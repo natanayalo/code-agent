@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -115,6 +116,10 @@ class ExecutionPlanRepository:
         changed_files: list[str] | None | Any = ...,
         output_artifacts: list[dict[str, Any]] | None | Any = ...,
         last_attempt_at: datetime | None | Any = ...,
+        latest_logical_activity_key: str | None | Any = ...,
+        terminal_result_schema_version: int | None | Any = ...,
+        terminal_result_digest: str | None | Any = ...,
+        terminal_result_payload: dict[str, Any] | None | Any = ...,
     ) -> ExecutionPlanNode | None:
         """Update fields of an execution plan node."""
         node = self.get_node(plan_id, node_id)
@@ -163,6 +168,14 @@ class ExecutionPlanRepository:
             node.output_artifacts = output_artifacts
         if last_attempt_at is not ...:
             node.last_attempt_at = last_attempt_at
+        if latest_logical_activity_key is not ...:
+            node.latest_logical_activity_key = latest_logical_activity_key
+        if terminal_result_schema_version is not ...:
+            node.terminal_result_schema_version = terminal_result_schema_version
+        if terminal_result_digest is not ...:
+            node.terminal_result_digest = terminal_result_digest
+        if terminal_result_payload is not ...:
+            node.terminal_result_payload = terminal_result_payload
 
         return node
 
@@ -179,6 +192,9 @@ class ExecutionPlanRepository:
         workspace_id: str | None,
         task_trace_id: str | None,
         worker_run_id: str | None = None,
+        logical_activity_key: str | None = None,
+        claim_token: str | None = None,
+        claim_expires_at: datetime | None = None,
         max_retries: int = 5,
     ) -> ExecutionPlanNodeAttempt:
         """Persist an attempt before a worker is dispatched."""
@@ -210,6 +226,10 @@ class ExecutionPlanRepository:
                         workspace_id=workspace_id,
                         worker_run_id=worker_run_id,
                         task_trace_id=task_trace_id,
+                        logical_activity_key=logical_activity_key,
+                        claim_token=claim_token,
+                        heartbeat_at=utc_now() if claim_token else None,
+                        claim_expires_at=claim_expires_at,
                     )
                     self.session.add(attempt)
                     self.session.flush()
@@ -219,6 +239,93 @@ class ExecutionPlanRepository:
                     raise
         raise RuntimeError("Unable to allocate execution-plan attempt number.")
 
+    def claim_activity(
+        self,
+        *,
+        plan_id: str,
+        node_id: str,
+        logical_activity_key: str,
+        effective_input_summary: dict[str, Any],
+        effective_input_digest: str,
+        worker_type: str | None,
+        worker_profile: str | None,
+        runtime_mode: str | None,
+        workspace_id: str | None,
+        task_trace_id: str | None,
+        lease_seconds: int = 30,
+    ) -> tuple[str, ExecutionPlanNodeAttempt]:
+        """Atomically claim, replay, or reject one logical node activity."""
+        node = self.get_node(plan_id, node_id)
+        if node is None:
+            raise ValueError(f"Unknown execution plan node: {node_id}")
+        existing = self.session.scalar(
+            select(ExecutionPlanNodeAttempt).where(
+                ExecutionPlanNodeAttempt.plan_node_id == node.id,
+                ExecutionPlanNodeAttempt.logical_activity_key == logical_activity_key,
+            )
+        )
+        if existing is not None:
+            if existing.effective_input_digest != effective_input_digest:
+                return "collision", existing
+            if existing.result_payload is not None:
+                return "terminal_replay", existing
+            now = utc_now()
+            if existing.claim_expires_at is not None and existing.claim_expires_at <= now:
+                existing.claim_generation += 1
+                existing.claim_token = uuid4().hex
+                existing.heartbeat_at = now
+                existing.claim_expires_at = now + timedelta(seconds=lease_seconds)
+                return "new", existing
+            return "in_progress", existing
+        token = uuid4().hex
+        try:
+            attempt = self.start_attempt(
+                plan_id=plan_id,
+                node_id=node_id,
+                effective_input_summary=effective_input_summary,
+                effective_input_digest=effective_input_digest,
+                worker_type=worker_type,
+                worker_profile=worker_profile,
+                runtime_mode=runtime_mode,
+                workspace_id=workspace_id,
+                task_trace_id=task_trace_id,
+                logical_activity_key=logical_activity_key,
+                claim_token=token,
+                claim_expires_at=utc_now() + timedelta(seconds=lease_seconds),
+            )
+        except IntegrityError:
+            self.session.rollback()
+            return self.claim_activity(
+                plan_id=plan_id,
+                node_id=node_id,
+                logical_activity_key=logical_activity_key,
+                effective_input_summary=effective_input_summary,
+                effective_input_digest=effective_input_digest,
+                worker_type=worker_type,
+                worker_profile=worker_profile,
+                runtime_mode=runtime_mode,
+                workspace_id=workspace_id,
+                task_trace_id=task_trace_id,
+                lease_seconds=lease_seconds,
+            )
+        return "new", attempt
+
+    def heartbeat_activity(
+        self, *, attempt_id: str, claim_token: str, lease_seconds: int = 30
+    ) -> bool:
+        """Extend a claim only when the caller still owns it."""
+        attempt = self.session.get(ExecutionPlanNodeAttempt, attempt_id)
+        if (
+            attempt is None
+            or attempt.claim_token != claim_token
+            or attempt.result_payload is not None
+        ):
+            return False
+        now = utc_now()
+        attempt.heartbeat_at = now
+        attempt.claim_expires_at = now + timedelta(seconds=lease_seconds)
+        return True
+
     def finish_attempt(
         self,
         *,
@@ -226,10 +333,16 @@ class ExecutionPlanRepository:
         status: str,
         failure_kind: str | None,
         workspace_id: str | None = None,
+        claim_token: str | None = None,
+        result_payload: dict[str, Any] | None = None,
+        result_schema_version: int | None = None,
+        result_digest: str | None = None,
     ) -> ExecutionPlanNodeAttempt | None:
         """Finalize a started attempt without modifying historical attempts."""
         attempt = self.session.get(ExecutionPlanNodeAttempt, attempt_id)
         if attempt is None:
+            return None
+        if claim_token is not None and attempt.claim_token != claim_token:
             return None
         finished_at = utc_now()
         if finished_at.tzinfo is None:
@@ -243,4 +356,8 @@ class ExecutionPlanRepository:
         attempt.failure_kind = failure_kind
         if workspace_id is not None:
             attempt.workspace_id = workspace_id
+        attempt.result_payload = result_payload
+        attempt.result_schema_version = result_schema_version
+        attempt.result_digest = result_digest
+        attempt.claim_expires_at = finished_at
         return attempt

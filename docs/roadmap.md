@@ -564,8 +564,9 @@ Progress:
     validate the read-only fan-out contract fail-closed, and retain legacy
     sequential compatibility without enabling concurrent execution
 - [ ] M25.1: durable node activity contract
-  - add typed node results, logical-attempt idempotency, and independent
-    node persistence without concurrent writes to parent Temporal state
+  - typed node results, logical-attempt idempotency, and independent node
+    persistence are in progress; finish Temporal one-node merge waves without
+    concurrent writes to parent Temporal state
 
 ### M26 Review Comment Repair
 

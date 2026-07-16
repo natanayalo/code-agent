@@ -216,6 +216,9 @@ export interface ExecutionPlanNodeSnapshot {
   changed_files?: string[] | null;
   output_artifacts?: Record<string, unknown>[] | null;
   last_attempt_at?: string | null;
+  latest_logical_activity_key?: string | null;
+  terminal_result_schema_version?: number | null;
+  terminal_result_digest?: string | null;
   attempts?: ExecutionPlanNodeAttemptSnapshot[];
   retry_count: number;
   created_at: string;
@@ -237,6 +240,9 @@ export interface ExecutionPlanNodeAttemptSnapshot {
   failure_kind?: string | null;
   effective_input_summary: Record<string, unknown>;
   effective_input_digest: string;
+  logical_activity_key?: string | null;
+  result_schema_version?: number | null;
+  result_digest?: string | null;
 }
 
 export interface ExecutionPlanSnapshot {

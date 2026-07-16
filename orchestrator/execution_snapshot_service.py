@@ -558,6 +558,11 @@ def _map_execution_plan_to_snapshot(execution_plan: Any) -> ExecutionPlanSnapsho
                 changed_files=node.changed_files,
                 output_artifacts=node.output_artifacts,
                 last_attempt_at=node.last_attempt_at,
+                latest_logical_activity_key=getattr(node, "latest_logical_activity_key", None),
+                terminal_result_schema_version=getattr(
+                    node, "terminal_result_schema_version", None
+                ),
+                terminal_result_digest=getattr(node, "terminal_result_digest", None),
                 attempts=[
                     ExecutionPlanNodeAttemptSnapshot(
                         attempt_number=attempt.attempt_number,
@@ -574,6 +579,9 @@ def _map_execution_plan_to_snapshot(execution_plan: Any) -> ExecutionPlanSnapsho
                         failure_kind=attempt.failure_kind,
                         effective_input_summary=attempt.effective_input_summary,
                         effective_input_digest=attempt.effective_input_digest,
+                        logical_activity_key=getattr(attempt, "logical_activity_key", None),
+                        result_schema_version=getattr(attempt, "result_schema_version", None),
+                        result_digest=getattr(attempt, "result_digest", None),
                     )
                     for attempt in getattr(node, "attempts", [])
                 ],

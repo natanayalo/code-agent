@@ -55,8 +55,9 @@ Active focus:
 
 ## Next Slices Only
 
-1. M25.1: durable node activity contract
-   - add typed node results, idempotency, and independent node persistence before fan-out
+1. M25.1: durable node activity contract (in progress)
+   - typed logical-attempt identities, idempotent result replay, and independent
+     node persistence are in place; Temporal one-node merge waves remain before fan-out
 
 ## Current Backlog
 

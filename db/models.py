@@ -990,6 +990,10 @@ class ExecutionPlanNode(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     changed_files: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     output_artifacts: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
     last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    latest_logical_activity_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    terminal_result_schema_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    terminal_result_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    terminal_result_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
     execution_plan: Mapped[ExecutionPlan] = relationship(back_populates="nodes")
     attempts: Mapped[list[ExecutionPlanNodeAttempt]] = relationship(
@@ -1015,6 +1019,9 @@ class ExecutionPlanNodeAttempt(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "execution_plan_node_attempts"
     __table_args__ = (
         UniqueConstraint("plan_node_id", "attempt_number", name="uq_plan_node_attempt_number"),
+        UniqueConstraint(
+            "plan_node_id", "logical_activity_key", name="uq_plan_node_attempt_activity_key"
+        ),
     )
 
     plan_node_id: Mapped[str] = mapped_column(
@@ -1034,5 +1041,15 @@ class ExecutionPlanNodeAttempt(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     failure_kind: Mapped[str | None] = mapped_column(String(50), nullable=True)
     effective_input_summary: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     effective_input_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    logical_activity_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    claim_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    claim_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    claim_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    result_schema_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    result_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    result_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
     plan_node: Mapped[ExecutionPlanNode] = relationship(back_populates="attempts")

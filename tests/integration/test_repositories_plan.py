@@ -154,6 +154,49 @@ def test_start_attempt_allocates_monotonic_numbers(session_factory):
         assert first.worker_run_id == "worker-run-1"
 
 
+def test_claim_activity_replays_terminal_result_and_rejects_digest_collision(session_factory):
+    """One logical activity key has one durable terminal result."""
+    with session_scope(session_factory) as session:
+        user = UserRepository(session).create(
+            external_user_id="test-claim-user", display_name="Test"
+        )
+        conversation = SessionRepository(session).create(
+            user_id=user.id, channel="web", external_thread_id="test-claim-thread"
+        )
+        task = TaskRepository(session).create(session_id=conversation.id, task_text="Test task")
+        repo = ExecutionPlanRepository(session)
+        plan = repo.create(task_id=task.id)
+        repo.add_node(plan_id=plan.id, node_id="node", goal="Test node")
+        kwargs = {
+            "plan_id": plan.id,
+            "node_id": "node",
+            "logical_activity_key": f"node-activity:v1:{plan.id}:node:1",
+            "effective_input_summary": {"node_id": "node"},
+            "effective_input_digest": "a" * 64,
+            "worker_type": "codex",
+            "worker_profile": None,
+            "runtime_mode": None,
+            "workspace_id": None,
+            "task_trace_id": None,
+        }
+        claim, attempt = repo.claim_activity(**kwargs)
+        assert claim == "new"
+        assert attempt.claim_token
+        repo.finish_attempt(
+            attempt_id=attempt.id,
+            claim_token=attempt.claim_token,
+            status="completed",
+            failure_kind=None,
+            result_payload={"node_outcome": {}},
+            result_schema_version=1,
+            result_digest="b" * 64,
+        )
+        replay, _ = repo.claim_activity(**kwargs)
+        assert replay == "terminal_replay"
+        collision, _ = repo.claim_activity(**(kwargs | {"effective_input_digest": "c" * 64}))
+        assert collision == "collision"
+
+
 def test_finish_attempt_normalizes_finished_at_before_persistence(session_factory, monkeypatch):
     with session_scope(session_factory) as session:
         user = UserRepository(session).create(external_user_id="finish-attempt-user")

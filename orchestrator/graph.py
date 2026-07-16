@@ -47,6 +47,11 @@ from orchestrator.constants import (
     LOW_COST_REQUEST_MARKERS,
 )
 from orchestrator.decomposition import decompose_task_plan
+from orchestrator.node_execution import (
+    NodeActivityRequest,
+    NodeExecutionService,
+    logical_activity_key,
+)
 from orchestrator.nodes.delivery import build_deliver_result_node
 from orchestrator.nodes.ingestion import (
     classify_task,
@@ -972,15 +977,53 @@ async def _await_decomposed_nodes(
                 prior_node_context=prior_context,
             )
             evidence, digest = _effective_input_evidence(state, ready_node, prior_context)
-            attempt_id = _start_node_attempt(session_factory, state, ready_node, evidence, digest)
             last_manifest = request.runtime_manifest
-            result, _progress = await _await_worker_with_timeout(
-                worker,
-                request,
-                worker_type=state.dispatch.worker_type or state.route.chosen_worker or "unknown",
-                session_id=request.session_id,
-                timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
-            )
+            persisted_outcome: NodeOutcome | None = None
+            if session_factory is not None and state.task.task_id:
+                with session_scope(cast(sessionmaker[Session], session_factory)) as session:
+                    persisted_plan = ExecutionPlanRepository(session).get_by_task_id(
+                        state.task.task_id
+                    )
+                    plan_id = persisted_plan.id if persisted_plan is not None else None
+                if plan_id is not None:
+                    activity_request = NodeActivityRequest(
+                        task_id=state.task.task_id,
+                        plan_id=plan_id,
+                        node_id=ready_node.node_id,
+                        logical_attempt=attempts,
+                        logical_activity_key=logical_activity_key(
+                            plan_id, ready_node.node_id, attempts
+                        ),
+                        effective_input_digest=digest,
+                    )
+                    _result_ref, persisted_outcome = await NodeExecutionService(
+                        session_factory, worker
+                    ).execute(
+                        activity=activity_request,
+                        request=request,
+                        effective_input_summary=evidence,
+                    )
+                    result = persisted_outcome.result if persisted_outcome is not None else None
+                else:
+                    result, _progress = await _await_worker_with_timeout(
+                        worker,
+                        request,
+                        worker_type=(
+                            state.dispatch.worker_type or state.route.chosen_worker or "unknown"
+                        ),
+                        session_id=request.session_id,
+                        timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
+                    )
+            else:
+                result, _progress = await _await_worker_with_timeout(
+                    worker,
+                    request,
+                    worker_type=(
+                        state.dispatch.worker_type or state.route.chosen_worker or "unknown"
+                    ),
+                    session_id=request.session_id,
+                    timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
+                )
             if result is None:
                 logger.warning("Node execution result is None, falling back to failure default.")
                 result = WorkerResult(
@@ -988,9 +1031,7 @@ async def _await_decomposed_nodes(
                     summary="Node execution returned no result.",
                     failure_kind="worker_failure",
                 )
-                _finish_node_attempt(session_factory, attempt_id, result)
                 break
-            _finish_node_attempt(session_factory, attempt_id, result)
             if result.status == "success" or result.next_action_hint == "request_higher_permission":
                 break
         if result is None:
@@ -1005,8 +1046,10 @@ async def _await_decomposed_nodes(
         if result.workspace_id is None and state.dispatch.workspace_id:
             result = result.model_copy(update={"workspace_id": state.dispatch.workspace_id})
         outcomes = [outcome for outcome in outcomes if outcome.node_id != ready_node.node_id]
-        outcomes.append(
-            NodeOutcome(
+        node_outcome = (
+            persisted_outcome.model_copy(update={"dependencies": ready_node.depends_on})
+            if persisted_outcome
+            else NodeOutcome(
                 node_id=ready_node.node_id,
                 status=(
                     "completed"
@@ -1020,6 +1063,7 @@ async def _await_decomposed_nodes(
                 attempts=attempts,
             )
         )
+        outcomes.append(node_outcome)
         pending.pop(ready_node.node_id)
         if result.next_action_hint == "request_higher_permission":
             break
