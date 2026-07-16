@@ -916,6 +916,19 @@ async def _await_decomposed_nodes(
     completed_node_ids = {outcome.node_id for outcome in outcomes if outcome.status == "completed"}
     pending = {node.node_id: node for node in plan.nodes if node.node_id not in completed_node_ids}
     last_manifest: dict[str, Any] | None = None
+    plan_id: str | None = None
+    task_trace_id: str | None = None
+    if session_factory is not None and state.task.task_id:
+        with session_scope(cast(sessionmaker[Session], session_factory)) as session:
+            execution_plan = ExecutionPlanRepository(session).get_by_task_id(state.task.task_id)
+            plan_id = execution_plan.id if execution_plan is not None else None
+            task = session.get(Task, state.task.task_id)
+            trace_context = task.trace_context if task is not None else None
+            traceparent = (
+                trace_context.get("traceparent") if isinstance(trace_context, dict) else None
+            )
+            trace_parts = traceparent.split("-") if isinstance(traceparent, str) else []
+            task_trace_id = trace_parts[1] if len(trace_parts) > 1 else None
     while pending:
         outcome_by_id = {outcome.node_id: outcome for outcome in outcomes}
         ready_node = next(
@@ -980,11 +993,6 @@ async def _await_decomposed_nodes(
             last_manifest = request.runtime_manifest
             persisted_outcome: NodeOutcome | None = None
             if session_factory is not None and state.task.task_id:
-                with session_scope(cast(sessionmaker[Session], session_factory)) as session:
-                    persisted_plan = ExecutionPlanRepository(session).get_by_task_id(
-                        state.task.task_id
-                    )
-                    plan_id = persisted_plan.id if persisted_plan is not None else None
                 if plan_id is not None:
                     activity_request = NodeActivityRequest(
                         task_id=state.task.task_id,
@@ -995,6 +1003,7 @@ async def _await_decomposed_nodes(
                             plan_id, ready_node.node_id, attempts
                         ),
                         effective_input_digest=digest,
+                        task_trace_id=task_trace_id,
                     )
                     _result_ref, persisted_outcome = await NodeExecutionService(
                         session_factory, worker

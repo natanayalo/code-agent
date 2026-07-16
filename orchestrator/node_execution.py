@@ -29,6 +29,7 @@ class NodeActivityRequest(OrchestratorModel):
     logical_attempt: int = Field(ge=1)
     logical_activity_key: str
     effective_input_digest: str
+    task_trace_id: str | None = None
 
 
 class NodeActivityResultRef(OrchestratorModel):
@@ -91,7 +92,7 @@ class NodeExecutionService:
                     if request.runtime_manifest
                     else None
                 ),
-                task_trace_id=None,
+                task_trace_id=activity.task_trace_id,
             )
             if claim == "collision":
                 raise ValueError(
