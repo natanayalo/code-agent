@@ -62,9 +62,9 @@ def _decomposed_node_payload(node: Any) -> dict[str, Any]:
         "node_kind": node.node_kind,
         "expected_inputs": ["parent_task_context", *dependencies],
         "expected_outputs": ["summary", "validation_evidence"],
-        "aggregation_role": getattr(node, "aggregation_role", _aggregation_role(node.node_kind)),
-        "execution_mode": getattr(node, "execution_mode", "mutable"),
-        "parallel_safe": bool(getattr(node, "parallel_safe", False)),
+        "aggregation_role": node.aggregation_role or _aggregation_role(node.node_kind),
+        "execution_mode": node.execution_mode or "mutable",
+        "parallel_safe": bool(node.parallel_safe),
     }
 
 
