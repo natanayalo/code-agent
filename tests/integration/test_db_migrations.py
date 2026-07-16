@@ -376,6 +376,58 @@ def test_sqlite_upgrade_skips_memory_fulltext_columns(tmp_path: Path) -> None:
     assert "search_vector" not in _column_names(inspector, "memory_project")
 
 
+def test_fanout_metadata_migration_backfills_legacy_aggregation_roles(tmp_path: Path) -> None:
+    """Existing inspect and verification nodes retain their inferred aggregation roles."""
+    database_path = tmp_path / "fanout_metadata_backfill.db"
+    config = Config(str(Path("alembic.ini").resolve()))
+    config.set_main_option("script_location", str(Path("db/migrations").resolve()))
+    config.set_main_option("sqlalchemy.url", f"sqlite:///{database_path}")
+    command.upgrade(config, "20260714_0037")
+
+    engine = create_engine(f"sqlite:///{database_path}")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO tasks (id, session_id, task_text, status, priority) "
+                "VALUES ('task', 'session', 'Backfill roles', 'pending', 0)"
+            )
+        )
+        connection.execute(
+            text("INSERT INTO execution_plans (id, task_id) VALUES ('plan', 'task')")
+        )
+        for node_id, node_kind in (
+            ("inspect", "inspect"),
+            ("verify", "verify"),
+            ("review", "review"),
+            ("aggregate", "aggregate"),
+            ("implement", "implement"),
+        ):
+            connection.execute(
+                text(
+                    "INSERT INTO execution_plan_nodes "
+                    "(id, plan_id, node_id, node_kind, status, goal) "
+                    "VALUES (:id, 'plan', :node_id, :node_kind, 'pending', :node_id)"
+                ),
+                {"id": f"node-{node_id}", "node_id": node_id, "node_kind": node_kind},
+            )
+
+    command.upgrade(config, "head")
+
+    with engine.connect() as connection:
+        roles = dict(
+            connection.execute(
+                text("SELECT node_id, aggregation_role FROM execution_plan_nodes")
+            ).all()
+        )
+    assert roles == {
+        "aggregate": "final",
+        "implement": "mutation",
+        "inspect": "context",
+        "review": "validation",
+        "verify": "validation",
+    }
+
+
 def test_personal_memory_scope_migration_deduplicates_and_removes_user_id(
     tmp_path: Path,
 ) -> None:

@@ -1,5 +1,7 @@
 """Tests for sequential M24 task decomposition."""
 
+import pytest
+
 from orchestrator.decomposition import decompose_task_plan, is_read_only_fanout_eligible
 from orchestrator.state import DecomposedTaskNode, TaskPlan, TaskPlanStep, TaskSpec
 
@@ -34,7 +36,12 @@ def test_decompose_task_plan_builds_sequential_dependencies() -> None:
     assert [node.node_id for node in result.nodes] == ["inspect", "implement", "verify"]
     assert [node.depends_on for node in result.nodes] == [[], ["inspect"], ["implement"]]
     assert result.nodes[0].task_spec.goal == "Step inspect"
-    assert [node.node_kind for node in result.nodes] == ["implement", "implement", "implement"]
+    assert [node.node_kind for node in result.nodes] == ["inspect", "implement", "verify"]
+    assert [node.aggregation_role for node in result.nodes] == [
+        "context",
+        "mutation",
+        "validation",
+    ]
     assert all(node.execution_mode == "mutable" for node in result.nodes)
     assert not any(node.parallel_safe for node in result.nodes)
 
@@ -84,6 +91,25 @@ def test_decompose_task_plan_preserves_explicit_node_classification() -> None:
     assert result.nodes[0].parallel_safe is True
 
 
+@pytest.mark.parametrize(
+    ("execution_mode", "aggregation_role"),
+    [("mutable", "context"), ("read_only", "mutation"), ("read_only", None)],
+)
+def test_task_plan_step_rejects_unsafe_parallel_metadata(
+    execution_mode: str, aggregation_role: str | None
+) -> None:
+    with pytest.raises(ValueError, match="parallel_safe steps"):
+        TaskPlanStep(
+            step_id="inspect",
+            title="Inspect",
+            expected_outcome="Find relevant code.",
+            node_kind="inspect",
+            execution_mode=execution_mode,
+            aggregation_role=aggregation_role,
+            parallel_safe=True,
+        )
+
+
 def test_read_only_fanout_eligibility_requires_every_safety_predicate() -> None:
     node = DecomposedTaskNode(
         node_id="inspect",
@@ -117,6 +143,9 @@ def test_read_only_fanout_eligibility_requires_every_safety_predicate() -> None:
     )
     assert not is_read_only_fanout_eligible(
         **(eligible | {"node": node.model_copy(update={"execution_mode": "mutable"})})
+    )
+    assert not is_read_only_fanout_eligible(
+        **(eligible | {"node": node.model_copy(update={"aggregation_role": "mutation"})})
     )
 
 

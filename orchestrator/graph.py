@@ -1911,6 +1911,9 @@ def build_decompose_task_node(
                         depends_on=item.get("depends_on") or [],
                         task_spec=task_spec,
                         node_kind=item.get("node_kind"),
+                        aggregation_role=item.get("aggregation_role") or "mutation",
+                        execution_mode=item.get("execution_mode") or "mutable",
+                        parallel_safe=bool(item.get("parallel_safe")),
                         acceptance_criteria="; ".join(
                             str(criterion)
                             for criterion in (

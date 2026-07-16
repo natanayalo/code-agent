@@ -8,7 +8,7 @@ from operator import add
 # Delay import to avoid circular dependency
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from orchestrator.reflection import FrictionReport
 from orchestrator.repo_profile import RepoProfile
@@ -211,10 +211,21 @@ class TaskPlanStep(OrchestratorModel):
     title: str = Field(min_length=1)
     expected_outcome: str = Field(min_length=1)
     depends_on: list[str] | None = None
-    node_kind: NodeKind = "implement"
-    aggregation_role: AggregationRole = "mutation"
+    node_kind: NodeKind | None = None
+    aggregation_role: AggregationRole | None = None
     execution_mode: NodeExecutionMode = "mutable"
     parallel_safe: bool = False
+
+    @model_validator(mode="after")
+    def validate_parallel_safety(self) -> TaskPlanStep:
+        """Reject metadata that could make a mutable node eligible for fan-out."""
+        if self.parallel_safe and (
+            self.execution_mode != "read_only" or self.aggregation_role in {None, "mutation"}
+        ):
+            raise ValueError(
+                "parallel_safe steps must be read_only with a non-mutation aggregation role"
+            )
+        return self
 
 
 class TaskPlan(OrchestratorModel):
@@ -288,6 +299,17 @@ class DecomposedTaskNode(OrchestratorModel):
     execution_mode: NodeExecutionMode = "mutable"
     parallel_safe: bool = False
     max_attempts: int = Field(default=1, ge=1, le=3)
+
+    @model_validator(mode="after")
+    def validate_parallel_safety(self) -> DecomposedTaskNode:
+        """Keep the durable fan-out contract fail-closed."""
+        if self.parallel_safe and (
+            self.execution_mode != "read_only" or self.aggregation_role == "mutation"
+        ):
+            raise ValueError(
+                "parallel_safe nodes must be read_only with a non-mutation aggregation role"
+            )
+        return self
 
 
 class DecomposedTaskPlan(OrchestratorModel):

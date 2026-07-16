@@ -592,7 +592,7 @@ def _update_task_route_and_spec(
                     aggregation_role=(
                         decomposed_node.aggregation_role
                         if decomposed_node is not None
-                        else step.aggregation_role
+                        else step.aggregation_role or "mutation"
                     ),
                     execution_mode=(
                         decomposed_node.execution_mode
@@ -622,7 +622,7 @@ def _update_task_route_and_spec(
                 else:
                     existing_node.task_spec = None
                     existing_node.node_kind = None
-                    existing_node.aggregation_role = step.aggregation_role
+                    existing_node.aggregation_role = step.aggregation_role or "mutation"
                     existing_node.execution_mode = step.execution_mode
                     existing_node.parallel_safe = step.parallel_safe
 

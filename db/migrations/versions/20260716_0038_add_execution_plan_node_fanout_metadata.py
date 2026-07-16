@@ -33,6 +33,17 @@ def upgrade() -> None:
         batch_op.add_column(
             sa.Column("parallel_safe", sa.Boolean(), nullable=False, server_default=sa.false())
         )
+    op.execute(
+        """
+        UPDATE execution_plan_nodes
+        SET aggregation_role = CASE
+            WHEN node_kind = 'inspect' THEN 'context'
+            WHEN node_kind IN ('verify', 'review') THEN 'validation'
+            WHEN node_kind = 'aggregate' THEN 'final'
+            ELSE 'mutation'
+        END
+        """
+    )
 
 
 def downgrade() -> None:
