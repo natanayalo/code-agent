@@ -557,6 +557,16 @@ Boundary:
 
 - no broad multi-agent swarm behavior; parallelism is selective, bounded, and measured
 
+Progress:
+
+- [x] M25.0: explicit DAG dependency and parallel-safety semantics
+  - preserve omitted versus explicit-empty dependencies, persist node metadata,
+    validate the read-only fan-out contract fail-closed, and retain legacy
+    sequential compatibility without enabling concurrent execution
+- [ ] M25.1: durable node activity contract
+  - add typed node results, logical-attempt idempotency, and independent
+    node persistence without concurrent writes to parent Temporal state
+
 ### M26 Review Comment Repair
 
 Goal:
