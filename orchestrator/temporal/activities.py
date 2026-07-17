@@ -43,6 +43,7 @@ from orchestrator.graph import (
     summarize_result,
 )
 from orchestrator.node_execution import (
+    CLAIM_HEARTBEAT_SECONDS,
     NodeActivityClaimLost,
     NodeActivityInProgress,
     NodeActivityRequest,
@@ -622,18 +623,34 @@ class TaskExecutionActivities:
                     has_pending_node = True
                     dependencies = list(node.depends_on or [])
                     unresolved = [
-                        dependency for dependency in dependencies if dependency not in outcomes
+                        dependency
+                        for dependency in dependencies
+                        if plan_nodes[dependency].status
+                        in {
+                            ExecutionPlanNodeStatus.PENDING,
+                            ExecutionPlanNodeStatus.ACTIVE,
+                            ExecutionPlanNodeStatus.BLOCKED,
+                        }
                     ]
                     if unresolved:
                         continue
                     failed = [
                         dependency
                         for dependency in dependencies
-                        if outcomes[dependency].status != "completed"
+                        if plan_nodes[dependency].status
+                        in {ExecutionPlanNodeStatus.FAILED, ExecutionPlanNodeStatus.SKIPPED}
                     ]
                     if failed:
                         return NodeSelectionResult(
                             action="skip", node_id=node.node_id, failed_dependency_ids=failed
+                        )
+                    missing_outcomes = [
+                        dependency for dependency in dependencies if dependency not in outcomes
+                    ]
+                    if missing_outcomes:
+                        return NodeSelectionResult(
+                            action="invalid",
+                            reason="Completed dependency outcomes are missing from parent state.",
                         )
                     node_contract = state_nodes[node.node_id]
                     prior_context = {
@@ -751,6 +768,24 @@ class TaskExecutionActivities:
             )
             return result
 
+        async def _execute_under_claim_recovery() -> (
+            tuple[NodeActivityResultRef, NodeOutcome | None]
+        ):
+            while True:
+                try:
+                    return await NodeExecutionService(self.service.session_factory).execute(
+                        activity=node_activity,
+                        request=request,
+                        effective_input_summary=evidence,
+                        execute_worker=_execute_worker,
+                    )
+                except (NodeActivityInProgress, NodeActivityClaimLost):
+                    # A prior activity attempt can retain the fenced DB claim for
+                    # up to its lease. Keep the Temporal activity alive until it
+                    # either records a terminal payload or the claim can be taken
+                    # over with the same logical key.
+                    await asyncio.sleep(CLAIM_HEARTBEAT_SECONDS)
+
         async def _heartbeat() -> None:
             while True:
                 activity.heartbeat()
@@ -759,14 +794,7 @@ class TaskExecutionActivities:
         heartbeat = asyncio.create_task(_heartbeat())
         worker_task: asyncio.Task[tuple[NodeActivityResultRef, NodeOutcome | None]] | None = None
         try:
-            worker_task = asyncio.create_task(
-                NodeExecutionService(self.service.session_factory).execute(
-                    activity=node_activity,
-                    request=request,
-                    effective_input_summary=evidence,
-                    execute_worker=_execute_worker,
-                )
-            )
+            worker_task = asyncio.create_task(_execute_under_claim_recovery())
             done, _ = await asyncio.wait(
                 {worker_task, heartbeat}, return_when=asyncio.FIRST_COMPLETED
             )
@@ -777,8 +805,6 @@ class TaskExecutionActivities:
                 raise heartbeat_error or RuntimeError("Temporal heartbeat stopped unexpectedly.")
             result_ref, _outcome = await worker_task
             return result_ref.model_dump(mode="json")
-        except (NodeActivityInProgress, NodeActivityClaimLost):
-            raise
         finally:
             if worker_task is not None and not worker_task.done():
                 worker_task.cancel()
@@ -907,6 +933,13 @@ class TaskExecutionActivities:
                     raise ValueError(f"Outcome for node {node.node_id} was not found after merge.")
                 if current.status == "blocked":
                     if current.attempts >= contract.max_attempts:
+                        ExecutionPlanRepository(session).update_node(
+                            plan_id=plan.id,
+                            node_id=node.node_id,
+                            status=ExecutionPlanNodeStatus.FAILED,
+                            failure_kind="permission_escalation_exhausted",
+                            finished_at=utc_now(),
+                        )
                         return NodeWaveMergeResult(continuation="fail_task")
                     return NodeWaveMergeResult(
                         continuation="await_permission",

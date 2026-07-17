@@ -8,7 +8,11 @@ from types import SimpleNamespace
 import pytest
 
 import orchestrator.temporal.activities as activities_module
-from orchestrator.node_execution import NodeActivityRequest, NodeActivityResultRef
+from orchestrator.node_execution import (
+    NodeActivityInProgress,
+    NodeActivityRequest,
+    NodeActivityResultRef,
+)
 from orchestrator.state import OrchestratorState
 from orchestrator.temporal.activities import TaskExecutionActivities
 
@@ -161,3 +165,58 @@ async def test_run_decomposed_node_cancels_worker_when_temporal_heartbeat_fails(
         )
 
     assert cancelled.is_set()
+
+
+@pytest.mark.anyio
+async def test_run_decomposed_node_waits_for_live_claim_recovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _state()
+    activity = _activity(state)
+    digest = "a" * 64
+    calls = 0
+
+    class FakeNodeExecutionService:
+        def __init__(self, _session_factory) -> None:
+            pass
+
+        async def execute(self, **_kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise NodeActivityInProgress("live claim")
+            return (
+                NodeActivityResultRef(
+                    node_id="node",
+                    logical_activity_key="node-activity:v1:plan:node:1",
+                    status="terminal_replay",
+                    result_digest="b" * 64,
+                    continuation="continue",
+                ),
+                None,
+            )
+
+    monkeypatch.setattr(activities_module, "NodeExecutionService", FakeNodeExecutionService)
+    monkeypatch.setattr(activities_module, "CLAIM_HEARTBEAT_SECONDS", 0)
+    monkeypatch.setattr(
+        activities_module,
+        "_build_worker_request",
+        lambda *args, **kwargs: SimpleNamespace(session_id=None),
+    )
+    monkeypatch.setattr(activities_module, "_effective_input_evidence", lambda *args: ({}, digest))
+    monkeypatch.setattr(activities_module.activity, "heartbeat", lambda: None)
+
+    result = await activity.run_decomposed_node(
+        "task",
+        NodeActivityRequest(
+            task_id="task",
+            plan_id="plan",
+            node_id="node",
+            logical_attempt=1,
+            logical_activity_key="node-activity:v1:plan:node:1",
+            effective_input_digest=digest,
+        ).model_dump(mode="json"),
+    )
+
+    assert result["status"] == "terminal_replay"
+    assert calls == 2
