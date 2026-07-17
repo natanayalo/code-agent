@@ -15,6 +15,7 @@ from orchestrator.node_execution import (
 )
 from orchestrator.state import OrchestratorState
 from orchestrator.temporal.activities import TaskExecutionActivities
+from workers import WorkerRequest
 
 
 def _state(*, with_dependency: bool = False) -> OrchestratorState:
@@ -51,6 +52,10 @@ def _activity(state: OrchestratorState) -> TaskExecutionActivities:
     return instance
 
 
+def _worker_request() -> WorkerRequest:
+    return WorkerRequest(task_text="Run node")
+
+
 @pytest.mark.anyio
 async def test_run_decomposed_node_reconstructs_request_and_returns_compact_reference(
     monkeypatch: pytest.MonkeyPatch,
@@ -58,7 +63,7 @@ async def test_run_decomposed_node_reconstructs_request_and_returns_compact_refe
     state = _state()
     activity = _activity(state)
     digest = "a" * 64
-    request = SimpleNamespace(session_id=None)
+    request = _worker_request()
     captured: dict[str, object] = {}
 
     class FakeNodeExecutionService:
@@ -97,6 +102,7 @@ async def test_run_decomposed_node_reconstructs_request_and_returns_compact_refe
 
     assert result["status"] == "completed"
     assert captured["effective_input_summary"] == {}
+    assert captured["request"].scratch_namespace == "node-activity:v1:plan:node:1"
 
 
 @pytest.mark.anyio
@@ -142,7 +148,7 @@ async def test_run_decomposed_node_cancels_worker_when_temporal_heartbeat_fails(
     monkeypatch.setattr(
         activities_module,
         "_build_worker_request",
-        lambda *args, **kwargs: SimpleNamespace(session_id=None),
+        lambda *args, **kwargs: _worker_request(),
     )
     monkeypatch.setattr(activities_module, "_effective_input_evidence", lambda *args: ({}, digest))
     monkeypatch.setattr(
@@ -201,7 +207,7 @@ async def test_run_decomposed_node_waits_for_live_claim_recovery(
     monkeypatch.setattr(
         activities_module,
         "_build_worker_request",
-        lambda *args, **kwargs: SimpleNamespace(session_id=None),
+        lambda *args, **kwargs: _worker_request(),
     )
     monkeypatch.setattr(activities_module, "_effective_input_evidence", lambda *args: ({}, digest))
     monkeypatch.setattr(activities_module.activity, "heartbeat", lambda: None)

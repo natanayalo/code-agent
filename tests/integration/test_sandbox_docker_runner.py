@@ -206,7 +206,7 @@ def test_docker_sandbox_runner_read_only_workspace(
         )
     )
     assert result_success.exit_code == 0
-    assert (workspace.workspace_path / "artifacts" / "should_succeed.txt").exists()
+    assert (workspace.workspace_path / "artifacts" / "default" / "should_succeed.txt").exists()
 
     # 3. Attempt to write to local repo should fail (using ContainerManager)
     monkeypatch.setenv("CODE_AGENT_ALLOWED_LOCAL_REMOTES", str(source_repo))

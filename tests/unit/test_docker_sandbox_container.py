@@ -68,6 +68,35 @@ def test_build_docker_container_run_command_detaches_and_mounts_workspace(tmp_pa
     assert "--env" in command
 
 
+def test_read_only_container_uses_distinct_writable_node_namespaces(tmp_path: Path) -> None:
+    """Concurrent read-only nodes share the repository but not writable mounts."""
+    workspace = _workspace_handle(tmp_path)
+    first = DockerSandboxContainerRequest(
+        workspace=workspace,
+        read_only_workspace=True,
+        scratch_namespace="node-activity:v1:plan:first:1",
+    )
+    second = DockerSandboxContainerRequest(
+        workspace=workspace,
+        read_only_workspace=True,
+        scratch_namespace="node-activity:v1:plan:second:1",
+    )
+
+    first_command = _build_docker_container_run_command(first, image="python:3.12-slim")
+    second_command = _build_docker_container_run_command(second, image="python:3.12-slim")
+
+    root = workspace.workspace_path.resolve()
+    first_mounts = " ".join(first_command)
+    second_mounts = " ".join(second_command)
+    assert build_container_name(workspace, first.scratch_namespace) != build_container_name(
+        workspace, second.scratch_namespace
+    )
+    assert f"source={root / '.agent_home' / first.scratch_namespace}" in first_mounts
+    assert f"source={root / '.agent_home' / second.scratch_namespace}" in second_mounts
+    assert f"source={root / 'artifacts' / first.scratch_namespace}" in first_mounts
+    assert f"source={root / 'artifacts' / second.scratch_namespace}" in second_mounts
+
+
 def test_build_docker_container_run_command_raises_on_comma_in_path(tmp_path: Path) -> None:
     """Workspace paths containing commas should fail fast before docker run."""
     workspace_path = tmp_path / "work,space"
