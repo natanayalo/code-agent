@@ -567,9 +567,9 @@ Progress:
   - typed node results, deterministic logical-attempt identities, atomic
     claim/replay, fenced terminal persistence, legacy compatibility, and shared
     legacy sequential execution are complete
-- [ ] M25.1B: Temporal one-node-wave orchestration
-  - finish select-next, node Activity, and merge-wave orchestration without
-    concurrent writes to parent Temporal state
+- [x] M25.1B: Temporal one-node-wave orchestration
+  - complete version-gated select-next, node Activity, and merge-wave orchestration
+    without concurrent writes to parent Temporal state
 
 ### M26 Review Comment Repair
 

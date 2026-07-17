@@ -5,6 +5,7 @@ from temporalio import workflow
 from orchestrator.temporal.policy import activity_options
 
 MAX_PERMISSION_ESCALATIONS = 5
+NODE_WAVE_PATCH_ID = "m25-1b-temporal-node-wave"
 
 
 @workflow.defn
@@ -49,7 +50,7 @@ class TaskExecutionWorkflow:
                 return {"status": "rejected", "summary": "Manual approval rejected."}
 
         # Step 4: Decompose Task
-        await workflow.execute_activity(
+        decomposition = await workflow.execute_activity(
             "decompose_task",
             task_id,
             **activity_options("decompose_task"),
@@ -69,9 +70,15 @@ class TaskExecutionWorkflow:
             **activity_options("provision_workspace"),
         )
 
-        # Step 7: Run worker
-        escalation_failure = await self._run_worker_with_permission_escalations(
-            task_id, execution_task_queue
+        # Step 7: Existing histories preserve their recorded worker activity.
+        # New histories enter the one-node-wave coordinator only for a validated DAG.
+        use_node_waves = workflow.patched(NODE_WAVE_PATCH_ID) and (
+            decomposition.get("execution_shape") == "decomposed"
+        )
+        escalation_failure = (
+            await self._run_decomposed_node_waves(task_id)
+            if use_node_waves
+            else await self._run_worker_with_permission_escalations(task_id, execution_task_queue)
         )
         if escalation_failure is not None:
             return escalation_failure
@@ -99,6 +106,56 @@ class TaskExecutionWorkflow:
         )
 
         return {"status": "completed", "summary": "Task completed successfully via Temporal."}
+
+    async def _run_decomposed_node_waves(self, task_id: str) -> dict | None:
+        """Coordinate exactly one durable node execution before every merge."""
+        while True:
+            selection = await workflow.execute_activity(
+                "select_next_node", task_id, **activity_options("select_next_node")
+            )
+            action = selection["action"]
+            if action == "complete":
+                return None
+            if action == "invalid":
+                failure = selection.get("reason") or "Invalid decomposed execution plan."
+                await workflow.execute_activity(
+                    "record_workflow_failure",
+                    args=[task_id, failure],
+                    **activity_options("record_workflow_failure"),
+                )
+                return {"status": "failed", "summary": failure}
+            if action == "await_permission":
+                if not await self._handle_permission_escalation(task_id):
+                    return {"status": "rejected", "summary": "Permission escalation rejected."}
+                await workflow.execute_activity(
+                    "provision_workspace", task_id, **activity_options("provision_workspace")
+                )
+                continue
+            result_ref = None
+            if action == "execute":
+                result_ref = await workflow.execute_activity(
+                    "run_decomposed_node",
+                    args=[task_id, selection["activity_request"]],
+                    **activity_options(
+                        "run_decomposed_node", task_queue=selection.get("execution_task_queue")
+                    ),
+                )
+            merge = await workflow.execute_activity(
+                "merge_node_wave",
+                args=[task_id, {"selection": selection, "result_ref": result_ref}],
+                **activity_options("merge_node_wave"),
+            )
+            continuation = merge["continuation"]
+            if continuation in {"continue", "retry_node"}:
+                continue
+            if continuation == "await_permission":
+                if not await self._handle_permission_escalation(task_id):
+                    return {"status": "rejected", "summary": "Permission escalation rejected."}
+                await workflow.execute_activity(
+                    "provision_workspace", task_id, **activity_options("provision_workspace")
+                )
+                continue
+            return {"status": "failed", "summary": "Decomposed node execution failed."}
 
     async def _run_worker_with_permission_escalations(
         self, task_id: str, task_queue: str | None
