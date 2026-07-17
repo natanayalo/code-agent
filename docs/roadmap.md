@@ -563,9 +563,12 @@ Progress:
   - preserve omitted versus explicit-empty dependencies, persist node metadata,
     validate the read-only fan-out contract fail-closed, and retain legacy
     sequential compatibility without enabling concurrent execution
-- [ ] M25.1: durable node activity contract
-  - typed node results, logical-attempt idempotency, and independent node
-    persistence are in progress; finish Temporal one-node merge waves without
+- [x] M25.1A: node execution domain and persistence
+  - typed node results, deterministic logical-attempt identities, atomic
+    claim/replay, fenced terminal persistence, legacy compatibility, and shared
+    legacy sequential execution are complete
+- [ ] M25.1B: Temporal one-node-wave orchestration
+  - finish select-next, node Activity, and merge-wave orchestration without
     concurrent writes to parent Temporal state
 
 ### M26 Review Comment Repair

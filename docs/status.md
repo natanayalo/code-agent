@@ -36,6 +36,9 @@ Active focus:
 - M24.9 Temporal PoC is complete: feature-flagged Temporal lifecycle, profile queues, durable activity handoff, dashboard HITL signals, trace continuity, worker recovery, and legacy fallback have closing evidence
 - M25.0 preserves explicit DAG dependencies, persists node-level fan-out metadata,
   validates parallel-safety contracts fail-closed, and retains legacy sequential behavior
+- M25.1A durable node activity persistence is complete: deterministic logical activity
+  identities, atomic claims/replay, fenced terminal results, legacy compatibility, and
+  claim-loss cancellation now support the legacy sequential executor
 - PR-native delivery fields with GitHub branch/draft-PR delivery integration
 - full-text personal/project memory search with dashboard search results and memory-retrieval timeline visibility
 - deterministic memory retrieval evaluation to separate full-text regressions from known semantic gaps
@@ -55,9 +58,9 @@ Active focus:
 
 ## Next Slices Only
 
-1. M25.1: durable node activity contract (in progress)
-   - typed logical-attempt identities, idempotent result replay, and independent
-     node persistence are in place; Temporal one-node merge waves remain before fan-out
+1. M25.1B: Temporal one-node-wave orchestration
+   - add select-next, node Activity, and merge-wave Activities while retaining strict
+     sequential scheduling and one parent-state writer
 
 ## Current Backlog
 
