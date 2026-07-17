@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: add Temporal one-node-wave orchestration ([#319](https://github.com/natanayalo/code-agent/pull/319))
+
 - Feat: add durable node activity persistence ([#318](https://github.com/natanayalo/code-agent/pull/318))
 
 - Feat: add M25 DAG fan-out metadata contracts ([#317](https://github.com/natanayalo/code-agent/pull/317))
