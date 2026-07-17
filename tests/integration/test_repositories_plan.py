@@ -154,6 +154,79 @@ def test_start_attempt_allocates_monotonic_numbers(session_factory):
         assert first.worker_run_id == "worker-run-1"
 
 
+def test_claim_activity_replays_terminal_result_and_rejects_digest_collision(session_factory):
+    """One logical activity key has one durable terminal result."""
+    with session_scope(session_factory) as session:
+        user = UserRepository(session).create(
+            external_user_id="test-claim-user", display_name="Test"
+        )
+        conversation = SessionRepository(session).create(
+            user_id=user.id, channel="web", external_thread_id="test-claim-thread"
+        )
+        task = TaskRepository(session).create(session_id=conversation.id, task_text="Test task")
+        repo = ExecutionPlanRepository(session)
+        plan = repo.create(task_id=task.id)
+        repo.add_node(plan_id=plan.id, node_id="node", goal="Test node")
+        kwargs = {
+            "plan_id": plan.id,
+            "node_id": "node",
+            "logical_activity_key": f"node-activity:v1:{plan.id}:node:1",
+            "effective_input_summary": {"node_id": "node"},
+            "effective_input_digest": "a" * 64,
+            "worker_type": "codex",
+            "worker_profile": None,
+            "runtime_mode": None,
+            "workspace_id": None,
+            "task_trace_id": None,
+        }
+        claim, attempt = repo.claim_activity(**kwargs)
+        assert claim == "new"
+        assert attempt.claim_token
+        original_token = attempt.claim_token
+        original_expiry = attempt.claim_expires_at
+        assert repo.heartbeat_activity(
+            attempt_id=attempt.id, claim_token=attempt.claim_token, lease_seconds=90
+        )
+        assert attempt.claim_expires_at is not None
+        assert original_expiry is not None
+        assert attempt.claim_expires_at > original_expiry
+        attempt.claim_expires_at = None
+        session.flush()
+        reclaimed, reclaimed_attempt = repo.claim_activity(**kwargs)
+        assert reclaimed == "new"
+        assert reclaimed_attempt.id == attempt.id
+        assert reclaimed_attempt.claim_generation == 1
+        assert reclaimed_attempt.claim_token != original_token
+        assert not repo.heartbeat_activity(
+            attempt_id=attempt.id, claim_token=original_token, lease_seconds=90
+        )
+        assert (
+            repo.finish_attempt(
+                attempt_id=attempt.id,
+                claim_token=original_token,
+                status="completed",
+                failure_kind=None,
+                result_payload={"node_outcome": {"late": True}},
+                result_schema_version=1,
+                result_digest="c" * 64,
+            )
+            is None
+        )
+        repo.finish_attempt(
+            attempt_id=attempt.id,
+            claim_token=attempt.claim_token,
+            status="completed",
+            failure_kind=None,
+            result_payload={"node_outcome": {}},
+            result_schema_version=1,
+            result_digest="b" * 64,
+        )
+        replay, _ = repo.claim_activity(**kwargs)
+        assert replay == "terminal_replay"
+        collision, _ = repo.claim_activity(**(kwargs | {"effective_input_digest": "c" * 64}))
+        assert collision == "collision"
+
+
 def test_finish_attempt_normalizes_finished_at_before_persistence(session_factory, monkeypatch):
     with session_scope(session_factory) as session:
         user = UserRepository(session).create(external_user_id="finish-attempt-user")
@@ -184,3 +257,46 @@ def test_finish_attempt_normalizes_finished_at_before_persistence(session_factor
         assert completed is not None
         assert completed.finished_at is not None
         assert completed.finished_at.tzinfo is not None
+
+
+def test_claim_activity_replays_terminal_legacy_attempt_without_result_payload(session_factory):
+    """A migrated terminal attempt is never dispatched again for its activity key."""
+    with session_scope(session_factory) as session:
+        user = UserRepository(session).create(external_user_id="legacy-claim-user")
+        conversation = SessionRepository(session).create(
+            user_id=user.id, channel="web", external_thread_id="legacy-claim-thread"
+        )
+        task = TaskRepository(session).create(session_id=conversation.id, task_text="Test task")
+        repo = ExecutionPlanRepository(session)
+        plan = repo.create(task_id=task.id)
+        repo.add_node(plan_id=plan.id, node_id="node", goal="Test node")
+        key = f"node-activity:v1:{plan.id}:node:1"
+        attempt = repo.start_attempt(
+            plan_id=plan.id,
+            node_id="node",
+            effective_input_summary={},
+            effective_input_digest="a" * 64,
+            worker_type=None,
+            worker_profile=None,
+            runtime_mode=None,
+            workspace_id=None,
+            task_trace_id=None,
+            logical_activity_key=key,
+        )
+        repo.finish_attempt(attempt_id=attempt.id, status="failed", failure_kind="timeout")
+
+        claim, replayed_attempt = repo.claim_activity(
+            plan_id=plan.id,
+            node_id="node",
+            logical_activity_key=key,
+            effective_input_summary={},
+            effective_input_digest="a" * 64,
+            worker_type=None,
+            worker_profile=None,
+            runtime_mode=None,
+            workspace_id=None,
+            task_trace_id=None,
+        )
+
+        assert claim == "terminal_replay"
+        assert replayed_attempt.id == attempt.id

@@ -6,6 +6,7 @@ import asyncio
 
 import orchestrator.graph as graph_module
 from db.enums import ExecutionPlanNodeStatus
+from db.models import Task
 from orchestrator import OrchestratorState
 from orchestrator.execution import TaskExecutionService
 from orchestrator.execution_types import TaskSubmission
@@ -74,7 +75,9 @@ def test_persisted_decomposition_skips_malformed_nodes(session_factory, monkeypa
         assert valid_node.parallel_safe is True
 
 
-def _assert_persisted_attempts(service: TaskExecutionService, task_id: str) -> None:
+def _assert_persisted_attempts(
+    service: TaskExecutionService, task_id: str, *, trace_id: str | None = None
+) -> None:
     """Assert resumed nodes retain one durable attempt record each."""
     persisted_snapshot = service.get_task(task_id)
     assert persisted_snapshot is not None
@@ -82,7 +85,18 @@ def _assert_persisted_attempts(service: TaskExecutionService, task_id: str) -> N
     assert [attempt.attempt_number for attempt in nodes["2"].attempts] == [1]
     assert nodes["2"].attempts[0].status == "completed"
     assert nodes["2"].attempts[0].effective_input_digest
+    assert nodes["2"].attempts[0].task_trace_id == trace_id
     assert [attempt.attempt_number for attempt in nodes["3"].attempts] == [1]
+
+
+def _set_task_trace_context(session_factory, task_id: str) -> str:
+    """Persist a stable parent trace for node-attempt propagation coverage."""
+    trace_id = "0123456789abcdef0123456789abcdef"
+    with session_scope(session_factory) as session:
+        task = session.get(Task, task_id)
+        assert task is not None
+        task.trace_context = {"traceparent": f"00-{trace_id}-0123456789abcdef-01"}
+    return trace_id
 
 
 def test_queue_reload_resumes_only_non_completed_decomposed_nodes(session_factory) -> None:
@@ -92,6 +106,7 @@ def test_queue_reload_resumes_only_non_completed_decomposed_nodes(session_factor
         TaskSubmission(task_text="Implement a multi-file change and verify it")
     )
 
+    trace_id = _set_task_trace_context(session_factory, snapshot.task_id)
     with session_scope(session_factory) as session:
         plan_repo = ExecutionPlanRepository(session)
         plan = plan_repo.create(task_id=snapshot.task_id)
@@ -160,4 +175,4 @@ def test_queue_reload_resumes_only_non_completed_decomposed_nodes(session_factor
     assert "Current DAG node (3)" in dag_requests[1].task_text
     assert all("Current DAG node (1)" not in request.task_text for request in dag_requests)
 
-    _assert_persisted_attempts(service, snapshot.task_id)
+    _assert_persisted_attempts(service, snapshot.task_id, trace_id=trace_id)

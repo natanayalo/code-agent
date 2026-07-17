@@ -483,6 +483,9 @@ class ExecutionPlanNodeSnapshot(ExecutionModel):
     changed_files: list[str] | None = None
     output_artifacts: list[dict[str, Any]] | None = None
     last_attempt_at: datetime | None = None
+    latest_logical_activity_key: str | None = None
+    terminal_result_schema_version: int | None = None
+    terminal_result_digest: str | None = None
     attempts: list[ExecutionPlanNodeAttemptSnapshot] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
@@ -505,6 +508,9 @@ class ExecutionPlanNodeAttemptSnapshot(ExecutionModel):
     failure_kind: str | None = None
     effective_input_summary: dict[str, Any]
     effective_input_digest: str
+    logical_activity_key: str | None = None
+    result_schema_version: int | None = None
+    result_digest: str | None = None
 
 
 class ExecutionPlanSnapshot(ExecutionModel):

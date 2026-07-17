@@ -15,7 +15,8 @@ from langchain_core.runnables import RunnableLambda
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy import select
+from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from apps.observability import (
     SPAN_KIND_CHAIN,
@@ -47,6 +48,12 @@ from orchestrator.constants import (
     LOW_COST_REQUEST_MARKERS,
 )
 from orchestrator.decomposition import decompose_task_plan
+from orchestrator.node_execution import (
+    NodeActivityInProgress,
+    NodeActivityRequest,
+    NodeExecutionService,
+    logical_activity_key,
+)
 from orchestrator.nodes.delivery import build_deliver_result_node
 from orchestrator.nodes.ingestion import (
     classify_task,
@@ -801,6 +808,62 @@ def _finish_node_attempt(
         )
 
 
+async def _execute_decomposed_node(
+    *,
+    session_factory: Callable[[], Session] | None,
+    state: OrchestratorState,
+    worker: Worker,
+    request: WorkerRequest,
+    node: DecomposedTaskNode,
+    logical_attempt: int,
+    plan_id: str | None,
+    effective_input_summary: dict[str, Any],
+    effective_input_digest: str,
+    task_trace_id: str | None,
+) -> tuple[WorkerResult | None, NodeOutcome | None]:
+    """Dispatch one node through durable persistence or the legacy fallback."""
+    if session_factory is not None and state.task.task_id and plan_id is not None:
+        activity_request = NodeActivityRequest(
+            task_id=state.task.task_id,
+            plan_id=plan_id,
+            node_id=node.node_id,
+            logical_attempt=logical_attempt,
+            logical_activity_key=logical_activity_key(plan_id, node.node_id, logical_attempt),
+            effective_input_digest=effective_input_digest,
+            task_trace_id=task_trace_id,
+        )
+
+        async def execute_worker() -> WorkerResult:
+            result, _progress = await _await_worker_with_timeout(
+                worker,
+                request,
+                worker_type=state.dispatch.worker_type or state.route.chosen_worker or "unknown",
+                session_id=request.session_id,
+                timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
+            )
+            return result
+
+        while True:
+            try:
+                _result_ref, outcome = await NodeExecutionService(session_factory).execute(
+                    activity=activity_request,
+                    request=request,
+                    effective_input_summary=effective_input_summary,
+                    execute_worker=execute_worker,
+                )
+                return outcome.result if outcome is not None else None, outcome
+            except NodeActivityInProgress:
+                await asyncio.sleep(1)
+    result, _progress = await _await_worker_with_timeout(
+        worker,
+        request,
+        worker_type=state.dispatch.worker_type or state.route.chosen_worker or "unknown",
+        session_id=request.session_id,
+        timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
+    )
+    return result, None
+
+
 def _aggregate_decomposed_results(outcomes: list[NodeOutcome]) -> WorkerResult:
     """Merge sequential node results into the existing parent worker contract."""
     failed = next(
@@ -911,6 +974,22 @@ async def _await_decomposed_nodes(
     completed_node_ids = {outcome.node_id for outcome in outcomes if outcome.status == "completed"}
     pending = {node.node_id: node for node in plan.nodes if node.node_id not in completed_node_ids}
     last_manifest: dict[str, Any] | None = None
+    plan_id: str | None = None
+    task_trace_id: str | None = None
+    if session_factory is not None and state.task.task_id:
+        with session_scope(cast(sessionmaker[Session], session_factory)) as session:
+            task = session.scalar(
+                select(Task)
+                .where(Task.id == state.task.task_id)
+                .options(selectinload(Task.execution_plan))
+            )
+            plan_id = task.execution_plan.id if task and task.execution_plan else None
+            trace_context = task.trace_context if task else None
+            traceparent = (
+                trace_context.get("traceparent") if isinstance(trace_context, dict) else None
+            )
+            trace_parts = traceparent.split("-") if isinstance(traceparent, str) else []
+            task_trace_id = trace_parts[1] if len(trace_parts) > 1 else None
     while pending:
         outcome_by_id = {outcome.node_id: outcome for outcome in outcomes}
         ready_node = next(
@@ -972,14 +1051,18 @@ async def _await_decomposed_nodes(
                 prior_node_context=prior_context,
             )
             evidence, digest = _effective_input_evidence(state, ready_node, prior_context)
-            attempt_id = _start_node_attempt(session_factory, state, ready_node, evidence, digest)
             last_manifest = request.runtime_manifest
-            result, _progress = await _await_worker_with_timeout(
-                worker,
-                request,
-                worker_type=state.dispatch.worker_type or state.route.chosen_worker or "unknown",
-                session_id=request.session_id,
-                timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
+            result, persisted_outcome = await _execute_decomposed_node(
+                session_factory=session_factory,
+                state=state,
+                worker=worker,
+                request=request,
+                node=ready_node,
+                logical_attempt=attempts,
+                plan_id=plan_id,
+                effective_input_summary=evidence,
+                effective_input_digest=digest,
+                task_trace_id=task_trace_id,
             )
             if result is None:
                 logger.warning("Node execution result is None, falling back to failure default.")
@@ -988,9 +1071,7 @@ async def _await_decomposed_nodes(
                     summary="Node execution returned no result.",
                     failure_kind="worker_failure",
                 )
-                _finish_node_attempt(session_factory, attempt_id, result)
                 break
-            _finish_node_attempt(session_factory, attempt_id, result)
             if result.status == "success" or result.next_action_hint == "request_higher_permission":
                 break
         if result is None:
@@ -1005,8 +1086,10 @@ async def _await_decomposed_nodes(
         if result.workspace_id is None and state.dispatch.workspace_id:
             result = result.model_copy(update={"workspace_id": state.dispatch.workspace_id})
         outcomes = [outcome for outcome in outcomes if outcome.node_id != ready_node.node_id]
-        outcomes.append(
-            NodeOutcome(
+        node_outcome = (
+            persisted_outcome.model_copy(update={"dependencies": ready_node.depends_on})
+            if persisted_outcome
+            else NodeOutcome(
                 node_id=ready_node.node_id,
                 status=(
                     "completed"
@@ -1020,6 +1103,7 @@ async def _await_decomposed_nodes(
                 attempts=attempts,
             )
         )
+        outcomes.append(node_outcome)
         pending.pop(ready_node.node_id)
         if result.next_action_hint == "request_higher_permission":
             break
