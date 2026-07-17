@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -270,13 +270,32 @@ class ExecutionPlanRepository:
             if existing.result_payload is not None:
                 return "terminal_replay", existing
             now = utc_now()
-            if existing.claim_expires_at is not None and existing.claim_expires_at <= now:
-                existing.claim_generation += 1
-                existing.claim_token = uuid4().hex
-                existing.heartbeat_at = now
-                existing.claim_expires_at = now + timedelta(seconds=lease_seconds)
+            token = uuid4().hex
+            expiry = now + timedelta(seconds=lease_seconds)
+            claimed = self.session.execute(
+                update(ExecutionPlanNodeAttempt)
+                .where(
+                    ExecutionPlanNodeAttempt.id == existing.id,
+                    ExecutionPlanNodeAttempt.claim_generation == existing.claim_generation,
+                    ExecutionPlanNodeAttempt.result_payload.is_(None),
+                    ExecutionPlanNodeAttempt.claim_expires_at.is_not(None),
+                    ExecutionPlanNodeAttempt.claim_expires_at <= now,
+                )
+                .values(
+                    claim_generation=ExecutionPlanNodeAttempt.claim_generation + 1,
+                    claim_token=token,
+                    heartbeat_at=now,
+                    claim_expires_at=expiry,
+                )
+            )
+            if cast(Any, claimed).rowcount == 1:
+                self.session.refresh(existing)
                 return "new", existing
-            return "in_progress", existing
+            self.session.expire(existing)
+            refreshed = self.session.get(ExecutionPlanNodeAttempt, existing.id)
+            if refreshed is None:
+                raise RuntimeError("claimed node activity disappeared")
+            return "in_progress", refreshed
         token = uuid4().hex
         try:
             attempt = self.start_attempt(

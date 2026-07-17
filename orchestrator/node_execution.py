@@ -2,34 +2,49 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Literal, cast
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from sqlalchemy.orm import Session, sessionmaker
 
 from db.base import utc_now
 from db.enums import ExecutionPlanNodeStatus
 from orchestrator.state import NodeOutcome, OrchestratorModel
 from repositories import ExecutionPlanRepository, session_scope
-from workers import Worker, WorkerRequest, WorkerResult
+from workers import WorkerRequest, WorkerResult
 
 NODE_ACTIVITY_SCHEMA_VERSION = 1
+CLAIM_HEARTBEAT_SECONDS = 10
+CLAIM_LEASE_SECONDS = 60
+
+
+class NodeActivityInProgress(RuntimeError):
+    """Raised when another live execution owns the logical node activity."""
 
 
 class NodeActivityRequest(OrchestratorModel):
     """Compact, deterministic identity for one logical node execution."""
 
-    schema_version: int = NODE_ACTIVITY_SCHEMA_VERSION
+    schema_version: Literal[1] = 1
     task_id: str
     plan_id: str
     node_id: str
     logical_attempt: int = Field(ge=1)
     logical_activity_key: str
-    effective_input_digest: str
+    effective_input_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     task_trace_id: str | None = None
+
+    @model_validator(mode="after")
+    def validate_logical_activity_key(self) -> NodeActivityRequest:
+        """Reject caller-supplied identities that do not match the node contract."""
+        expected = logical_activity_key(self.plan_id, self.node_id, self.logical_attempt)
+        if self.logical_activity_key != expected:
+            raise ValueError("logical_activity_key does not match the plan node attempt")
+        return self
 
 
 class NodeActivityResultRef(OrchestratorModel):
@@ -64,9 +79,8 @@ def _node_status(result: WorkerResult) -> tuple[str, str]:
 class NodeExecutionService:
     """Application service; Temporal and legacy execution share this boundary."""
 
-    def __init__(self, session_factory: Callable[[], Session], worker: Worker) -> None:
+    def __init__(self, session_factory: Callable[[], Session]) -> None:
         self.session_factory = session_factory
-        self.worker = worker
 
     async def execute(
         self,
@@ -74,10 +88,14 @@ class NodeExecutionService:
         activity: NodeActivityRequest,
         request: WorkerRequest,
         effective_input_summary: dict[str, object],
+        execute_worker: Callable[[], Awaitable[WorkerResult]],
     ) -> tuple[NodeActivityResultRef, NodeOutcome | None]:
         """Claim, run, and independently persist exactly one logical node result."""
         with session_scope(cast(sessionmaker[Session], self.session_factory)) as session:
             repository = ExecutionPlanRepository(session)
+            plan = repository.get_by_id(activity.plan_id)
+            if plan is None or plan.task_id != activity.task_id:
+                raise ValueError("node activity plan does not belong to the task")
             claim, attempt = repository.claim_activity(
                 plan_id=activity.plan_id,
                 node_id=activity.node_id,
@@ -93,6 +111,7 @@ class NodeExecutionService:
                     else None
                 ),
                 task_trace_id=activity.task_trace_id,
+                lease_seconds=CLAIM_LEASE_SECONDS,
             )
             if claim == "collision":
                 raise ValueError(
@@ -113,19 +132,17 @@ class NodeExecutionService:
                     outcome,
                 )
             if claim == "in_progress":
-                return (
-                    NodeActivityResultRef(
-                        node_id=activity.node_id,
-                        logical_activity_key=activity.logical_activity_key,
-                        status="failed",
-                        result_digest="",
-                        continuation="retry_node",
-                    ),
-                    None,
-                )
+                raise NodeActivityInProgress(activity.logical_activity_key)
             attempt_id, token = attempt.id, attempt.claim_token
 
-        result = await self.worker.run(request)
+        heartbeat = asyncio.create_task(
+            self._heartbeat_claim(attempt_id, token), name=f"node-claim-{attempt_id}"
+        )
+        try:
+            result = await execute_worker()
+        finally:
+            heartbeat.cancel()
+            await asyncio.gather(heartbeat, return_exceptions=True)
         if result is None:
             result = WorkerResult(
                 status="failure",
@@ -190,3 +207,18 @@ class NodeExecutionService:
             ),
             outcome,
         )
+
+    async def _heartbeat_claim(self, attempt_id: str, claim_token: str | None) -> None:
+        """Keep the database lease live without holding a transaction during work."""
+        if not claim_token:
+            return
+        while True:
+            await asyncio.sleep(CLAIM_HEARTBEAT_SECONDS)
+            with session_scope(cast(sessionmaker[Session], self.session_factory)) as session:
+                owned = ExecutionPlanRepository(session).heartbeat_activity(
+                    attempt_id=attempt_id,
+                    claim_token=claim_token,
+                    lease_seconds=CLAIM_LEASE_SECONDS,
+                )
+            if not owned:
+                return

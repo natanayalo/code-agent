@@ -48,6 +48,7 @@ from orchestrator.constants import (
 )
 from orchestrator.decomposition import decompose_task_plan
 from orchestrator.node_execution import (
+    NodeActivityInProgress,
     NodeActivityRequest,
     NodeExecutionService,
     logical_activity_key,
@@ -830,12 +831,28 @@ async def _execute_decomposed_node(
             effective_input_digest=effective_input_digest,
             task_trace_id=task_trace_id,
         )
-        _result_ref, outcome = await NodeExecutionService(session_factory, worker).execute(
-            activity=activity_request,
-            request=request,
-            effective_input_summary=effective_input_summary,
-        )
-        return outcome.result if outcome is not None else None, outcome
+
+        async def execute_worker() -> WorkerResult:
+            result, _progress = await _await_worker_with_timeout(
+                worker,
+                request,
+                worker_type=state.dispatch.worker_type or state.route.chosen_worker or "unknown",
+                session_id=request.session_id,
+                timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
+            )
+            return result
+
+        while True:
+            try:
+                _result_ref, outcome = await NodeExecutionService(session_factory).execute(
+                    activity=activity_request,
+                    request=request,
+                    effective_input_summary=effective_input_summary,
+                    execute_worker=execute_worker,
+                )
+                return outcome.result if outcome is not None else None, outcome
+            except NodeActivityInProgress:
+                await asyncio.sleep(1)
     result, _progress = await _await_worker_with_timeout(
         worker,
         request,

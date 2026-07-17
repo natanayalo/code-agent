@@ -182,6 +182,13 @@ def test_claim_activity_replays_terminal_result_and_rejects_digest_collision(ses
         claim, attempt = repo.claim_activity(**kwargs)
         assert claim == "new"
         assert attempt.claim_token
+        original_expiry = attempt.claim_expires_at
+        assert repo.heartbeat_activity(
+            attempt_id=attempt.id, claim_token=attempt.claim_token, lease_seconds=90
+        )
+        assert attempt.claim_expires_at is not None
+        assert original_expiry is not None
+        assert attempt.claim_expires_at > original_expiry
         repo.finish_attempt(
             attempt_id=attempt.id,
             claim_token=attempt.claim_token,
