@@ -143,7 +143,9 @@ class TaskExecutionWorkflow:
             if action == "await_permission":
                 escalation_count += 1
                 if escalation_count > MAX_PERMISSION_ESCALATIONS:
-                    return await self._record_node_wave_escalation_limit(task_id)
+                    return await self._record_node_wave_escalation_limit(
+                        task_id, selection.get("node_id")
+                    )
                 if not await self._handle_permission_escalation(task_id):
                     return {"status": "rejected", "summary": "Permission escalation rejected."}
                 await workflow.execute_activity(
@@ -179,7 +181,9 @@ class TaskExecutionWorkflow:
             if continuation == "await_permission":
                 escalation_count += 1
                 if escalation_count > MAX_PERMISSION_ESCALATIONS:
-                    return await self._record_node_wave_escalation_limit(task_id)
+                    return await self._record_node_wave_escalation_limit(
+                        task_id, merge.get("blocked_node_id")
+                    )
                 if not await self._handle_permission_escalation(task_id):
                     return {"status": "rejected", "summary": "Permission escalation rejected."}
                 await workflow.execute_activity(
@@ -194,12 +198,20 @@ class TaskExecutionWorkflow:
             )
             return {"status": "failed", "summary": failure}
 
-    async def _record_node_wave_escalation_limit(self, task_id: str) -> dict:
+    async def _record_node_wave_escalation_limit(
+        self, task_id: str, blocked_node_id: str | None
+    ) -> dict:
         """Project a bounded terminal result for repeated node permission requests."""
         failure = (
             "Maximum sequential permission escalation limit reached "
             f"({MAX_PERMISSION_ESCALATIONS})."
         )
+        if blocked_node_id is not None:
+            await workflow.execute_activity(
+                "fail_node_permission_escalation",
+                args=[task_id, blocked_node_id],
+                **activity_options("fail_node_permission_escalation"),
+            )
         await workflow.execute_activity(
             "record_workflow_failure",
             args=[task_id, failure],

@@ -10,7 +10,7 @@ from temporalio.client import Client, WorkflowFailureError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
-from db.enums import TimelineEventType
+from db.enums import ExecutionPlanNodeStatus, TimelineEventType
 from db.models import Base, Task, TaskTimelineEvent, TemporalTaskState, WorkerRun
 from orchestrator.execution import TaskExecutionService, TaskSubmission
 from orchestrator.execution_types import InteractionResponse
@@ -19,6 +19,7 @@ from orchestrator.temporal.activities import TaskExecutionActivities
 from orchestrator.temporal.queues import CODEX_EXECUTION_TASK_QUEUE
 from orchestrator.temporal.workflows import TaskExecutionWorkflow
 from repositories import (
+    ExecutionPlanRepository,
     TaskTimelineRepository,
     TemporalTaskStateRepository,
     create_engine_from_url,
@@ -195,6 +196,35 @@ async def test_temporal_activity_failure_projects_terminal_task(session_factory)
             .all()
         )
         assert [event.event_type for event in events].count(TimelineEventType.TASK_FAILED) == 1
+
+
+@pytest.mark.anyio
+async def test_global_permission_cap_projects_blocked_node_as_failed(session_factory):
+    """The task-level escalation cap must not leave an actionable blocked node."""
+    service = TaskExecutionService(
+        session_factory=session_factory,
+        worker=CodexCliWorker(runtime_adapter=_ScriptedAdapter([])),
+    )
+    snapshot, _ = service.create_task(TaskSubmission(task_text="Bound permission escalation"))
+    with session_scope(session_factory) as session:
+        plan = ExecutionPlanRepository(session).create(task_id=snapshot.task_id)
+        ExecutionPlanRepository(session).add_node(
+            plan_id=plan.id,
+            node_id="blocked",
+            goal="Await permission",
+            status=ExecutionPlanNodeStatus.BLOCKED,
+        )
+
+    await TaskExecutionActivities(service=service).fail_node_permission_escalation(
+        snapshot.task_id, "blocked"
+    )
+
+    with session_scope(session_factory) as session:
+        node = ExecutionPlanRepository(session).get_node(plan.id, "blocked")
+        assert node is not None
+        assert node.status == ExecutionPlanNodeStatus.FAILED
+        assert node.failure_kind == "permission_escalation_limit"
+        assert node.blocker_interaction_id is None
 
 
 @pytest.mark.anyio

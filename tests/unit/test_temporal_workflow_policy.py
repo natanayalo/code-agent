@@ -141,7 +141,7 @@ async def test_decomposed_workflow_bounds_permission_escalations(monkeypatch) ->
     async def execute_activity(name: str, *args, **kwargs):
         activity_names.append(name)
         if name == "select_next_node":
-            return {"action": "await_permission"}
+            return {"action": "await_permission", "node_id": "blocked-node"}
         return {"execution_shape": "decomposed"} if name == "decompose_task" else {}
 
     async def wait_condition(_predicate) -> None:
@@ -155,7 +155,7 @@ async def test_decomposed_workflow_bounds_permission_escalations(monkeypatch) ->
 
     assert result["status"] == "failed"
     assert activity_names.count("request_permission_escalation") == MAX_PERMISSION_ESCALATIONS
-    assert activity_names[-1] == "record_workflow_failure"
+    assert activity_names[-2:] == ["fail_node_permission_escalation", "record_workflow_failure"]
 
 
 @pytest.mark.anyio

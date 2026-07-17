@@ -1122,6 +1122,30 @@ class TaskExecutionActivities:
 
         await self.service._run_blocking(_record_failure)
 
+    @activity.defn(name="fail_node_permission_escalation")
+    @_restore_task_trace_context
+    async def fail_node_permission_escalation(self, task_id: str, node_id: str) -> None:
+        """Project a global permission-cap failure onto the blocked plan node."""
+
+        def _fail_node() -> None:
+            with session_scope(self.service.session_factory) as session:
+                plan = ExecutionPlanRepository(session).get_by_task_id(task_id)
+                if plan is None:
+                    raise RuntimeError(f"Task '{task_id}' has no execution plan.")
+                node = ExecutionPlanRepository(session).get_node(plan.id, node_id)
+                if node is None:
+                    raise RuntimeError(f"Execution plan node '{node_id}' is unavailable.")
+                ExecutionPlanRepository(session).update_node(
+                    plan_id=plan.id,
+                    node_id=node_id,
+                    status=ExecutionPlanNodeStatus.FAILED,
+                    failure_kind="permission_escalation_limit",
+                    blocker_interaction_id=None,
+                    finished_at=utc_now(),
+                )
+
+        await self.service._run_blocking(_fail_node)
+
     @activity.defn(name="verify_result")
     @_restore_task_trace_context
     async def verify_result(self, task_id: str) -> None:

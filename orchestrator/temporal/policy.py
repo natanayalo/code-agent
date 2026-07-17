@@ -43,6 +43,9 @@ _POLICIES: dict[str, TemporalActivityPolicy] = {
         timedelta(minutes=30), _WORKER_RETRY, heartbeat_timeout=timedelta(seconds=20)
     ),
     "merge_node_wave": TemporalActivityPolicy(timedelta(minutes=5), _STANDARD_RETRY),
+    "fail_node_permission_escalation": TemporalActivityPolicy(
+        timedelta(minutes=5), _STANDARD_RETRY
+    ),
     "request_permission_escalation": TemporalActivityPolicy(timedelta(minutes=5), _STANDARD_RETRY),
     "resolve_permission_escalation": TemporalActivityPolicy(timedelta(minutes=5), _STANDARD_RETRY),
     "verify_result": TemporalActivityPolicy(timedelta(minutes=15), _STANDARD_RETRY),
