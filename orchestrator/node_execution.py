@@ -29,6 +29,10 @@ class NodeActivityInProgress(RuntimeError):
     """Raised when another live execution owns the logical node activity."""
 
 
+class NodeActivityClaimLost(RuntimeError):
+    """Raised when execution loses its durable claim before completion."""
+
+
 class NodeActivityRequest(OrchestratorModel):
     """Compact, deterministic identity for one logical node execution."""
 
@@ -119,6 +123,34 @@ def _legacy_terminal_outcome(
     return result, outcome, _node_status(result)[1]
 
 
+async def _execute_worker_under_claim(
+    execute_worker: Callable[[], Awaitable[WorkerResult]],
+    heartbeat_claim: Callable[[], Awaitable[bool]],
+) -> WorkerResult:
+    """Cancel worker execution if its durable claim stops being owned."""
+    worker_task: asyncio.Future[WorkerResult] = asyncio.ensure_future(execute_worker())
+    heartbeat_task: asyncio.Future[bool] = asyncio.ensure_future(heartbeat_claim())
+    try:
+        done, _pending = await asyncio.wait(
+            [
+                cast(asyncio.Future[object], worker_task),
+                cast(asyncio.Future[object], heartbeat_task),
+            ],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if heartbeat_task in done and not heartbeat_task.result():
+            worker_task.cancel()
+            await asyncio.gather(worker_task, return_exceptions=True)
+            raise NodeActivityClaimLost("node activity claim was lost during worker execution")
+        return worker_task.result()
+    finally:
+        heartbeat_task.cancel()
+        await asyncio.gather(heartbeat_task, return_exceptions=True)
+        if not worker_task.done():
+            worker_task.cancel()
+            await asyncio.gather(worker_task, return_exceptions=True)
+
+
 class NodeExecutionService:
     """Application service; Temporal and legacy execution share this boundary."""
 
@@ -195,14 +227,10 @@ class NodeExecutionService:
                 raise NodeActivityInProgress(activity.logical_activity_key)
             attempt_id, token = attempt.id, attempt.claim_token
 
-        heartbeat = asyncio.create_task(
-            self._heartbeat_claim(attempt_id, token), name=f"node-claim-{attempt_id}"
+        result = await _execute_worker_under_claim(
+            execute_worker,
+            lambda: self._heartbeat_claim(attempt_id, token),
         )
-        try:
-            result = await execute_worker()
-        finally:
-            heartbeat.cancel()
-            await asyncio.gather(heartbeat, return_exceptions=True)
         if result is None:
             result = WorkerResult(
                 status="failure",
@@ -268,10 +296,10 @@ class NodeExecutionService:
             outcome,
         )
 
-    async def _heartbeat_claim(self, attempt_id: str, claim_token: str | None) -> None:
+    async def _heartbeat_claim(self, attempt_id: str, claim_token: str | None) -> bool:
         """Keep the database lease live without holding a transaction during work."""
         if not claim_token:
-            return
+            return False
         while True:
             await asyncio.sleep(CLAIM_HEARTBEAT_SECONDS)
             try:
@@ -290,4 +318,4 @@ class NodeExecutionService:
                 continue
             if not owned:
                 logger.warning("Node execution heartbeat lost ownership of attempt %s", attempt_id)
-                return
+                return False

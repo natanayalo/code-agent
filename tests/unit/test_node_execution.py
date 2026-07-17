@@ -1,12 +1,17 @@
 """Contract tests for durable node execution identities."""
 
+import asyncio
+
 import pytest
 
 from orchestrator.node_execution import (
+    NodeActivityClaimLost,
     NodeActivityRequest,
+    _execute_worker_under_claim,
     _legacy_terminal_outcome,
     logical_activity_key,
 )
+from workers import WorkerResult
 
 
 def test_node_activity_request_requires_canonical_identity_and_digest() -> None:
@@ -48,3 +53,25 @@ def test_legacy_terminal_outcome_preserves_permission_continuation() -> None:
     assert outcome.status == "blocked"
     assert outcome.attempts == 2
     assert continuation == "await_permission"
+
+
+def test_lost_claim_cancels_worker_before_processing_result() -> None:
+    worker_cancelled = asyncio.Event()
+
+    async def worker() -> WorkerResult:
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            worker_cancelled.set()
+            raise
+        raise AssertionError("cancelled worker unexpectedly completed")
+
+    async def lost_claim() -> bool:
+        return False
+
+    async def exercise() -> None:
+        with pytest.raises(NodeActivityClaimLost):
+            await _execute_worker_under_claim(worker, lost_claim)
+
+    asyncio.run(exercise())
+    assert worker_cancelled.is_set()
