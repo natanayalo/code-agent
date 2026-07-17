@@ -93,9 +93,10 @@ def test_antigravity_worker_builds_prompt_argv_command_and_settings(tmp_path: Pa
     assert command[:3] == ["/opt/bin/agy", "-p", native_request.prompt]
     assert "--model" in command
     assert command[command.index("--model") + 1] == "gemini-3-pro"
-    assert command[command.index("--log-file") + 1] == str(
-        workspace.workspace_path / ".code-agent" / "antigravity-native.log"
-    )
+    assert native_request.artifact_root is not None
+    assert native_request.provider_log_path == native_request.artifact_root / "provider.log"
+    assert native_request.artifact_root.parent.name == "native-agent-runner"
+    assert command[command.index("--log-file") + 1] == str(native_request.provider_log_path)
     assert native_request.stdin_prompt is False
     assert native_request.command_redactions == [native_request.prompt]
     assert native_request.env is not None
@@ -103,10 +104,6 @@ def test_antigravity_worker_builds_prompt_argv_command_and_settings(tmp_path: Pa
         workspace.workspace_path / ".agent_home" / ".gemini"
     )
     assert native_request.events_path is None
-    assert (
-        native_request.provider_log_path
-        == workspace.workspace_path / ".code-agent" / "antigravity-native.log"
-    )
 
     settings_path = (
         workspace.workspace_path / ".agent_home" / ".gemini" / "antigravity-cli" / "settings.json"
@@ -119,6 +116,7 @@ def test_antigravity_worker_builds_prompt_argv_command_and_settings(tmp_path: Pa
     }
     assert provider_metadata["provider"] == "antigravity"
     assert provider_metadata["tool_permission"] == "proceed-in-sandbox"
+    assert provider_metadata["log_file"] == str(native_request.provider_log_path)
     assert provider_metadata["gemini_home"] == str(
         workspace.workspace_path / ".agent_home" / ".gemini"
     )

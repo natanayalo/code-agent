@@ -727,9 +727,13 @@ def _setup_native_agent_paths(
         request.provider_log_path.expanduser().resolve() if request.provider_log_path else None
     )
     artifact_root = (
-        workspace_path
-        / DEFAULT_NATIVE_AGENT_ARTIFACTS_DIR
-        / f"run-{int(time.time() * 1000)}-{time.monotonic_ns()}"
+        request.artifact_root.expanduser().resolve()
+        if request.artifact_root
+        else (
+            workspace_path
+            / DEFAULT_NATIVE_AGENT_ARTIFACTS_DIR
+            / f"run-{int(time.time() * 1000)}-{time.monotonic_ns()}"
+        )
     )
     artifact_root.mkdir(parents=True, exist_ok=True)
     return repo_path, final_message_path, events_path, provider_log_path, artifact_root
@@ -785,7 +789,8 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
             redactor=request.redactor,
         )
         set_current_span_attribute(
-            NATIVE_AGENT_COMMAND_ATTRIBUTE, sanitize_command(command_text, request.redactor)
+            NATIVE_AGENT_COMMAND_ATTRIBUTE,
+            sanitize_command(command_text, request.redactor),
         )
 
         try:

@@ -9,6 +9,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from sandbox import WorkspaceHandle
 from workers.antigravity_cli_adapter import (
@@ -17,6 +18,7 @@ from workers.antigravity_cli_adapter import (
 )
 from workers.base import WorkerRequest
 from workers.cli_runtime import CliRuntimeSettings
+from workers.native_agent_artifacts import DEFAULT_NATIVE_AGENT_ARTIFACTS_DIR
 
 ANTIGRAVITY_READ_ONLY_TOOL_PERMISSION = "strict"
 
@@ -330,8 +332,10 @@ def build_antigravity_native_command(
         artifact_review_policy=adapter.artifact_review_policy,
         enable_terminal_sandbox=native_sandbox_enabled,
     )
-    log_file = workspace.workspace_path / ".code-agent" / "antigravity-native.log"
-    log_file.parent.mkdir(parents=True, exist_ok=True)
+    artifact_root = (
+        workspace.workspace_path / DEFAULT_NATIVE_AGENT_ARTIFACTS_DIR / f"run-{uuid4().hex}"
+    )
+    log_file = artifact_root / "provider.log"
     command = adapter.build_native_command(
         prompt=prompt,
         cwd=workspace.repo_path,
