@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: add durable node activity persistence ([#318](https://github.com/natanayalo/code-agent/pull/318))
+
 - Feat: add M25 DAG fan-out metadata contracts ([#317](https://github.com/natanayalo/code-agent/pull/317))
 
 - Feat: consolidate temporal task execution runtime ([#316](https://github.com/natanayalo/code-agent/pull/316))
