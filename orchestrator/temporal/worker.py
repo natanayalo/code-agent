@@ -43,6 +43,7 @@ async def start_temporal_worker(
             activities.load_memory,
             activities.provision_workspace,
             activities.run_worker,
+            activities.run_decomposed_node,
             activities.request_permission_escalation,
             activities.resolve_permission_escalation,
             activities.record_workflow_failure,

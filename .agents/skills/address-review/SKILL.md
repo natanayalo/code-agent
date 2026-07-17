@@ -29,7 +29,6 @@ Default mode is end-to-end mode:
 - Commit and push review-fix commits once checks pass.
 - Reply to each addressed thread with concrete fix/verification details.
 - Resolve threads when the concern is fully addressed.
-- Post a final `@gemini-code-assist review` PR comment after pushing updates.
 
 Local-fix mode is opt-in only when the user explicitly asks for local-only work. In local-fix mode:
 
@@ -258,18 +257,6 @@ mutation($id: ID!) {
   }
 }'
 ```
-
-## Final Review Trigger
-
-Post automated re-review trigger by default at the end of end-to-end runs.
-
-Example:
-
-```bash
-GH_PAGER=cat gh pr comment {PR_NUMBER} --body "@gemini-code-assist review"
-```
-
-Skip this trigger only when the user explicitly asks not to post it.
 
 ## Final Summary
 

@@ -109,6 +109,7 @@ class TaskExecutionWorkflow:
 
     async def _run_decomposed_node_waves(self, task_id: str) -> dict | None:
         """Coordinate exactly one durable node execution before every merge."""
+        escalation_count = 0
         while True:
             selection = await workflow.execute_activity(
                 "select_next_node", task_id, **activity_options("select_next_node")
@@ -140,6 +141,9 @@ class TaskExecutionWorkflow:
                 )
                 return {"status": "failed", "summary": failure}
             if action == "await_permission":
+                escalation_count += 1
+                if escalation_count > MAX_PERMISSION_ESCALATIONS:
+                    return await self._record_node_wave_escalation_limit(task_id)
                 if not await self._handle_permission_escalation(task_id):
                     return {"status": "rejected", "summary": "Permission escalation rejected."}
                 await workflow.execute_activity(
@@ -150,10 +154,13 @@ class TaskExecutionWorkflow:
             if action == "execute":
                 activity_request = selection.get("activity_request")
                 if activity_request is None:
-                    return {
-                        "status": "failed",
-                        "summary": "Node selection omitted its activity request.",
-                    }
+                    failure = "Node selection omitted its activity request."
+                    await workflow.execute_activity(
+                        "record_workflow_failure",
+                        args=[task_id, failure],
+                        **activity_options("record_workflow_failure"),
+                    )
+                    return {"status": "failed", "summary": failure}
                 result_ref = await workflow.execute_activity(
                     "run_decomposed_node",
                     args=[task_id, activity_request],
@@ -170,13 +177,35 @@ class TaskExecutionWorkflow:
             if continuation in {"continue", "retry_node"}:
                 continue
             if continuation == "await_permission":
+                escalation_count += 1
+                if escalation_count > MAX_PERMISSION_ESCALATIONS:
+                    return await self._record_node_wave_escalation_limit(task_id)
                 if not await self._handle_permission_escalation(task_id):
                     return {"status": "rejected", "summary": "Permission escalation rejected."}
                 await workflow.execute_activity(
                     "provision_workspace", task_id, **activity_options("provision_workspace")
                 )
                 continue
-            return {"status": "failed", "summary": "Decomposed node execution failed."}
+            failure = "Decomposed node execution failed."
+            await workflow.execute_activity(
+                "record_workflow_failure",
+                args=[task_id, failure],
+                **activity_options("record_workflow_failure"),
+            )
+            return {"status": "failed", "summary": failure}
+
+    async def _record_node_wave_escalation_limit(self, task_id: str) -> dict:
+        """Project a bounded terminal result for repeated node permission requests."""
+        failure = (
+            "Maximum sequential permission escalation limit reached "
+            f"({MAX_PERMISSION_ESCALATIONS})."
+        )
+        await workflow.execute_activity(
+            "record_workflow_failure",
+            args=[task_id, failure],
+            **activity_options("record_workflow_failure"),
+        )
+        return {"status": "failed", "summary": failure}
 
     async def _run_worker_with_permission_escalations(
         self, task_id: str, task_queue: str | None

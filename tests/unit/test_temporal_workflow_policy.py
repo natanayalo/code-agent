@@ -133,6 +133,32 @@ async def test_decomposed_workflow_runs_one_node_wave_before_the_next_selection(
 
 
 @pytest.mark.anyio
+async def test_decomposed_workflow_bounds_permission_escalations(monkeypatch) -> None:
+    """A blocked node cannot bypass the task-level escalation cap."""
+    workflow_instance = TaskExecutionWorkflow()
+    activity_names: list[str] = []
+
+    async def execute_activity(name: str, *args, **kwargs):
+        activity_names.append(name)
+        if name == "select_next_node":
+            return {"action": "await_permission"}
+        return {"execution_shape": "decomposed"} if name == "decompose_task" else {}
+
+    async def wait_condition(_predicate) -> None:
+        workflow_instance.permission_escalation_decision = True
+
+    monkeypatch.setattr(workflow, "patched", lambda _patch_id: True)
+    monkeypatch.setattr(workflow, "execute_activity", execute_activity)
+    monkeypatch.setattr(workflow, "wait_condition", wait_condition)
+
+    result = await workflow_instance._run_lifecycle("task-id")
+
+    assert result["status"] == "failed"
+    assert activity_names.count("request_permission_escalation") == MAX_PERMISSION_ESCALATIONS
+    assert activity_names[-1] == "record_workflow_failure"
+
+
+@pytest.mark.anyio
 async def test_workflow_repeats_sequential_permission_escalations(monkeypatch) -> None:
     """Each worker retry must be able to request a fresh permission decision."""
     workflow_instance = TaskExecutionWorkflow()
