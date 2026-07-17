@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import shlex
@@ -44,6 +45,7 @@ class DockerSandboxContainerRequest(SandboxModel):
     )
     start_timeout_seconds: int = Field(default=30, ge=1)
     read_only_workspace: bool = False
+    scratch_namespace: str | None = None
 
 
 class DockerSandboxContainer(SandboxModel):
@@ -63,9 +65,13 @@ class DockerSandboxContainerError(RuntimeError):
     """Raised when a persistent sandbox container cannot be managed."""
 
 
-def build_container_name(workspace: WorkspaceHandle) -> str:
+def build_container_name(workspace: WorkspaceHandle, scratch_namespace: str | None = None) -> str:
     """Build a deterministic docker container name for a workspace."""
-    return f"sandbox-{workspace.workspace_id}"
+    digest = ""
+    if scratch_namespace:
+        digest = hashlib.sha256(scratch_namespace.encode()).hexdigest()[:12]
+    suffix = f"-{digest}" if digest else ""
+    return f"sandbox-{workspace.workspace_id}{suffix}"
 
 
 def _append_resource_limits(command: list[str], request: DockerSandboxContainerRequest) -> None:
@@ -80,6 +86,7 @@ def append_workspace_mount_options(
     workspace_path: Path,
     working_dir: str | None,
     read_only_workspace: bool,
+    scratch_namespace: str | None = None,
 ) -> tuple[Path, str]:
     target_path = str(workspace_path)
     if working_dir is None or working_dir == "/workspace":
@@ -96,11 +103,12 @@ def append_workspace_mount_options(
     )
 
     if read_only_workspace:
-        code_agent_path = workspace_path / ".code-agent"
+        namespace = scratch_namespace or "default"
+        code_agent_path = workspace_path / ".code-agent" / "node-runs" / namespace
         code_agent_path.mkdir(parents=True, exist_ok=True)
-        agent_home_path = workspace_path / ".agent_home"
+        agent_home_path = workspace_path / ".agent_home" / namespace
         agent_home_path.mkdir(parents=True, exist_ok=True)
-        artifacts_path = workspace_path / "artifacts"
+        artifacts_path = workspace_path / "artifacts" / namespace
         artifacts_path.mkdir(parents=True, exist_ok=True)
         sandbox_db_path = code_agent_path / ".sandbox.db"
 
@@ -153,6 +161,7 @@ def _append_workspace_mount(
         workspace_path=workspace_path,
         working_dir=request.working_dir,
         read_only_workspace=request.read_only_workspace,
+        scratch_namespace=request.scratch_namespace,
     )
 
 
@@ -219,7 +228,7 @@ def _build_docker_container_run_command(
     docker_binary: str = "docker",
 ) -> list[str]:
     """Build the `docker run -d` command for a persistent sandbox container."""
-    container_name = build_container_name(request.workspace)
+    container_name = build_container_name(request.workspace, request.scratch_namespace)
     command = [
         docker_binary,
         "run",

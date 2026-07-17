@@ -87,6 +87,7 @@ function_exceptions:
     _select: Keeps plan ordering, terminal replay, dependency, and logical-attempt selection in one read-only transaction.
     run_decomposed_node: Reconstructs one worker request while coordinating Temporal and durable-claim heartbeat ownership.
     merge_node_wave: Validates durable result payloads and projects the sole parent node-wave state transition atomically.
+    _merge_v2_wave: Projects every V2 fan-out result, aggregate outcome, retry transition, and Temporal snapshot in one transaction.
     _merge: Rebuilds node outcomes from durable evidence while coordinating skip persistence and logical retry state in one transaction.
   orchestrator/temporal/workflows.py:
     _run_decomposed_node_waves: Coordinates versioned select, execute, merge, and bounded permission continuation in one deterministic workflow loop.

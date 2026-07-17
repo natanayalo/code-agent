@@ -4,7 +4,10 @@ import pytest
 from temporalio import workflow
 
 from orchestrator.temporal.policy import activity_options
-from orchestrator.temporal.workflows import MAX_PERMISSION_ESCALATIONS, TaskExecutionWorkflow
+from orchestrator.temporal.workflows import (
+    MAX_PERMISSION_ESCALATIONS,
+    TaskExecutionWorkflow,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -130,6 +133,75 @@ async def test_decomposed_workflow_runs_one_node_wave_before_the_next_selection(
     assert first_selection < activity_names.index("run_decomposed_node") < merge
     assert merge < activity_names.index("select_next_node", first_selection + 1)
     assert "run_worker" not in activity_names
+
+
+@pytest.mark.anyio
+async def test_v2_fanout_starts_both_nodes_before_ordered_merge(monkeypatch) -> None:
+    """A V2 selection schedules siblings together and preserves selection order."""
+    started: list[str] = []
+    merges: list[dict] = []
+
+    def item(node_id: str, digest: str) -> dict:
+        return {
+            "node_id": node_id,
+            "execution_task_queue": "code-agent-codex",
+            "activity_request": {
+                "task_id": "task-id",
+                "plan_id": "plan",
+                "node_id": node_id,
+                "logical_attempt": 1,
+                "logical_activity_key": f"node-activity:v1:plan:{node_id}:1",
+                "effective_input_digest": digest * 64,
+            },
+        }
+
+    selections = iter(
+        [
+            {
+                "schema_version": 2,
+                "action": "execute_wave",
+                "fanout_applied": True,
+                "wave_id": "wave",
+                "items": [
+                    item("a", "a"),
+                    item("b", "b"),
+                ],
+            },
+            {"action": "complete"},
+        ]
+    )
+
+    async def execute_activity(name: str, *args, **kwargs):
+        if name == "classify_and_plan":
+            return {}
+        if name == "decompose_task":
+            return {"execution_shape": "decomposed"}
+        if name == "select_next_node":
+            return next(selections)
+        if name == "run_decomposed_node":
+            request = kwargs["args"][1]
+            started.append(request["node_id"])
+            return {
+                "node_id": request["node_id"],
+                "logical_activity_key": request["logical_activity_key"],
+                "status": "completed",
+                "result_digest": request["effective_input_digest"],
+                "continuation": "continue",
+            }
+        if name == "merge_node_wave":
+            merges.append(kwargs["args"][1])
+            return {"continuation": "continue"}
+        return {}
+
+    monkeypatch.setattr(workflow, "patched", lambda _patch_id: True)
+    monkeypatch.setattr(workflow, "execute_activity", execute_activity)
+
+    result = await TaskExecutionWorkflow()._run_lifecycle("task-id")
+
+    assert result["status"] == "completed"
+    assert started == ["a", "b"]
+    assert len(merges) == 1
+    assert [item["node_id"] for item in merges[0]["selection"]["items"]] == ["a", "b"]
 
 
 @pytest.mark.anyio

@@ -6,6 +6,10 @@ Phase 4: selective autonomy after reliability.
 
 Active focus:
 
+- M25.2 bounded read-only fan-out is complete.
+  - The opt-in, version-gated pilot uses two-node waves, durable queue permits,
+    ordered multi-result merge projection, and node-scoped writable scratch
+    mounts while the repository remains read-only.
 - M25.0 explicit DAG dependency and parallel-safety semantics are complete.
   - Planner intent, durable node metadata, legacy compatibility, and
     read-only fan-out eligibility are now defined without enabling concurrency.

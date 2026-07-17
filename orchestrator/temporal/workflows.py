@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+
 from temporalio import workflow
 
 from orchestrator.temporal.policy import activity_options
 
 MAX_PERMISSION_ESCALATIONS = 5
 NODE_WAVE_PATCH_ID = "m25-1b-temporal-node-wave"
+M25_2_FANOUT_PATCH_ID = "m25-2-bounded-selective-fanout"
 
 
 @workflow.defn
@@ -114,6 +117,15 @@ class TaskExecutionWorkflow:
             selection = await workflow.execute_activity(
                 "select_next_node", task_id, **activity_options("select_next_node")
             )
+            if (
+                workflow.patched(M25_2_FANOUT_PATCH_ID)
+                and selection.get("schema_version") == 2
+                and selection.get("fanout_applied")
+            ):
+                fanout_failure = await self._run_fanout_wave(task_id, selection)
+                if fanout_failure is not None:
+                    return fanout_failure
+                continue
             action = selection.get("action")
             if action not in {
                 "execute",
@@ -197,6 +209,42 @@ class TaskExecutionWorkflow:
                 **activity_options("record_workflow_failure"),
             )
             return {"status": "failed", "summary": failure}
+
+    async def _run_fanout_wave(self, task_id: str, selection: dict) -> dict | None:
+        """Run every selected activity before a single ordered reconciliation.
+
+        The selector persists the rollout decision, so this method remains fully
+        deterministic during replay and never consults process configuration.
+        """
+        items = selection.get("items") or []
+        if not items:
+            return {"status": "failed", "summary": "Fan-out wave omitted its items."}
+        tasks = [
+            workflow.execute_activity(
+                "run_decomposed_node",
+                args=[task_id, item["activity_request"]],
+                **activity_options("run_decomposed_node", task_queue=item["execution_task_queue"]),
+            )
+            for item in items
+        ]
+        # gather preserves selection order even when activities complete out of order.
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        if any(isinstance(result, BaseException) for result in results):
+            failure = "A started fan-out node activity failed before reconciliation."
+            await workflow.execute_activity(
+                "record_workflow_failure",
+                args=[task_id, failure],
+                **activity_options("record_workflow_failure"),
+            )
+            return {"status": "failed", "summary": failure}
+        merge = await workflow.execute_activity(
+            "merge_node_wave",
+            args=[task_id, {"selection": selection, "result_refs": results}],
+            **activity_options("merge_node_wave"),
+        )
+        if merge.get("continuation") not in {"continue", "retry_node"}:
+            return {"status": "failed", "summary": "Fan-out wave requires sequential recovery."}
+        return None
 
     async def _record_node_wave_escalation_limit(
         self, task_id: str, blocked_node_id: str | None

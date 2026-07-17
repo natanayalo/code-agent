@@ -360,6 +360,22 @@ class TemporalTaskState(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     task: Mapped[Task] = relationship(back_populates="temporal_state")
 
 
+class ExecutionCapacityPermit(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """One durable lease slot for bounded execution-queue concurrency."""
+
+    __tablename__ = "execution_capacity_permits"
+    __table_args__ = (
+        UniqueConstraint("queue_name", "slot_index", name="uq_execution_capacity_slot"),
+    )
+
+    queue_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    slot_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    lease_owner: Mapped[str | None] = mapped_column(String(512), nullable=True, index=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
 class WorkerRun(UUIDPrimaryKeyMixin, Base):
     """A single worker execution attempt for a task."""
 

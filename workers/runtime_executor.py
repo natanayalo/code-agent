@@ -318,6 +318,7 @@ class RuntimeExecutor:
             network_enabled=network_enabled,
             read_only_workspace=read_only_workspace,
             secrets=request.secrets,
+            scratch_namespace=request.scratch_namespace,
         ) as (container, session):
             runtime_setup = self._prepare_setup(
                 request, workspace, container, session, system_prompt_override, read_only_workspace

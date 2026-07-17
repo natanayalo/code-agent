@@ -27,6 +27,7 @@ class ShellSessionFactory(Protocol):
         container: DockerSandboxContainer,
         *,
         secrets: dict[str, str] | None = None,
+        scratch_namespace: str | None = None,
     ) -> ShellSessionProtocol:
         """Return a ready-to-use shell session."""
 
@@ -51,6 +52,7 @@ class SandboxSessionAdapter:
         network_enabled: bool = False,
         read_only_workspace: bool = False,
         secrets: dict[str, str] | None = None,
+        scratch_namespace: str | None = None,
     ) -> Generator[tuple[DockerSandboxContainer, ShellSessionProtocol], None, None]:
         """Start a persistent sandbox container and open a shell session within it.
 
@@ -63,6 +65,7 @@ class SandboxSessionAdapter:
                 environment=environment or {},
                 network_enabled=network_enabled,
                 read_only_workspace=read_only_workspace,
+                scratch_namespace=scratch_namespace,
             )
         )
         session: ShellSessionProtocol | None = None

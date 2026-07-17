@@ -7,7 +7,7 @@ import json
 import logging
 from datetime import datetime
 from functools import wraps
-from typing import Any
+from typing import Any, Literal
 
 from sqlalchemy import select
 from temporalio import activity
@@ -24,6 +24,7 @@ from db.enums import (
 )
 from db.models import ExecutionPlanNodeAttempt, HumanInteraction, Task
 from db.utils import compute_interaction_content_hash
+from orchestrator.decomposition import is_read_only_fanout_eligible
 from orchestrator.execution_graph_input import build_orchestrator_graph_input
 from orchestrator.execution_policy import _apply_execution_budget_policy
 from orchestrator.graph import (
@@ -66,15 +67,19 @@ from orchestrator.nodes.provisioning import (
 )
 from orchestrator.nodes.utils import _available_workers
 from orchestrator.nodes.verification import build_verify_result_node
-from orchestrator.state import NodeOutcome, OrchestratorState
+from orchestrator.state import NodeOutcome, OrchestratorState, is_task_read_only
 from orchestrator.temporal.node_wave import (
     DecomposeTaskResult,
     NodeSelectionResult,
+    NodeWaveItem,
     NodeWaveMergeRequest,
     NodeWaveMergeResult,
+    NodeWaveSelectionV2,
+    deterministic_wave_id,
 )
 from orchestrator.temporal.queues import execution_task_queue_for_profile
 from repositories import (
+    ExecutionCapacityPermitRepository,
     ExecutionPlanRepository,
     TaskRepository,
     TaskTimelineRepository,
@@ -164,6 +169,16 @@ class TaskExecutionActivities:
             if self.service.session_factory
             else None
         )
+
+    def _claim_execution_capacity(self, queue_name: str, owner: str) -> bool:
+        with session_scope(self.service.session_factory) as session:
+            return ExecutionCapacityPermitRepository(session).claim(
+                queue_name=queue_name, owner=owner
+            )
+
+    def _release_execution_capacity(self, owner: str) -> None:
+        with session_scope(self.service.session_factory) as session:
+            ExecutionCapacityPermitRepository(session).release(owner=owner)
 
     def _get_current_state(self, task_id: str) -> OrchestratorState:
         with session_scope(self.service.session_factory) as session:
@@ -580,7 +595,7 @@ class TaskExecutionActivities:
                 action="invalid", reason="Task is not decomposed."
             ).model_dump(mode="json")
 
-        def _select() -> NodeSelectionResult:
+        def _select() -> NodeSelectionResult | NodeWaveSelectionV2:
             with session_scope(self.service.session_factory) as session:
                 plan = ExecutionPlanRepository(session).get_by_task_id(task_id)
                 if plan is None:
@@ -686,8 +701,11 @@ class TaskExecutionActivities:
                         ),
                         effective_input_digest=digest,
                         task_trace_id=trace_parts[1] if len(trace_parts) > 1 else None,
+                        execution_capacity_key=execution_task_queue_for_profile(
+                            state.route.chosen_profile if state.route else None
+                        ),
                     )
-                    return NodeSelectionResult(
+                    singleton = NodeSelectionResult(
                         action="execute",
                         activity_request=request,
                         execution_task_queue=execution_task_queue_for_profile(
@@ -695,6 +713,104 @@ class TaskExecutionActivities:
                         ),
                         node_id=node.node_id,
                         logical_activity_key=request.logical_activity_key,
+                    )
+                    profile = self.service.worker_profiles.get(
+                        state.route.chosen_profile if state.route else None
+                    )
+                    if not (
+                        self.service.decomposed_fanout_enabled
+                        and profile is not None
+                        and is_read_only_fanout_eligible(
+                            parent_read_only=is_task_read_only(state),
+                            selected_profile_mutation_policy=profile.mutation_policy,
+                            node=node_contract,
+                            completed_node_ids={
+                                node_id
+                                for node_id, persisted in plan_nodes.items()
+                                if persisted.status == ExecutionPlanNodeStatus.COMPLETED
+                            },
+                            has_unresolved_blocker=any(
+                                persisted.status == ExecutionPlanNodeStatus.BLOCKED
+                                for persisted in plan.nodes
+                            ),
+                            fanout_disabled=state.fanout_disabled_for_remainder,
+                        )
+                    ):
+                        return singleton
+                    # Pilot rule: only inspect the immediately following ready
+                    # node. This deliberately never overtakes an ineligible node.
+                    position = plan.nodes.index(node)
+                    if position + 1 >= len(plan.nodes):
+                        return singleton
+                    second = plan.nodes[position + 1]
+                    second_contract = state_nodes[second.node_id]
+                    second_dependencies = list(second.depends_on or [])
+                    if (
+                        second.status != ExecutionPlanNodeStatus.PENDING
+                        or any(
+                            plan_nodes[dependency].status != ExecutionPlanNodeStatus.COMPLETED
+                            for dependency in second_dependencies
+                        )
+                        or not is_read_only_fanout_eligible(
+                            parent_read_only=is_task_read_only(state),
+                            selected_profile_mutation_policy=profile.mutation_policy,
+                            node=second_contract,
+                            completed_node_ids={
+                                node_id
+                                for node_id, persisted in plan_nodes.items()
+                                if persisted.status == ExecutionPlanNodeStatus.COMPLETED
+                            },
+                            has_unresolved_blocker=False,
+                            fanout_disabled=state.fanout_disabled_for_remainder,
+                        )
+                    ):
+                        return singleton
+                    second_context = {
+                        dependency: {
+                            "summary": outcomes[dependency].result.summary,
+                            "files_changed": outcomes[dependency].result.files_changed or [],
+                            "artifacts": [
+                                artifact.model_dump(mode="json")
+                                for artifact in (outcomes[dependency].result.artifacts or [])
+                            ],
+                        }
+                        for dependency in second_dependencies
+                    }
+                    _evidence, second_digest = _effective_input_evidence(
+                        state, second_contract, second_context
+                    )
+                    queue = execution_task_queue_for_profile(
+                        state.route.chosen_profile if state.route else None
+                    )
+                    second_request = NodeActivityRequest(
+                        task_id=task_id,
+                        plan_id=plan.id,
+                        node_id=second.node_id,
+                        logical_attempt=second.retry_count + 1,
+                        logical_activity_key=logical_activity_key(
+                            plan.id, second.node_id, second.retry_count + 1
+                        ),
+                        effective_input_digest=second_digest,
+                        task_trace_id=trace_parts[1] if len(trace_parts) > 1 else None,
+                        execution_capacity_key=queue,
+                    )
+                    items = [
+                        NodeWaveItem(
+                            node_id=node.node_id,
+                            activity_request=request,
+                            execution_task_queue=queue,
+                        ),
+                        NodeWaveItem(
+                            node_id=second.node_id,
+                            activity_request=second_request,
+                            execution_task_queue=queue,
+                        ),
+                    ]
+                    return NodeWaveSelectionV2(
+                        action="execute_wave",
+                        items=items,
+                        wave_id=deterministic_wave_id(plan.id, items),
+                        fanout_applied=True,
                     )
                 if has_pending_node:
                     return NodeSelectionResult(
@@ -754,6 +870,9 @@ class TaskExecutionActivities:
             task_text_override=task_text,
             prior_node_context=prior_context,
         )
+        request = request.model_copy(
+            update={"scratch_namespace": node_activity.logical_activity_key}
+        )
         evidence, digest = _effective_input_evidence(state, node, prior_context)
         if digest != node_activity.effective_input_digest:
             raise ValueError("Node activity input digest changed before execution.")
@@ -766,12 +885,33 @@ class TaskExecutionActivities:
                 session_id=request.session_id,
                 timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
             )
+            if node.parallel_safe and (
+                result.files_changed
+                or result.diff_text
+                or (result.delivery_metadata if hasattr(result, "delivery_metadata") else None)
+            ):
+                return result.model_copy(
+                    update={
+                        "status": "failure",
+                        "failure_kind": "read_only_violation",
+                        "summary": "Read-only fan-out node reported mutation evidence.",
+                    }
+                )
             return result
 
         async def _execute_under_claim_recovery() -> (
             tuple[NodeActivityResultRef, NodeOutcome | None]
         ):
             while True:
+                if node_activity.execution_capacity_key:
+                    claimed = await self.service._run_blocking(
+                        self._claim_execution_capacity,
+                        node_activity.execution_capacity_key,
+                        node_activity.logical_activity_key,
+                    )
+                    if not claimed:
+                        await asyncio.sleep(CLAIM_HEARTBEAT_SECONDS)
+                        continue
                 try:
                     return await NodeExecutionService(self.service.session_factory).execute(
                         activity=node_activity,
@@ -785,6 +925,11 @@ class TaskExecutionActivities:
                     # either records a terminal payload or the claim can be taken
                     # over with the same logical key.
                     await asyncio.sleep(CLAIM_HEARTBEAT_SECONDS)
+                finally:
+                    if node_activity.execution_capacity_key:
+                        await self.service._run_blocking(
+                            self._release_execution_capacity, node_activity.logical_activity_key
+                        )
 
         async def _heartbeat() -> None:
             while True:
@@ -816,6 +961,11 @@ class TaskExecutionActivities:
     @_restore_task_trace_context
     async def merge_node_wave(self, task_id: str, merge_data: dict[str, Any]) -> dict[str, Any]:
         """Validate durable node evidence and atomically project the parent state."""
+        raw_selection = merge_data.get("selection")
+        if isinstance(raw_selection, dict) and raw_selection.get("schema_version") == 2:
+            return await self.service._run_blocking(
+                self._merge_v2_wave, task_id, raw_selection, merge_data.get("result_refs") or []
+            )
         merge = NodeWaveMergeRequest.model_validate(merge_data)
         selection = merge.selection
         state = await self.service._run_blocking(self._get_current_state, task_id)
@@ -947,6 +1097,9 @@ class TaskExecutionActivities:
                         blocked_logical_activity_key=key,
                         requested_permission=current.result.requested_permission,
                     )
+                if current.result.failure_kind == "read_only_violation":
+                    state.fanout_disabled_for_remainder = True
+                    return NodeWaveMergeResult(continuation="fail_task")
                 if current.status == "failed" and current.attempts < contract.max_attempts:
                     ExecutionPlanRepository(session).update_node(
                         plan_id=plan.id,
@@ -966,6 +1119,102 @@ class TaskExecutionActivities:
             finished_at=utc_now(),
         )
         return result.model_dump(mode="json")
+
+    def _merge_v2_wave(
+        self, task_id: str, selection_data: dict[str, Any], result_refs: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """Project every fan-out result and the parent snapshot in one transaction."""
+        selection = NodeWaveSelectionV2.model_validate(selection_data)
+        refs = [NodeActivityResultRef.model_validate(item) for item in result_refs]
+        if len(selection.items) != len(refs):
+            raise ValueError("Fan-out merge result count does not match its selection.")
+        with session_scope(self.service.session_factory) as session:
+            snapshot = TemporalTaskStateRepository(session).get(task_id=task_id)
+            if snapshot is None:
+                raise RuntimeError(f"Task '{task_id}' has no Temporal state.")
+            state = OrchestratorState.model_validate(snapshot.state)
+            plan = ExecutionPlanRepository(session).get_by_task_id(task_id)
+            if plan is None:
+                raise ValueError("Execution plan is missing.")
+            if state.decomposed_plan is None:
+                raise ValueError("Task is not decomposed.")
+            contracts = {node.node_id: node for node in state.decomposed_plan.nodes or []}
+            for item, result_ref in zip(selection.items, refs, strict=True):
+                node = ExecutionPlanRepository(session).get_node(plan.id, item.node_id)
+                if (
+                    node is None
+                    or not node.terminal_result_payload
+                    or not node.terminal_result_digest
+                ):
+                    raise ValueError("Fan-out node result is unavailable for merge.")
+                if result_ref.logical_activity_key != item.activity_request.logical_activity_key:
+                    raise ValueError("Fan-out result does not belong to its selected node.")
+                if result_ref.result_digest != node.terminal_result_digest:
+                    raise ValueError("Fan-out result digest does not match durable evidence.")
+                WorkerResult.model_validate(node.terminal_result_payload["worker_result"])
+                NodeOutcome.model_validate(node.terminal_result_payload["node_outcome"])
+            outcomes: list[NodeOutcome] = []
+            for node in plan.nodes:
+                if node.terminal_result_payload:
+                    outcome = NodeOutcome.model_validate(
+                        node.terminal_result_payload["node_outcome"]
+                    )
+                    outcomes.append(
+                        outcome.model_copy(
+                            update={
+                                "dependencies": list(node.depends_on or []),
+                                "logical_activity_key": node.latest_logical_activity_key,
+                                "result_digest": node.terminal_result_digest,
+                            }
+                        )
+                    )
+            state.node_outcomes = outcomes
+            state.result = _aggregate_decomposed_results(outcomes)
+            continuation: Literal["continue", "retry_node", "await_permission", "fail_task"] = (
+                "continue"
+            )
+            blocked: NodeOutcome | None = None
+            for outcome in outcomes:
+                contract = contracts.get(outcome.node_id)
+                if outcome.result.failure_kind == "read_only_violation":
+                    state.fanout_disabled_for_remainder = True
+                    continuation = "fail_task"
+                    break
+                if outcome.status == "blocked" and blocked is None:
+                    blocked = outcome
+                    state.fanout_disabled_for_remainder = True
+                    if contract is None or outcome.attempts >= contract.max_attempts:
+                        ExecutionPlanRepository(session).update_node(
+                            plan_id=plan.id,
+                            node_id=outcome.node_id,
+                            status=ExecutionPlanNodeStatus.FAILED,
+                            failure_kind="permission_escalation_exhausted",
+                            finished_at=utc_now(),
+                        )
+                        continuation = "fail_task"
+                    else:
+                        continuation = "await_permission"
+                elif (
+                    outcome.status == "failed"
+                    and contract
+                    and outcome.attempts < contract.max_attempts
+                ):
+                    ExecutionPlanRepository(session).update_node(
+                        plan_id=plan.id,
+                        node_id=outcome.node_id,
+                        status=ExecutionPlanNodeStatus.PENDING,
+                        retry_count=outcome.attempts,
+                    )
+                    continuation = "retry_node"
+            TemporalTaskStateRepository(session).upsert(
+                task_id=task_id, state=state.model_dump(mode="json")
+            )
+            return NodeWaveMergeResult(
+                continuation=continuation,
+                blocked_node_id=blocked.node_id if blocked else None,
+                blocked_logical_activity_key=blocked.logical_activity_key if blocked else None,
+                requested_permission=blocked.result.requested_permission if blocked else None,
+            ).model_dump(mode="json")
 
     @activity.defn(name="request_permission_escalation")
     @_restore_task_trace_context
