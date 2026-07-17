@@ -447,6 +447,7 @@ class GeminiCliWorkerNativeMixin:
             system_prompt=system_prompt, request=request, runtime_mode=runtime_mode
         )
         events_path: Path | None = None
+        provider_log_path: Path | None = None
         command_redactions: list[str] = []
         stdin_prompt = True
         native_env = self._native_run_env()
@@ -463,7 +464,7 @@ class GeminiCliWorkerNativeMixin:
                 runtime_settings=runtime_settings,
                 native_sandbox_enabled=getattr(self, "native_sandbox_enabled", True),
             )
-            command, events_path, provider_metadata = build_antigravity_native_command(config)
+            command, provider_log_path, provider_metadata = build_antigravity_native_command(config)
             command_redactions.append(prompt)
             stdin_prompt = False
             native_env = dict(native_env or {})
@@ -484,6 +485,7 @@ class GeminiCliWorkerNativeMixin:
                 changed_files_timeout_seconds=runtime_settings.command_timeout_seconds,
                 env=native_env,
                 events_path=events_path,
+                provider_log_path=provider_log_path,
                 collect_diff=True,
                 collect_changed_files=True,
                 task_id=request.task_id,

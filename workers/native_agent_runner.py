@@ -392,6 +392,7 @@ def _handle_native_agent_timeout(
     started_at: float,
     artifact_root: Path,  # type: ignore[name-defined]
     events_path: Path | None,  # type: ignore[name-defined]
+    provider_log_path: Path | None,  # type: ignore[name-defined]
 ) -> tuple[bool, NativeAgentRunResult | None]:
     """Handle timeout. Returns (should_retry, run_result)."""
     stdout_text = _normalize_stream_payload(exc.stdout)
@@ -421,6 +422,8 @@ def _handle_native_agent_timeout(
                 stdout_text=stdout_text,
                 stderr_text=stderr_text,
                 events_path=events_path,
+                provider_log_path=provider_log_path,
+                redactor=request.redactor,
             )
         )
     except (OSError, subprocess.SubprocessError, ValueError, RuntimeError) as e:
@@ -459,6 +462,7 @@ def _execute_native_agent_subprocess(
     started_at: float,
     artifact_root: Path,  # type: ignore[name-defined]
     events_path: Path | None,  # type: ignore[name-defined]
+    provider_log_path: Path | None = None,  # type: ignore[name-defined]
 ) -> subprocess.CompletedProcess[str] | NativeAgentRunResult:
     """Run the native agent subprocess with retries for network errors."""
     max_retries = 2
@@ -511,6 +515,7 @@ def _execute_native_agent_subprocess(
                 started_at,
                 artifact_root,
                 events_path,
+                provider_log_path,
             )
             if should_retry:
                 retry_count += 1
@@ -566,6 +571,7 @@ def _build_native_agent_artifacts(
     base_git_ref: str | None,
     artifact_root: Path,  # type: ignore[name-defined]
     events_path: Path | None,  # type: ignore[name-defined]
+    provider_log_path: Path | None,  # type: ignore[name-defined]
     final_message_path: Path | None,  # type: ignore[name-defined]
     stdout_text: str,
     stderr_text: str,
@@ -578,6 +584,8 @@ def _build_native_agent_artifacts(
             stdout_text=stdout_text,
             stderr_text=stderr_text,
             events_path=events_path,
+            provider_log_path=provider_log_path,
+            redactor=request.redactor,
         )
     )
 
@@ -614,6 +622,7 @@ def _collect_native_agent_results(
     started_at: float,
     artifact_root: Path,  # type: ignore[name-defined]
     events_path: Path | None,  # type: ignore[name-defined]
+    provider_log_path: Path | None,  # type: ignore[name-defined]
     final_message_path: Path | None,  # type: ignore[name-defined]
 ) -> NativeAgentRunResult:
     """Collect artifacts, determine status, and finalize the result."""
@@ -629,6 +638,7 @@ def _collect_native_agent_results(
             base_git_ref,
             artifact_root,
             events_path,
+            provider_log_path,
             final_message_path,
             stdout_text,
             stderr_text,
@@ -704,7 +714,7 @@ def _collect_native_agent_results(
 
 def _setup_native_agent_paths(
     request: NativeAgentRunRequest,
-) -> tuple[Path, Path | None, Path | None, Path]:  # type: ignore[name-defined]
+) -> tuple[Path, Path | None, Path | None, Path | None, Path]:  # type: ignore[name-defined]
     repo_path = request.repo_path.expanduser().resolve()
     workspace_path = request.workspace_path.expanduser().resolve()
     final_message_path = (
@@ -713,13 +723,16 @@ def _setup_native_agent_paths(
         else None
     )
     events_path = request.events_path.expanduser().resolve() if request.events_path else None
+    provider_log_path = (
+        request.provider_log_path.expanduser().resolve() if request.provider_log_path else None
+    )
     artifact_root = (
         workspace_path
         / DEFAULT_NATIVE_AGENT_ARTIFACTS_DIR
         / f"run-{int(time.time() * 1000)}-{time.monotonic_ns()}"
     )
     artifact_root.mkdir(parents=True, exist_ok=True)
-    return repo_path, final_message_path, events_path, artifact_root
+    return repo_path, final_message_path, events_path, provider_log_path, artifact_root
 
 
 def _capture_git_head(repo_path: Path, *, timeout_seconds: int) -> str | None:
@@ -750,7 +763,9 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
     if not request.command:
         raise ValueError("NativeAgentRunRequest.command must include at least one argv token.")
 
-    repo_path, final_message_path, events_path, artifact_root = _setup_native_agent_paths(request)
+    repo_path, final_message_path, events_path, provider_log_path, artifact_root = (
+        _setup_native_agent_paths(request)
+    )
 
     base_git_ref = _capture_git_head(
         repo_path,
@@ -781,6 +796,7 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
                 started_at=started_at,
                 artifact_root=artifact_root,
                 events_path=events_path,
+                provider_log_path=provider_log_path,
             )
         except OSError as exc:
             return _finalize_native_agent_run(
@@ -816,5 +832,6 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
             started_at=started_at,
             artifact_root=artifact_root,
             events_path=events_path,
+            provider_log_path=provider_log_path,
             final_message_path=final_message_path,
         )

@@ -336,6 +336,7 @@ def build_antigravity_native_command(
         prompt=prompt,
         cwd=workspace.repo_path,
     )
+    command.extend(["--log-file", str(log_file)])
     metadata = {
         "provider": "antigravity",
         "tool_permission": tool_permission,

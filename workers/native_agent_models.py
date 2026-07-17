@@ -54,6 +54,7 @@ class NativeAgentRunRequest:
     env: dict[str, str] | None = None
     final_message_path: Path | None = None
     events_path: Path | None = None
+    provider_log_path: Path | None = None
     collect_diff: bool = True
     collect_changed_files: bool = True
     task_id: str | None = None
