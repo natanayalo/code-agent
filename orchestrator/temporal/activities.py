@@ -687,7 +687,12 @@ class TaskExecutionActivities:
         if node is None:
             raise ValueError("Node activity references an unknown plan node.")
         outcome_by_id = {outcome.node_id: outcome for outcome in state.node_outcomes}
-        dependencies = [outcome_by_id[dependency] for dependency in node.depends_on]
+        dependencies: list[NodeOutcome] = []
+        for dependency in node.depends_on or []:
+            outcome = outcome_by_id.get(dependency)
+            if outcome is None:
+                raise ValueError(f"Dependency {dependency} outcome is missing from state.")
+            dependencies.append(outcome)
         prior_context = {
             dependency.node_id: {
                 "summary": dependency.result.summary,
@@ -767,8 +772,15 @@ class TaskExecutionActivities:
                 if node is None:
                     raise ValueError("Execution plan node is missing.")
                 contract = next(
-                    item for item in state.decomposed_plan.nodes if item.node_id == node.node_id
+                    (
+                        item
+                        for item in state.decomposed_plan.nodes or []
+                        if item.node_id == node.node_id
+                    ),
+                    None,
                 )
+                if contract is None:
+                    raise ValueError(f"Node contract for {node.node_id} is missing from state.")
                 key: str | None
                 if selection.action == "skip":
                     result = _skipped_node_result(
@@ -845,7 +857,11 @@ class TaskExecutionActivities:
                     )
                 state.node_outcomes = outcomes
                 state.result = _aggregate_decomposed_results(outcomes)
-                current = next(outcome for outcome in outcomes if outcome.node_id == node.node_id)
+                current = next(
+                    (outcome for outcome in outcomes if outcome.node_id == node.node_id), None
+                )
+                if current is None:
+                    raise ValueError(f"Outcome for node {node.node_id} was not found after merge.")
                 if current.status == "blocked":
                     return NodeWaveMergeResult(
                         continuation="await_permission",

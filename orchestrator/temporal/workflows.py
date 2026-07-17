@@ -73,7 +73,7 @@ class TaskExecutionWorkflow:
         # Step 7: Existing histories preserve their recorded worker activity.
         # New histories enter the one-node-wave coordinator only for a validated DAG.
         use_node_waves = workflow.patched(NODE_WAVE_PATCH_ID) and (
-            decomposition.get("execution_shape") == "decomposed"
+            (decomposition or {}).get("execution_shape") == "decomposed"
         )
         escalation_failure = (
             await self._run_decomposed_node_waves(task_id)
@@ -113,7 +113,22 @@ class TaskExecutionWorkflow:
             selection = await workflow.execute_activity(
                 "select_next_node", task_id, **activity_options("select_next_node")
             )
-            action = selection["action"]
+            action = selection.get("action")
+            if action not in {
+                "execute",
+                "merge_terminal",
+                "skip",
+                "await_permission",
+                "complete",
+                "invalid",
+            }:
+                failure = "Node selection returned an unknown coordinator action."
+                await workflow.execute_activity(
+                    "record_workflow_failure",
+                    args=[task_id, failure],
+                    **activity_options("record_workflow_failure"),
+                )
+                return {"status": "failed", "summary": failure}
             if action == "complete":
                 return None
             if action == "invalid":
@@ -133,9 +148,15 @@ class TaskExecutionWorkflow:
                 continue
             result_ref = None
             if action == "execute":
+                activity_request = selection.get("activity_request")
+                if activity_request is None:
+                    return {
+                        "status": "failed",
+                        "summary": "Node selection omitted its activity request.",
+                    }
                 result_ref = await workflow.execute_activity(
                     "run_decomposed_node",
-                    args=[task_id, selection["activity_request"]],
+                    args=[task_id, activity_request],
                     **activity_options(
                         "run_decomposed_node", task_queue=selection.get("execution_task_queue")
                     ),
@@ -145,7 +166,7 @@ class TaskExecutionWorkflow:
                 args=[task_id, {"selection": selection, "result_ref": result_ref}],
                 **activity_options("merge_node_wave"),
             )
-            continuation = merge["continuation"]
+            continuation = merge.get("continuation")
             if continuation in {"continue", "retry_node"}:
                 continue
             if continuation == "await_permission":
