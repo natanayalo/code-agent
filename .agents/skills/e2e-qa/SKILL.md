@@ -36,7 +36,7 @@ Ensure the API is listening on `http://127.0.0.1:8000` (which is the default).
 3. **Check the Output.**
    - The script will announce `[+] Task ingested successfully. Task ID: <uuid>`.
    - It will poll the status (e.g. `pending`, `in_progress`, `completed`).
-   - Once finished, it looks inside your local `~/.code-agent/workspaces/` (or whatever `CODE_AGENT_WORKSPACE_ROOT` is set to in `.env`) to find the artifact `qa-hello.txt` created by the AI.
+   - Once finished, it looks inside your local `~/code-agent-workspaces/` (or whatever `CODE_AGENT_WORKSPACE_ROOT` is set to in `.env`) to find the artifact `qa-hello.txt` created by the AI. The default must remain visible rather than nested below a hidden directory because Antigravity ignores hidden workspace URIs.
    - If the artifact exists and contains the correct text, the QA passes!
 
 ## Customizing the QA

@@ -65,7 +65,7 @@ EXPECT_DECOMPOSED_DAG: Final[bool] = os.environ.get(
 
 
 # Read workspace root from .env to match the docker compose volume mapping
-DEFAULT_WORKSPACE_ROOT: Final[str] = os.path.expanduser("~/.code-agent/workspaces")
+DEFAULT_WORKSPACE_ROOT: Final[str] = os.path.expanduser("~/code-agent-workspaces")
 
 workspace_root = _read_env_value("CODE_AGENT_WORKSPACE_ROOT") or DEFAULT_WORKSPACE_ROOT
 workspace_root = os.path.expandvars(os.path.expanduser(workspace_root))

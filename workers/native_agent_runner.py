@@ -59,6 +59,14 @@ _FINAL_MESSAGE_FIELDS: Final = (
 )
 _LLM_METADATA_ATTR_PREFIX: Final[str] = "code_agent.native.llm_wrapper"
 _JSON_PAYLOAD_ATTR_PREFIX: Final[str] = "code_agent.native.json_payload"
+_INTERIM_STATUS_START_MARKERS: Final[tuple[str, ...]] = (
+    "i have started ",
+    "i've started ",
+)
+_INTERIM_STATUS_COMPLETION_MARKERS: Final[tuple[str, ...]] = (
+    "wait for the task to complete",
+    "report back",
+)
 
 # Standardized system environment variables that are safe to propagate to the sandbox.
 SAFE_SYSTEM_ENV_ALLOWLIST: Final[frozenset[str]] = frozenset(
@@ -189,6 +197,14 @@ def _sanitize_run_command(command_text: str, request: NativeAgentRunRequest) -> 
     return sanitized
 
 
+def _is_incomplete_interim_status(text: str) -> bool:
+    """Return whether a native agent emitted a status update instead of a result."""
+    normalized_text = " ".join(text.lower().split())
+    return any(marker in normalized_text for marker in _INTERIM_STATUS_START_MARKERS) and any(
+        marker in normalized_text for marker in _INTERIM_STATUS_COMPLETION_MARKERS
+    )
+
+
 def _determine_exit_status(
     completed_returncode: int,
     final_message: str | None,
@@ -220,6 +236,23 @@ def _determine_exit_status(
                 return (
                     "error",
                     "NATIVE_AGENT_PROVIDER_FAILURE: provider request was not completed.",
+                    friction_reports,
+                )
+            if _is_incomplete_interim_status(combined_text):
+                friction_reports.append(
+                    _build_friction_report_dict(
+                        source="tooling",
+                        description=(
+                            "Native agent exited after reporting an interim status instead of "
+                            "a completed result."
+                        ),
+                        impact="blocked",
+                        context={"exit_code": completed_returncode},
+                    )
+                )
+                return (
+                    "error",
+                    "NATIVE_AGENT_INCOMPLETE_RESULT: native agent produced only an interim status.",
                     friction_reports,
                 )
             if (

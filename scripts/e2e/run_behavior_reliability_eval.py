@@ -513,7 +513,7 @@ async def main_async() -> int:
         load_dotenv()
     run_id = args.run_id or f"behavior-eval-{utc_now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6]}"
 
-    workspace_root = os.path.expanduser("~/.code-agent/workspaces")
+    workspace_root = os.path.expanduser("~/code-agent-workspaces")
     if os.environ.get("CODE_AGENT_WORKSPACE_ROOT"):
         workspace_root = os.path.expandvars(
             os.path.expanduser(os.environ["CODE_AGENT_WORKSPACE_ROOT"])

@@ -35,7 +35,9 @@ set +a
 
 export CODE_AGENT_CODEX_AUTH_DIR="${CODE_AGENT_CODEX_AUTH_DIR:-$HOME/.codex}"
 export CODE_AGENT_ANTIGRAVITY_AUTH_DIR="${CODE_AGENT_ANTIGRAVITY_AUTH_DIR:-$HOME/.gemini}"
-export CODE_AGENT_WORKSPACE_ROOT="${CODE_AGENT_WORKSPACE_ROOT:-$HOME/.code-agent/workspaces}"
+# Antigravity ignores workspace URIs beneath hidden path components. Keep the
+# default root visible while allowing an explicit deployment-specific override.
+export CODE_AGENT_WORKSPACE_ROOT="${CODE_AGENT_WORKSPACE_ROOT:-$HOME/code-agent-workspaces}"
 export CODE_AGENT_CODEX_SANDBOX="${CODE_AGENT_CODEX_SANDBOX:-workspace-write}"
 ALLOW_READ_ONLY_SANDBOX="${CODE_AGENT_ALLOW_READ_ONLY_SANDBOX:-0}"
 EXPECTED_HOME="$(eval echo "~$(id -un)")"
