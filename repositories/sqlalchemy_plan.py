@@ -9,6 +9,7 @@ from uuid import uuid4
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm.attributes import set_committed_value
 
 from db.base import generate_uuid, utc_now
 from db.enums import ExecutionPlanNodeStatus
@@ -334,17 +335,20 @@ class ExecutionPlanRepository:
         self, *, attempt_id: str, claim_token: str, lease_seconds: int = 30
     ) -> bool:
         """Extend a claim only when the caller still owns it."""
-        attempt = self.session.get(ExecutionPlanNodeAttempt, attempt_id)
-        if (
-            attempt is None
-            or attempt.claim_token != claim_token
-            or attempt.result_payload is not None
-        ):
-            return False
         now = utc_now()
-        attempt.heartbeat_at = now
-        attempt.claim_expires_at = now + timedelta(seconds=lease_seconds)
-        return True
+        updated = self.session.execute(
+            update(ExecutionPlanNodeAttempt)
+            .where(
+                ExecutionPlanNodeAttempt.id == attempt_id,
+                ExecutionPlanNodeAttempt.claim_token == claim_token,
+                ExecutionPlanNodeAttempt.result_payload.is_(None),
+            )
+            .values(
+                heartbeat_at=now,
+                claim_expires_at=now + timedelta(seconds=lease_seconds),
+            )
+        )
+        return cast(Any, updated).rowcount == 1
 
     def finish_attempt(
         self,
@@ -362,22 +366,35 @@ class ExecutionPlanRepository:
         attempt = self.session.get(ExecutionPlanNodeAttempt, attempt_id)
         if attempt is None:
             return None
-        if claim_token is not None and attempt.claim_token != claim_token:
-            return None
         finished_at = utc_now()
         if finished_at.tzinfo is None:
             finished_at = finished_at.replace(tzinfo=UTC)
-        attempt.finished_at = finished_at
         started_at = attempt.started_at
         if started_at.tzinfo is None:
             started_at = started_at.replace(tzinfo=UTC)
-        attempt.duration_ms = max(0, int((finished_at - started_at).total_seconds() * 1000))
-        attempt.status = status
-        attempt.failure_kind = failure_kind
+        conditions = [
+            ExecutionPlanNodeAttempt.id == attempt_id,
+            ExecutionPlanNodeAttempt.result_payload.is_(None),
+        ]
+        if claim_token is not None:
+            conditions.append(ExecutionPlanNodeAttempt.claim_token == claim_token)
+        values: dict[str, Any] = {
+            "finished_at": finished_at,
+            "duration_ms": max(0, int((finished_at - started_at).total_seconds() * 1000)),
+            "status": status,
+            "failure_kind": failure_kind,
+            "result_payload": result_payload,
+            "result_schema_version": result_schema_version,
+            "result_digest": result_digest,
+            "claim_expires_at": finished_at,
+        }
         if workspace_id is not None:
-            attempt.workspace_id = workspace_id
-        attempt.result_payload = result_payload
-        attempt.result_schema_version = result_schema_version
-        attempt.result_digest = result_digest
-        attempt.claim_expires_at = finished_at
+            values["workspace_id"] = workspace_id
+        updated = self.session.execute(
+            update(ExecutionPlanNodeAttempt).where(*conditions).values(**values)
+        )
+        if cast(Any, updated).rowcount != 1:
+            return None
+        for attribute, value in values.items():
+            set_committed_value(attempt, attribute, value)
         return attempt

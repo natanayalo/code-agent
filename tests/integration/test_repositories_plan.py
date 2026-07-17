@@ -182,6 +182,7 @@ def test_claim_activity_replays_terminal_result_and_rejects_digest_collision(ses
         claim, attempt = repo.claim_activity(**kwargs)
         assert claim == "new"
         assert attempt.claim_token
+        original_token = attempt.claim_token
         original_expiry = attempt.claim_expires_at
         assert repo.heartbeat_activity(
             attempt_id=attempt.id, claim_token=attempt.claim_token, lease_seconds=90
@@ -195,6 +196,22 @@ def test_claim_activity_replays_terminal_result_and_rejects_digest_collision(ses
         assert reclaimed == "new"
         assert reclaimed_attempt.id == attempt.id
         assert reclaimed_attempt.claim_generation == 1
+        assert reclaimed_attempt.claim_token != original_token
+        assert not repo.heartbeat_activity(
+            attempt_id=attempt.id, claim_token=original_token, lease_seconds=90
+        )
+        assert (
+            repo.finish_attempt(
+                attempt_id=attempt.id,
+                claim_token=original_token,
+                status="completed",
+                failure_kind=None,
+                result_payload={"node_outcome": {"late": True}},
+                result_schema_version=1,
+                result_digest="c" * 64,
+            )
+            is None
+        )
         repo.finish_attempt(
             attempt_id=attempt.id,
             claim_token=attempt.claim_token,
