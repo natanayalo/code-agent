@@ -257,3 +257,46 @@ def test_finish_attempt_normalizes_finished_at_before_persistence(session_factor
         assert completed is not None
         assert completed.finished_at is not None
         assert completed.finished_at.tzinfo is not None
+
+
+def test_claim_activity_replays_terminal_legacy_attempt_without_result_payload(session_factory):
+    """A migrated terminal attempt is never dispatched again for its activity key."""
+    with session_scope(session_factory) as session:
+        user = UserRepository(session).create(external_user_id="legacy-claim-user")
+        conversation = SessionRepository(session).create(
+            user_id=user.id, channel="web", external_thread_id="legacy-claim-thread"
+        )
+        task = TaskRepository(session).create(session_id=conversation.id, task_text="Test task")
+        repo = ExecutionPlanRepository(session)
+        plan = repo.create(task_id=task.id)
+        repo.add_node(plan_id=plan.id, node_id="node", goal="Test node")
+        key = f"node-activity:v1:{plan.id}:node:1"
+        attempt = repo.start_attempt(
+            plan_id=plan.id,
+            node_id="node",
+            effective_input_summary={},
+            effective_input_digest="a" * 64,
+            worker_type=None,
+            worker_profile=None,
+            runtime_mode=None,
+            workspace_id=None,
+            task_trace_id=None,
+            logical_activity_key=key,
+        )
+        repo.finish_attempt(attempt_id=attempt.id, status="failed", failure_kind="timeout")
+
+        claim, replayed_attempt = repo.claim_activity(
+            plan_id=plan.id,
+            node_id="node",
+            logical_activity_key=key,
+            effective_input_summary={},
+            effective_input_digest="a" * 64,
+            worker_type=None,
+            worker_profile=None,
+            runtime_mode=None,
+            workspace_id=None,
+            task_trace_id=None,
+        )
+
+        assert claim == "terminal_replay"
+        assert replayed_attempt.id == attempt.id

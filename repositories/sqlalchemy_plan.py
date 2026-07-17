@@ -268,7 +268,7 @@ class ExecutionPlanRepository:
         if existing is not None:
             if existing.effective_input_digest != effective_input_digest:
                 return "collision", existing
-            if existing.result_payload is not None:
+            if existing.result_payload is not None or existing.finished_at is not None:
                 return "terminal_replay", existing
             now = utc_now()
             token = uuid4().hex

@@ -17,7 +17,7 @@ from db.base import utc_now
 from db.enums import ExecutionPlanNodeStatus
 from orchestrator.state import NodeOutcome, OrchestratorModel
 from repositories import ExecutionPlanRepository, session_scope
-from workers import WorkerRequest, WorkerResult
+from workers import FailureKind, WorkerRequest, WorkerResult
 
 NODE_ACTIVITY_SCHEMA_VERSION = 1
 CLAIM_HEARTBEAT_SECONDS = 10
@@ -79,6 +79,46 @@ def _node_status(result: WorkerResult) -> tuple[str, str]:
     return "failed", "retry_node"
 
 
+def _legacy_terminal_outcome(
+    *,
+    node_id: str,
+    logical_attempt: int,
+    status: str,
+    failure_kind: str | None,
+) -> tuple[WorkerResult, NodeOutcome, str]:
+    """Reconstruct a safe outcome for a terminal attempt from before M25.1."""
+    outcome_status: Literal["completed", "blocked", "failed"] = (
+        "completed" if status == "completed" else "blocked" if status == "blocked" else "failed"
+    )
+    worker_status: Literal["success", "failure"] = (
+        "success" if outcome_status == "completed" else "failure"
+    )
+    try:
+        result = WorkerResult(
+            status=worker_status,
+            summary=failure_kind or f"Legacy node attempt {status}",
+            failure_kind=cast(
+                FailureKind | None,
+                failure_kind or (None if worker_status == "success" else "unknown"),
+            ),
+            next_action_hint=("request_higher_permission" if outcome_status == "blocked" else None),
+        )
+    except ValueError:
+        result = WorkerResult(
+            status=worker_status,
+            summary=f"Legacy node attempt {status}",
+            failure_kind=None if worker_status == "success" else "unknown",
+            next_action_hint=("request_higher_permission" if outcome_status == "blocked" else None),
+        )
+    outcome = NodeOutcome(
+        node_id=node_id,
+        status=cast(Literal["completed", "failed", "blocked", "skipped"], outcome_status),
+        result=result,
+        attempts=logical_attempt,
+    )
+    return result, outcome, _node_status(result)[1]
+
+
 class NodeExecutionService:
     """Application service; Temporal and legacy execution share this boundary."""
 
@@ -122,15 +162,32 @@ class NodeExecutionService:
                 )
             if claim == "terminal_replay":
                 payload = dict(attempt.result_payload or {})
-                result = WorkerResult.model_validate(payload["worker_result"])
-                outcome = NodeOutcome.model_validate(payload["node_outcome"])
+                if payload:
+                    result = WorkerResult.model_validate(payload["worker_result"])
+                    outcome = NodeOutcome.model_validate(payload["node_outcome"])
+                    continuation = payload.get("continuation", "continue")
+                    replay_digest = attempt.result_digest or _result_digest(payload)
+                else:
+                    result, outcome, continuation = _legacy_terminal_outcome(
+                        node_id=activity.node_id,
+                        logical_attempt=activity.logical_attempt,
+                        status=attempt.status,
+                        failure_kind=attempt.failure_kind,
+                    )
+                    replay_digest = _result_digest(
+                        {
+                            "schema_version": 0,
+                            "legacy_status": attempt.status,
+                            "failure_kind": result.failure_kind,
+                        }
+                    )
                 return (
                     NodeActivityResultRef(
                         node_id=activity.node_id,
                         logical_activity_key=activity.logical_activity_key,
                         status="terminal_replay",
-                        result_digest=attempt.result_digest or _result_digest(payload),
-                        continuation=payload.get("continuation", "continue"),
+                        result_digest=replay_digest,
+                        continuation=continuation,
                     ),
                     outcome,
                 )
