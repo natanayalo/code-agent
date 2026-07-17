@@ -38,6 +38,14 @@ _POLICIES: dict[str, TemporalActivityPolicy] = {
         _WORKER_RETRY,
         heartbeat_timeout=timedelta(seconds=20),
     ),
+    "select_next_node": TemporalActivityPolicy(timedelta(minutes=5), _STANDARD_RETRY),
+    "run_decomposed_node": TemporalActivityPolicy(
+        timedelta(minutes=30), _WORKER_RETRY, heartbeat_timeout=timedelta(seconds=20)
+    ),
+    "merge_node_wave": TemporalActivityPolicy(timedelta(minutes=5), _STANDARD_RETRY),
+    "fail_node_permission_escalation": TemporalActivityPolicy(
+        timedelta(minutes=5), _STANDARD_RETRY
+    ),
     "request_permission_escalation": TemporalActivityPolicy(timedelta(minutes=5), _STANDARD_RETRY),
     "resolve_permission_escalation": TemporalActivityPolicy(timedelta(minutes=5), _STANDARD_RETRY),
     "verify_result": TemporalActivityPolicy(timedelta(minutes=15), _STANDARD_RETRY),
@@ -48,6 +56,8 @@ _POLICIES: dict[str, TemporalActivityPolicy] = {
         RetryPolicy(maximum_attempts=3),
     ),
 }
+
+EXECUTION_ACTIVITIES = frozenset({"run_worker", "run_decomposed_node"})
 
 
 def activity_options(activity_name: str, *, task_queue: str | None = None) -> dict[str, Any]:
@@ -60,8 +70,10 @@ def activity_options(activity_name: str, *, task_queue: str | None = None) -> di
     policy = _POLICIES.get(activity_name)
     if policy is None:
         raise ValueError(f"Unknown Temporal activity policy: {activity_name}")
-    if task_queue is not None and activity_name != "run_worker":
-        raise ValueError(f"Only run_worker may select a Temporal task queue: {activity_name}")
+    if task_queue is not None and activity_name not in EXECUTION_ACTIVITIES:
+        raise ValueError(
+            f"Only execution activities may select a Temporal task queue: {activity_name}"
+        )
 
     options: dict[str, Any] = {
         "start_to_close_timeout": policy.start_to_close_timeout,

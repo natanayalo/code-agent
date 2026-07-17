@@ -38,9 +38,13 @@ async def start_temporal_worker(
         activities=[
             activities.classify_and_plan,
             activities.decompose_task,
+            activities.select_next_node,
+            activities.merge_node_wave,
+            activities.fail_node_permission_escalation,
             activities.load_memory,
             activities.provision_workspace,
             activities.run_worker,
+            activities.run_decomposed_node,
             activities.request_permission_escalation,
             activities.resolve_permission_escalation,
             activities.record_workflow_failure,
@@ -53,7 +57,7 @@ async def start_temporal_worker(
     codex_execution_worker = Worker(
         client,
         task_queue=CODEX_EXECUTION_TASK_QUEUE,
-        activities=[activities.run_worker],
+        activities=[activities.run_worker, activities.run_decomposed_node],
     )
 
     logger.info("Temporal workers successfully started. Running worker loops...")

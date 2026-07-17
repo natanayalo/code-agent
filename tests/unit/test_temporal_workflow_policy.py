@@ -7,6 +7,12 @@ from orchestrator.temporal.policy import activity_options
 from orchestrator.temporal.workflows import MAX_PERMISSION_ESCALATIONS, TaskExecutionWorkflow
 
 
+@pytest.fixture(autouse=True)
+def _legacy_workflow_version_for_direct_unit_calls(monkeypatch) -> None:
+    """Direct workflow-method tests have no Temporal runtime patch context."""
+    monkeypatch.setattr(workflow, "patched", lambda _patch_id: False)
+
+
 def test_worker_activity_policy_has_bounded_retry_and_heartbeat() -> None:
     """Long-running worker work must retain explicit recovery bounds."""
     options = activity_options("run_worker", task_queue="code-agent-codex")
@@ -40,6 +46,15 @@ def test_unknown_activity_policy_is_rejected() -> None:
         raise AssertionError("Unknown activity policy unexpectedly resolved.")
 
 
+def test_node_execution_activity_can_use_profile_queue() -> None:
+    """Only execution activities may leave the orchestration queue."""
+    options = activity_options("run_decomposed_node", task_queue="code-agent-codex")
+
+    assert options["task_queue"] == "code-agent-codex"
+    with pytest.raises(ValueError, match="Only execution activities"):
+        activity_options("merge_node_wave", task_queue="code-agent-codex")
+
+
 @pytest.mark.anyio
 async def test_workflow_persists_memory_before_terminal_delivery(monkeypatch) -> None:
     """The final worker state must still exist when memory persistence runs."""
@@ -58,6 +73,89 @@ async def test_workflow_persists_memory_before_terminal_delivery(monkeypatch) ->
     await TaskExecutionWorkflow()._run_lifecycle("task-id")
 
     assert activity_names[-2:] == ["persist_memory", "deliver_result"]
+
+
+@pytest.mark.anyio
+async def test_decomposed_workflow_runs_one_node_wave_before_the_next_selection(
+    monkeypatch,
+) -> None:
+    """New histories coordinate select, execute, and merge sequentially."""
+    activity_names: list[str] = []
+    selections = iter(
+        [
+            {
+                "action": "execute",
+                "execution_task_queue": "code-agent-codex",
+                "activity_request": {
+                    "task_id": "task-id",
+                    "plan_id": "plan-id",
+                    "node_id": "node-a",
+                    "logical_attempt": 1,
+                    "logical_activity_key": "node-activity:v1:plan-id:node-a:1",
+                    "effective_input_digest": "a" * 64,
+                },
+            },
+            {"action": "complete"},
+        ]
+    )
+
+    async def execute_activity(name: str, *args, **kwargs):
+        activity_names.append(name)
+        if name == "classify_and_plan":
+            return {}
+        if name == "decompose_task":
+            return {"execution_shape": "decomposed", "execution_task_queue": "code-agent-codex"}
+        if name == "select_next_node":
+            return next(selections)
+        if name == "run_decomposed_node":
+            return {
+                "node_id": "node-a",
+                "logical_activity_key": "node-activity:v1:plan-id:node-a:1",
+                "status": "completed",
+                "result_digest": "b" * 64,
+                "continuation": "continue",
+            }
+        if name == "merge_node_wave":
+            return {"continuation": "continue"}
+        return {}
+
+    monkeypatch.setattr(workflow, "patched", lambda _patch_id: True)
+    monkeypatch.setattr(workflow, "execute_activity", execute_activity)
+
+    result = await TaskExecutionWorkflow()._run_lifecycle("task-id")
+
+    assert result["status"] == "completed"
+    first_selection = activity_names.index("select_next_node")
+    merge = activity_names.index("merge_node_wave")
+    assert first_selection < activity_names.index("run_decomposed_node") < merge
+    assert merge < activity_names.index("select_next_node", first_selection + 1)
+    assert "run_worker" not in activity_names
+
+
+@pytest.mark.anyio
+async def test_decomposed_workflow_bounds_permission_escalations(monkeypatch) -> None:
+    """A blocked node cannot bypass the task-level escalation cap."""
+    workflow_instance = TaskExecutionWorkflow()
+    activity_names: list[str] = []
+
+    async def execute_activity(name: str, *args, **kwargs):
+        activity_names.append(name)
+        if name == "select_next_node":
+            return {"action": "await_permission", "node_id": "blocked-node"}
+        return {"execution_shape": "decomposed"} if name == "decompose_task" else {}
+
+    async def wait_condition(_predicate) -> None:
+        workflow_instance.permission_escalation_decision = True
+
+    monkeypatch.setattr(workflow, "patched", lambda _patch_id: True)
+    monkeypatch.setattr(workflow, "execute_activity", execute_activity)
+    monkeypatch.setattr(workflow, "wait_condition", wait_condition)
+
+    result = await workflow_instance._run_lifecycle("task-id")
+
+    assert result["status"] == "failed"
+    assert activity_names.count("request_permission_escalation") == MAX_PERMISSION_ESCALATIONS
+    assert activity_names[-2:] == ["fail_node_permission_escalation", "record_workflow_failure"]
 
 
 @pytest.mark.anyio

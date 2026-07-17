@@ -332,6 +332,11 @@ class NodeOutcome(OrchestratorModel):
     result: WorkerResult
     dependencies: list[str] = Field(default_factory=list)
     attempts: int = Field(default=1, ge=1)
+    # These fields are optional so snapshots written before the Temporal
+    # node-wave runtime remain readable.
+    logical_activity_key: str | None = None
+    result_digest: str | None = None
+    replayed: bool = False
 
 
 class ApprovalCheckpoint(OrchestratorModel):

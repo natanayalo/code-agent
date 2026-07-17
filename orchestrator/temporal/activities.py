@@ -1,28 +1,38 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
+import json
 import logging
 from datetime import datetime
 from functools import wraps
 from typing import Any
 
+from sqlalchemy import select
 from temporalio import activity
 
 from apps.observability import with_restored_trace_context
 from db.base import utc_now
 from db.enums import (
+    ExecutionPlanNodeStatus,
     HumanInteractionHitlMode,
     HumanInteractionStatus,
     HumanInteractionType,
     TaskStatus,
     TimelineEventType,
 )
-from db.models import HumanInteraction
+from db.models import ExecutionPlanNodeAttempt, HumanInteraction, Task
 from db.utils import compute_interaction_content_hash
 from orchestrator.execution_graph_input import build_orchestrator_graph_input
 from orchestrator.execution_policy import _apply_execution_budget_policy
 from orchestrator.graph import (
+    _aggregate_decomposed_results,
+    _await_worker_with_timeout,
+    _build_worker_request,
+    _effective_input_evidence,
+    _resolve_orchestrator_timeout_seconds,
+    _skipped_node_result,
     build_await_result_node,
     build_decompose_task_node,
     build_generate_task_spec_and_route_node,
@@ -31,6 +41,15 @@ from orchestrator.graph import (
     build_review_result_node,
     check_approval,
     summarize_result,
+)
+from orchestrator.node_execution import (
+    CLAIM_HEARTBEAT_SECONDS,
+    NodeActivityClaimLost,
+    NodeActivityInProgress,
+    NodeActivityRequest,
+    NodeActivityResultRef,
+    NodeExecutionService,
+    logical_activity_key,
 )
 from orchestrator.nodes.delivery import build_deliver_result_node
 
@@ -47,14 +66,22 @@ from orchestrator.nodes.provisioning import (
 )
 from orchestrator.nodes.utils import _available_workers
 from orchestrator.nodes.verification import build_verify_result_node
-from orchestrator.state import OrchestratorState
+from orchestrator.state import NodeOutcome, OrchestratorState
+from orchestrator.temporal.node_wave import (
+    DecomposeTaskResult,
+    NodeSelectionResult,
+    NodeWaveMergeRequest,
+    NodeWaveMergeResult,
+)
 from orchestrator.temporal.queues import execution_task_queue_for_profile
 from repositories import (
+    ExecutionPlanRepository,
     TaskRepository,
     TaskTimelineRepository,
     TemporalTaskStateRepository,
     session_scope,
 )
+from workers import WorkerResult
 
 logger = logging.getLogger(__name__)
 
@@ -367,11 +394,11 @@ class TaskExecutionActivities:
 
     @activity.defn(name="decompose_task")
     @_restore_task_trace_context
-    async def decompose_task(self, task_id: str) -> None:
+    async def decompose_task(self, task_id: str) -> dict[str, Any]:
         state = await self.service._run_blocking(self._get_current_state, task_id)
         if self._has_event(state, TimelineEventType.TASK_PLANNED):
             logger.info("decompose_task already executed for task %s, skipping", task_id)
-            return
+            return self._decompose_result(state).model_dump(mode="json")
 
         started_at = utc_now()
         state_dict = state.model_dump()
@@ -389,6 +416,20 @@ class TaskExecutionActivities:
             finished_at=finished_at,
         )
         state.timeline_persisted_count = len(state.timeline_events)
+        return self._decompose_result(state).model_dump(mode="json")
+
+    @staticmethod
+    def _decompose_result(state: OrchestratorState) -> DecomposeTaskResult:
+        """Keep the workflow branch decision out of direct database reads."""
+        decomposed = bool(
+            state.decomposed_plan is not None and state.decomposed_plan.status == "decomposed"
+        )
+        return DecomposeTaskResult(
+            execution_shape="decomposed" if decomposed else "monolithic",
+            execution_task_queue=execution_task_queue_for_profile(
+                state.route.chosen_profile if state.route else None
+            ),
+        )
 
     @activity.defn(name="load_memory")
     @_restore_task_trace_context
@@ -529,6 +570,403 @@ class TaskExecutionActivities:
             heartbeat_task.cancel()
             await asyncio.gather(heartbeat_task, return_exceptions=True)
 
+    @activity.defn(name="select_next_node")
+    @_restore_task_trace_context
+    async def select_next_node(self, task_id: str) -> dict[str, Any]:
+        """Read durable state and choose one deterministic node-wave action."""
+        state = await self.service._run_blocking(self._get_current_state, task_id)
+        if state.decomposed_plan is None or state.decomposed_plan.status != "decomposed":
+            return NodeSelectionResult(
+                action="invalid", reason="Task is not decomposed."
+            ).model_dump(mode="json")
+
+        def _select() -> NodeSelectionResult:
+            with session_scope(self.service.session_factory) as session:
+                plan = ExecutionPlanRepository(session).get_by_task_id(task_id)
+                if plan is None:
+                    return NodeSelectionResult(
+                        action="invalid", reason="Execution plan is missing."
+                    )
+                plan_nodes = {node.node_id: node for node in plan.nodes}
+                state_nodes = {node.node_id: node for node in state.decomposed_plan.nodes}
+                if set(plan_nodes) != set(state_nodes):
+                    return NodeSelectionResult(
+                        action="invalid", reason="Plan nodes do not match state."
+                    )
+                merged_keys = {
+                    outcome.logical_activity_key
+                    for outcome in state.node_outcomes
+                    if outcome.logical_activity_key
+                }
+                outcomes = {outcome.node_id: outcome for outcome in state.node_outcomes}
+                has_pending_node = False
+                for node in plan.nodes:
+                    if (
+                        node.latest_logical_activity_key
+                        and node.terminal_result_payload
+                        and node.latest_logical_activity_key not in merged_keys
+                    ):
+                        return NodeSelectionResult(
+                            action="merge_terminal",
+                            node_id=node.node_id,
+                            logical_activity_key=node.latest_logical_activity_key,
+                            result_digest=node.terminal_result_digest,
+                        )
+                    if node.status == ExecutionPlanNodeStatus.BLOCKED:
+                        return NodeSelectionResult(
+                            action="await_permission",
+                            node_id=node.node_id,
+                            logical_activity_key=node.latest_logical_activity_key,
+                        )
+                    if node.status != ExecutionPlanNodeStatus.PENDING:
+                        continue
+                    has_pending_node = True
+                    dependencies = list(node.depends_on or [])
+                    unresolved = [
+                        dependency
+                        for dependency in dependencies
+                        if plan_nodes[dependency].status
+                        in {
+                            ExecutionPlanNodeStatus.PENDING,
+                            ExecutionPlanNodeStatus.ACTIVE,
+                            ExecutionPlanNodeStatus.BLOCKED,
+                        }
+                    ]
+                    if unresolved:
+                        continue
+                    failed = [
+                        dependency
+                        for dependency in dependencies
+                        if plan_nodes[dependency].status
+                        in {ExecutionPlanNodeStatus.FAILED, ExecutionPlanNodeStatus.SKIPPED}
+                    ]
+                    if failed:
+                        return NodeSelectionResult(
+                            action="skip", node_id=node.node_id, failed_dependency_ids=failed
+                        )
+                    missing_outcomes = [
+                        dependency for dependency in dependencies if dependency not in outcomes
+                    ]
+                    if missing_outcomes:
+                        return NodeSelectionResult(
+                            action="invalid",
+                            reason="Completed dependency outcomes are missing from parent state.",
+                        )
+                    node_contract = state_nodes[node.node_id]
+                    prior_context = {
+                        dependency: {
+                            "summary": outcomes[dependency].result.summary,
+                            "files_changed": outcomes[dependency].result.files_changed or [],
+                            "artifacts": [
+                                artifact.model_dump(mode="json")
+                                for artifact in (outcomes[dependency].result.artifacts or [])
+                            ],
+                        }
+                        for dependency in dependencies
+                    }
+                    _evidence, digest = _effective_input_evidence(
+                        state, node_contract, prior_context
+                    )
+                    logical_attempt = node.retry_count + 1
+                    task = session.get(Task, task_id)
+                    trace_context = task.trace_context if task is not None else None
+                    traceparent = (
+                        trace_context.get("traceparent")
+                        if isinstance(trace_context, dict)
+                        else None
+                    )
+                    trace_parts = traceparent.split("-") if isinstance(traceparent, str) else []
+                    request = NodeActivityRequest(
+                        task_id=task_id,
+                        plan_id=plan.id,
+                        node_id=node.node_id,
+                        logical_attempt=logical_attempt,
+                        logical_activity_key=logical_activity_key(
+                            plan.id, node.node_id, logical_attempt
+                        ),
+                        effective_input_digest=digest,
+                        task_trace_id=trace_parts[1] if len(trace_parts) > 1 else None,
+                    )
+                    return NodeSelectionResult(
+                        action="execute",
+                        activity_request=request,
+                        execution_task_queue=execution_task_queue_for_profile(
+                            state.route.chosen_profile if state.route else None
+                        ),
+                        node_id=node.node_id,
+                        logical_activity_key=request.logical_activity_key,
+                    )
+                if has_pending_node:
+                    return NodeSelectionResult(
+                        action="invalid",
+                        reason=(
+                            "Execution plan contains pending nodes with unresolvable dependencies."
+                        ),
+                    )
+                return NodeSelectionResult(action="complete")
+
+        selection = await self.service._run_blocking(_select)
+        return selection.model_dump(mode="json")
+
+    @activity.defn(name="run_decomposed_node")
+    @_restore_task_trace_context
+    async def run_decomposed_node(
+        self, task_id: str, activity_data: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Execute one durable logical node without writing parent snapshot state."""
+        node_activity = NodeActivityRequest.model_validate(activity_data)
+        state = await self.service._run_blocking(self._get_current_state, task_id)
+        if node_activity.task_id != task_id or state.decomposed_plan is None:
+            raise ValueError("Node activity does not belong to a decomposed task.")
+        node = next(
+            (item for item in state.decomposed_plan.nodes if item.node_id == node_activity.node_id),
+            None,
+        )
+        if node is None:
+            raise ValueError("Node activity references an unknown plan node.")
+        outcome_by_id = {outcome.node_id: outcome for outcome in state.node_outcomes}
+        dependencies: list[NodeOutcome] = []
+        for dependency in node.depends_on or []:
+            outcome = outcome_by_id.get(dependency)
+            if outcome is None:
+                raise ValueError(f"Dependency {dependency} outcome is missing from state.")
+            dependencies.append(outcome)
+        prior_context = {
+            dependency.node_id: {
+                "summary": dependency.result.summary,
+                "files_changed": dependency.result.files_changed or [],
+                "artifacts": [
+                    artifact.model_dump(mode="json")
+                    for artifact in (dependency.result.artifacts or [])
+                ],
+            }
+            for dependency in dependencies
+        }
+        node_state = state.model_copy(update={"task_plan": None, "task_spec": node.task_spec})
+        task_text = (
+            f"Parent task:\n{state.normalized_task_text or state.task.task_text}\n\n"
+            f"Current DAG node ({node.node_id}): {node.task_spec.goal}\n"
+            f"Node acceptance criteria: {'; '.join(node.task_spec.acceptance_criteria)}"
+        )
+        request = _build_worker_request(
+            node_state,
+            task_spec_override=node.task_spec,
+            task_text_override=task_text,
+            prior_node_context=prior_context,
+        )
+        evidence, digest = _effective_input_evidence(state, node, prior_context)
+        if digest != node_activity.effective_input_digest:
+            raise ValueError("Node activity input digest changed before execution.")
+
+        async def _execute_worker() -> WorkerResult:
+            result, _progress = await _await_worker_with_timeout(
+                self.service.worker,
+                request,
+                worker_type=state.dispatch.worker_type or state.route.chosen_worker or "unknown",
+                session_id=request.session_id,
+                timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
+            )
+            return result
+
+        async def _execute_under_claim_recovery() -> (
+            tuple[NodeActivityResultRef, NodeOutcome | None]
+        ):
+            while True:
+                try:
+                    return await NodeExecutionService(self.service.session_factory).execute(
+                        activity=node_activity,
+                        request=request,
+                        effective_input_summary=evidence,
+                        execute_worker=_execute_worker,
+                    )
+                except (NodeActivityInProgress, NodeActivityClaimLost):
+                    # A prior activity attempt can retain the fenced DB claim for
+                    # up to its lease. Keep the Temporal activity alive until it
+                    # either records a terminal payload or the claim can be taken
+                    # over with the same logical key.
+                    await asyncio.sleep(CLAIM_HEARTBEAT_SECONDS)
+
+        async def _heartbeat() -> None:
+            while True:
+                activity.heartbeat()
+                await asyncio.sleep(5)
+
+        heartbeat = asyncio.create_task(_heartbeat())
+        worker_task: asyncio.Task[tuple[NodeActivityResultRef, NodeOutcome | None]] | None = None
+        try:
+            worker_task = asyncio.create_task(_execute_under_claim_recovery())
+            done, _ = await asyncio.wait(
+                {worker_task, heartbeat}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if heartbeat in done:
+                heartbeat_error = heartbeat.exception()
+                worker_task.cancel()
+                await asyncio.gather(worker_task, return_exceptions=True)
+                raise heartbeat_error or RuntimeError("Temporal heartbeat stopped unexpectedly.")
+            result_ref, _outcome = await worker_task
+            return result_ref.model_dump(mode="json")
+        finally:
+            if worker_task is not None and not worker_task.done():
+                worker_task.cancel()
+                await asyncio.gather(worker_task, return_exceptions=True)
+            heartbeat.cancel()
+            await asyncio.gather(heartbeat, return_exceptions=True)
+
+    @activity.defn(name="merge_node_wave")
+    @_restore_task_trace_context
+    async def merge_node_wave(self, task_id: str, merge_data: dict[str, Any]) -> dict[str, Any]:
+        """Validate durable node evidence and atomically project the parent state."""
+        merge = NodeWaveMergeRequest.model_validate(merge_data)
+        selection = merge.selection
+        state = await self.service._run_blocking(self._get_current_state, task_id)
+        if state.decomposed_plan is None or not selection.node_id:
+            raise ValueError("Node-wave merge requires a decomposed node selection.")
+        node_id = selection.node_id
+
+        def _merge() -> NodeWaveMergeResult:
+            with session_scope(self.service.session_factory) as session:
+                plan = ExecutionPlanRepository(session).get_by_task_id(task_id)
+                if plan is None:
+                    raise ValueError("Execution plan is missing.")
+                node = ExecutionPlanRepository(session).get_node(plan.id, node_id)
+                if node is None:
+                    raise ValueError("Execution plan node is missing.")
+                contract = next(
+                    (
+                        item
+                        for item in state.decomposed_plan.nodes or []
+                        if item.node_id == node.node_id
+                    ),
+                    None,
+                )
+                if contract is None:
+                    raise ValueError(f"Node contract for {node.node_id} is missing from state.")
+                key: str | None
+                if selection.action == "skip":
+                    result = _skipped_node_result(
+                        contract, ", ".join(selection.failed_dependency_ids)
+                    )
+                    skip_payload = {
+                        "schema_version": 1,
+                        "worker_result": result.model_dump(mode="json"),
+                        "node_outcome": NodeOutcome(
+                            node_id=node.node_id,
+                            status="skipped",
+                            result=result,
+                            dependencies=list(node.depends_on or []),
+                        ).model_dump(mode="json"),
+                        "continuation": "continue",
+                    }
+                    digest = hashlib.sha256(
+                        json.dumps(skip_payload, sort_keys=True, separators=(",", ":")).encode()
+                    ).hexdigest()
+                    key = f"node-skip:v1:{plan.id}:{node.node_id}:{digest}"
+                    ExecutionPlanRepository(session).update_node(
+                        plan_id=plan.id,
+                        node_id=node.node_id,
+                        status=ExecutionPlanNodeStatus.SKIPPED,
+                        failure_kind="dependency_failed",
+                        result_summary=result.summary,
+                        latest_logical_activity_key=key,
+                        terminal_result_schema_version=1,
+                        terminal_result_digest=digest,
+                        terminal_result_payload=skip_payload,
+                    )
+                else:
+                    key = (
+                        merge.result_ref.logical_activity_key
+                        if merge.result_ref is not None
+                        else selection.logical_activity_key
+                    )
+                    if not key:
+                        raise ValueError("Terminal merge is missing its activity key.")
+                    terminal_payload = node.terminal_result_payload
+                    terminal_digest = node.terminal_result_digest
+                    if not terminal_payload or not terminal_digest:
+                        raise ValueError("Terminal node result is unavailable for merge.")
+                    attempt = session.scalar(
+                        select(ExecutionPlanNodeAttempt).where(
+                            ExecutionPlanNodeAttempt.plan_node_id == node.id,
+                            ExecutionPlanNodeAttempt.logical_activity_key == key,
+                        )
+                    )
+                    expected = (
+                        merge.result_ref.result_digest
+                        if merge.result_ref
+                        else selection.result_digest
+                    )
+                    if expected and expected != terminal_digest:
+                        raise ValueError("Node result digest does not match durable evidence.")
+                    WorkerResult.model_validate(terminal_payload["worker_result"])
+                    NodeOutcome.model_validate(terminal_payload["node_outcome"])
+                    if attempt is not None and attempt.result_digest != terminal_digest:
+                        raise ValueError(
+                            "Node attempt digest does not match terminal node evidence."
+                        )
+                    digest = terminal_digest
+
+                outcomes: list[NodeOutcome] = []
+                for persisted_node in plan.nodes:
+                    persisted_payload = persisted_node.terminal_result_payload
+                    if not persisted_payload:
+                        continue
+                    outcome = NodeOutcome.model_validate(persisted_payload["node_outcome"])
+                    outcomes.append(
+                        outcome.model_copy(
+                            update={
+                                "dependencies": list(persisted_node.depends_on or []),
+                                "logical_activity_key": persisted_node.latest_logical_activity_key,
+                                "result_digest": persisted_node.terminal_result_digest,
+                                "replayed": (
+                                    selection.action == "merge_terminal"
+                                    and persisted_node.node_id == node.node_id
+                                ),
+                            }
+                        )
+                    )
+                state.node_outcomes = outcomes
+                state.result = _aggregate_decomposed_results(outcomes)
+                current = next(
+                    (outcome for outcome in outcomes if outcome.node_id == node.node_id), None
+                )
+                if current is None:
+                    raise ValueError(f"Outcome for node {node.node_id} was not found after merge.")
+                if current.status == "blocked":
+                    if current.attempts >= contract.max_attempts:
+                        ExecutionPlanRepository(session).update_node(
+                            plan_id=plan.id,
+                            node_id=node.node_id,
+                            status=ExecutionPlanNodeStatus.FAILED,
+                            failure_kind="permission_escalation_exhausted",
+                            finished_at=utc_now(),
+                        )
+                        return NodeWaveMergeResult(continuation="fail_task")
+                    return NodeWaveMergeResult(
+                        continuation="await_permission",
+                        blocked_node_id=node.node_id,
+                        blocked_logical_activity_key=key,
+                        requested_permission=current.result.requested_permission,
+                    )
+                if current.status == "failed" and current.attempts < contract.max_attempts:
+                    ExecutionPlanRepository(session).update_node(
+                        plan_id=plan.id,
+                        node_id=node.node_id,
+                        status=ExecutionPlanNodeStatus.PENDING,
+                        retry_count=current.attempts,
+                    )
+                    return NodeWaveMergeResult(continuation="retry_node")
+                return NodeWaveMergeResult(continuation="continue")
+
+        result = await self.service._run_blocking(_merge)
+        await self.service._run_blocking(
+            self._persist_intermediate_state,
+            task_id=task_id,
+            state=state,
+            started_at=utc_now(),
+            finished_at=utc_now(),
+        )
+        return result.model_dump(mode="json")
+
     @activity.defn(name="request_permission_escalation")
     @_restore_task_trace_context
     async def request_permission_escalation(self, task_id: str) -> None:
@@ -544,11 +982,27 @@ class TaskExecutionActivities:
                 if result is None or result.next_action_hint != "request_higher_permission":
                     return
                 requested = result.requested_permission or "unknown"
-                data = {
+                blocked = next(
+                    (
+                        outcome
+                        for outcome in state.node_outcomes
+                        if outcome.status == "blocked"
+                        and outcome.result.next_action_hint == "request_higher_permission"
+                    ),
+                    None,
+                )
+                data: dict[str, Any] = {
                     "source": "worker_permission_escalation",
                     "requested_permission": requested,
                     "resume_token": f"permission-escalation-{task_id}-{requested}",
                 }
+                if blocked is not None:
+                    data.update(
+                        {
+                            "blocked_node_id": blocked.node_id,
+                            "blocked_logical_activity_key": blocked.logical_activity_key,
+                        }
+                    )
                 summary = result.summary or f"Worker requested higher permission: {requested}"
                 decision_key = compute_interaction_content_hash(
                     HumanInteractionType.PERMISSION.value, summary, data
@@ -588,6 +1042,16 @@ class TaskExecutionActivities:
                     )
                 state = OrchestratorState.model_validate(snapshot.state)
                 requested = state.result.requested_permission if state.result else None
+                blocked = next(
+                    (
+                        outcome
+                        for outcome in state.node_outcomes
+                        if outcome.status == "blocked"
+                        and outcome.result.next_action_hint == "request_higher_permission"
+                    ),
+                    None,
+                )
+                plan = ExecutionPlanRepository(session).get_by_task_id(task_id)
                 if not approved:
                     task.status = TaskStatus.FAILED
                     task.last_error = "Worker permission escalation rejected by operator."
@@ -599,6 +1063,13 @@ class TaskExecutionActivities:
                         event_key=f"permission-escalation:{task_id}:rejected",
                         message=task.last_error,
                     )
+                    if blocked is not None and plan is not None:
+                        ExecutionPlanRepository(session).update_node(
+                            plan_id=plan.id,
+                            node_id=blocked.node_id,
+                            status=ExecutionPlanNodeStatus.FAILED,
+                            failure_kind="permission_denied",
+                        )
                     TemporalTaskStateRepository(session).delete(task_id=task_id)
                     return
                 constraints = dict(task.constraints or {})
@@ -607,7 +1078,20 @@ class TaskExecutionActivities:
                 task.constraints = constraints
                 task.status = TaskStatus.IN_PROGRESS
                 state.task = state.task.model_copy(update={"constraints": constraints})
-                state.result = None
+                if blocked is not None and plan is not None:
+                    ExecutionPlanRepository(session).update_node(
+                        plan_id=plan.id,
+                        node_id=blocked.node_id,
+                        status=ExecutionPlanNodeStatus.PENDING,
+                        blocker_interaction_id=None,
+                        retry_count=blocked.attempts,
+                    )
+                    # Retain the terminal key in parent state while the node is
+                    # reset for its next logical attempt. Otherwise selection
+                    # would replay the old blocked payload before it can run.
+                    state.result = _aggregate_decomposed_results(state.node_outcomes)
+                else:
+                    state.result = None
                 TemporalTaskStateRepository(session).upsert(
                     task_id=task_id, state=state.model_dump(mode="json")
                 )
@@ -637,6 +1121,30 @@ class TaskExecutionActivities:
                 TemporalTaskStateRepository(session).delete(task_id=task_id)
 
         await self.service._run_blocking(_record_failure)
+
+    @activity.defn(name="fail_node_permission_escalation")
+    @_restore_task_trace_context
+    async def fail_node_permission_escalation(self, task_id: str, node_id: str) -> None:
+        """Project a global permission-cap failure onto the blocked plan node."""
+
+        def _fail_node() -> None:
+            with session_scope(self.service.session_factory) as session:
+                plan = ExecutionPlanRepository(session).get_by_task_id(task_id)
+                if plan is None:
+                    raise RuntimeError(f"Task '{task_id}' has no execution plan.")
+                node = ExecutionPlanRepository(session).get_node(plan.id, node_id)
+                if node is None:
+                    raise RuntimeError(f"Execution plan node '{node_id}' is unavailable.")
+                ExecutionPlanRepository(session).update_node(
+                    plan_id=plan.id,
+                    node_id=node_id,
+                    status=ExecutionPlanNodeStatus.FAILED,
+                    failure_kind="permission_escalation_limit",
+                    blocker_interaction_id=None,
+                    finished_at=utc_now(),
+                )
+
+        await self.service._run_blocking(_fail_node)
 
     @activity.defn(name="verify_result")
     @_restore_task_trace_context
