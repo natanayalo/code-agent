@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 from uuid import uuid4
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -278,8 +278,10 @@ class ExecutionPlanRepository:
                     ExecutionPlanNodeAttempt.id == existing.id,
                     ExecutionPlanNodeAttempt.claim_generation == existing.claim_generation,
                     ExecutionPlanNodeAttempt.result_payload.is_(None),
-                    ExecutionPlanNodeAttempt.claim_expires_at.is_not(None),
-                    ExecutionPlanNodeAttempt.claim_expires_at <= now,
+                    or_(
+                        ExecutionPlanNodeAttempt.claim_expires_at.is_(None),
+                        ExecutionPlanNodeAttempt.claim_expires_at <= now,
+                    ),
                 )
                 .values(
                     claim_generation=ExecutionPlanNodeAttempt.claim_generation + 1,
@@ -313,7 +315,6 @@ class ExecutionPlanRepository:
                 claim_expires_at=utc_now() + timedelta(seconds=lease_seconds),
             )
         except IntegrityError:
-            self.session.rollback()
             return self.claim_activity(
                 plan_id=plan_id,
                 node_id=node_id,

@@ -15,7 +15,8 @@ from langchain_core.runnables import RunnableLambda
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy import select
+from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from apps.observability import (
     SPAN_KIND_CHAIN,
@@ -977,10 +978,13 @@ async def _await_decomposed_nodes(
     task_trace_id: str | None = None
     if session_factory is not None and state.task.task_id:
         with session_scope(cast(sessionmaker[Session], session_factory)) as session:
-            execution_plan = ExecutionPlanRepository(session).get_by_task_id(state.task.task_id)
-            plan_id = execution_plan.id if execution_plan is not None else None
-            task = session.get(Task, state.task.task_id)
-            trace_context = task.trace_context if task is not None else None
+            task = session.scalar(
+                select(Task)
+                .where(Task.id == state.task.task_id)
+                .options(selectinload(Task.execution_plan))
+            )
+            plan_id = task.execution_plan.id if task and task.execution_plan else None
+            trace_context = task.trace_context if task else None
             traceparent = (
                 trace_context.get("traceparent") if isinstance(trace_context, dict) else None
             )

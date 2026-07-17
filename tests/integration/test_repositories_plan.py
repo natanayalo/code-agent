@@ -189,6 +189,12 @@ def test_claim_activity_replays_terminal_result_and_rejects_digest_collision(ses
         assert attempt.claim_expires_at is not None
         assert original_expiry is not None
         assert attempt.claim_expires_at > original_expiry
+        attempt.claim_expires_at = None
+        session.flush()
+        reclaimed, reclaimed_attempt = repo.claim_activity(**kwargs)
+        assert reclaimed == "new"
+        assert reclaimed_attempt.id == attempt.id
+        assert reclaimed_attempt.claim_generation == 1
         repo.finish_attempt(
             attempt_id=attempt.id,
             claim_token=attempt.claim_token,

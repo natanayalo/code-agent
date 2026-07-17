@@ -5,10 +5,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Literal, cast
 
 from pydantic import Field, model_validator
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from db.base import utc_now
@@ -20,6 +22,7 @@ from workers import WorkerRequest, WorkerResult
 NODE_ACTIVITY_SCHEMA_VERSION = 1
 CLAIM_HEARTBEAT_SECONDS = 10
 CLAIM_LEASE_SECONDS = 60
+logger = logging.getLogger(__name__)
 
 
 class NodeActivityInProgress(RuntimeError):
@@ -214,11 +217,20 @@ class NodeExecutionService:
             return
         while True:
             await asyncio.sleep(CLAIM_HEARTBEAT_SECONDS)
-            with session_scope(cast(sessionmaker[Session], self.session_factory)) as session:
-                owned = ExecutionPlanRepository(session).heartbeat_activity(
-                    attempt_id=attempt_id,
-                    claim_token=claim_token,
-                    lease_seconds=CLAIM_LEASE_SECONDS,
+            try:
+                with session_scope(cast(sessionmaker[Session], self.session_factory)) as session:
+                    owned = ExecutionPlanRepository(session).heartbeat_activity(
+                        attempt_id=attempt_id,
+                        claim_token=claim_token,
+                        lease_seconds=CLAIM_LEASE_SECONDS,
+                    )
+            except SQLAlchemyError:
+                logger.warning(
+                    "Node execution heartbeat failed transiently for attempt %s",
+                    attempt_id,
+                    exc_info=True,
                 )
+                continue
             if not owned:
+                logger.warning("Node execution heartbeat lost ownership of attempt %s", attempt_id)
                 return
