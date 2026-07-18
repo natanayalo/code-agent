@@ -117,6 +117,38 @@ def test_create_task_pins_selected_orchestration_runtime(monkeypatch) -> None:
     assert reloaded_snapshot.orchestration_runtime == "temporal"
 
 
+def test_temporal_availability_retries_then_allows_a_recovered_submission(monkeypatch) -> None:
+    """A transient outage should not require restarting the API process."""
+    session_factory = _setup_persistence_test_db()
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+    attempts: list[tuple[str, int]] = []
+
+    class _Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+    def connect(address, timeout):
+        attempts.append(address)
+        if len(attempts) == 1:
+            raise OSError("Temporal unavailable")
+        assert timeout == 1
+        return _Connection()
+
+    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
+    monkeypatch.setattr(execution_module.socket, "create_connection", connect)
+    monkeypatch.setattr(execution_module.time, "sleep", lambda _seconds: None)
+
+    service.ensure_temporal_available()
+
+    assert attempts == [("localhost", 7233), ("localhost", 7233)]
+
+
 def test_persist_execution_outcome_creates_error_worker_run_without_result() -> None:
     """Missing worker results should still leave an error worker-run record for observability."""
     session_factory = _setup_persistence_test_db()

@@ -10,6 +10,8 @@ export interface OperationalMetrics {
   orchestration_runtime_counts?: Record<string, number>;
   active_legacy_task_count?: number;
   active_unknown_task_count?: number;
+  temporal_only_cutover_at?: string | null;
+  legacy_submissions_since_cutover?: number | null;
   avg_duration_seconds: number;
   success_rate: number;
 }

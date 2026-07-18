@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import Final
 
 RUN_API_ENV_VAR: Final[str] = "CODE_AGENT_RUN_API"
@@ -11,7 +12,7 @@ RUN_WORKER_ENV_VAR: Final[str] = "CODE_AGENT_RUN_WORKER"
 EXECUTION_RUNTIME_ENV_VAR: Final[str] = "CODE_AGENT_EXECUTION_RUNTIME"
 TEMPORAL_EXECUTION_RUNTIME: Final[str] = "temporal"
 LEGACY_EXECUTION_RUNTIME: Final[str] = "legacy"
-_LEGACY_TEMPORAL_FLAG_ENV_VAR: Final[str] = "CODE_AGENT_USE_TEMPORAL"
+TEMPORAL_ONLY_CUTOVER_AT_ENV_VAR: Final[str] = "TEMPORAL_ONLY_CUTOVER_AT"
 
 
 def is_enabled(value: str | None, *, default: bool = False) -> bool:
@@ -54,19 +55,27 @@ def coerce_non_negative_int_env(value: str | None, *, default: int) -> int:
 
 
 def execution_runtime(environ: Mapping[str, str] | None = None) -> str:
-    """Return the selected execution runtime with a safe legacy fallback.
-
-    ``CODE_AGENT_EXECUTION_RUNTIME`` is the explicit selector. The former
-    ``CODE_AGENT_USE_TEMPORAL`` boolean remains supported while deployments
-    transition, but the explicit selector wins whenever it is valid.
-    """
+    """Return the selected execution runtime, defaulting to Temporal."""
     resolved_env = os.environ if environ is None else environ
     selected = resolved_env.get(EXECUTION_RUNTIME_ENV_VAR, "").strip().lower()
     if selected in {TEMPORAL_EXECUTION_RUNTIME, LEGACY_EXECUTION_RUNTIME}:
         return selected
-    if is_enabled(resolved_env.get(_LEGACY_TEMPORAL_FLAG_ENV_VAR), default=False):
-        return TEMPORAL_EXECUTION_RUNTIME
-    return LEGACY_EXECUTION_RUNTIME
+    return TEMPORAL_EXECUTION_RUNTIME
+
+
+def temporal_only_cutover_at(environ: Mapping[str, str] | None = None) -> datetime | None:
+    """Return the configured immutable UTC cutover timestamp, if valid."""
+    resolved_env = os.environ if environ is None else environ
+    raw_value = resolved_env.get(TEMPORAL_ONLY_CUTOVER_AT_ENV_VAR, "").strip()
+    if not raw_value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw_value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed.astimezone(UTC)
 
 
 def uses_temporal_execution(environ: Mapping[str, str] | None = None) -> bool:

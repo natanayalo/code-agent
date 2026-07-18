@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import threading
+import time
 from collections.abc import Callable, Mapping
 from contextlib import AbstractAsyncContextManager
 from pathlib import Path
@@ -21,6 +22,7 @@ from apps.observability import (
 from apps.observability import (
     with_restored_trace_context as _with_restored_trace_context,
 )
+from apps.runtime import execution_runtime
 from db.enums import (
     OrchestrationRuntime,
     TaskStatus,
@@ -119,6 +121,11 @@ from sandbox import WorkspaceManager
 from workers import Worker, WorkerProfile
 
 logger = logging.getLogger(__name__)
+
+
+class TemporalUnavailableError(RuntimeError):
+    """Raised when Temporal cannot accept a new task submission."""
+
 
 with_restored_trace_context = _with_restored_trace_context
 socket = _execution_policy_module.socket
@@ -270,6 +277,33 @@ class TaskExecutionService:
             if task_snapshot.orchestration_runtime == OrchestrationRuntime.TEMPORAL.value:
                 self.start_temporal_workflow_sync(task_id)
         return outcome
+
+    def ensure_temporal_available(self) -> None:
+        """Fail a new Temporal submission before it is persisted when unreachable."""
+        if execution_runtime() != "temporal":
+            return
+        temporal_address = os.environ.get("TEMPORAL_ADDRESS", "localhost:7233")
+        host, separator, port_text = temporal_address.rpartition(":")
+        if not separator or not host:
+            raise TemporalUnavailableError(f"Invalid TEMPORAL_ADDRESS: {temporal_address!r}")
+        try:
+            port = int(port_text)
+        except ValueError as exc:
+            raise TemporalUnavailableError(
+                f"Invalid TEMPORAL_ADDRESS: {temporal_address!r}"
+            ) from exc
+        last_error: OSError | None = None
+        for attempt in range(3):
+            try:
+                with socket.create_connection((host, port), timeout=1):
+                    return
+            except OSError as exc:
+                last_error = exc
+                if attempt < 2:
+                    time.sleep(0.1 * (2**attempt))
+        raise TemporalUnavailableError(
+            f"Temporal is unavailable at {temporal_address}; new tasks are temporarily disabled."
+        ) from last_error
 
     _normalize_and_validate_submission = (
         execution_submission_service._normalize_and_validate_submission

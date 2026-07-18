@@ -8,6 +8,7 @@ import pytest
 
 from apps import runtime as runtime_module
 from apps.worker import main as worker_main
+from orchestrator.temporal import worker as temporal_worker
 
 
 class _FakeAsyncClient:
@@ -38,13 +39,9 @@ def test_runtime_mode_defaults_and_overrides() -> None:
     assert runtime_module.should_run_worker({runtime_module.RUN_WORKER_ENV_VAR: "on"}) is True
 
 
-def test_execution_runtime_prefers_explicit_selector_with_legacy_flag_compatibility() -> None:
-    """The explicit runtime selector should make fallback intent unambiguous."""
-    assert runtime_module.execution_runtime({}) == runtime_module.LEGACY_EXECUTION_RUNTIME
-    assert (
-        runtime_module.execution_runtime({"CODE_AGENT_USE_TEMPORAL": "true"})
-        == runtime_module.TEMPORAL_EXECUTION_RUNTIME
-    )
+def test_execution_runtime_defaults_to_temporal_with_explicit_legacy_fallback() -> None:
+    """Temporal is the cutover default and legacy requires explicit selection."""
+    assert runtime_module.execution_runtime({}) == runtime_module.TEMPORAL_EXECUTION_RUNTIME
     assert (
         runtime_module.execution_runtime({"CODE_AGENT_EXECUTION_RUNTIME": "temporal"})
         == runtime_module.TEMPORAL_EXECUTION_RUNTIME
@@ -53,14 +50,27 @@ def test_execution_runtime_prefers_explicit_selector_with_legacy_flag_compatibil
         runtime_module.execution_runtime(
             {
                 "CODE_AGENT_EXECUTION_RUNTIME": "legacy",
-                "CODE_AGENT_USE_TEMPORAL": "true",
             }
         )
         == runtime_module.LEGACY_EXECUTION_RUNTIME
     )
     assert runtime_module.uses_temporal_execution({"CODE_AGENT_EXECUTION_RUNTIME": "temporal"})
-    assert not runtime_module.uses_temporal_execution(
-        {"CODE_AGENT_EXECUTION_RUNTIME": "unexpected"}
+    assert runtime_module.uses_temporal_execution({"CODE_AGENT_EXECUTION_RUNTIME": "unexpected"})
+
+
+def test_temporal_only_cutover_at_requires_an_aware_iso_timestamp() -> None:
+    """Drain metrics must not invent a boundary from invalid deployment config."""
+    assert runtime_module.temporal_only_cutover_at({}) is None
+    assert runtime_module.temporal_only_cutover_at({"TEMPORAL_ONLY_CUTOVER_AT": "invalid"}) is None
+    assert (
+        runtime_module.temporal_only_cutover_at({"TEMPORAL_ONLY_CUTOVER_AT": "2026-07-18T12:00:00"})
+        is None
+    )
+    assert (
+        runtime_module.temporal_only_cutover_at(
+            {"TEMPORAL_ONLY_CUTOVER_AT": "2026-07-18T12:00:00Z"}
+        ).isoformat()
+        == "2026-07-18T12:00:00+00:00"
     )
 
 
@@ -101,6 +111,27 @@ async def test_run_worker_forever_requires_enabled_runtime(monkeypatch: pytest.M
 
     with pytest.raises(RuntimeError, match="Worker runtime is disabled"):
         await worker_main.run_worker_forever()
+
+
+@pytest.mark.anyio
+async def test_temporal_worker_fails_after_bounded_connection_retries(monkeypatch) -> None:
+    """A Temporal outage must terminate the worker instead of entering legacy polling."""
+    attempts: list[str] = []
+
+    async def unavailable(address: str) -> object:
+        attempts.append(address)
+        raise ConnectionError("Temporal unavailable")
+
+    async def skip_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(temporal_worker.Client, "connect", unavailable)
+    monkeypatch.setattr(temporal_worker.asyncio, "sleep", skip_sleep)
+
+    with pytest.raises(RuntimeError, match="after 3 attempts"):
+        await temporal_worker.start_temporal_worker("temporal:7233", "queue", object())
+
+    assert attempts == ["temporal:7233"] * 3
 
 
 @pytest.mark.anyio
@@ -184,6 +215,7 @@ async def test_run_worker_forever_builds_queue_worker_from_env_and_runs(
     monkeypatch.setenv(worker_main.POLL_INTERVAL_ENV_VAR, "4.5")
     monkeypatch.setenv(worker_main.LEASE_SECONDS_ENV_VAR, "75")
     monkeypatch.setenv(worker_main.CAPACITY_ENV_VAR, "3")
+    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "legacy")
 
     await worker_main.run_worker_forever()
 
@@ -232,6 +264,7 @@ async def test_run_worker_forever_bootstraps_observability(monkeypatch: pytest.M
         "configure_tracing_from_env",
         lambda *, service_name: tracing_calls.append(service_name),
     )
+    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "legacy")
 
     await worker_main.run_worker_forever()
 

@@ -31,6 +31,7 @@ from orchestrator.execution import (
     TaskSubmission,
     TaskSubmissionValidationError,
     TaskSummarySnapshot,
+    TemporalUnavailableError,
     validate_callback_url,
 )
 
@@ -138,6 +139,7 @@ def submit_task(
         )
 
         try:
+            task_service.ensure_temporal_available()
             task_snapshot, _ = task_service.create_task(submission)
             set_current_span_attribute(TASK_ID_ATTRIBUTE, task_snapshot.task_id)
             set_current_span_attribute(SESSION_ID_ATTRIBUTE, task_snapshot.session_id)
@@ -146,6 +148,10 @@ def submit_task(
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=str(exc),
+            ) from exc
+        except TemporalUnavailableError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
             ) from exc
 
 
@@ -212,6 +218,7 @@ def trigger_scout_task(
     ):
         set_span_input_output(input_data=submission.model_dump(exclude={"secrets"}))
         try:
+            task_service.ensure_temporal_available()
             task_snapshot, _ = task_service.create_task(submission)
             set_current_span_attribute(TASK_ID_ATTRIBUTE, task_snapshot.task_id)
             set_current_span_attribute(SESSION_ID_ATTRIBUTE, task_snapshot.session_id)
@@ -220,6 +227,10 @@ def trigger_scout_task(
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=str(exc),
+            ) from exc
+        except TemporalUnavailableError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
             ) from exc
 
 

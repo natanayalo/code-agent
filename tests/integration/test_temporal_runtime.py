@@ -170,8 +170,9 @@ def test_temporal_snapshot_reconciles_operator_approval(session_factory):
 
 
 @pytest.mark.anyio
-async def test_temporal_activity_failure_projects_terminal_task(session_factory):
+async def test_temporal_activity_failure_projects_terminal_task(session_factory, monkeypatch):
     """An exhausted workflow activity must not leave the product task pending."""
+    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "legacy")
     service = TaskExecutionService(
         session_factory=session_factory,
         worker=CodexCliWorker(runtime_adapter=_ScriptedAdapter([])),
@@ -766,8 +767,11 @@ async def _exercise_permission_escalation_workflow_with_docker(
 
 
 @pytest.mark.anyio
-async def test_permission_escalation_activities_persist_and_apply_grant(session_factory):
+async def test_permission_escalation_activities_persist_and_apply_grant(
+    session_factory, monkeypatch
+):
     """Escalation activities create one interaction and reset durable state on grant."""
+    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "legacy")
     service = TaskExecutionService(
         session_factory=session_factory,
         worker=CodexCliWorker(runtime_adapter=_ScriptedAdapter([])),
@@ -857,8 +861,11 @@ async def test_permission_escalation_rejection_projects_terminal_state(session_f
 
 
 @pytest.mark.anyio
-async def test_cancelling_pending_permission_escalation_removes_resumable_state(session_factory):
+async def test_cancelling_pending_permission_escalation_removes_resumable_state(
+    session_factory, monkeypatch
+):
     """Operator cancellation must win over a pending worker escalation."""
+    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "legacy")
     service = TaskExecutionService(
         session_factory=session_factory,
         worker=CodexCliWorker(runtime_adapter=_ScriptedAdapter([])),

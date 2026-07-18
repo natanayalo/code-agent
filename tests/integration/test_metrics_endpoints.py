@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -253,6 +253,31 @@ def test_get_metrics_empty_state(client: TestClient) -> None:
     assert data["active_unknown_task_count"] == 0
     assert data["avg_duration_seconds"] == 0.0
     assert data["success_rate"] == 0.0
+
+
+def test_get_metrics_reports_legacy_submissions_since_cutover(
+    client, session_factory, monkeypatch
+) -> None:
+    """The immutable deployment timestamp bounds the legacy retirement metric."""
+    cutover_at = datetime(2026, 7, 18, 12, tzinfo=UTC)
+    monkeypatch.setenv("TEMPORAL_ONLY_CUTOVER_AT", "2026-07-18T12:00:00Z")
+    with session_scope(session_factory) as session:
+        task_repo = TaskRepository(session)
+        before = task_repo.create(
+            session_id="before",
+            task_text="before",
+            orchestration_runtime=OrchestrationRuntime.LEGACY,
+        )
+        after = task_repo.create(
+            session_id="after", task_text="after", orchestration_runtime=OrchestrationRuntime.LEGACY
+        )
+        before.created_at = cutover_at - timedelta(seconds=1)
+        after.created_at = cutover_at + timedelta(seconds=1)
+
+    data = client.get("/metrics").json()
+
+    assert data["temporal_only_cutover_at"] == "2026-07-18T12:00:00Z"
+    assert data["legacy_submissions_since_cutover"] == 1
 
 
 def test_get_metrics_with_windowing(client: TestClient, session_factory) -> None:

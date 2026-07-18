@@ -88,16 +88,11 @@ mkdir -p "$CODE_AGENT_WORKSPACE_ROOT"
 echo "[run-production-like] Using shared workspace root: $CODE_AGENT_WORKSPACE_ROOT"
 echo "[run-production-like] Codex sandbox mode: $CODE_AGENT_CODEX_SANDBOX"
 
-services="postgres migrate api worker dashboard"
+services="postgres temporal temporal-ui migrate api worker dashboard"
 if is_enabled "${CODE_AGENT_ENABLE_TRACING:-0}"; then
   echo "[run-production-like] Tracing enabled (CODE_AGENT_ENABLE_TRACING=1); starting phoenix too"
   services="$services phoenix"
 fi
-if is_enabled "${CODE_AGENT_USE_TEMPORAL:-0}"; then
-  echo "[run-production-like] Temporal enabled (CODE_AGENT_USE_TEMPORAL=true); starting temporal and temporal-ui too"
-  services="$services temporal temporal-ui"
-fi
-
 echo "[run-production-like] Starting $services"
 if is_enabled "${CODE_AGENT_ENABLE_TRACING:-0}"; then
   # shellcheck disable=SC2086

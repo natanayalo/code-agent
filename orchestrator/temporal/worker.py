@@ -24,7 +24,24 @@ async def start_temporal_worker(
         "Starting Temporal worker",
         extra={"address": temporal_address, "queue": task_queue},
     )
-    client = await Client.connect(temporal_address)
+    last_error: Exception | None = None
+    for attempt in range(3):
+        try:
+            client = await Client.connect(temporal_address)
+            break
+        except Exception as exc:
+            last_error = exc
+            if attempt == 2:
+                raise RuntimeError(
+                    f"Temporal worker could not connect to {temporal_address} after 3 attempts."
+                ) from exc
+            logger.warning(
+                "Temporal worker connection failed; retrying",
+                extra={"attempt": attempt + 1},
+            )
+            await asyncio.sleep(2**attempt)
+    else:  # pragma: no cover - loop either breaks or raises
+        raise RuntimeError("Temporal worker connection retries exhausted.") from last_error
 
     # Initialize our activities class with the service
     activities = TaskExecutionActivities(service=task_service)

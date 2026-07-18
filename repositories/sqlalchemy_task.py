@@ -673,7 +673,7 @@ class TaskRepository:
             else 0,
         }
 
-    def get_runtime_drain_metrics(self) -> dict[str, Any]:
+    def get_runtime_drain_metrics(self, *, cutover_at: datetime | None = None) -> dict[str, Any]:
         """Return all-time runtime counts used to gate legacy retirement."""
 
         runtime_counts = self.session.execute(
@@ -693,6 +693,14 @@ class TaskRepository:
                 Task.status.in_((TaskStatus.PENDING, TaskStatus.IN_PROGRESS)),
             )
         )
+        legacy_since_cutover_count = None
+        if cutover_at is not None:
+            legacy_since_cutover_count = self.session.scalar(
+                select(func.count(Task.id)).where(
+                    Task.orchestration_runtime == OrchestrationRuntime.LEGACY,
+                    Task.created_at >= cutover_at,
+                )
+            )
         return {
             "orchestration_runtime_counts": {
                 (runtime.value if runtime is not None else "unknown"): count
@@ -700,6 +708,11 @@ class TaskRepository:
             },
             "active_legacy_task_count": int(active_legacy_count or 0),
             "active_unknown_task_count": int(active_unknown_count or 0),
+            "legacy_submissions_since_cutover": (
+                int(legacy_since_cutover_count or 0)
+                if legacy_since_cutover_count is not None
+                else None
+            ),
         }
 
     def release_runtime_ownership_violation(self, *, task_id: str, worker_id: str) -> bool:

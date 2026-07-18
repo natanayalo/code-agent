@@ -548,6 +548,8 @@ class OperationalMetrics(ExecutionModel):
     orchestration_runtime_counts: dict[str, int]
     active_legacy_task_count: int
     active_unknown_task_count: int
+    temporal_only_cutover_at: datetime | None = None
+    legacy_submissions_since_cutover: int | None = None
     avg_duration_seconds: float
     success_rate: float
 
