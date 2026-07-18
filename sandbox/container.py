@@ -16,6 +16,7 @@ from pydantic import Field
 
 from sandbox.policy import LocalRepoPolicyError, validate_local_repo_path
 from sandbox.redact import mask_url_credentials as _mask_url_credentials
+from sandbox.scratch import node_run_root, scratch_namespace_component
 from sandbox.workspace import SandboxModel, WorkspaceHandle
 
 logger = logging.getLogger(__name__)
@@ -103,8 +104,8 @@ def append_workspace_mount_options(
     )
 
     if read_only_workspace:
-        namespace = scratch_namespace or "default"
-        code_agent_path = workspace_path / ".code-agent" / "node-runs" / namespace
+        namespace = scratch_namespace_component(scratch_namespace)
+        code_agent_path = node_run_root(workspace_path, scratch_namespace)
         code_agent_path.mkdir(parents=True, exist_ok=True)
         agent_home_path = workspace_path / ".agent_home" / namespace
         agent_home_path.mkdir(parents=True, exist_ok=True)

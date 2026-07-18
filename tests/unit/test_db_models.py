@@ -113,6 +113,11 @@ def test_model_metadata_defines_runtime_manifest_column_type() -> None:
     assert isinstance(column_type, JSON)
 
 
+def test_execution_capacity_permits_store_a_fenced_acquisition_token() -> None:
+    """Permit release and renewal require more than a reusable logical owner."""
+    assert "lease_token" in Base.metadata.tables["execution_capacity_permits"].c
+
+
 def test_model_metadata_enforces_memory_observation_constraints() -> None:
     """Metadata-created DBs should match migration constraints for observations."""
     engine = create_engine("sqlite:///:memory:")

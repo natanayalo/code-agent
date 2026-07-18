@@ -22,6 +22,7 @@ from apps.observability import (
     with_span_kind,
 )
 from sandbox.redact import SecretRedactor, sanitize_command
+from sandbox.scratch import node_run_root, scratch_namespace_component
 from workers.adapter_utils import truncate_detail_keep_tail
 from workers.base import ArtifactReference
 from workers.cli_runtime import collect_changed_files_since_ref_from_repo_path
@@ -127,12 +128,25 @@ _SIGNAL_EXIT_CODES: Final = {
 }
 
 
+def _native_sandbox_db_path(request: NativeAgentRunRequest) -> Path:
+    """Return this run's isolated sandbox database path."""
+    root = (
+        node_run_root(request.workspace_path, request.scratch_namespace)
+        if request.scratch_namespace
+        else request.workspace_path
+    )
+    return root / ".sandbox.db"
+
+
 def _build_effective_env(request: NativeAgentRunRequest) -> dict[str, str]:
     effective_env: dict[str, str] = {
         k: v for k, v in os.environ.items() if k.upper() in SAFE_SYSTEM_ENV_ALLOWLIST
     }
     auth_home_overrides: dict[str, str] = {}
+    namespace = scratch_namespace_component(request.scratch_namespace)
     agent_home = request.workspace_path / ".agent_home"
+    if request.scratch_namespace:
+        agent_home /= namespace
     agent_home.mkdir(parents=True, exist_ok=True)
     agent_home_value = str(agent_home)
     effective_env["HOME"] = agent_home_value
@@ -160,7 +174,7 @@ def _build_effective_env(request: NativeAgentRunRequest) -> dict[str, str]:
             "CODE_AGENT_ENABLE_TRACING": "0",
             "CODE_AGENT_ENABLE_TASK_SERVICE": "0",
             "CODE_AGENT_INDEPENDENT_VERIFIER_ENABLED": "0",
-            "DATABASE_URL": f"sqlite:///{request.workspace_path.as_posix()}/.sandbox.db",
+            "DATABASE_URL": f"sqlite:///{_native_sandbox_db_path(request)}",
             "TELEGRAM_BOT_TOKEN": "",
         }
     )
@@ -763,8 +777,11 @@ def _setup_native_agent_paths(
         request.artifact_root.expanduser().resolve()
         if request.artifact_root
         else (
-            workspace_path
-            / DEFAULT_NATIVE_AGENT_ARTIFACTS_DIR
+            (
+                node_run_root(workspace_path, request.scratch_namespace) / "native-agent-runner"
+                if request.scratch_namespace
+                else workspace_path / DEFAULT_NATIVE_AGENT_ARTIFACTS_DIR
+            )
             / f"run-{int(time.time() * 1000)}-{time.monotonic_ns()}"
         )
     )

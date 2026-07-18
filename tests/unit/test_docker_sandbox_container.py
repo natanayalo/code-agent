@@ -20,6 +20,7 @@ from sandbox.container import (
     _run_docker_command,
     build_container_name,
 )
+from sandbox.scratch import scratch_namespace_component
 from sandbox.workspace import WorkspaceCleanupPolicy, WorkspaceHandle
 
 
@@ -91,10 +92,12 @@ def test_read_only_container_uses_distinct_writable_node_namespaces(tmp_path: Pa
     assert build_container_name(workspace, first.scratch_namespace) != build_container_name(
         workspace, second.scratch_namespace
     )
-    assert f"source={root / '.agent_home' / first.scratch_namespace}" in first_mounts
-    assert f"source={root / '.agent_home' / second.scratch_namespace}" in second_mounts
-    assert f"source={root / 'artifacts' / first.scratch_namespace}" in first_mounts
-    assert f"source={root / 'artifacts' / second.scratch_namespace}" in second_mounts
+    first_namespace = scratch_namespace_component(first.scratch_namespace)
+    second_namespace = scratch_namespace_component(second.scratch_namespace)
+    assert f"source={root / '.agent_home' / first_namespace}" in first_mounts
+    assert f"source={root / '.agent_home' / second_namespace}" in second_mounts
+    assert f"source={root / 'artifacts' / first_namespace}" in first_mounts
+    assert f"source={root / 'artifacts' / second_namespace}" in second_mounts
 
 
 def test_build_docker_container_run_command_raises_on_comma_in_path(tmp_path: Path) -> None:

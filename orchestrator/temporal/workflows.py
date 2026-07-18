@@ -113,80 +113,84 @@ class TaskExecutionWorkflow:
     async def _run_decomposed_node_waves(self, task_id: str) -> dict | None:
         """Coordinate exactly one durable node execution before every merge."""
         escalation_count = 0
+        # Record the M25.2 marker before selection can produce a V2 contract.
+        # Passing this recorded decision to the Activity keeps a replay after a
+        # workflow-task crash on the same contract version as the original run.
+        fanout_contract_enabled = workflow.patched(M25_2_FANOUT_PATCH_ID)
         while True:
             selection = await workflow.execute_activity(
-                "select_next_node", task_id, **activity_options("select_next_node")
+                "select_next_node",
+                args=[task_id, fanout_contract_enabled],
+                **activity_options("select_next_node"),
             )
             if (
-                workflow.patched(M25_2_FANOUT_PATCH_ID)
+                fanout_contract_enabled
                 and selection.get("schema_version") == 2
                 and selection.get("fanout_applied")
             ):
-                fanout_failure = await self._run_fanout_wave(task_id, selection)
-                if fanout_failure is not None:
-                    return fanout_failure
-                continue
-            action = selection.get("action")
-            if action not in {
-                "execute",
-                "merge_terminal",
-                "skip",
-                "await_permission",
-                "complete",
-                "invalid",
-            }:
-                failure = "Node selection returned an unknown coordinator action."
-                await workflow.execute_activity(
-                    "record_workflow_failure",
-                    args=[task_id, failure],
-                    **activity_options("record_workflow_failure"),
-                )
-                return {"status": "failed", "summary": failure}
-            if action == "complete":
-                return None
-            if action == "invalid":
-                failure = selection.get("reason") or "Invalid decomposed execution plan."
-                await workflow.execute_activity(
-                    "record_workflow_failure",
-                    args=[task_id, failure],
-                    **activity_options("record_workflow_failure"),
-                )
-                return {"status": "failed", "summary": failure}
-            if action == "await_permission":
-                escalation_count += 1
-                if escalation_count > MAX_PERMISSION_ESCALATIONS:
-                    return await self._record_node_wave_escalation_limit(
-                        task_id, selection.get("node_id")
-                    )
-                if not await self._handle_permission_escalation(task_id):
-                    return {"status": "rejected", "summary": "Permission escalation rejected."}
-                await workflow.execute_activity(
-                    "provision_workspace", task_id, **activity_options("provision_workspace")
-                )
-                continue
-            result_ref = None
-            if action == "execute":
-                activity_request = selection.get("activity_request")
-                if activity_request is None:
-                    failure = "Node selection omitted its activity request."
+                merge = await self._run_fanout_wave(task_id, selection)
+            else:
+                action = selection.get("action")
+                if action not in {
+                    "execute",
+                    "merge_terminal",
+                    "skip",
+                    "await_permission",
+                    "complete",
+                    "invalid",
+                }:
+                    failure = "Node selection returned an unknown coordinator action."
                     await workflow.execute_activity(
                         "record_workflow_failure",
                         args=[task_id, failure],
                         **activity_options("record_workflow_failure"),
                     )
                     return {"status": "failed", "summary": failure}
-                result_ref = await workflow.execute_activity(
-                    "run_decomposed_node",
-                    args=[task_id, activity_request],
-                    **activity_options(
-                        "run_decomposed_node", task_queue=selection.get("execution_task_queue")
-                    ),
+                if action == "complete":
+                    return None
+                if action == "invalid":
+                    failure = selection.get("reason") or "Invalid decomposed execution plan."
+                    await workflow.execute_activity(
+                        "record_workflow_failure",
+                        args=[task_id, failure],
+                        **activity_options("record_workflow_failure"),
+                    )
+                    return {"status": "failed", "summary": failure}
+                if action == "await_permission":
+                    escalation_count += 1
+                    if escalation_count > MAX_PERMISSION_ESCALATIONS:
+                        return await self._record_node_wave_escalation_limit(
+                            task_id, selection.get("node_id")
+                        )
+                    if not await self._handle_permission_escalation(task_id):
+                        return {"status": "rejected", "summary": "Permission escalation rejected."}
+                    await workflow.execute_activity(
+                        "provision_workspace", task_id, **activity_options("provision_workspace")
+                    )
+                    continue
+                result_ref = None
+                if action == "execute":
+                    activity_request = selection.get("activity_request")
+                    if activity_request is None:
+                        failure = "Node selection omitted its activity request."
+                        await workflow.execute_activity(
+                            "record_workflow_failure",
+                            args=[task_id, failure],
+                            **activity_options("record_workflow_failure"),
+                        )
+                        return {"status": "failed", "summary": failure}
+                    result_ref = await workflow.execute_activity(
+                        "run_decomposed_node",
+                        args=[task_id, activity_request],
+                        **activity_options(
+                            "run_decomposed_node", task_queue=selection.get("execution_task_queue")
+                        ),
+                    )
+                merge = await workflow.execute_activity(
+                    "merge_node_wave",
+                    args=[task_id, {"selection": selection, "result_ref": result_ref}],
+                    **activity_options("merge_node_wave"),
                 )
-            merge = await workflow.execute_activity(
-                "merge_node_wave",
-                args=[task_id, {"selection": selection, "result_ref": result_ref}],
-                **activity_options("merge_node_wave"),
-            )
             continuation = merge.get("continuation")
             if continuation in {"continue", "retry_node"}:
                 continue
@@ -210,7 +214,7 @@ class TaskExecutionWorkflow:
             )
             return {"status": "failed", "summary": failure}
 
-    async def _run_fanout_wave(self, task_id: str, selection: dict) -> dict | None:
+    async def _run_fanout_wave(self, task_id: str, selection: dict) -> dict:
         """Run every selected activity before a single ordered reconciliation.
 
         The selector persists the rollout decision, so this method remains fully
@@ -218,7 +222,7 @@ class TaskExecutionWorkflow:
         """
         items = selection.get("items") or []
         if not items:
-            return {"status": "failed", "summary": "Fan-out wave omitted its items."}
+            return {"continuation": "fail_task"}
         tasks = [
             workflow.execute_activity(
                 "run_decomposed_node",
@@ -229,22 +233,15 @@ class TaskExecutionWorkflow:
         ]
         # gather preserves selection order even when activities complete out of order.
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        if any(isinstance(result, BaseException) for result in results):
-            failure = "A started fan-out node activity failed before reconciliation."
-            await workflow.execute_activity(
-                "record_workflow_failure",
-                args=[task_id, failure],
-                **activity_options("record_workflow_failure"),
-            )
-            return {"status": "failed", "summary": failure}
-        merge = await workflow.execute_activity(
+        # A sibling can commit its terminal result before another Activity
+        # raises. Preserve those durable references and let the merge Activity
+        # project all available evidence before failing the parent task.
+        result_refs = [None if isinstance(result, BaseException) else result for result in results]
+        return await workflow.execute_activity(
             "merge_node_wave",
-            args=[task_id, {"selection": selection, "result_refs": results}],
+            args=[task_id, {"selection": selection, "result_refs": result_refs}],
             **activity_options("merge_node_wave"),
         )
-        if merge.get("continuation") not in {"continue", "retry_node"}:
-            return {"status": "failed", "summary": "Fan-out wave requires sequential recovery."}
-        return None
 
     async def _record_node_wave_escalation_limit(
         self, task_id: str, blocked_node_id: str | None

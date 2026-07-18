@@ -122,6 +122,32 @@ def test_antigravity_worker_builds_prompt_argv_command_and_settings(tmp_path: Pa
     )
 
 
+def test_antigravity_fanout_namespace_does_not_migrate_shared_repository_files(
+    tmp_path: Path,
+) -> None:
+    """Native read-only nodes keep provider setup out of the shared repository."""
+    workspace = _make_workspace(tmp_path)
+    (workspace.repo_path / ".gemini" / "skills" / "legacy").mkdir(parents=True)
+
+    _, _, metadata = build_antigravity_native_command(
+        AntigravityCommandConfig(
+            adapter=AntigravityCliRuntimeAdapter(executable="/opt/bin/agy"),
+            workspace=workspace,
+            request=WorkerRequest(
+                repo_url="https://example.com/repo.git",
+                task_text="inspect",
+                scratch_namespace="node-activity:v1:plan:node:1",
+            ),
+            prompt="inspect",
+            runtime_settings=CliRuntimeSettings(),
+            native_sandbox_enabled=True,
+        )
+    )
+
+    assert not (workspace.repo_path / ".agents").exists()
+    assert "copied_workspace_skills" not in metadata["migration_actions"]
+
+
 def test_antigravity_workspace_migration_replaces_symlink_and_copies_legacy_config(
     tmp_path: Path,
 ) -> None:

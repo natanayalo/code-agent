@@ -12,6 +12,7 @@ from typing import Any
 from uuid import uuid4
 
 from sandbox import WorkspaceHandle
+from sandbox.scratch import node_run_root, scratch_namespace_component
 from workers.antigravity_cli_adapter import (
     AntigravityCliRuntimeAdapter,
     write_antigravity_settings,
@@ -209,9 +210,12 @@ def prepare_antigravity_workspace_migration(
     *,
     adapter: AntigravityCliRuntimeAdapter,
     workspace: WorkspaceHandle,
+    scratch_namespace: str | None = None,
 ) -> tuple[Path, list[str]]:
     """Prepare Antigravity-compatible Gemini config without mutating host config."""
     agent_home = workspace.workspace_path / ".agent_home"
+    if scratch_namespace:
+        agent_home /= scratch_namespace_component(scratch_namespace)
     gemini_home = agent_home / ".gemini"
     actions: list[str] = []
     symlink_source: Path | None = None
@@ -282,26 +286,32 @@ def prepare_antigravity_workspace_migration(
 
         break
 
-    migrated_workspace_agents = False
-    legacy_workspace_skills = workspace.repo_path / ".gemini" / "skills"
-    if _copytree_if_missing(legacy_workspace_skills, workspace.repo_path / ".agents" / "skills"):
-        actions.append("copied_workspace_skills")
-        migrated_workspace_agents = True
+    # Read-only fan-out shares the repository mount. Its provider setup must
+    # therefore remain inside the per-node writable namespace rather than
+    # migrating legacy workspace files into ``repo_path/.agents``.
+    if scratch_namespace is None:
+        migrated_workspace_agents = False
+        legacy_workspace_skills = workspace.repo_path / ".gemini" / "skills"
+        if _copytree_if_missing(
+            legacy_workspace_skills, workspace.repo_path / ".agents" / "skills"
+        ):
+            actions.append("copied_workspace_skills")
+            migrated_workspace_agents = True
 
-    legacy_workspace_settings = workspace.repo_path / ".gemini" / "settings.json"
-    workspace_mcp_config = _migrated_mcp_config(legacy_workspace_settings)
-    if workspace_mcp_config and _write_json_if_missing(
-        workspace.repo_path / ".agents" / "mcp_config.json",
-        workspace_mcp_config,
-    ):
-        actions.append("migrated_workspace_mcp_config")
-        migrated_workspace_agents = True
+        legacy_workspace_settings = workspace.repo_path / ".gemini" / "settings.json"
+        workspace_mcp_config = _migrated_mcp_config(legacy_workspace_settings)
+        if workspace_mcp_config and _write_json_if_missing(
+            workspace.repo_path / ".agents" / "mcp_config.json",
+            workspace_mcp_config,
+        ):
+            actions.append("migrated_workspace_mcp_config")
+            migrated_workspace_agents = True
 
-    if migrated_workspace_agents and _exclude_local_git_path_if_present(
-        workspace.repo_path,
-        ".agents/",
-    ):
-        actions.append("excluded_workspace_agents_from_git")
+        if migrated_workspace_agents and _exclude_local_git_path_if_present(
+            workspace.repo_path,
+            ".agents/",
+        ):
+            actions.append("excluded_workspace_agents_from_git")
 
     if actions:
         logger.info(
@@ -322,9 +332,12 @@ def build_antigravity_native_command(
     native_sandbox_enabled = config.native_sandbox_enabled
     tool_permission = antigravity_tool_permission(adapter, request)
     agent_home = workspace.workspace_path / ".agent_home"
+    if request.scratch_namespace:
+        agent_home /= scratch_namespace_component(request.scratch_namespace)
     gemini_home, migration_actions = prepare_antigravity_workspace_migration(
         adapter=adapter,
         workspace=workspace,
+        scratch_namespace=request.scratch_namespace,
     )
     settings_path = write_antigravity_settings(
         agent_home=agent_home,
@@ -333,8 +346,10 @@ def build_antigravity_native_command(
         enable_terminal_sandbox=native_sandbox_enabled,
     )
     artifact_root = (
-        workspace.workspace_path / DEFAULT_NATIVE_AGENT_ARTIFACTS_DIR / f"run-{uuid4().hex}"
-    )
+        node_run_root(workspace.workspace_path, request.scratch_namespace) / "native-agent-runner"
+        if request.scratch_namespace
+        else workspace.workspace_path / DEFAULT_NATIVE_AGENT_ARTIFACTS_DIR
+    ) / f"run-{uuid4().hex}"
     log_file = artifact_root / "provider.log"
     command = adapter.build_native_command(
         prompt=prompt,

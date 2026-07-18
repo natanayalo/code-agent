@@ -188,7 +188,7 @@ def _persist_terminal_result(
 async def test_select_next_node_returns_ordered_v2_wave_for_two_eligible_nodes() -> None:
     fixture = _build_fixture()
 
-    selection = await fixture.activity.select_next_node(fixture.task_id)
+    selection = await fixture.activity.select_next_node(fixture.task_id, True)
 
     assert selection["schema_version"] == 2
     assert selection["fanout_applied"] is True
@@ -200,7 +200,7 @@ async def test_select_next_node_returns_ordered_v2_wave_for_two_eligible_nodes()
 async def test_select_next_node_does_not_overtake_an_ineligible_second_node() -> None:
     fixture = _build_fixture(second_parallel_safe=False)
 
-    selection = await fixture.activity.select_next_node(fixture.task_id)
+    selection = await fixture.activity.select_next_node(fixture.task_id, True)
 
     assert selection["action"] == "execute"
     assert selection["node_id"] == "first"
@@ -222,7 +222,7 @@ async def test_merge_v2_wave_projects_ordered_multi_result_outcomes(
     continuation: str,
 ) -> None:
     fixture = _build_fixture()
-    selection = await fixture.activity.select_next_node(fixture.task_id)
+    selection = await fixture.activity.select_next_node(fixture.task_id, True)
     refs = [
         _persist_terminal_result(
             fixture,
@@ -250,3 +250,48 @@ async def test_merge_v2_wave_projects_ordered_multi_result_outcomes(
             assert second.retry_count == 1
         if continuation in {"await_permission", "fail_task"}:
             assert merged.fanout_disabled_for_remainder is True
+
+
+@pytest.mark.parametrize(
+    "statuses",
+    [("blocked", "failed"), ("failed", "blocked")],
+)
+@pytest.mark.anyio
+async def test_merge_v2_wave_prioritizes_permission_over_retryable_failure(
+    statuses: tuple[str, str],
+) -> None:
+    """A retryable sibling cannot bypass the earlier/later blocked-node HITL flow."""
+    fixture = _build_fixture()
+    selection = await fixture.activity.select_next_node(fixture.task_id, True)
+    refs = [
+        _persist_terminal_result(fixture, item, status=status, failure_kind="worker_failure")
+        for item, status in zip(selection["items"], statuses, strict=True)
+    ]
+
+    result = fixture.activity._merge_v2_wave(fixture.task_id, selection, refs)
+
+    assert result["continuation"] == "await_permission"
+    assert result["blocked_node_id"] == ("first" if statuses[0] == "blocked" else "second")
+
+
+@pytest.mark.anyio
+async def test_merge_v2_wave_keeps_terminal_sibling_when_other_evidence_is_missing() -> None:
+    """An Activity exception reconciles committed evidence before failing the parent."""
+    fixture = _build_fixture()
+    selection = await fixture.activity.select_next_node(fixture.task_id, True)
+    first_ref = _persist_terminal_result(fixture, selection["items"][0], status="completed")
+
+    result = fixture.activity._merge_v2_wave(
+        fixture.task_id,
+        selection,
+        [first_ref, None],
+    )
+
+    assert result["continuation"] == "fail_task"
+    with session_scope(fixture.session_factory) as session:
+        snapshot = TemporalTaskStateRepository(session).get(task_id=fixture.task_id)
+        assert snapshot is not None
+        merged = OrchestratorState.model_validate(snapshot.state)
+        assert [outcome.node_id for outcome in merged.node_outcomes] == ["first", "second"]
+        assert merged.node_outcomes[0].status == "completed"
+        assert merged.node_outcomes[1].result.failure_kind == "sandbox_infra"

@@ -205,6 +205,138 @@ async def test_v2_fanout_starts_both_nodes_before_ordered_merge(monkeypatch) -> 
 
 
 @pytest.mark.anyio
+async def test_v2_fanout_permission_continues_through_the_shared_hitl_state_machine(
+    monkeypatch,
+) -> None:
+    """A blocked sibling must create and resolve the ordinary permission interaction."""
+    workflow_instance = TaskExecutionWorkflow()
+    activity_names: list[str] = []
+    selections = iter(
+        [
+            {
+                "schema_version": 2,
+                "action": "execute_wave",
+                "fanout_applied": True,
+                "wave_id": "wave",
+                "items": [
+                    {
+                        "node_id": "a",
+                        "execution_task_queue": "code-agent-codex",
+                        "activity_request": {"node_id": "a"},
+                    },
+                    {
+                        "node_id": "b",
+                        "execution_task_queue": "code-agent-codex",
+                        "activity_request": {"node_id": "b"},
+                    },
+                ],
+            },
+            {"action": "complete"},
+        ]
+    )
+
+    async def execute_activity(name: str, *args, **kwargs):
+        activity_names.append(name)
+        if name == "classify_and_plan":
+            return {}
+        if name == "decompose_task":
+            return {"execution_shape": "decomposed"}
+        if name == "select_next_node":
+            return next(selections)
+        if name == "run_decomposed_node":
+            return {"status": "completed"}
+        if name == "merge_node_wave":
+            return {"continuation": "await_permission", "blocked_node_id": "b"}
+        return {}
+
+    async def wait_condition(_predicate) -> None:
+        workflow_instance.permission_escalation_decision = True
+
+    monkeypatch.setattr(workflow, "patched", lambda _patch_id: True)
+    monkeypatch.setattr(workflow, "execute_activity", execute_activity)
+    monkeypatch.setattr(workflow, "wait_condition", wait_condition)
+
+    result = await workflow_instance._run_lifecycle("task-id")
+
+    assert result["status"] == "completed"
+    assert activity_names.count("request_permission_escalation") == 1
+    assert activity_names.count("resolve_permission_escalation") == 1
+    assert activity_names.count("provision_workspace") == 2
+
+
+@pytest.mark.anyio
+async def test_v2_fanout_merges_successful_sibling_when_another_activity_raises(
+    monkeypatch,
+) -> None:
+    """Ordered merge input represents an Activity exception as missing durable evidence."""
+    workflow_instance = TaskExecutionWorkflow()
+    merge_inputs: list[dict] = []
+
+    async def execute_activity(name: str, *args, **kwargs):
+        if name == "run_decomposed_node":
+            node_id = kwargs["args"][1]["node_id"]
+            if node_id == "b":
+                raise RuntimeError("worker transport failed")
+            return {"node_id": "a", "status": "completed"}
+        if name == "merge_node_wave":
+            merge_inputs.append(kwargs["args"][1])
+            return {"continuation": "fail_task"}
+        raise AssertionError(f"Unexpected activity: {name}")
+
+    monkeypatch.setattr(workflow, "execute_activity", execute_activity)
+
+    merge = await workflow_instance._run_fanout_wave(
+        "task-id",
+        {
+            "items": [
+                {
+                    "node_id": "a",
+                    "execution_task_queue": "queue",
+                    "activity_request": {"node_id": "a"},
+                },
+                {
+                    "node_id": "b",
+                    "execution_task_queue": "queue",
+                    "activity_request": {"node_id": "b"},
+                },
+            ]
+        },
+    )
+
+    assert merge["continuation"] == "fail_task"
+    assert merge_inputs[0]["result_refs"] == [{"node_id": "a", "status": "completed"}, None]
+
+
+@pytest.mark.anyio
+async def test_patch_decision_is_recorded_before_selecting_v2_contract(monkeypatch) -> None:
+    """Patch-off selection stays V1 even when the runtime rollout flag is on."""
+    workflow_instance = TaskExecutionWorkflow()
+    patch_calls: list[str] = []
+    selection_args: list[object] = []
+
+    async def execute_activity(name: str, *args, **kwargs):
+        if name == "decompose_task":
+            return {"execution_shape": "decomposed"}
+        if name == "select_next_node":
+            selection_args.extend(kwargs["args"])
+            return {"action": "complete"}
+        return {}
+
+    def patched(patch_id: str) -> bool:
+        patch_calls.append(patch_id)
+        return patch_id != "m25-2-bounded-selective-fanout"
+
+    monkeypatch.setattr(workflow, "patched", patched)
+    monkeypatch.setattr(workflow, "execute_activity", execute_activity)
+
+    result = await workflow_instance._run_lifecycle("task-id")
+
+    assert result["status"] == "completed"
+    assert patch_calls.index("m25-2-bounded-selective-fanout") < len(patch_calls)
+    assert selection_args == ["task-id", False]
+
+
+@pytest.mark.anyio
 async def test_decomposed_workflow_bounds_permission_escalations(monkeypatch) -> None:
     """A blocked node cannot bypass the task-level escalation cap."""
     workflow_instance = TaskExecutionWorkflow()

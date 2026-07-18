@@ -48,6 +48,7 @@ class NativeAgentRunRequest:
     prompt: str
     repo_path: Path
     workspace_path: Path
+    scratch_namespace: str | None = None
     artifact_root: Path | None = None
     timeout_seconds: int = DEFAULT_NATIVE_AGENT_TIMEOUT_SECONDS
     diff_timeout_seconds: int = DEFAULT_NATIVE_AGENT_DIFF_TIMEOUT_SECONDS

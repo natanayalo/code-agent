@@ -8,6 +8,7 @@ import logging
 from datetime import datetime
 from functools import wraps
 from typing import Any, Literal
+from uuid import uuid4
 
 from sqlalchemy import select
 from temporalio import activity
@@ -90,6 +91,8 @@ from workers import WorkerResult
 
 logger = logging.getLogger(__name__)
 
+EXECUTION_CAPACITY_LEASE_SECONDS = 60
+
 
 def _restore_task_trace_context(func: Any) -> Any:
     """Restore the ingress trace context around a Temporal activity invocation."""
@@ -170,15 +173,26 @@ class TaskExecutionActivities:
             else None
         )
 
-    def _claim_execution_capacity(self, queue_name: str, owner: str) -> bool:
+    def _claim_execution_capacity(self, queue_name: str, owner: str, token: str) -> bool:
         with session_scope(self.service.session_factory) as session:
             return ExecutionCapacityPermitRepository(session).claim(
-                queue_name=queue_name, owner=owner
+                queue_name=queue_name,
+                owner=owner,
+                token=token,
+                lease_seconds=EXECUTION_CAPACITY_LEASE_SECONDS,
             )
 
-    def _release_execution_capacity(self, owner: str) -> None:
+    def _heartbeat_execution_capacity(self, owner: str, token: str) -> bool:
         with session_scope(self.service.session_factory) as session:
-            ExecutionCapacityPermitRepository(session).release(owner=owner)
+            return ExecutionCapacityPermitRepository(session).heartbeat(
+                owner=owner,
+                token=token,
+                lease_seconds=EXECUTION_CAPACITY_LEASE_SECONDS,
+            )
+
+    def _release_execution_capacity(self, owner: str, token: str) -> None:
+        with session_scope(self.service.session_factory) as session:
+            ExecutionCapacityPermitRepository(session).release(owner=owner, token=token)
 
     def _get_current_state(self, task_id: str) -> OrchestratorState:
         with session_scope(self.service.session_factory) as session:
@@ -587,7 +601,9 @@ class TaskExecutionActivities:
 
     @activity.defn(name="select_next_node")
     @_restore_task_trace_context
-    async def select_next_node(self, task_id: str) -> dict[str, Any]:
+    async def select_next_node(
+        self, task_id: str, fanout_contract_enabled: bool = False
+    ) -> dict[str, Any]:
         """Read durable state and choose one deterministic node-wave action."""
         state = await self.service._run_blocking(self._get_current_state, task_id)
         if state.decomposed_plan is None or state.decomposed_plan.status != "decomposed":
@@ -718,7 +734,8 @@ class TaskExecutionActivities:
                         state.route.chosen_profile if state.route else None
                     )
                     if not (
-                        self.service.decomposed_fanout_enabled
+                        fanout_contract_enabled
+                        and self.service.decomposed_fanout_enabled
                         and profile is not None
                         and is_read_only_fanout_eligible(
                             parent_read_only=is_task_read_only(state),
@@ -899,19 +916,28 @@ class TaskExecutionActivities:
                 )
             return result
 
+        active_permit_token: str | None = None
+
         async def _execute_under_claim_recovery() -> (
             tuple[NodeActivityResultRef, NodeOutcome | None]
         ):
+            nonlocal active_permit_token
             while True:
+                permit_token: str | None = None
+                capacity_claimed = False
                 if node_activity.execution_capacity_key:
+                    permit_token = uuid4().hex
                     claimed = await self.service._run_blocking(
                         self._claim_execution_capacity,
                         node_activity.execution_capacity_key,
                         node_activity.logical_activity_key,
+                        permit_token,
                     )
                     if not claimed:
                         await asyncio.sleep(CLAIM_HEARTBEAT_SECONDS)
                         continue
+                    capacity_claimed = True
+                    active_permit_token = permit_token
                 try:
                     return await NodeExecutionService(self.service.session_factory).execute(
                         activity=node_activity,
@@ -926,14 +952,26 @@ class TaskExecutionActivities:
                     # over with the same logical key.
                     await asyncio.sleep(CLAIM_HEARTBEAT_SECONDS)
                 finally:
-                    if node_activity.execution_capacity_key:
+                    if node_activity.execution_capacity_key and capacity_claimed and permit_token:
+                        active_permit_token = None
                         await self.service._run_blocking(
-                            self._release_execution_capacity, node_activity.logical_activity_key
+                            self._release_execution_capacity,
+                            node_activity.logical_activity_key,
+                            permit_token,
                         )
 
         async def _heartbeat() -> None:
             while True:
                 activity.heartbeat()
+                if node_activity.execution_capacity_key and active_permit_token:
+                    permit_token = active_permit_token
+                    renewed = await self.service._run_blocking(
+                        self._heartbeat_execution_capacity,
+                        node_activity.logical_activity_key,
+                        permit_token,
+                    )
+                    if not renewed and active_permit_token == permit_token:
+                        raise NodeActivityClaimLost("Execution capacity permit heartbeat was lost.")
                 await asyncio.sleep(5)
 
         heartbeat = asyncio.create_task(_heartbeat())
@@ -1121,11 +1159,17 @@ class TaskExecutionActivities:
         return result.model_dump(mode="json")
 
     def _merge_v2_wave(
-        self, task_id: str, selection_data: dict[str, Any], result_refs: list[dict[str, Any]]
+        self,
+        task_id: str,
+        selection_data: dict[str, Any],
+        result_refs: list[dict[str, Any] | None],
     ) -> dict[str, Any]:
         """Project every fan-out result and the parent snapshot in one transaction."""
         selection = NodeWaveSelectionV2.model_validate(selection_data)
-        refs = [NodeActivityResultRef.model_validate(item) for item in result_refs]
+        refs = [
+            NodeActivityResultRef.model_validate(item) if item is not None else None
+            for item in result_refs
+        ]
         if len(selection.items) != len(refs):
             raise ValueError("Fan-out merge result count does not match its selection.")
         with session_scope(self.service.session_factory) as session:
@@ -1139,20 +1183,40 @@ class TaskExecutionActivities:
             if state.decomposed_plan is None:
                 raise ValueError("Task is not decomposed.")
             contracts = {node.node_id: node for node in state.decomposed_plan.nodes or []}
+            missing_evidence: set[str] = set()
             for item, result_ref in zip(selection.items, refs, strict=True):
                 node = ExecutionPlanRepository(session).get_node(plan.id, item.node_id)
                 if (
                     node is None
                     or not node.terminal_result_payload
                     or not node.terminal_result_digest
+                    or node.latest_logical_activity_key
+                    != item.activity_request.logical_activity_key
                 ):
-                    raise ValueError("Fan-out node result is unavailable for merge.")
-                if result_ref.logical_activity_key != item.activity_request.logical_activity_key:
+                    missing_evidence.add(item.node_id)
+                    continue
+                if result_ref is not None and (
+                    result_ref.node_id != item.node_id
+                    or result_ref.logical_activity_key != item.activity_request.logical_activity_key
+                ):
                     raise ValueError("Fan-out result does not belong to its selected node.")
-                if result_ref.result_digest != node.terminal_result_digest:
+                if (
+                    result_ref is not None
+                    and result_ref.result_digest != node.terminal_result_digest
+                ):
                     raise ValueError("Fan-out result digest does not match durable evidence.")
                 WorkerResult.model_validate(node.terminal_result_payload["worker_result"])
                 NodeOutcome.model_validate(node.terminal_result_payload["node_outcome"])
+            for item in selection.items:
+                if item.node_id not in missing_evidence:
+                    continue
+                ExecutionPlanRepository(session).update_node(
+                    plan_id=plan.id,
+                    node_id=item.node_id,
+                    status=ExecutionPlanNodeStatus.FAILED,
+                    failure_kind="sandbox_infra",
+                    finished_at=utc_now(),
+                )
             outcomes: list[NodeOutcome] = []
             for node in plan.nodes:
                 if node.terminal_result_payload:
@@ -1168,18 +1232,39 @@ class TaskExecutionActivities:
                             }
                         )
                     )
+                elif node.node_id in missing_evidence:
+                    selected = next(
+                        item for item in selection.items if item.node_id == node.node_id
+                    )
+                    outcomes.append(
+                        NodeOutcome(
+                            node_id=node.node_id,
+                            status="failed",
+                            result=WorkerResult(
+                                status="failure",
+                                failure_kind="sandbox_infra",
+                                summary=(
+                                    "Fan-out activity ended without durable terminal evidence."
+                                ),
+                            ),
+                            dependencies=list(node.depends_on or []),
+                            attempts=selected.activity_request.logical_attempt,
+                            logical_activity_key=selected.activity_request.logical_activity_key,
+                        )
+                    )
             state.node_outcomes = outcomes
             state.result = _aggregate_decomposed_results(outcomes)
             continuation: Literal["continue", "retry_node", "await_permission", "fail_task"] = (
                 "continue"
             )
             blocked: NodeOutcome | None = None
+            if missing_evidence:
+                continuation = "fail_task"
             for outcome in outcomes:
                 contract = contracts.get(outcome.node_id)
                 if outcome.result.failure_kind == "read_only_violation":
                     state.fanout_disabled_for_remainder = True
                     continuation = "fail_task"
-                    break
                 if outcome.status == "blocked" and blocked is None:
                     blocked = outcome
                     state.fanout_disabled_for_remainder = True
@@ -1192,12 +1277,14 @@ class TaskExecutionActivities:
                             finished_at=utc_now(),
                         )
                         continuation = "fail_task"
-                    else:
+                    elif continuation != "fail_task":
                         continuation = "await_permission"
                 elif (
                     outcome.status == "failed"
                     and contract
                     and outcome.attempts < contract.max_attempts
+                    and outcome.result.failure_kind != "read_only_violation"
+                    and continuation != "fail_task"
                 ):
                     ExecutionPlanRepository(session).update_node(
                         plan_id=plan.id,
@@ -1205,7 +1292,8 @@ class TaskExecutionActivities:
                         status=ExecutionPlanNodeStatus.PENDING,
                         retry_count=outcome.attempts,
                     )
-                    continuation = "retry_node"
+                    if continuation == "continue":
+                        continuation = "retry_node"
             TemporalTaskStateRepository(session).upsert(
                 task_id=task_id, state=state.model_dump(mode="json")
             )

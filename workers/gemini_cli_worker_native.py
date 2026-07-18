@@ -21,6 +21,7 @@ from sandbox import (
     WorkspaceHandle,
 )
 from sandbox.redact import SecretRedactor
+from sandbox.scratch import scratch_namespace_component
 from tools import (
     ToolPermissionLevel,
 )
@@ -107,6 +108,14 @@ def _workspace_artifacts(workspace: WorkspaceHandle) -> list[ArtifactReference]:
             artifact_type="workspace",
         )
     ]
+
+
+def _native_gemini_home(workspace_path: Path, scratch_namespace: str | None) -> Path:
+    """Return the native provider home for an optional isolated node namespace."""
+    agent_home = workspace_path / ".agent_home"
+    if scratch_namespace:
+        agent_home /= scratch_namespace_component(scratch_namespace)
+    return agent_home / ".gemini"
 
 
 def _prepare_workspace_gemini_home(
@@ -470,7 +479,9 @@ class GeminiCliWorkerNativeMixin:
             command_redactions.append(prompt)
             stdin_prompt = False
             native_env = dict(native_env or {})
-            native_env["GEMINI_HOME"] = str(workspace.workspace_path / ".agent_home" / ".gemini")
+            native_env["GEMINI_HOME"] = str(
+                _native_gemini_home(workspace.workspace_path, request.scratch_namespace)
+            )
         else:
             command = self._build_native_command(
                 request=request,
@@ -482,6 +493,7 @@ class GeminiCliWorkerNativeMixin:
                 prompt=prompt,
                 repo_path=workspace.repo_path,
                 workspace_path=workspace.workspace_path,
+                scratch_namespace=request.scratch_namespace,
                 artifact_root=artifact_root,
                 timeout_seconds=runtime_settings.worker_timeout_seconds,
                 diff_timeout_seconds=runtime_settings.command_timeout_seconds,
