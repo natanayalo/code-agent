@@ -20,6 +20,7 @@ from sandbox import (
 )
 from sandbox.policy import is_in_container
 from sandbox.redact import SecretRedactor
+from sandbox.scratch import node_run_root
 from tools import (
     ToolPermissionLevel,
 )
@@ -374,17 +375,20 @@ class CodexCliWorkerNativeMixin:
                 tool_registry=self.tool_registry,  # type: ignore[attr-defined]
             )
         )
-        final_message_path = workspace.workspace_path / ".code-agent" / "native-final-message.json"
+        node_root = (
+            node_run_root(workspace.workspace_path, request.scratch_namespace)
+            if request.scratch_namespace
+            else workspace.workspace_path / ".code-agent"
+        )
+        final_message_path = node_root / "native-final-message.json"
         final_message_path.parent.mkdir(parents=True, exist_ok=True)
         events_path = (
-            workspace.workspace_path / ".code-agent" / "native-events.jsonl"
+            node_root / "native-events.jsonl"
             if self.native_event_capture_enabled  # type: ignore[attr-defined]
             else None
         )
         output_schema_path = (
-            workspace.workspace_path / ".code-agent" / "native-response.schema.json"
-            if request.response_schema
-            else None
+            node_root / "native-response.schema.json" if request.response_schema else None
         )
         if output_schema_path:
             output_schema_path.write_text(
@@ -404,6 +408,10 @@ class CodexCliWorkerNativeMixin:
             prompt=self._build_native_prompt(system_prompt=system_prompt, request=request),
             repo_path=workspace.repo_path,
             workspace_path=workspace.workspace_path,
+            scratch_namespace=request.scratch_namespace,
+            artifact_root=(
+                node_root / "native-agent-runner" if request.scratch_namespace else None
+            ),
             timeout_seconds=runtime_settings.worker_timeout_seconds,
             diff_timeout_seconds=runtime_settings.command_timeout_seconds,
             changed_files_timeout_seconds=runtime_settings.command_timeout_seconds,

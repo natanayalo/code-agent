@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import hashlib
 import json
 import logging
@@ -3902,14 +3901,14 @@ def summarize_result(state_input: OrchestratorState) -> dict[str, Any]:
 
     if state.task_plan is not None and state.task_plan.triggered:
         plan_json = state.task_plan.model_dump_json()
-        plan_payload = base64.b64encode(plan_json.encode("utf-8")).decode("utf-8")
+        plan_digest = hashlib.sha256(plan_json.encode("utf-8")).hexdigest()
         result = result.model_copy(
             update={
                 "artifacts": [
                     *result.artifacts,
                     ArtifactReference(
                         name="task_plan",
-                        uri=f"data:application/json;base64,{plan_payload}",
+                        uri=f"task-plan://sha256/{plan_digest}",
                         artifact_type="result_summary",
                     ),
                 ]

@@ -14,6 +14,7 @@ EXPECTED_TABLES = {
     "execution_plans",
     "execution_plan_nodes",
     "execution_plan_node_attempts",
+    "execution_capacity_permits",
     "human_interactions",
     "inbound_deliveries",
     "memory_admission_decisions",

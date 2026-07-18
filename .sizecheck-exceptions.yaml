@@ -16,6 +16,7 @@ file_exceptions:
   evaluation/harness.py: File exceeds length due to comprehensive evaluation orchestration and formatting requirements.
   tests/unit/test_evaluation_harness.py: File exceeds length due to extensive test coverage for all reporting permutations.
   tests/integration/test_temporal_runtime.py: Comprehensive Temporal integration coverage shares one Compose/test-fixture boundary for lifecycle, HITL, cancellation, retry, and projection behavior.
+  tests/unit/test_native_agent_runner.py: Comprehensive native-agent runner contract coverage shares isolated environment and artifact fixtures.
   orchestrator/temporal/activities.py: Temporal activity adapters keep the product projection and worker handoff contract together.
   tests/unit/test_memory_observation.py: Contains comprehensive unit tests for all memory observation, candidate extraction, and trace-bridging rules.
 function_exceptions:
@@ -84,9 +85,11 @@ function_exceptions:
     execute: Coordinates the node claim, worker execution, and fenced terminal projection across separate transactions.
   orchestrator/temporal/activities.py:
     select_next_node: Reads the durable plan and snapshot together to produce a deterministic node-wave selection without parent-state writes.
+    _select_next_node: Versioned selector wrapper keeps M25.1B and V2 contracts on one deterministic plan-read path.
     _select: Keeps plan ordering, terminal replay, dependency, and logical-attempt selection in one read-only transaction.
     run_decomposed_node: Reconstructs one worker request while coordinating Temporal and durable-claim heartbeat ownership.
     merge_node_wave: Validates durable result payloads and projects the sole parent node-wave state transition atomically.
+    _merge_v2_wave: Projects every V2 fan-out result, aggregate outcome, retry transition, and Temporal snapshot in one transaction.
     _merge: Rebuilds node outcomes from durable evidence while coordinating skip persistence and logical retry state in one transaction.
   orchestrator/temporal/workflows.py:
     _run_decomposed_node_waves: Coordinates versioned select, execute, merge, and bounded permission continuation in one deterministic workflow loop.

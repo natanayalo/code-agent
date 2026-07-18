@@ -570,6 +570,9 @@ Progress:
 - [x] M25.1B: Temporal one-node-wave orchestration
   - complete version-gated select-next, node Activity, and merge-wave orchestration
     without concurrent writes to parent Temporal state
+- [x] M25.2: replay-safe bounded read-only fan-out
+  - version-gated two-node waves, queue permits, ordered transactional merge,
+    task-specific read-only planning, and isolated provider/scratch lifecycle
 
 ### M26 Review Comment Repair
 

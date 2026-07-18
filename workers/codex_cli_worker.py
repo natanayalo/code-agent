@@ -175,7 +175,7 @@ class CodexCliWorker(CodexCliWorkerNativeMixin, Worker):
 
         self.sandbox_adapter = SandboxSessionAdapter(
             container_manager=self.container_manager,
-            session_factory=self._session_factory,
+            session_factory=self._session_factory,  # type: ignore[arg-type]
         )
         self.runtime_executor = RuntimeExecutor(
             runtime_adapter=self.runtime_adapter,

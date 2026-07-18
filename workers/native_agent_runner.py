@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import shlex
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -22,6 +23,7 @@ from apps.observability import (
     with_span_kind,
 )
 from sandbox.redact import SecretRedactor, sanitize_command
+from sandbox.scratch import node_agent_home, node_run_root
 from workers.adapter_utils import truncate_detail_keep_tail
 from workers.base import ArtifactReference
 from workers.cli_runtime import collect_changed_files_since_ref_from_repo_path
@@ -59,6 +61,14 @@ _FINAL_MESSAGE_FIELDS: Final = (
 )
 _LLM_METADATA_ATTR_PREFIX: Final[str] = "code_agent.native.llm_wrapper"
 _JSON_PAYLOAD_ATTR_PREFIX: Final[str] = "code_agent.native.json_payload"
+_INTERIM_STATUS_START_MARKERS: Final[tuple[str, ...]] = (
+    "i have started ",
+    "i've started ",
+)
+_INTERIM_STATUS_COMPLETION_MARKERS: Final[tuple[str, ...]] = (
+    "wait for the task to complete",
+    "report back",
+)
 
 # Standardized system environment variables that are safe to propagate to the sandbox.
 SAFE_SYSTEM_ENV_ALLOWLIST: Final[frozenset[str]] = frozenset(
@@ -119,12 +129,26 @@ _SIGNAL_EXIT_CODES: Final = {
 }
 
 
+def _native_sandbox_db_path(request: NativeAgentRunRequest) -> Path:
+    """Return this run's isolated sandbox database path."""
+    root = (
+        node_run_root(request.workspace_path, request.scratch_namespace)
+        if request.scratch_namespace
+        else request.workspace_path
+    )
+    return root / ".sandbox.db"
+
+
 def _build_effective_env(request: NativeAgentRunRequest) -> dict[str, str]:
     effective_env: dict[str, str] = {
         k: v for k, v in os.environ.items() if k.upper() in SAFE_SYSTEM_ENV_ALLOWLIST
     }
     auth_home_overrides: dict[str, str] = {}
-    agent_home = request.workspace_path / ".agent_home"
+    agent_home = (
+        node_agent_home(request.workspace_path, request.scratch_namespace)
+        if request.scratch_namespace
+        else request.workspace_path / ".agent_home"
+    )
     agent_home.mkdir(parents=True, exist_ok=True)
     agent_home_value = str(agent_home)
     effective_env["HOME"] = agent_home_value
@@ -144,22 +168,42 @@ def _build_effective_env(request: NativeAgentRunRequest) -> dict[str, str]:
                 continue
             effective_env[k] = v
 
+    if request.scratch_namespace:
+        for key, source in auth_home_overrides.items():
+            target = agent_home / (".codex" if key == "CODEX_HOME" else ".gemini")
+            _copy_provider_auth_home(Path(source), target)
+
     effective_env.update(
         {
             "HOME": agent_home_value,
-            "CODEX_HOME": "/root/.codex",
-            "GEMINI_HOME": "/root/.gemini",
+            "CODEX_HOME": str(agent_home / ".codex"),
+            "GEMINI_HOME": str(agent_home / ".gemini"),
             "CODE_AGENT_ENABLE_TRACING": "0",
             "CODE_AGENT_ENABLE_TASK_SERVICE": "0",
             "CODE_AGENT_INDEPENDENT_VERIFIER_ENABLED": "0",
-            "DATABASE_URL": f"sqlite:///{request.workspace_path.as_posix()}/.sandbox.db",
+            "DATABASE_URL": f"sqlite:///{_native_sandbox_db_path(request)}",
             "TELEGRAM_BOT_TOKEN": "",
         }
     )
     if "DBUS_SESSION_BUS_ADDRESS" not in effective_env and "DBUS_SESSION_BUS_ADDRESS" in os.environ:
         effective_env["DBUS_SESSION_BUS_ADDRESS"] = os.environ["DBUS_SESSION_BUS_ADDRESS"]
-    effective_env.update(auth_home_overrides)
+    if not request.scratch_namespace:
+        effective_env.update(auth_home_overrides)
     return effective_env
+
+
+def _copy_provider_auth_home(source: Path, target: Path) -> None:
+    """Copy only provider authentication/config files into a node-local home."""
+    try:
+        if source.resolve() == target.resolve():
+            return
+    except OSError:
+        return
+    target.mkdir(parents=True, exist_ok=True)
+    for name in ("auth.json", "config.toml", "settings.json"):
+        candidate = source / name
+        if candidate.is_file():
+            shutil.copy2(candidate, target / name)
 
 
 def _build_friction_report_dict(
@@ -187,6 +231,14 @@ def _sanitize_run_command(command_text: str, request: NativeAgentRunRequest) -> 
     if active_redactions:
         sanitized = SecretRedactor(active_redactions).redact(sanitized)
     return sanitized
+
+
+def _is_incomplete_interim_status(text: str) -> bool:
+    """Return whether a native agent emitted a status update instead of a result."""
+    normalized_text = " ".join(text.lower().split())
+    return any(marker in normalized_text for marker in _INTERIM_STATUS_START_MARKERS) and any(
+        marker in normalized_text for marker in _INTERIM_STATUS_COMPLETION_MARKERS
+    )
 
 
 def _determine_exit_status(
@@ -220,6 +272,23 @@ def _determine_exit_status(
                 return (
                     "error",
                     "NATIVE_AGENT_PROVIDER_FAILURE: provider request was not completed.",
+                    friction_reports,
+                )
+            if _is_incomplete_interim_status(combined_text):
+                friction_reports.append(
+                    _build_friction_report_dict(
+                        source="tooling",
+                        description=(
+                            "Native agent exited after reporting an interim status instead of "
+                            "a completed result."
+                        ),
+                        impact="blocked",
+                        context={"exit_code": completed_returncode},
+                    )
+                )
+                return (
+                    "error",
+                    "NATIVE_AGENT_INCOMPLETE_RESULT: native agent produced only an interim status.",
                     friction_reports,
                 )
             if (
@@ -392,6 +461,7 @@ def _handle_native_agent_timeout(
     started_at: float,
     artifact_root: Path,  # type: ignore[name-defined]
     events_path: Path | None,  # type: ignore[name-defined]
+    provider_log_path: Path | None,  # type: ignore[name-defined]
 ) -> tuple[bool, NativeAgentRunResult | None]:
     """Handle timeout. Returns (should_retry, run_result)."""
     stdout_text = _normalize_stream_payload(exc.stdout)
@@ -421,6 +491,8 @@ def _handle_native_agent_timeout(
                 stdout_text=stdout_text,
                 stderr_text=stderr_text,
                 events_path=events_path,
+                provider_log_path=provider_log_path,
+                redactor=request.redactor,
             )
         )
     except (OSError, subprocess.SubprocessError, ValueError, RuntimeError) as e:
@@ -459,6 +531,7 @@ def _execute_native_agent_subprocess(
     started_at: float,
     artifact_root: Path,  # type: ignore[name-defined]
     events_path: Path | None,  # type: ignore[name-defined]
+    provider_log_path: Path | None = None,  # type: ignore[name-defined]
 ) -> subprocess.CompletedProcess[str] | NativeAgentRunResult:
     """Run the native agent subprocess with retries for network errors."""
     max_retries = 2
@@ -511,6 +584,7 @@ def _execute_native_agent_subprocess(
                 started_at,
                 artifact_root,
                 events_path,
+                provider_log_path,
             )
             if should_retry:
                 retry_count += 1
@@ -566,6 +640,7 @@ def _build_native_agent_artifacts(
     base_git_ref: str | None,
     artifact_root: Path,  # type: ignore[name-defined]
     events_path: Path | None,  # type: ignore[name-defined]
+    provider_log_path: Path | None,  # type: ignore[name-defined]
     final_message_path: Path | None,  # type: ignore[name-defined]
     stdout_text: str,
     stderr_text: str,
@@ -578,6 +653,8 @@ def _build_native_agent_artifacts(
             stdout_text=stdout_text,
             stderr_text=stderr_text,
             events_path=events_path,
+            provider_log_path=provider_log_path,
+            redactor=request.redactor,
         )
     )
 
@@ -614,6 +691,7 @@ def _collect_native_agent_results(
     started_at: float,
     artifact_root: Path,  # type: ignore[name-defined]
     events_path: Path | None,  # type: ignore[name-defined]
+    provider_log_path: Path | None,  # type: ignore[name-defined]
     final_message_path: Path | None,  # type: ignore[name-defined]
 ) -> NativeAgentRunResult:
     """Collect artifacts, determine status, and finalize the result."""
@@ -629,6 +707,7 @@ def _collect_native_agent_results(
             base_git_ref,
             artifact_root,
             events_path,
+            provider_log_path,
             final_message_path,
             stdout_text,
             stderr_text,
@@ -704,7 +783,7 @@ def _collect_native_agent_results(
 
 def _setup_native_agent_paths(
     request: NativeAgentRunRequest,
-) -> tuple[Path, Path | None, Path | None, Path]:  # type: ignore[name-defined]
+) -> tuple[Path, Path | None, Path | None, Path | None, Path]:  # type: ignore[name-defined]
     repo_path = request.repo_path.expanduser().resolve()
     workspace_path = request.workspace_path.expanduser().resolve()
     final_message_path = (
@@ -713,13 +792,23 @@ def _setup_native_agent_paths(
         else None
     )
     events_path = request.events_path.expanduser().resolve() if request.events_path else None
+    provider_log_path = (
+        request.provider_log_path.expanduser().resolve() if request.provider_log_path else None
+    )
     artifact_root = (
-        workspace_path
-        / DEFAULT_NATIVE_AGENT_ARTIFACTS_DIR
-        / f"run-{int(time.time() * 1000)}-{time.monotonic_ns()}"
+        request.artifact_root.expanduser().resolve()
+        if request.artifact_root
+        else (
+            (
+                node_run_root(workspace_path, request.scratch_namespace) / "native-agent-runner"
+                if request.scratch_namespace
+                else workspace_path / DEFAULT_NATIVE_AGENT_ARTIFACTS_DIR
+            )
+            / f"run-{int(time.time() * 1000)}-{time.monotonic_ns()}"
+        )
     )
     artifact_root.mkdir(parents=True, exist_ok=True)
-    return repo_path, final_message_path, events_path, artifact_root
+    return repo_path, final_message_path, events_path, provider_log_path, artifact_root
 
 
 def _capture_git_head(repo_path: Path, *, timeout_seconds: int) -> str | None:
@@ -750,7 +839,9 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
     if not request.command:
         raise ValueError("NativeAgentRunRequest.command must include at least one argv token.")
 
-    repo_path, final_message_path, events_path, artifact_root = _setup_native_agent_paths(request)
+    repo_path, final_message_path, events_path, provider_log_path, artifact_root = (
+        _setup_native_agent_paths(request)
+    )
 
     base_git_ref = _capture_git_head(
         repo_path,
@@ -770,7 +861,8 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
             redactor=request.redactor,
         )
         set_current_span_attribute(
-            NATIVE_AGENT_COMMAND_ATTRIBUTE, sanitize_command(command_text, request.redactor)
+            NATIVE_AGENT_COMMAND_ATTRIBUTE,
+            sanitize_command(command_text, request.redactor),
         )
 
         try:
@@ -781,6 +873,7 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
                 started_at=started_at,
                 artifact_root=artifact_root,
                 events_path=events_path,
+                provider_log_path=provider_log_path,
             )
         except OSError as exc:
             return _finalize_native_agent_run(
@@ -816,5 +909,6 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
             started_at=started_at,
             artifact_root=artifact_root,
             events_path=events_path,
+            provider_log_path=provider_log_path,
             final_message_path=final_message_path,
         )

@@ -569,4 +569,7 @@ def build_task_service_from_env(
         ),
         workspace_root=resolved_workspace_root,
         checkpoint_path=resolved_env.get(CHECKPOINT_DB_PATH_ENV_VAR),
+        decomposed_fanout_enabled=_is_enabled(
+            resolved_env.get("CODE_AGENT_DECOMPOSED_FANOUT_ENABLED")
+        ),
     )

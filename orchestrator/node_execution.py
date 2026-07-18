@@ -44,6 +44,7 @@ class NodeActivityRequest(OrchestratorModel):
     logical_activity_key: str
     effective_input_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     task_trace_id: str | None = None
+    execution_capacity_key: str | None = None
 
     @model_validator(mode="after")
     def validate_logical_activity_key(self) -> NodeActivityRequest:

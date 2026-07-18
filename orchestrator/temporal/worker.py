@@ -39,6 +39,7 @@ async def start_temporal_worker(
             activities.classify_and_plan,
             activities.decompose_task,
             activities.select_next_node,
+            activities.select_next_node_v2,
             activities.merge_node_wave,
             activities.fail_node_permission_escalation,
             activities.load_memory,
@@ -58,6 +59,10 @@ async def start_temporal_worker(
         client,
         task_queue=CODEX_EXECUTION_TASK_QUEUE,
         activities=[activities.run_worker, activities.run_decomposed_node],
+        # M25.2's local backstop. The durable selector remains responsible for
+        # choosing safe waves; this prevents a single worker process from
+        # accepting an unbounded number of execution activities.
+        max_concurrent_activities=2,
     )
 
     logger.info("Temporal workers successfully started. Running worker loops...")

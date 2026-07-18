@@ -116,3 +116,35 @@ raise SystemExit(0)
     assert result.status == "error"
     assert result.summary == "NATIVE_AGENT_PROVIDER_FAILURE: provider request was not completed."
     assert result.friction_reports[0]["source"] == "tooling"
+
+
+def test_native_agent_runner_rejects_interim_status_with_zero_exit(tmp_path: Path) -> None:
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    _init_git_repo(repo_path)
+    fake_binary = _write_fake_binary(
+        tmp_path / "fake-interim-success.py",
+        """#!/usr/bin/env python3
+print("I have started a search for AGENTS.md in the workspace directories. "
+      "I'll wait for the task to complete and report back.", flush=True)
+raise SystemExit(0)
+""",
+    )
+
+    result = run_native_agent(
+        NativeAgentRunRequest(
+            command=[str(fake_binary)],
+            prompt="task",
+            repo_path=repo_path,
+            workspace_path=tmp_path,
+            timeout_seconds=10,
+        )
+    )
+
+    assert result.status == "error"
+    assert result.summary == (
+        "NATIVE_AGENT_INCOMPLETE_RESULT: native agent produced only an interim status."
+    )
+    assert result.friction_reports[0]["description"].startswith(
+        "Native agent exited after reporting an interim status"
+    )

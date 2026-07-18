@@ -16,11 +16,16 @@ from sandbox import (
     WorkspaceCleanupPolicy,
     WorkspaceHandle,
 )
+from sandbox.scratch import node_agent_home, node_run_root
 from tools import DEFAULT_TOOL_REGISTRY
 from workers import CodexCliWorker, ReviewResult, WorkerRequest
 from workers.base import ArtifactReference
 from workers.cli_runtime import CliRuntimeMessage, CliRuntimeSettings, CliRuntimeStep
-from workers.native_agent_runner import NativeAgentRunResult
+from workers.native_agent_runner import (
+    NativeAgentRunRequest,
+    NativeAgentRunResult,
+    _build_effective_env,
+)
 
 
 class _FakeWorkspaceManager:
@@ -542,3 +547,80 @@ def test_codex_native_runtime_writes_response_schema_file(tmp_path: Path) -> Non
     assert schema_path.exists()
     assert json.loads(schema_path.read_text(encoding="utf-8")) == {"type": "object"}
     assert result.status == "success"
+
+
+def test_codex_native_runs_isolate_all_writable_output_paths_by_hashed_namespace(
+    tmp_path: Path,
+) -> None:
+    """Concurrent node IDs cannot collide or escape their native writable roots."""
+    workspace = _workspace_handle(tmp_path)
+    worker = CodexCliWorker(
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(
+            DockerSandboxContainer(
+                working_dir="/workspace",
+                container_name="native-isolation",
+                image="python:3.12",
+                workspace=workspace,
+            )
+        ),
+        runtime_adapter=_ScriptedAdapter([CliRuntimeStep(kind="final", final_output="done")]),
+        tool_registry=DEFAULT_TOOL_REGISTRY,
+        native_event_capture_enabled=True,
+    )
+    first = WorkerRequest(task_text="first", scratch_namespace="../../first")
+    second = WorkerRequest(task_text="second", scratch_namespace="node:second")
+
+    first_run, _ = worker._prepare_native_agent_run_request(
+        first,
+        workspace,
+        CliRuntimeSettings(),
+        WorkerRuntimeMode.NATIVE_AGENT,
+        "system",
+    )
+    second_run, _ = worker._prepare_native_agent_run_request(
+        second,
+        workspace,
+        CliRuntimeSettings(),
+        WorkerRuntimeMode.NATIVE_AGENT,
+        "system",
+    )
+
+    first_root = node_run_root(workspace.workspace_path, first.scratch_namespace)
+    second_root = node_run_root(workspace.workspace_path, second.scratch_namespace)
+    assert first_root != second_root
+    assert first_run.final_message_path is not None
+    assert first_run.events_path is not None
+    assert first_run.artifact_root is not None
+    assert first_run.final_message_path.parent == first_root
+    assert first_run.events_path.parent == first_root
+    assert first_run.artifact_root.parent == first_root
+    assert second_run.final_message_path is not None
+    assert second_run.final_message_path.parent == second_root
+    assert ".." not in first_root.parts
+
+    first_env = _build_effective_env(
+        NativeAgentRunRequest(
+            command=["codex"],
+            prompt="first",
+            repo_path=workspace.repo_path,
+            workspace_path=workspace.workspace_path,
+            scratch_namespace=first.scratch_namespace,
+        )
+    )
+    second_env = _build_effective_env(
+        NativeAgentRunRequest(
+            command=["codex"],
+            prompt="second",
+            repo_path=workspace.repo_path,
+            workspace_path=workspace.workspace_path,
+            scratch_namespace=second.scratch_namespace,
+        )
+    )
+    assert first_env["HOME"] == str(
+        node_agent_home(workspace.workspace_path, first.scratch_namespace)
+    )
+    assert first_env["HOME"] != second_env["HOME"]
+    assert first_env["CODEX_HOME"] != second_env["CODEX_HOME"]
+    assert ".code-agent-scratch" in first_env["CODEX_HOME"]
+    assert first_env["DATABASE_URL"] != second_env["DATABASE_URL"]

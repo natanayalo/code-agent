@@ -147,6 +147,7 @@ class TaskExecutionService:
         workspace_root: str | Path | None = None,
         retention_seconds: int | None = 7 * 24 * 60 * 60,
         checkpoint_path: str | Path | None = None,
+        decomposed_fanout_enabled: bool = False,
     ) -> None:
         self.session_factory = session_factory
         self.worker = worker
@@ -166,6 +167,9 @@ class TaskExecutionService:
         )
         self.retention_seconds = None if retention_seconds is None else max(0, retention_seconds)
         self.checkpoint_path = checkpoint_path
+        # Read once at service construction; Temporal workflows replay the
+        # decision returned by selection rather than consulting process state.
+        self.decomposed_fanout_enabled = decomposed_fanout_enabled
         self._checkpointer: BaseCheckpointSaver | None = None
         self._checkpointer_cm: AbstractAsyncContextManager[BaseCheckpointSaver] | None = None
         self._graph: Any | None = None

@@ -91,6 +91,10 @@ legacy queue intentionally (for fallback or API-only development), set
 `CODE_AGENT_EXECUTION_RUNTIME=legacy`; the older `CODE_AGENT_USE_TEMPORAL`
 boolean remains a compatibility fallback only.
 
+The M25.2 decomposed-task fan-out pilot is disabled by default. Set
+`CODE_AGENT_DECOMPOSED_FANOUT_ENABLED=true` only to enable version-gated,
+read-only two-node waves.
+
 Verify service health:
 
 ```bash

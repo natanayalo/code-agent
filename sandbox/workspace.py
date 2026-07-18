@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from sandbox.constants import DEFAULT_SANDBOX_MAX_COMMAND_TIMEOUT_SECONDS
 from sandbox.redact import mask_url_credentials as _mask_url_credentials
+from sandbox.scratch import workspace_scratch_root
 
 logger = logging.getLogger(__name__)
 
@@ -368,6 +369,11 @@ class WorkspaceManager:
             if not target.is_relative_to(self.root_dir) or target == self.root_dir:
                 raise WorkspaceManagerError(f"Refusing to delete path outside root: {target}")
             shutil.rmtree(target)
+            scratch_root = workspace_scratch_root(target)
+            scratch_parent = (self.root_dir / ".code-agent-scratch").resolve()
+            if not scratch_root.is_relative_to(scratch_parent):
+                raise WorkspaceManagerError("Refusing to delete scratch outside root")
+            shutil.rmtree(scratch_root, ignore_errors=True)
         except FileNotFoundError:
             return True
         except OSError as exc:

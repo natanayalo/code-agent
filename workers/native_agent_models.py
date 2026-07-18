@@ -48,12 +48,15 @@ class NativeAgentRunRequest:
     prompt: str
     repo_path: Path
     workspace_path: Path
+    scratch_namespace: str | None = None
+    artifact_root: Path | None = None
     timeout_seconds: int = DEFAULT_NATIVE_AGENT_TIMEOUT_SECONDS
     diff_timeout_seconds: int = DEFAULT_NATIVE_AGENT_DIFF_TIMEOUT_SECONDS
     changed_files_timeout_seconds: int = DEFAULT_NATIVE_AGENT_CHANGED_FILES_TIMEOUT_SECONDS
     env: dict[str, str] | None = None
     final_message_path: Path | None = None
     events_path: Path | None = None
+    provider_log_path: Path | None = None
     collect_diff: bool = True
     collect_changed_files: bool = True
     task_id: str | None = None

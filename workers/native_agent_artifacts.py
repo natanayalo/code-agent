@@ -5,10 +5,10 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from sandbox.redact import REDACTED_OUTPUT_LIMIT, SecretRedactor, redact_and_truncate_output
+from workers.base import ArtifactReference
+
 DEFAULT_NATIVE_AGENT_ARTIFACTS_DIR = ".code-agent/native-agent-runner"
-
-
-from workers.base import ArtifactReference  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -49,12 +49,37 @@ def _copy_artifact(
     )
 
 
+def _copy_redacted_log_artifact(
+    *,
+    artifact_root: Path,
+    source_path: Path,
+    file_name: str,
+    name: str,
+    redactor: SecretRedactor | None,
+) -> ArtifactReference | None:
+    """Persist a bounded, redacted provider log when the CLI produced one."""
+    try:
+        with source_path.open(encoding="utf-8", errors="replace") as source_file:
+            content = source_file.read(REDACTED_OUTPUT_LIMIT + 1)
+    except OSError:
+        return None
+    return _write_artifact(
+        artifact_root=artifact_root,
+        file_name=file_name,
+        content=redact_and_truncate_output(content, redactor=redactor),
+        name=name,
+        artifact_type="log",
+    )
+
+
 def _collect_standard_artifacts(
     *,
     artifact_root: Path,
     stdout_text: str,
     stderr_text: str,
     events_path: Path | None,
+    provider_log_path: Path | None,
+    redactor: SecretRedactor | None,
 ) -> list[ArtifactReference]:
     """Write and return the standard set of execution artifacts."""
     artifacts = [
@@ -87,6 +112,20 @@ def _collect_standard_artifacts(
     )
     if event_artifact is not None:
         artifacts.append(event_artifact)
+
+    provider_log_artifact = (
+        _copy_redacted_log_artifact(
+            artifact_root=artifact_root,
+            source_path=provider_log_path,
+            file_name="provider.log",
+            name="native-agent-provider-log",
+            redactor=redactor,
+        )
+        if provider_log_path is not None
+        else None
+    )
+    if provider_log_artifact is not None:
+        artifacts.append(provider_log_artifact)
 
     return artifacts
 

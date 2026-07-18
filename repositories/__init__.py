@@ -24,11 +24,13 @@ from repositories.sqlalchemy import (
     WorkerNodeRepository,
     WorkerRunRepository,
 )
+from repositories.sqlalchemy_capacity import ExecutionCapacityPermitRepository
 from repositories.sqlalchemy_plan import ExecutionPlanRepository
 
 __all__ = [
     "ArtifactRepository",
     "ExecutionPlanRepository",
+    "ExecutionCapacityPermitRepository",
     "HumanInteractionRepository",
     "InboundDeliveryRepository",
     "MemoryAdmissionDecisionRepository",

@@ -457,6 +457,8 @@ class OrchestratorState(OrchestratorModel):
     session_state_update: SessionStateUpdate | None = None
     scout_phase: Literal["repo", "research"] | None = None
     scout_phase_results: list[ScoutPhaseResult] = Field(default_factory=list)
+    # A permission escalation or safety violation makes later waves singleton.
+    fanout_disabled_for_remainder: bool = False
 
 
 def is_task_read_only(state: OrchestratorState) -> bool:

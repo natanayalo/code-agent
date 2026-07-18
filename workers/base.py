@@ -42,6 +42,7 @@ FailureKind = Literal[
     "risky_command",
     "worker_failure",
     "interaction",
+    "read_only_violation",
     "unknown",
 ]
 
@@ -111,6 +112,8 @@ class WorkerRequest(WorkerModel):
     response_schema: dict[str, Any] | None = None
     network_enabled: bool = False
     image: str | None = None
+    # Internal per-node writable namespace for read-only fan-out containers.
+    scratch_namespace: str | None = None
 
     @field_validator("worker_type", mode="before")
     @classmethod

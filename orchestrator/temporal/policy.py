@@ -39,6 +39,7 @@ _POLICIES: dict[str, TemporalActivityPolicy] = {
         heartbeat_timeout=timedelta(seconds=20),
     ),
     "select_next_node": TemporalActivityPolicy(timedelta(minutes=5), _STANDARD_RETRY),
+    "select_next_node_v2": TemporalActivityPolicy(timedelta(minutes=5), _STANDARD_RETRY),
     "run_decomposed_node": TemporalActivityPolicy(
         timedelta(minutes=30), _WORKER_RETRY, heartbeat_timeout=timedelta(seconds=20)
     ),

@@ -42,6 +42,9 @@ Active focus:
 - M25.1B Temporal one-node-wave orchestration is complete: version-gated workflow
   compatibility, compact select/execute/merge contracts, profile-queue node execution,
   and idempotent parent-state reconciliation retain strict sequential scheduling
+- M25.2 bounded read-only fan-out is complete: opt-in replay-safe two-node waves,
+  queue permits, transactional ordered merge, and isolated provider/scratch homes
+  retain a shared read-only repository mount
 - PR-native delivery fields with GitHub branch/draft-PR delivery integration
 - full-text personal/project memory search with dashboard search results and memory-retrieval timeline visibility
 - deterministic memory retrieval evaluation to separate full-text regressions from known semantic gaps
@@ -61,9 +64,8 @@ Active focus:
 
 ## Next Slices Only
 
-1. M25.2: bounded selective fan-out
-   - replace one selected execution with a capacity- and policy-bounded ready-node wave
-     while retaining the established node execution and merge contracts
+1. M26: review comment repair
+   - extend the PR repair loop from CI failures to actionable review feedback
 
 ## Current Backlog
 

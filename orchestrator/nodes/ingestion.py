@@ -84,9 +84,51 @@ def classify_task(state_input: OrchestratorState) -> dict[str, Any]:
 # [Moved to orchestrator/nodes/utils.py]
 
 
+def _read_only_analysis_task_plan(complexity_reason: str, task_text: str) -> TaskPlan:
+    """Build a task-specific, explicitly safe plan for read-only analysis."""
+    subject = " ".join(task_text.split())[:100]
+    return TaskPlan(
+        triggered=True,
+        complexity_reason=complexity_reason,
+        steps=[
+            TaskPlanStep(
+                step_id="1",
+                title="Analyze Requested Repository Evidence",
+                expected_outcome=f"Gather evidence needed to analyze: {subject}",
+                depends_on=[],
+                node_kind="inspect",
+                aggregation_role="context",
+                execution_mode="read_only",
+                parallel_safe=True,
+            ),
+            TaskPlanStep(
+                step_id="2",
+                title="Independently Validate Requested Scope",
+                expected_outcome=f"Independently validate relevant scope for: {subject}",
+                depends_on=[],
+                node_kind="inspect",
+                aggregation_role="context",
+                execution_mode="read_only",
+                parallel_safe=True,
+            ),
+            TaskPlanStep(
+                step_id="3",
+                title="Synthesize Inspection Findings",
+                expected_outcome="Combine the independent evidence into a concise summary.",
+                depends_on=["1", "2"],
+                node_kind="verify",
+                aggregation_role="validation",
+                execution_mode="read_only",
+            ),
+        ],
+    )
+
+
 def _build_task_plan(state: OrchestratorState, complexity_reason: str) -> TaskPlan:
     """Create an ordered, structured decomposition for complex tasks."""
     task_text = state.normalized_task_text or state.task.task_text
+    if state.task.constraints.get("read_only") is True and complexity_reason == "ambiguous_task":
+        return _read_only_analysis_task_plan(complexity_reason, task_text)
     normalized_task_text = " ".join(task_text.split())
     task_text_preview = normalized_task_text[:100] + (
         "..." if len(normalized_task_text) > 100 else ""

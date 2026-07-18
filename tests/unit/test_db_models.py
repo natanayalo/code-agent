@@ -32,6 +32,7 @@ EXPECTED_TABLES = {
     "execution_plans",
     "execution_plan_nodes",
     "execution_plan_node_attempts",
+    "execution_capacity_permits",
     "human_interactions",
     "inbound_deliveries",
     "memory_admission_decisions",
@@ -110,6 +111,11 @@ def test_model_metadata_defines_runtime_manifest_column_type() -> None:
     """Runtime operating contract metadata needs a JSON column on worker runs."""
     column_type = Base.metadata.tables["worker_runs"].c["runtime_manifest"].type
     assert isinstance(column_type, JSON)
+
+
+def test_execution_capacity_permits_store_a_fenced_acquisition_token() -> None:
+    """Permit release and renewal require more than a reusable logical owner."""
+    assert "lease_token" in Base.metadata.tables["execution_capacity_permits"].c
 
 
 def test_model_metadata_enforces_memory_observation_constraints() -> None:

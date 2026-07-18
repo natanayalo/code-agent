@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Literal
 
 from pydantic import Field
@@ -44,3 +46,38 @@ class NodeWaveMergeResult(OrchestratorModel):
     blocked_node_id: str | None = None
     blocked_logical_activity_key: str | None = None
     requested_permission: str | None = None
+
+
+class NodeWaveItem(OrchestratorModel):
+    """One ordered, independently durable execution in a bounded wave."""
+
+    node_id: str
+    activity_request: NodeActivityRequest
+    execution_task_queue: str
+
+
+class NodeWaveSelectionV2(OrchestratorModel):
+    """Versioned fan-out selection; older histories keep ``NodeSelectionResult``."""
+
+    schema_version: Literal[2] = 2
+    action: Literal[
+        "execute_wave", "merge_terminal_wave", "skip", "await_permission", "complete", "invalid"
+    ]
+    wave_id: str | None = None
+    items: list[NodeWaveItem] = Field(default_factory=list, max_length=2)
+    fanout_applied: bool = False
+    reason: str | None = None
+
+
+class NodeWaveMergeRequestV2(OrchestratorModel):
+    """Ordered compact evidence references for a fan-out wave."""
+
+    selection: NodeWaveSelectionV2
+    result_refs: list[NodeActivityResultRef | None] = Field(default_factory=list, max_length=2)
+
+
+def deterministic_wave_id(plan_id: str, items: list[NodeWaveItem]) -> str:
+    """Return a completion-order-independent identity for a selected wave."""
+    keys = [item.activity_request.logical_activity_key for item in items]
+    digest = hashlib.sha256(json.dumps(keys, separators=(",", ":")).encode()).hexdigest()
+    return f"node-wave:v2:{plan_id}:{digest}"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import shlex
@@ -15,6 +16,7 @@ from pydantic import Field
 
 from sandbox.policy import LocalRepoPolicyError, validate_local_repo_path
 from sandbox.redact import mask_url_credentials as _mask_url_credentials
+from sandbox.scratch import node_agent_home, node_artifacts_root, node_run_root
 from sandbox.workspace import SandboxModel, WorkspaceHandle
 
 logger = logging.getLogger(__name__)
@@ -44,6 +46,7 @@ class DockerSandboxContainerRequest(SandboxModel):
     )
     start_timeout_seconds: int = Field(default=30, ge=1)
     read_only_workspace: bool = False
+    scratch_namespace: str | None = None
 
 
 class DockerSandboxContainer(SandboxModel):
@@ -63,9 +66,13 @@ class DockerSandboxContainerError(RuntimeError):
     """Raised when a persistent sandbox container cannot be managed."""
 
 
-def build_container_name(workspace: WorkspaceHandle) -> str:
+def build_container_name(workspace: WorkspaceHandle, scratch_namespace: str | None = None) -> str:
     """Build a deterministic docker container name for a workspace."""
-    return f"sandbox-{workspace.workspace_id}"
+    digest = ""
+    if scratch_namespace:
+        digest = hashlib.sha256(scratch_namespace.encode()).hexdigest()[:12]
+    suffix = f"-{digest}" if digest else ""
+    return f"sandbox-{workspace.workspace_id}{suffix}"
 
 
 def _append_resource_limits(command: list[str], request: DockerSandboxContainerRequest) -> None:
@@ -80,6 +87,7 @@ def append_workspace_mount_options(
     workspace_path: Path,
     working_dir: str | None,
     read_only_workspace: bool,
+    scratch_namespace: str | None = None,
 ) -> tuple[Path, str]:
     target_path = str(workspace_path)
     if working_dir is None or working_dir == "/workspace":
@@ -96,35 +104,22 @@ def append_workspace_mount_options(
     )
 
     if read_only_workspace:
-        code_agent_path = workspace_path / ".code-agent"
+        code_agent_path = node_run_root(workspace_path, scratch_namespace)
         code_agent_path.mkdir(parents=True, exist_ok=True)
-        agent_home_path = workspace_path / ".agent_home"
+        agent_home_path = node_agent_home(workspace_path, scratch_namespace)
         agent_home_path.mkdir(parents=True, exist_ok=True)
-        artifacts_path = workspace_path / "artifacts"
+        artifacts_path = node_artifacts_root(workspace_path, scratch_namespace)
         artifacts_path.mkdir(parents=True, exist_ok=True)
-        sandbox_db_path = code_agent_path / ".sandbox.db"
-
-        symlink_path = workspace_path / ".sandbox.db"
-        if symlink_path.exists() or symlink_path.is_symlink():
-            try:
-                if symlink_path.is_symlink():
-                    target = os.readlink(symlink_path)
-                    if Path(target).as_posix() != ".code-agent/.sandbox.db":
-                        symlink_path.unlink()
-                else:
-                    if symlink_path.is_file() and not sandbox_db_path.exists():
-                        symlink_path.rename(sandbox_db_path)
-                    else:
-                        symlink_path.unlink()
-            except OSError:
-                pass
-        if not symlink_path.exists() and not symlink_path.is_symlink():
-            try:
-                symlink_path.symlink_to(".code-agent/.sandbox.db")
-            except OSError:
-                pass
-
-        sandbox_db_path.touch(exist_ok=True)
+        (code_agent_path / ".sandbox.db").touch(exist_ok=True)
+        # Docker must find bind-mount targets before applying the read-only
+        # repository mount. These directories are only empty mountpoints; all
+        # writable contents are kept in the external node scratch paths above.
+        for mountpoint in (
+            workspace_path / ".code-agent",
+            workspace_path / ".agent_home",
+            workspace_path / "artifacts",
+        ):
+            mountpoint.mkdir(parents=True, exist_ok=True)
 
         command.extend(
             ["--mount", f"type=bind,source={code_agent_path},target={target_path}/.code-agent"]
@@ -153,6 +148,7 @@ def _append_workspace_mount(
         workspace_path=workspace_path,
         working_dir=request.working_dir,
         read_only_workspace=request.read_only_workspace,
+        scratch_namespace=request.scratch_namespace,
     )
 
 
@@ -219,7 +215,7 @@ def _build_docker_container_run_command(
     docker_binary: str = "docker",
 ) -> list[str]:
     """Build the `docker run -d` command for a persistent sandbox container."""
-    container_name = build_container_name(request.workspace)
+    container_name = build_container_name(request.workspace, request.scratch_namespace)
     command = [
         docker_binary,
         "run",

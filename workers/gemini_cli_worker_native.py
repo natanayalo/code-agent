@@ -21,6 +21,7 @@ from sandbox import (
     WorkspaceHandle,
 )
 from sandbox.redact import SecretRedactor
+from sandbox.scratch import node_agent_home
 from tools import (
     ToolPermissionLevel,
 )
@@ -107,6 +108,15 @@ def _workspace_artifacts(workspace: WorkspaceHandle) -> list[ArtifactReference]:
             artifact_type="workspace",
         )
     ]
+
+
+def _native_gemini_home(workspace_path: Path, scratch_namespace: str | None) -> Path:
+    agent_home = (
+        node_agent_home(workspace_path, scratch_namespace)
+        if scratch_namespace
+        else workspace_path / ".agent_home"
+    )
+    return agent_home / ".gemini"
 
 
 def _prepare_workspace_gemini_home(
@@ -447,6 +457,8 @@ class GeminiCliWorkerNativeMixin:
             system_prompt=system_prompt, request=request, runtime_mode=runtime_mode
         )
         events_path: Path | None = None
+        provider_log_path: Path | None = None
+        artifact_root: Path | None = None
         command_redactions: list[str] = []
         stdin_prompt = True
         native_env = self._native_run_env()
@@ -463,11 +475,14 @@ class GeminiCliWorkerNativeMixin:
                 runtime_settings=runtime_settings,
                 native_sandbox_enabled=getattr(self, "native_sandbox_enabled", True),
             )
-            command, events_path, provider_metadata = build_antigravity_native_command(config)
+            command, provider_log_path, provider_metadata = build_antigravity_native_command(config)
+            artifact_root = provider_log_path.parent
             command_redactions.append(prompt)
             stdin_prompt = False
             native_env = dict(native_env or {})
-            native_env["GEMINI_HOME"] = str(workspace.workspace_path / ".agent_home" / ".gemini")
+            native_env["GEMINI_HOME"] = str(
+                _native_gemini_home(workspace.workspace_path, request.scratch_namespace)
+            )
         else:
             command = self._build_native_command(
                 request=request,
@@ -479,11 +494,14 @@ class GeminiCliWorkerNativeMixin:
                 prompt=prompt,
                 repo_path=workspace.repo_path,
                 workspace_path=workspace.workspace_path,
+                scratch_namespace=request.scratch_namespace,
+                artifact_root=artifact_root,
                 timeout_seconds=runtime_settings.worker_timeout_seconds,
                 diff_timeout_seconds=runtime_settings.command_timeout_seconds,
                 changed_files_timeout_seconds=runtime_settings.command_timeout_seconds,
                 env=native_env,
                 events_path=events_path,
+                provider_log_path=provider_log_path,
                 collect_diff=True,
                 collect_changed_files=True,
                 task_id=request.task_id,
