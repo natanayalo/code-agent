@@ -11,6 +11,7 @@ from sqlalchemy.pool import StaticPool
 
 from apps.api.auth import DASHBOARD_COOKIE_NAME, ApiAuthConfig, create_dashboard_token
 from apps.api.main import create_app
+from apps.runtime import initialize_persisted_cutover
 from db.base import Base, utc_now
 from db.enums import (
     OrchestrationRuntime,
@@ -261,6 +262,7 @@ def test_get_metrics_reports_legacy_submissions_since_cutover(
     """The immutable deployment timestamp bounds the legacy retirement metric."""
     cutover_at = datetime(2026, 7, 18, 12, tzinfo=UTC)
     monkeypatch.setenv("TEMPORAL_ONLY_CUTOVER_AT", "2026-07-18T12:00:00Z")
+    initialize_persisted_cutover(session_factory)
     with session_scope(session_factory) as session:
         task_repo = TaskRepository(session)
         before = task_repo.create(

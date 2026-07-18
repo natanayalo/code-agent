@@ -145,29 +145,23 @@ def test_temporal_availability_retries_then_allows_a_recovered_submission(monkey
         session_factory=session_factory,
         worker=_StaticWorker(),
     )
-    attempts: list[tuple[str, int]] = []
+    attempts: list[str] = []
 
-    class _Connection:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return None
-
-    def connect(address, timeout):
+    async def connect(address: str):
         attempts.append(address)
         if len(attempts) == 1:
-            raise OSError("Temporal unavailable")
-        assert timeout == 1
-        return _Connection()
+            raise ConnectionError("Temporal unavailable")
+        return object()
 
     monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
-    monkeypatch.setattr(execution_module.socket, "create_connection", connect)
+    from temporalio.client import Client
+
+    monkeypatch.setattr(Client, "connect", connect)
     monkeypatch.setattr(execution_module.time, "sleep", lambda _seconds: None)
 
     service.ensure_temporal_available()
 
-    assert attempts == [("localhost", 7233), ("localhost", 7233)]
+    assert attempts == ["localhost:7233", "localhost:7233"]
 
 
 def test_persist_execution_outcome_creates_error_worker_run_without_result() -> None:

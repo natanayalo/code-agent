@@ -23,6 +23,7 @@ EXPECTED_TABLES = {
     "memory_proposals",
     "memory_project",
     "proposals",
+    "runtime_cutovers",
     "sessions",
     "session_states",
     "tasks",

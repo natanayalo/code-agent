@@ -7,10 +7,11 @@ from types import SimpleNamespace
 
 from sqlalchemy.pool import StaticPool
 
-from db.base import Base
+from db.base import Base, utc_now
 from db.models import TemporalCommand
 from orchestrator.execution import TaskExecutionService, TaskSubmission
 from orchestrator.temporal.command_dispatcher import TemporalCommandDispatcher
+from orchestrator.temporal.workflows import TaskExecutionWorkflow
 from repositories import (
     TemporalCommandRepository,
     create_engine_from_url,
@@ -108,7 +109,12 @@ def test_temporal_signal_and_cancel_commands_are_delivered(monkeypatch) -> None:
     dispatcher = TemporalCommandDispatcher(client=client, session_factory=session_factory)
     asyncio.run(dispatcher.dispatch_pending())
 
-    assert client.handle.signals == [("handle_approval", True)]
+    assert client.handle.signals == [
+        (
+            "handle_approval",
+            {"command_key": f"{snapshot.task_id}:signal", "value": True},
+        )
+    ]
     assert client.handle.cancelled is True
     with session_scope(session_factory) as session:
         assert all(command.delivered_at is not None for command in session.query(TemporalCommand))
@@ -148,8 +154,70 @@ def test_unknown_temporal_command_type_is_rejected() -> None:
     command = SimpleNamespace(task_id="task-id", command_type="unexpected", payload={})
 
     try:
-        asyncio.run(dispatcher._deliver(command))
+        asyncio.run(
+            dispatcher._deliver(
+                task_id=command.task_id,
+                command_type=command.command_type,
+                command_key="unexpected-key",
+                payload=command.payload,
+            )
+        )
     except ValueError as exc:
         assert str(exc) == "Unknown Temporal command type: unexpected"
     else:  # pragma: no cover - protects the assertion if behavior changes
         raise AssertionError("Unexpected command type should be rejected.")
+
+
+def test_two_dispatchers_claim_only_one_logical_signal(monkeypatch) -> None:
+    """A second dispatcher cannot deliver a command fenced by the first claim."""
+    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+    service = TaskExecutionService(session_factory=session_factory, worker=_Worker())
+    snapshot, _ = service.create_task(TaskSubmission(task_text="fenced signal"))
+    with session_scope(session_factory) as session:
+        TemporalCommandRepository(session).enqueue(
+            task_id=snapshot.task_id,
+            command_type="signal",
+            command_key="fenced-signal",
+            payload={"signal_name": "handle_approval", "signal_arg": True},
+        )
+    with session_scope(session_factory) as session:
+        first = TemporalCommandRepository(session).claim_pending(limit=10, lease_seconds=30)
+        assert len(first) == 2
+
+    client = _CommandClient()
+    asyncio.run(
+        TemporalCommandDispatcher(client=client, session_factory=session_factory).dispatch_pending()
+    )
+    assert client.handle.signals == []
+
+    with session_scope(session_factory) as session:
+        signal = session.query(TemporalCommand).filter_by(command_key="fenced-signal").one()
+        assert signal.claim_token is not None
+        signal.claim_expires_at = utc_now()
+
+    asyncio.run(
+        TemporalCommandDispatcher(client=client, session_factory=session_factory).dispatch_pending()
+    )
+    assert len(client.handle.signals) == 1
+
+
+def test_workflow_signal_envelope_ignores_stale_permission_command() -> None:
+    """A duplicate escalation-one signal cannot approve escalation two."""
+    workflow = TaskExecutionWorkflow()
+    asyncio.run(
+        workflow.handle_permission_escalation({"command_key": "escalation-1", "value": True})
+    )
+    assert workflow.permission_escalation_decision is True
+
+    workflow.permission_escalation_decision = None
+    asyncio.run(
+        workflow.handle_permission_escalation({"command_key": "escalation-1", "value": True})
+    )
+    assert workflow.permission_escalation_decision is None

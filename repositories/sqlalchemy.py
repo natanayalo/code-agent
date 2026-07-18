@@ -14,6 +14,7 @@ from repositories.sqlalchemy_observation import ObservationRepository
 from repositories.sqlalchemy_plan import ExecutionPlanRepository
 from repositories.sqlalchemy_proposal import ProposalRepository
 from repositories.sqlalchemy_run import ArtifactRepository, WorkerRunRepository
+from repositories.sqlalchemy_runtime_cutover import RuntimeCutoverRepository
 from repositories.sqlalchemy_session import (
     SessionRepository,
     SessionStateRepository,
@@ -39,6 +40,7 @@ __all__ = [
     "SessionRepository",
     "SessionStateRepository",
     "TaskRepository",
+    "RuntimeCutoverRepository",
     "TemporalTaskStateRepository",
     "TemporalCommandRepository",
     "TaskTimelineRepository",

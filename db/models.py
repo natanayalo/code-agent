@@ -395,10 +395,30 @@ class TemporalCommand(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     command_key: Mapped[str] = mapped_column(String(512), nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    claim_token: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    claim_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    next_attempt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=utc_now, index=True
+    )
+    dead_lettered_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     task: Mapped[Task] = relationship(back_populates="temporal_commands")
+
+
+class RuntimeCutover(TimestampMixin, Base):
+    """Immutable deployment cutover evidence used by operational retirement gates."""
+
+    __tablename__ = "runtime_cutovers"
+
+    cutover_name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    cutover_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    release_identifier: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
 
 class ExecutionCapacityPermit(UUIDPrimaryKeyMixin, TimestampMixin, Base):

@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import Final
+from typing import Any, Final
 
 RUN_API_ENV_VAR: Final[str] = "CODE_AGENT_RUN_API"
 RUN_WORKER_ENV_VAR: Final[str] = "CODE_AGENT_RUN_WORKER"
@@ -89,6 +89,16 @@ def validate_runtime_configuration(environ: Mapping[str, str] | None = None) -> 
     raw_cutover = resolved_env.get(TEMPORAL_ONLY_CUTOVER_AT_ENV_VAR, "").strip()
     if raw_cutover and temporal_only_cutover_at(resolved_env) is None:
         raise ValueError(f"{TEMPORAL_ONLY_CUTOVER_AT_ENV_VAR} must be an aware ISO-8601 timestamp.")
+
+
+def initialize_persisted_cutover(session_factory: Any) -> datetime | None:
+    """Persist/read the immutable cutover record after database bootstrap."""
+    from repositories import RuntimeCutoverRepository, session_scope
+
+    with session_scope(session_factory) as session:
+        return RuntimeCutoverRepository(session).initialize_temporal_only(
+            temporal_only_cutover_at()
+        )
 
 
 def uses_temporal_execution(environ: Mapping[str, str] | None = None) -> bool:
