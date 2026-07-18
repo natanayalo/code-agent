@@ -6,6 +6,7 @@ from sqlalchemy.pool import StaticPool
 
 from db.base import Base
 from db.enums import TaskStatus, TimelineEventType
+from db.models import TemporalCommand
 from orchestrator.execution import TaskExecutionService
 from repositories import (
     TaskRepository,
@@ -105,18 +106,14 @@ def test_cancel_temporal_task_requests_workflow_cancellation(
     monkeypatch.setattr(service, "start_temporal_workflow_sync", lambda task_id: None)
     response = client.post("/tasks", json={"task_text": "Temporal cancellation"})
     task_id = response.json()["task_id"]
-    requested_cancellations: list[str] = []
-
-    async def cancel_temporal_workflow(cancelled_task_id: str) -> None:
-        requested_cancellations.append(cancelled_task_id)
-
-    monkeypatch.setattr(service, "cancel_temporal_workflow", cancel_temporal_workflow)
 
     cancel_response = client.post(f"/tasks/{task_id}/cancel")
 
     assert cancel_response.status_code == 200
     assert cancel_response.json()["status"] == "failed"
-    assert requested_cancellations == [task_id]
+    with session_scope(client.app.state.task_service.session_factory) as session:
+        command = session.query(TemporalCommand).filter_by(command_type="cancel").one()
+        assert command.task_id == task_id
 
 
 def test_cancel_in_progress_task_aborts_execution(client: TestClient, session_factory, slow_worker):

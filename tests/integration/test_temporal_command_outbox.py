@@ -77,8 +77,9 @@ def test_temporal_start_command_survives_submission_until_dispatch(monkeypatch) 
         assert session.query(TemporalCommand).one().delivered_at is not None
 
 
-def test_temporal_signal_and_cancel_commands_are_delivered() -> None:
+def test_temporal_signal_and_cancel_commands_are_delivered(monkeypatch) -> None:
     """Interaction signals and cancellation use the same durable dispatcher."""
+    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
     engine = create_engine_from_url(
         "sqlite+pysqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -113,8 +114,9 @@ def test_temporal_signal_and_cancel_commands_are_delivered() -> None:
         assert all(command.delivered_at is not None for command in session.query(TemporalCommand))
 
 
-def test_temporal_command_delivery_failure_remains_pending_for_retry() -> None:
+def test_temporal_command_delivery_failure_remains_pending_for_retry(monkeypatch) -> None:
     """A transport failure records an attempt without discarding the command."""
+    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
     engine = create_engine_from_url(
         "sqlite+pysqlite:///:memory:",
         connect_args={"check_same_thread": False},
