@@ -194,6 +194,11 @@ def _build_effective_env(request: NativeAgentRunRequest) -> dict[str, str]:
 
 def _copy_provider_auth_home(source: Path, target: Path) -> None:
     """Copy only provider authentication/config files into a node-local home."""
+    try:
+        if source.resolve() == target.resolve():
+            return
+    except OSError:
+        return
     target.mkdir(parents=True, exist_ok=True)
     for name in ("auth.json", "config.toml", "settings.json"):
         candidate = source / name

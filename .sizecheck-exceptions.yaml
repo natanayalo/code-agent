@@ -16,6 +16,7 @@ file_exceptions:
   evaluation/harness.py: File exceeds length due to comprehensive evaluation orchestration and formatting requirements.
   tests/unit/test_evaluation_harness.py: File exceeds length due to extensive test coverage for all reporting permutations.
   tests/integration/test_temporal_runtime.py: Comprehensive Temporal integration coverage shares one Compose/test-fixture boundary for lifecycle, HITL, cancellation, retry, and projection behavior.
+  tests/unit/test_native_agent_runner.py: Comprehensive native-agent runner contract coverage shares isolated environment and artifact fixtures.
   orchestrator/temporal/activities.py: Temporal activity adapters keep the product projection and worker handoff contract together.
   tests/unit/test_memory_observation.py: Contains comprehensive unit tests for all memory observation, candidate extraction, and trace-bridging rules.
 function_exceptions:

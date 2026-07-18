@@ -30,6 +30,28 @@ _UNIFIED_SUGGESTION_SCHEMA = {
 }
 
 
+def test_namespaced_codex_home_copies_auth_without_reusing_shared_source(tmp_path: Path) -> None:
+    source = tmp_path / "source-codex"
+    source.mkdir()
+    (source / "auth.json").write_text('{"token":"test"}', encoding="utf-8")
+    (source / "config.toml").write_text('model = "test"', encoding="utf-8")
+    request = NativeAgentRunRequest(
+        command=["codex"],
+        prompt="test",
+        repo_path=tmp_path,
+        workspace_path=tmp_path,
+        scratch_namespace="node-a",
+        env={"CODEX_HOME": str(source)},
+    )
+
+    environment = native_runner._build_effective_env(request)
+
+    codex_home = Path(environment["CODEX_HOME"])
+    assert codex_home != source
+    assert (codex_home / "auth.json").read_text(encoding="utf-8") == '{"token":"test"}'
+    assert (codex_home / "config.toml").exists()
+
+
 def _write_fake_binary(path: Path, body: str) -> Path:
     path.write_text(textwrap.dedent(body), encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
