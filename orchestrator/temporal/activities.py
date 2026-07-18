@@ -902,7 +902,7 @@ class TaskExecutionActivities:
                         NodeWaveItem(
                             node_id=second.node_id,
                             activity_request=second_request,
-                            execution_task_queue=queue,
+                            execution_task_queue=second_queue,
                         ),
                     ]
                     return NodeWaveSelectionV2(

@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import shlex
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -167,6 +168,11 @@ def _build_effective_env(request: NativeAgentRunRequest) -> dict[str, str]:
                 continue
             effective_env[k] = v
 
+    if request.scratch_namespace:
+        for key, source in auth_home_overrides.items():
+            target = agent_home / (".codex" if key == "CODEX_HOME" else ".gemini")
+            _copy_provider_auth_home(Path(source), target)
+
     effective_env.update(
         {
             "HOME": agent_home_value,
@@ -181,8 +187,18 @@ def _build_effective_env(request: NativeAgentRunRequest) -> dict[str, str]:
     )
     if "DBUS_SESSION_BUS_ADDRESS" not in effective_env and "DBUS_SESSION_BUS_ADDRESS" in os.environ:
         effective_env["DBUS_SESSION_BUS_ADDRESS"] = os.environ["DBUS_SESSION_BUS_ADDRESS"]
-    effective_env.update(auth_home_overrides)
+    if not request.scratch_namespace:
+        effective_env.update(auth_home_overrides)
     return effective_env
+
+
+def _copy_provider_auth_home(source: Path, target: Path) -> None:
+    """Copy only provider authentication/config files into a node-local home."""
+    target.mkdir(parents=True, exist_ok=True)
+    for name in ("auth.json", "config.toml", "settings.json"):
+        candidate = source / name
+        if candidate.is_file():
+            shutil.copy2(candidate, target / name)
 
 
 def _build_friction_report_dict(
