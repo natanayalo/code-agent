@@ -10,8 +10,9 @@ from temporalio.client import Client, WorkflowFailureError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
+from db.base import utc_now
 from db.enums import ExecutionPlanNodeStatus, TimelineEventType
-from db.models import Base, Task, TaskTimelineEvent, TemporalTaskState, WorkerRun
+from db.models import Base, Task, TaskTimelineEvent, TemporalCommand, TemporalTaskState, WorkerRun
 from orchestrator.execution import TaskExecutionService, TaskSubmission
 from orchestrator.execution_types import InteractionResponse
 from orchestrator.state import OrchestratorState, VerificationReport, VerificationReportItem
@@ -22,6 +23,7 @@ from orchestrator.temporal.workflows import TaskExecutionWorkflow
 from repositories import (
     ExecutionPlanRepository,
     TaskTimelineRepository,
+    TemporalCommandRepository,
     TemporalTaskStateRepository,
     create_engine_from_url,
     create_session_factory,
@@ -472,6 +474,9 @@ async def test_temporal_runtime_hitl_approval(session_factory, tmp_path: Path, m
 
         snapshot, persisted = service.create_task(submission)
         task_id = snapshot.task_id
+        with session_scope(session_factory) as session:
+            start_command = session.query(TemporalCommand).filter_by(task_id=task_id).one()
+            start_command.delivered_at = utc_now()
 
         activities = TaskExecutionActivities(service=service)
         temporal_worker = Worker(
@@ -493,6 +498,10 @@ async def test_temporal_runtime_hitl_approval(session_factory, tmp_path: Path, m
         )
 
         async with temporal_worker:
+            dispatcher = TemporalCommandDispatcher(
+                client=env.client,
+                session_factory=session_factory,
+            )
             # Awaiting a workflow result unlocks automatic time skipping. Keep
             # real time while an operator-style signal is deliberately pending.
             with env.auto_time_skipping_disabled():
@@ -517,7 +526,14 @@ async def test_temporal_runtime_hitl_approval(session_factory, tmp_path: Path, m
                         f"{error!r}; cause={getattr(error, 'cause', None)!r}"
                     )
 
-                await service.signal_temporal_workflow(task_id, "handle_approval", True)
+                with session_scope(session_factory) as session:
+                    TemporalCommandRepository(session).enqueue(
+                        task_id=task_id,
+                        command_type="signal",
+                        command_key=f"task:{task_id}:approval:test",
+                        payload={"signal_name": "handle_approval", "signal_arg": True},
+                    )
+                await dispatcher.dispatch_pending()
                 await run_task
 
     # Verify task successfully completed

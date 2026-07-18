@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 from temporalio import workflow
 
@@ -329,24 +330,24 @@ class TaskExecutionWorkflow:
         return bool(approved)
 
     @workflow.signal
-    async def handle_approval(self, approved: object) -> None:
+    async def handle_approval(self, approved: Any) -> None:
         accepted, value = self._accept_signal(approved)
         if accepted:
             self.approval_decision = bool(value)
 
     @workflow.signal
-    async def handle_clarification(self, response: object | None = None) -> None:
+    async def handle_clarification(self, response: Any = None) -> None:
         accepted, _ = self._accept_signal(response)
         if accepted:
             self.clarification_resolved = True
 
     @workflow.signal
-    async def handle_permission_escalation(self, approved: object) -> None:
+    async def handle_permission_escalation(self, approved: Any) -> None:
         accepted, value = self._accept_signal(approved)
         if accepted:
             self.permission_escalation_decision = bool(value)
 
-    def _accept_signal(self, payload: object) -> tuple[bool, object]:
+    def _accept_signal(self, payload: Any) -> tuple[bool, Any]:
         """Deduplicate new command envelopes while accepting historical raw signals."""
         if not isinstance(payload, dict) or "command_key" not in payload:
             return True, payload
