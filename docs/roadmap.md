@@ -622,6 +622,8 @@ Progress:
   - pin runtime to task at submission (immutable after creation)
   - dashboard drain-gate widgets: tasks by runtime and active legacy count;
     defer legacy submissions since cutover until Slice 2 persists the cutover timestamp
+  - deployment prerequisite: deploy with zero active tasks, or explicitly classify,
+    complete, or cancel every active unknown task before relying on the scheduler boundary
   - fix status.md Active Focus, add M25.3 to roadmap
 - [ ] Slice 2: production cutover
   - default `execution_runtime()` to `temporal` when unconfigured

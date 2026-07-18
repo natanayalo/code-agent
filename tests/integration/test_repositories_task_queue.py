@@ -491,6 +491,7 @@ def test_task_repository_reclaim_expired_leases_fails_task_after_max_attempts(
             session_id=conversation_session.id,
             task_text="max attempts task",
             max_attempts=3,
+            orchestration_runtime=OrchestrationRuntime.LEGACY,
         )
         worker_repo.register_worker(
             worker_id="worker-reclaim-max",

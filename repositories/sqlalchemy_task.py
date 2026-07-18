@@ -433,6 +433,7 @@ class TaskRepository:
         """Return expired leases to pending and rebuild affected worker load."""
         expired_tasks_info = self.session.execute(
             select(Task.id, Task.lease_owner).where(
+                Task.orchestration_runtime == OrchestrationRuntime.LEGACY,
                 Task.status == TaskStatus.IN_PROGRESS,
                 Task.lease_expires_at.is_not(None),
                 Task.lease_expires_at <= now,
@@ -451,7 +452,11 @@ class TaskRepository:
         # and prevent deadlocks with release_success/release_failure.
         updated = self.session.execute(
             update(Task)
-            .where(Task.id.in_(task_ids), Task.status == TaskStatus.IN_PROGRESS)
+            .where(
+                Task.id.in_(task_ids),
+                Task.orchestration_runtime == OrchestrationRuntime.LEGACY,
+                Task.status == TaskStatus.IN_PROGRESS,
+            )
             .values(
                 status=case(
                     (Task.attempt_count >= Task.max_attempts, TaskStatus.FAILED),
@@ -486,6 +491,7 @@ class TaskRepository:
             loads_query = (
                 select(Task.lease_owner, func.count(Task.id))
                 .where(
+                    Task.orchestration_runtime == OrchestrationRuntime.LEGACY,
                     Task.lease_owner.in_(affected_workers),
                     Task.status == TaskStatus.IN_PROGRESS,
                 )
@@ -512,6 +518,7 @@ class TaskRepository:
             update(Task)
             .where(
                 Task.id == task_id,
+                Task.orchestration_runtime == OrchestrationRuntime.LEGACY,
                 Task.status == TaskStatus.IN_PROGRESS,
                 Task.lease_owner == worker_id,
             )
@@ -528,7 +535,10 @@ class TaskRepository:
         task = self.get(task_id)
         if task is None:
             return None
-        if task.lease_owner != worker_id:
+        if (
+            task.orchestration_runtime != OrchestrationRuntime.LEGACY
+            or task.lease_owner != worker_id
+        ):
             return task
         task.status = TaskStatus.COMPLETED
         task.lease_owner = None
@@ -550,7 +560,11 @@ class TaskRepository:
         task = self.get(task_id)
         if task is None:
             return None
-        if task.status != TaskStatus.IN_PROGRESS or task.lease_owner != worker_id:
+        if (
+            task.orchestration_runtime != OrchestrationRuntime.LEGACY
+            or task.status != TaskStatus.IN_PROGRESS
+            or task.lease_owner != worker_id
+        ):
             return task
 
         previous_owner = task.lease_owner
@@ -577,7 +591,10 @@ class TaskRepository:
         task = self.get(task_id)
         if task is None:
             return None
-        if task.lease_owner != worker_id:
+        if (
+            task.orchestration_runtime != OrchestrationRuntime.LEGACY
+            or task.lease_owner != worker_id
+        ):
             return task
         previous_owner = task.lease_owner
         task.lease_owner = None
@@ -703,6 +720,10 @@ class TaskRepository:
                 status=TaskStatus.PENDING,
                 lease_owner=None,
                 lease_expires_at=None,
+                attempt_count=case(
+                    (Task.attempt_count > 0, Task.attempt_count - 1),
+                    else_=0,
+                ),
                 last_error="Legacy worker refused task due to orchestration runtime ownership.",
             )
         )
