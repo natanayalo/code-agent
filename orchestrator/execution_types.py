@@ -547,6 +547,7 @@ class OperationalMetrics(ExecutionModel):
     legacy_tool_loop_usage: dict[str, int]
     orchestration_runtime_counts: dict[str, int]
     active_legacy_task_count: int
+    active_unknown_task_count: int
     avg_duration_seconds: float
     success_rate: float
 

@@ -472,6 +472,20 @@ class WorkerRun(UUIDPrimaryKeyMixin, Base):
             return None
         return WorkerRuntimeMode(value)
 
+    @validates("orchestration_runtime")
+    def _coerce_orchestration_runtime(
+        self,
+        _key: str,
+        value: OrchestrationRuntime | str | None,
+    ) -> OrchestrationRuntime | None:
+        """Normalize runtime evidence and prevent mutation after creation."""
+
+        normalized = OrchestrationRuntime(value) if value is not None else None
+        existing = self.__dict__.get("orchestration_runtime")
+        if existing is not None and normalized != existing:
+            raise ValueError("WorkerRun orchestration_runtime is immutable after creation.")
+        return normalized
+
 
 class WorkerNode(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """A queue worker process that can claim and execute persisted tasks."""

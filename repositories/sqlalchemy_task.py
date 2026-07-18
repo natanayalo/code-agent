@@ -352,7 +352,10 @@ class TaskRepository:
             candidates = list(
                 self.session.scalars(
                     select(Task)
-                    .where(self._claimable_pending_filter(now=now))
+                    .where(
+                        self._claimable_pending_filter(now=now),
+                        Task.orchestration_runtime == OrchestrationRuntime.LEGACY,
+                    )
                     .order_by(
                         case((Task.queue_lane == "primary", 1), else_=2).asc(),
                         Task.priority.desc(),
@@ -381,6 +384,7 @@ class TaskRepository:
                     .where(
                         Task.id == candidate.id,
                         self._claimable_pending_filter(now=now),
+                        Task.orchestration_runtime == OrchestrationRuntime.LEGACY,
                     )
                     .values(
                         status=TaskStatus.IN_PROGRESS,
@@ -666,10 +670,41 @@ class TaskRepository:
                 Task.status.in_((TaskStatus.PENDING, TaskStatus.IN_PROGRESS)),
             )
         )
+        active_unknown_count = self.session.scalar(
+            select(func.count(Task.id)).where(
+                Task.orchestration_runtime.is_(None),
+                Task.status.in_((TaskStatus.PENDING, TaskStatus.IN_PROGRESS)),
+            )
+        )
         return {
             "orchestration_runtime_counts": {
                 (runtime.value if runtime is not None else "unknown"): count
                 for runtime, count in runtime_counts
             },
             "active_legacy_task_count": int(active_legacy_count or 0),
+            "active_unknown_task_count": int(active_unknown_count or 0),
         }
+
+    def release_runtime_ownership_violation(self, *, task_id: str, worker_id: str) -> bool:
+        """Release a non-legacy task accidentally handed to the legacy worker."""
+
+        released = self.session.execute(
+            update(Task)
+            .where(
+                Task.id == task_id,
+                Task.status == TaskStatus.IN_PROGRESS,
+                Task.lease_owner == worker_id,
+                or_(
+                    Task.orchestration_runtime.is_(None),
+                    Task.orchestration_runtime != OrchestrationRuntime.LEGACY,
+                ),
+            )
+            .values(
+                status=TaskStatus.PENDING,
+                lease_owner=None,
+                lease_expires_at=None,
+                last_error="Legacy worker refused task due to orchestration runtime ownership.",
+            )
+        )
+        self.session.flush()
+        return bool(getattr(released, "rowcount", 0))

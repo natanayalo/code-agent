@@ -10,7 +10,7 @@ down_revision = "20260718_0041"
 branch_labels = None
 depends_on = None
 
-_RUNTIME_COLUMN = sa.String(length=16)
+_RUNTIME_COLUMN = sa.String(length=8)
 _RUNTIME_CHECK = "orchestration_runtime IN ('temporal', 'legacy')"
 
 

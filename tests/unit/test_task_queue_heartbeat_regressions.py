@@ -56,7 +56,9 @@ def _make_task_service(
     )
 
 
-def _persisted_context() -> execution_module._PersistedTaskContext:
+def _persisted_context(
+    *, orchestration_runtime: str | None = "legacy"
+) -> execution_module._PersistedTaskContext:
     return execution_module._PersistedTaskContext(
         user_id="user-1",
         session_id="session-1",
@@ -65,6 +67,7 @@ def _persisted_context() -> execution_module._PersistedTaskContext:
         task_id="task-1",
         attempt_count=1,
         trace_context={},
+        orchestration_runtime=orchestration_runtime,
     )
 
 
@@ -166,6 +169,35 @@ async def test_run_queued_task_skips_missing_persisted_submission(caplog, monkey
 
     assert "Skipping queued task run: task no longer exists" in caplog.text
     assert notifier.events == []
+
+
+@pytest.mark.anyio
+async def test_run_queued_task_releases_nonlegacy_ownership_violation(monkeypatch, caplog) -> None:
+    """A directly invoked legacy worker must fail closed for a Temporal task."""
+    service = _make_task_service()
+    submission = execution_module.TaskSubmission(task_text="Temporal task")
+    persisted = _persisted_context(orchestration_runtime="temporal")
+    released: list[tuple[str, str]] = []
+
+    async def fake_run_blocking(func, /, *args, **kwargs):
+        if getattr(func, "__name__", "") == "_load_submission_for_task":
+            return submission, persisted
+        if getattr(func, "__name__", "") == "_release_legacy_ownership_violation":
+            released.append((kwargs["task_id"], kwargs["worker_id"]))
+            return None
+        raise AssertionError(f"unexpected blocking call: {getattr(func, '__name__', '')}")
+
+    async def fail_run_orchestrator(*_args, **_kwargs):
+        raise AssertionError("A non-legacy task must not execute on the legacy worker")
+
+    monkeypatch.setattr(service, "_run_blocking", fake_run_blocking)
+    monkeypatch.setattr(service, "_run_orchestrator", fail_run_orchestrator)
+
+    with caplog.at_level(logging.ERROR, logger="orchestrator.execution"):
+        await service.run_queued_task(task_id="task-1", worker_id="worker-a")
+
+    assert released == [("task-1", "worker-a")]
+    assert "Legacy worker refused task with non-legacy runtime ownership" in caplog.text
 
 
 @pytest.mark.anyio

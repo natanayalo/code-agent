@@ -106,8 +106,19 @@ def test_worker_run_created_for_task_inherits_pinned_orchestration_runtime(sessi
         )
 
         assert run.orchestration_runtime is OrchestrationRuntime.TEMPORAL
+        direct_run = WorkerRunRepository(session).create(
+            task_id=task.id,
+            session_id="wrong-session",
+            worker_type="codex",
+            started_at=datetime.now(UTC),
+            status="running",
+        )
+        assert direct_run.session_id == "wrong-session"
+        assert direct_run.orchestration_runtime is OrchestrationRuntime.TEMPORAL
         with pytest.raises(ValueError, match="immutable"):
             task.orchestration_runtime = OrchestrationRuntime.LEGACY
+        with pytest.raises(ValueError, match="immutable"):
+            run.orchestration_runtime = OrchestrationRuntime.LEGACY
 
 
 def test_worker_run_complete_preserves_existing_optional_fields(session_factory) -> None:

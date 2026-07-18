@@ -593,8 +593,8 @@ Boundary:
 Design decisions:
 
 - persist `orchestration_runtime` on both `Task` (authoritative for drain metrics)
-  and `WorkerRun` (execution evidence), using a new `OrchestrationRuntime` Postgres
-  enum with values `temporal` and `legacy`
+  and `WorkerRun` (execution evidence), using a portable constrained
+  `OrchestrationRuntime` enum with values `temporal` and `legacy`
 - runtime is pinned to the task at submission and immutable — no re-evaluation per run
 - historical backfill uses conservative classification: positively identified rows
   get their runtime; ambiguous rows stay `NULL` (displayed as "unknown")

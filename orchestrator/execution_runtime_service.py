@@ -26,6 +26,7 @@ from orchestrator.execution_graph_input import build_orchestrator_graph_input
 from orchestrator.execution_policy import (
     _apply_execution_budget_policy,
 )
+from orchestrator.execution_queue_ownership_service import legacy_worker_may_execute
 from orchestrator.execution_serialization import (
     _completion_progress_phase,
     _normalize_orchestrator_graph_output,
@@ -411,16 +412,19 @@ async def run_queued_task(
     try:
         loaded = await self._run_blocking(self._load_submission_for_task, task_id=task_id)
     except ValidationError as exc:
-        await _handle_invalid_queued_submission(self, exc, worker_id, task_id)
-        return None
+        return await _handle_invalid_queued_submission(self, exc, worker_id, task_id)
     if loaded is None:
-        logger.warning(
-            "Skipping queued task run: task no longer exists",
-            extra={"task_id": task_id},
-        )
+        logger.warning("Skipping queued task run: task no longer exists; id=%s", task_id)
         return None
 
     submission, persisted = loaded
+    if not await legacy_worker_may_execute(
+        self,
+        task_id=task_id,
+        worker_id=worker_id,
+        orchestration_runtime=persisted.orchestration_runtime,
+    ):
+        return None
     execution_facade = sys.modules.get("orchestrator.execution")
     restored_trace_context = getattr(
         execution_facade,

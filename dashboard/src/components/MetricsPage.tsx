@@ -84,12 +84,13 @@ export function MetricsPage() {
 
           <div className="metrics-details-grid">
             <section className="metric-detail-card card" aria-labelledby="runtime-drain-heading">
-              <h3 id="runtime-drain-heading">Runtime Drain</h3>
+              <h3 id="runtime-drain-heading">Runtime Drain — all time</h3>
               <div className="runtime-drain-grid">
-                <RuntimeDrainMetric label="Temporal" value={metrics.orchestration_runtime_counts.temporal ?? 0} />
-                <RuntimeDrainMetric label="Legacy" value={metrics.orchestration_runtime_counts.legacy ?? 0} />
-                <RuntimeDrainMetric label="Unknown" value={metrics.orchestration_runtime_counts.unknown ?? 0} />
-                <RuntimeDrainMetric label="Active legacy" value={metrics.active_legacy_task_count} alert />
+                <RuntimeDrainMetric label="Temporal" value={metrics.orchestration_runtime_counts?.temporal ?? 0} />
+                <RuntimeDrainMetric label="Legacy" value={metrics.orchestration_runtime_counts?.legacy ?? 0} />
+                <RuntimeDrainMetric label="Unknown" value={metrics.orchestration_runtime_counts?.unknown ?? 0} />
+                <RuntimeDrainMetric label="Active legacy" value={metrics.active_legacy_task_count ?? 0} alert />
+                <RuntimeDrainMetric label="Active unknown" value={metrics.active_unknown_task_count ?? 0} alert />
               </div>
               <p className="metric-note"><GitBranch size={14} aria-hidden="true" /> Since-cutover submissions will be available after the Slice 2 cutover timestamp is persisted.</p>
             </section>

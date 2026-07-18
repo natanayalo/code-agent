@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from db.enums import OrchestrationRuntime
 from repositories import WorkerNodeRepository
 from tests.unit.task_execution_service_support import *  # noqa: F403
 
@@ -125,6 +126,7 @@ def test_claim_next_task_orders_by_queue_lane_then_priority_then_age() -> None:
             queue_lane="scout",
             priority=1,
             next_attempt_at=now - timedelta(minutes=5),
+            orchestration_runtime=OrchestrationRuntime.LEGACY,
         )
         repo.create(
             session_id="t1",
@@ -132,6 +134,7 @@ def test_claim_next_task_orders_by_queue_lane_then_priority_then_age() -> None:
             queue_lane="primary",
             priority=0,
             next_attempt_at=now - timedelta(minutes=4),
+            orchestration_runtime=OrchestrationRuntime.LEGACY,
         )
         repo.create(
             session_id="t1",
@@ -139,6 +142,7 @@ def test_claim_next_task_orders_by_queue_lane_then_priority_then_age() -> None:
             queue_lane="primary",
             priority=1,
             next_attempt_at=now - timedelta(minutes=3),
+            orchestration_runtime=OrchestrationRuntime.LEGACY,
         )
         repo.create(
             session_id="t1",
@@ -146,6 +150,7 @@ def test_claim_next_task_orders_by_queue_lane_then_priority_then_age() -> None:
             queue_lane="primary",
             priority=1,
             next_attempt_at=now - timedelta(minutes=2),
+            orchestration_runtime=OrchestrationRuntime.LEGACY,
         )
 
     service = execution_module.TaskExecutionService(

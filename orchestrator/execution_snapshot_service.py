@@ -1007,6 +1007,7 @@ def get_operational_metrics(self: Any, window_hours: int | None = 24) -> Operati
             legacy_tool_loop_usage=run_metrics["legacy_tool_loop_usage"],
             orchestration_runtime_counts=runtime_drain_metrics["orchestration_runtime_counts"],
             active_legacy_task_count=runtime_drain_metrics["active_legacy_task_count"],
+            active_unknown_task_count=runtime_drain_metrics["active_unknown_task_count"],
             avg_duration_seconds=run_metrics["avg_duration_seconds"],
             success_rate=run_metrics["success_rate"],
         )

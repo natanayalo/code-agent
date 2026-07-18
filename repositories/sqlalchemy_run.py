@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 
 from db.enums import (
     ArtifactType,
-    OrchestrationRuntime,
     WorkerRunStatus,
     WorkerRuntimeMode,
     WorkerType,
@@ -47,11 +46,13 @@ class WorkerRunRepository:
         retention_expires_at: datetime | None = None,
         worker_profile: str | None = None,
         runtime_mode: str | WorkerRuntimeMode | None = None,
-        orchestration_runtime: str | OrchestrationRuntime | None = None,
     ) -> WorkerRun:
+        task = self.session.get(Task, task_id)
+        if task is None:
+            raise ValueError(f"Cannot create worker run for missing task '{task_id}'.")
         worker_run = WorkerRun(
             task_id=task_id,
-            session_id=session_id,
+            session_id=session_id or task.session_id,
             worker_type=worker_type,
             workspace_id=workspace_id,
             started_at=started_at,
@@ -59,7 +60,7 @@ class WorkerRunRepository:
             status=status,
             worker_profile=worker_profile,
             runtime_mode=cast(WorkerRuntimeMode | None, runtime_mode),
-            orchestration_runtime=cast(OrchestrationRuntime | None, orchestration_runtime),
+            orchestration_runtime=task.orchestration_runtime,
             summary=summary,
             requested_permission=requested_permission,
             budget_usage=budget_usage,
@@ -93,7 +94,6 @@ class WorkerRunRepository:
             worker_type=worker_type,
             started_at=started_at,
             status=status,
-            orchestration_runtime=task.orchestration_runtime,
             **kwargs,
         )
 

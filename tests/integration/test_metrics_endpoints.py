@@ -228,6 +228,7 @@ def test_get_metrics_returns_aggregated_stats(client: TestClient, session_factor
     assert data["legacy_tool_loop_usage"]["codex"] == 1
     assert data["orchestration_runtime_counts"] == {"temporal": 1, "legacy": 2, "unknown": 1}
     assert data["active_legacy_task_count"] == 0
+    assert data["active_unknown_task_count"] == 1
     # Average of 5, 8, and 3 minutes = (300 + 480 + 180) / 3 = 960 / 3 = 320 seconds
     assert data["avg_duration_seconds"] == 320.0
     # 2 successes out of 3 runs
@@ -249,6 +250,7 @@ def test_get_metrics_empty_state(client: TestClient) -> None:
     assert data["legacy_tool_loop_usage"] == {}
     assert data["orchestration_runtime_counts"] == {}
     assert data["active_legacy_task_count"] == 0
+    assert data["active_unknown_task_count"] == 0
     assert data["avg_duration_seconds"] == 0.0
     assert data["success_rate"] == 0.0
 
