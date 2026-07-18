@@ -2,7 +2,7 @@ import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../services/api';
 import { DashboardLayout } from './layout/DashboardLayout';
-import { Activity, Clock, Database, Cpu, TrendingUp } from 'lucide-react';
+import { Activity, Clock, Database, Cpu, GitBranch, TrendingUp } from 'lucide-react';
 import { formatLabel } from '../utils/formatters';
 
 const METRICS_REFETCH_INTERVAL_MS = 60000;
@@ -83,6 +83,16 @@ export function MetricsPage() {
           </div>
 
           <div className="metrics-details-grid">
+            <section className="metric-detail-card card" aria-labelledby="runtime-drain-heading">
+              <h3 id="runtime-drain-heading">Runtime Drain</h3>
+              <div className="runtime-drain-grid">
+                <RuntimeDrainMetric label="Temporal" value={metrics.orchestration_runtime_counts.temporal ?? 0} />
+                <RuntimeDrainMetric label="Legacy" value={metrics.orchestration_runtime_counts.legacy ?? 0} />
+                <RuntimeDrainMetric label="Unknown" value={metrics.orchestration_runtime_counts.unknown ?? 0} />
+                <RuntimeDrainMetric label="Active legacy" value={metrics.active_legacy_task_count} alert />
+              </div>
+              <p className="metric-note"><GitBranch size={14} aria-hidden="true" /> Since-cutover submissions will be available after the Slice 2 cutover timestamp is persisted.</p>
+            </section>
             <div className="metric-detail-card card">
               <h3>Status Distribution</h3>
               <div className="status-list">
@@ -116,6 +126,15 @@ export function MetricsPage() {
         </div>
       )}
     </DashboardLayout>
+  );
+}
+
+function RuntimeDrainMetric({ label, value, alert = false }: { label: string; value: number; alert?: boolean }) {
+  return (
+    <div className="runtime-drain-metric">
+      <span>{label}</span>
+      <strong className={alert && value > 0 ? 'runtime-drain-alert' : undefined}>{value}</strong>
+    </div>
   );
 }
 

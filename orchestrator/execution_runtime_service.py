@@ -20,9 +20,8 @@ from apps.observability import (
     with_span_kind,
 )
 from apps.observability_utils import ATTR_WORKER_ID
-from apps.runtime import uses_temporal_execution
 from db.base import utc_now
-from db.enums import TaskStatus
+from db.enums import OrchestrationRuntime, TaskStatus
 from orchestrator.execution_graph_input import build_orchestrator_graph_input
 from orchestrator.execution_policy import (
     _apply_execution_budget_policy,
@@ -98,7 +97,7 @@ async def submit_task(
     persisted: _PersistedTaskContext,
 ) -> None:
     """Legacy direct execution entrypoint kept for compatibility/tests."""
-    if uses_temporal_execution():
+    if persisted.orchestration_runtime == OrchestrationRuntime.TEMPORAL.value:
         import temporalio.exceptions
 
         client = await self._get_temporal_client()

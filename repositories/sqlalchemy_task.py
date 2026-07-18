@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from db.enums import (
     HumanInteractionStatus,
+    OrchestrationRuntime,
     TaskStatus,
     WorkerNodeStatus,
     WorkerRuntimeMode,
@@ -47,6 +48,7 @@ class TaskRepository:
         chosen_worker: str | None = None,
         chosen_profile: str | None = None,
         runtime_mode: str | WorkerRuntimeMode | None = None,
+        orchestration_runtime: str | OrchestrationRuntime | None = None,
         route_reason: str | None = None,
         trace_context: dict[str, str] | None = None,
         repair_for_task_id: str | None = None,
@@ -71,6 +73,7 @@ class TaskRepository:
             chosen_worker=chosen_worker,
             chosen_profile=chosen_profile,
             runtime_mode=cast(WorkerRuntimeMode | None, runtime_mode),
+            orchestration_runtime=cast(OrchestrationRuntime | None, orchestration_runtime),
             route_reason=route_reason,
             trace_context=trace_context or {},
             repair_for_task_id=repair_for_task_id,
@@ -647,4 +650,26 @@ class TaskRepository:
             "retry_rate": (retry_stats.retried / retry_stats.attempted)
             if retry_stats.attempted > 0
             else 0,
+        }
+
+    def get_runtime_drain_metrics(self) -> dict[str, Any]:
+        """Return all-time runtime counts used to gate legacy retirement."""
+
+        runtime_counts = self.session.execute(
+            select(Task.orchestration_runtime, func.count(Task.id)).group_by(
+                Task.orchestration_runtime
+            )
+        ).all()
+        active_legacy_count = self.session.scalar(
+            select(func.count(Task.id)).where(
+                Task.orchestration_runtime == OrchestrationRuntime.LEGACY,
+                Task.status.in_((TaskStatus.PENDING, TaskStatus.IN_PROGRESS)),
+            )
+        )
+        return {
+            "orchestration_runtime_counts": {
+                (runtime.value if runtime is not None else "unknown"): count
+                for runtime, count in runtime_counts
+            },
+            "active_legacy_task_count": int(active_legacy_count or 0),
         }

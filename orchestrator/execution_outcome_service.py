@@ -174,7 +174,7 @@ def _build_artifact_index(
 
 def _create_worker_run(
     worker_run_repo: WorkerRunRepository,
-    task_id: str,
+    task: Any,
     state: OrchestratorState,
     artifacts: list[Any],
     artifact_index: list[dict[str, Any]],
@@ -184,9 +184,8 @@ def _create_worker_run(
 ) -> Any:
     result = state.result
     worker_type = _worker_type_for_persistence(state)
-    return worker_run_repo.create(
-        task_id=task_id,
-        session_id=state.session.session_id if state.session is not None else None,
+    return worker_run_repo.create_for_task(
+        task=task,
         worker_type=worker_type,
         workspace_id=_workspace_id_from_artifacts(artifacts),
         started_at=started_at,
@@ -715,7 +714,7 @@ def _persist_execution_outcome(
 
         worker_run = _create_worker_run(
             worker_run_repo=worker_run_repo,
-            task_id=task_id,
+            task=task,
             state=state,
             artifacts=artifacts,
             artifact_index=artifact_index,

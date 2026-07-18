@@ -8,8 +8,14 @@ from typing import Any, cast
 from sqlalchemy import case, delete, func, select
 from sqlalchemy.orm import Session
 
-from db.enums import ArtifactType, WorkerRunStatus, WorkerRuntimeMode, WorkerType
-from db.models import Artifact, WorkerRun
+from db.enums import (
+    ArtifactType,
+    OrchestrationRuntime,
+    WorkerRunStatus,
+    WorkerRuntimeMode,
+    WorkerType,
+)
+from db.models import Artifact, Task, WorkerRun
 
 
 class WorkerRunRepository:
@@ -41,6 +47,7 @@ class WorkerRunRepository:
         retention_expires_at: datetime | None = None,
         worker_profile: str | None = None,
         runtime_mode: str | WorkerRuntimeMode | None = None,
+        orchestration_runtime: str | OrchestrationRuntime | None = None,
     ) -> WorkerRun:
         worker_run = WorkerRun(
             task_id=task_id,
@@ -52,6 +59,7 @@ class WorkerRunRepository:
             status=status,
             worker_profile=worker_profile,
             runtime_mode=cast(WorkerRuntimeMode | None, runtime_mode),
+            orchestration_runtime=cast(OrchestrationRuntime | None, orchestration_runtime),
             summary=summary,
             requested_permission=requested_permission,
             budget_usage=budget_usage,
@@ -67,6 +75,27 @@ class WorkerRunRepository:
         self.session.add(worker_run)
         self.session.flush()
         return worker_run
+
+    def create_for_task(
+        self,
+        *,
+        task: Task,
+        worker_type: str | WorkerType,
+        started_at: datetime,
+        status: str | WorkerRunStatus,
+        **kwargs: Any,
+    ) -> WorkerRun:
+        """Create run evidence using the runtime pinned on its parent task."""
+
+        return self.create(
+            task_id=task.id,
+            session_id=task.session_id,
+            worker_type=worker_type,
+            started_at=started_at,
+            status=status,
+            orchestration_runtime=task.orchestration_runtime,
+            **kwargs,
+        )
 
     def get(self, run_id: str) -> WorkerRun | None:
         return self.session.get(WorkerRun, run_id)

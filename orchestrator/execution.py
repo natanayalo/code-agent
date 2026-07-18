@@ -21,8 +21,8 @@ from apps.observability import (
 from apps.observability import (
     with_restored_trace_context as _with_restored_trace_context,
 )
-from apps.runtime import uses_temporal_execution
 from db.enums import (
+    OrchestrationRuntime,
     TaskStatus,
 )
 from db.models import Task as _Task
@@ -267,7 +267,7 @@ class TaskExecutionService:
                 },
             )
         else:
-            if uses_temporal_execution():
+            if task_snapshot.orchestration_runtime == OrchestrationRuntime.TEMPORAL.value:
                 self.start_temporal_workflow_sync(task_id)
         return outcome
 

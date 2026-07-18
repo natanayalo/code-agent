@@ -7,11 +7,11 @@ import logging
 from collections.abc import Mapping
 from typing import Any
 
-from apps.runtime import uses_temporal_execution
 from db.base import utc_now
 from db.enums import (
     HumanInteractionStatus,
     HumanInteractionType,
+    OrchestrationRuntime,
     TaskStatus,
     TimelineEventType,
     WorkerRunStatus,
@@ -215,7 +215,7 @@ def record_interaction_response(
 
         session.flush()
 
-        is_temporal = uses_temporal_execution()
+        is_temporal = task.orchestration_runtime == OrchestrationRuntime.TEMPORAL
         is_resolved = applied and interaction.status == HumanInteractionStatus.RESOLVED
         if is_temporal and is_resolved:
             interaction_data = interaction.data if isinstance(interaction.data, Mapping) else {}
@@ -284,9 +284,8 @@ def _handle_approval_rejection(
     task.next_attempt_at = None
     task.last_error = "Manual approval rejected via API decision endpoint."
     worker_type = task.chosen_worker or task.worker_override or WorkerType.CODEX
-    worker_run_repo.create(
-        task_id=task.id,
-        session_id=task.session_id,
+    worker_run_repo.create_for_task(
+        task=task,
         worker_type=worker_type,
         workspace_id=None,
         started_at=decided_at,
@@ -370,7 +369,7 @@ def apply_task_approval_decision(
         task.lease_expires_at = None
         session.flush()
 
-    if uses_temporal_execution():
+    if task.orchestration_runtime == OrchestrationRuntime.TEMPORAL:
         _dispatch_temporal_signal(self, task_id, "handle_approval", approved)
 
     snapshot = self.get_task(task_id)
@@ -400,7 +399,7 @@ def cancel_task(self: Any, *, task_id: str) -> TaskSnapshot | None:
                 event_key=f"task:{task_id}:cancelled",
                 message="Task was cancelled by operator.",
             )
-    if was_cancelled and uses_temporal_execution():
+    if was_cancelled and task.orchestration_runtime == OrchestrationRuntime.TEMPORAL:
         try:
             loop = asyncio.get_running_loop()
             loop.create_task(self.cancel_temporal_workflow(task_id))

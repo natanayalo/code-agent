@@ -73,6 +73,39 @@ button {
   background-color: var(--color-bg-primary);
 }
 
+.runtime-drain-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--spacing-sm);
+  margin: var(--spacing-md) 0;
+}
+
+.runtime-drain-metric {
+  background: var(--color-surface);
+  border: var(--glass-border);
+  border-radius: 10px;
+  padding: var(--spacing-sm);
+  display: flex;
+  justify-content: space-between;
+  color: var(--color-text-secondary);
+}
+
+.runtime-drain-metric strong {
+  color: var(--color-text-primary);
+}
+
+.runtime-drain-alert {
+  color: var(--color-status-failed) !important;
+}
+
+.metric-note {
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+}
+
 /* Sidebar Styling */
 .sidebar-brand {
   padding: var(--spacing-xl);

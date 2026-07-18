@@ -72,6 +72,13 @@ class WorkerRuntimeMode(StrEnum):
     SHELL = "shell"
 
 
+class OrchestrationRuntime(StrEnum):
+    """Durable scheduler selected for a task at submission time."""
+
+    TEMPORAL = "temporal"
+    LEGACY = "legacy"
+
+
 class WorkerType(StrEnum):
     """Supported worker identifiers stored in persistence."""
 

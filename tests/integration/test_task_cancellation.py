@@ -100,6 +100,9 @@ def test_cancel_temporal_task_requests_workflow_cancellation(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ):
     """Temporal-backed cancellation should cancel the durable workflow too."""
+    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
+    service = client.app.state.task_service
+    monkeypatch.setattr(service, "start_temporal_workflow_sync", lambda task_id: None)
     response = client.post("/tasks", json={"task_text": "Temporal cancellation"})
     task_id = response.json()["task_id"]
     requested_cancellations: list[str] = []
@@ -107,8 +110,6 @@ def test_cancel_temporal_task_requests_workflow_cancellation(
     async def cancel_temporal_workflow(cancelled_task_id: str) -> None:
         requested_cancellations.append(cancelled_task_id)
 
-    service = client.app.state.task_service
-    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
     monkeypatch.setattr(service, "cancel_temporal_workflow", cancel_temporal_workflow)
 
     cancel_response = client.post(f"/tasks/{task_id}/cancel")

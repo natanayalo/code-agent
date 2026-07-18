@@ -55,6 +55,7 @@ export interface TaskSummarySnapshot {
   chosen_worker?: string | null;
   chosen_profile?: string | null;
   runtime_mode?: string | null;
+  orchestration_runtime?: string | null;
   route_reason?: string | null;
   created_at: string;
   updated_at: string;
@@ -87,6 +88,7 @@ export interface WorkerRunSnapshot {
   worker_type: string;
   worker_profile?: string | null;
   runtime_mode?: string | null;
+  orchestration_runtime?: string | null;
   workspace_id?: string | null;
   status: string;
   started_at: string;

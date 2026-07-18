@@ -12,7 +12,13 @@ from sqlalchemy.pool import StaticPool
 from apps.api.auth import DASHBOARD_COOKIE_NAME, ApiAuthConfig, create_dashboard_token
 from apps.api.main import create_app
 from db.base import Base, utc_now
-from db.enums import TaskStatus, WorkerRunStatus, WorkerRuntimeMode, WorkerType
+from db.enums import (
+    OrchestrationRuntime,
+    TaskStatus,
+    WorkerRunStatus,
+    WorkerRuntimeMode,
+    WorkerType,
+)
 from orchestrator.execution import TaskExecutionService
 from repositories import (
     TaskRepository,
@@ -133,6 +139,63 @@ def test_get_metrics_allows_cookie_auth(session_factory) -> None:
         assert "total_tasks" in response.json()
 
 
+def _seed_aggregated_metrics(task_repo, run_repo, now) -> None:
+    """Create a mixed-runtime task and worker-run set for metrics assertions."""
+    t1 = task_repo.create(
+        session_id="s1",
+        task_text="task 1",
+        status=TaskStatus.COMPLETED,
+        orchestration_runtime=OrchestrationRuntime.TEMPORAL,
+    )
+    t1.attempt_count = 1
+    t2 = task_repo.create(
+        session_id="s1",
+        task_text="task 2",
+        status=TaskStatus.FAILED,
+        orchestration_runtime=OrchestrationRuntime.LEGACY,
+    )
+    t2.attempt_count = 1
+    task_repo.create(session_id="s2", task_text="task 3", status=TaskStatus.PENDING)
+    t4 = task_repo.create(
+        session_id="s2",
+        task_text="task 4",
+        status=TaskStatus.COMPLETED,
+        orchestration_runtime=OrchestrationRuntime.LEGACY,
+    )
+    t4.attempt_count = 2
+    for task, worker_type, runtime_mode, finished_at, status in (
+        (
+            t1,
+            WorkerType.CODEX,
+            WorkerRuntimeMode.NATIVE_AGENT,
+            now - timedelta(minutes=5),
+            WorkerRunStatus.SUCCESS,
+        ),
+        (
+            t2,
+            WorkerType.ANTIGRAVITY,
+            WorkerRuntimeMode.NATIVE_AGENT,
+            now - timedelta(minutes=2),
+            WorkerRunStatus.FAILURE,
+        ),
+        (
+            t4,
+            WorkerType.CODEX,
+            WorkerRuntimeMode.TOOL_LOOP,
+            now - timedelta(minutes=7),
+            WorkerRunStatus.SUCCESS,
+        ),
+    ):
+        run_repo.create(
+            task_id=task.id,
+            worker_type=worker_type,
+            runtime_mode=runtime_mode,
+            started_at=now - timedelta(minutes=10),
+            finished_at=finished_at,
+            status=status,
+        )
+
+
 def test_get_metrics_returns_aggregated_stats(client: TestClient, session_factory) -> None:
     """Metrics should reflect the aggregated state of tasks and runs in the DB."""
     now = utc_now()
@@ -141,43 +204,8 @@ def test_get_metrics_returns_aggregated_stats(client: TestClient, session_factor
         task_repo = TaskRepository(session)
         run_repo = WorkerRunRepository(session)
 
-        # Create some tasks
-        t1 = task_repo.create(session_id="s1", task_text="task 1", status=TaskStatus.COMPLETED)
-        t1.attempt_count = 1
-        t2 = task_repo.create(session_id="s1", task_text="task 2", status=TaskStatus.FAILED)
-        t2.attempt_count = 1
-        task_repo.create(session_id="s2", task_text="task 3", status=TaskStatus.PENDING)
-
-        # Task with retries
-        t4 = task_repo.create(session_id="s2", task_text="task 4", status=TaskStatus.COMPLETED)
-        t4.attempt_count = 2
+        _seed_aggregated_metrics(task_repo, run_repo, now)
         session.flush()
-
-        # Create some runs
-        run_repo.create(
-            task_id=t1.id,
-            worker_type=WorkerType.CODEX,
-            runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
-            started_at=now - timedelta(minutes=10),
-            finished_at=now - timedelta(minutes=5),  # 5 min duration
-            status=WorkerRunStatus.SUCCESS,
-        )
-        run_repo.create(
-            task_id=t2.id,
-            worker_type=WorkerType.ANTIGRAVITY,
-            runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
-            started_at=now - timedelta(minutes=10),
-            finished_at=now - timedelta(minutes=2),  # 8 min duration
-            status=WorkerRunStatus.FAILURE,
-        )
-        run_repo.create(
-            task_id=t4.id,
-            worker_type=WorkerType.CODEX,
-            runtime_mode=WorkerRuntimeMode.TOOL_LOOP,
-            started_at=now - timedelta(minutes=10),
-            finished_at=now - timedelta(minutes=7),  # 3 min duration
-            status=WorkerRunStatus.SUCCESS,
-        )
 
     response = client.get("/metrics")
     assert response.status_code == 200
@@ -198,6 +226,8 @@ def test_get_metrics_returns_aggregated_stats(client: TestClient, session_factor
     assert data["runtime_mode_usage"]["native_agent"] == 2
     assert data["runtime_mode_usage"]["tool_loop"] == 1
     assert data["legacy_tool_loop_usage"]["codex"] == 1
+    assert data["orchestration_runtime_counts"] == {"temporal": 1, "legacy": 2, "unknown": 1}
+    assert data["active_legacy_task_count"] == 0
     # Average of 5, 8, and 3 minutes = (300 + 480 + 180) / 3 = 960 / 3 = 320 seconds
     assert data["avg_duration_seconds"] == 320.0
     # 2 successes out of 3 runs
@@ -217,6 +247,8 @@ def test_get_metrics_empty_state(client: TestClient) -> None:
     assert data["worker_usage"] == {}
     assert data["runtime_mode_usage"] == {}
     assert data["legacy_tool_loop_usage"] == {}
+    assert data["orchestration_runtime_counts"] == {}
+    assert data["active_legacy_task_count"] == 0
     assert data["avg_duration_seconds"] == 0.0
     assert data["success_rate"] == 0.0
 

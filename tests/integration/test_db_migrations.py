@@ -118,6 +118,7 @@ EXPECTED_CHECK_CONSTRAINTS = {
         },
         "ck_tasks_worker_type": {"antigravity", "codex", "openrouter"},
         "ck_tasks_worker_override_type": {"antigravity", "codex", "openrouter"},
+        "ck_tasks_orchestration_runtime": {"temporal", "legacy"},
     },
     "worker_runs": {
         "ck_worker_runs_worker_type": {"antigravity", "codex", "openrouter"},
@@ -129,6 +130,7 @@ EXPECTED_CHECK_CONSTRAINTS = {
             "error",
             "cancelled",
         },
+        "ck_worker_runs_orchestration_runtime": {"temporal", "legacy"},
     },
     "worker_nodes": {
         "ck_worker_nodes_worker_type": {"antigravity", "codex", "openrouter"},
@@ -217,6 +219,7 @@ def _assert_upgrade_columns(inspector) -> None:
         "budget",
         "chosen_worker",
         "route_reason",
+        "orchestration_runtime",
     } <= _column_names(inspector, "tasks")
     assert {
         "session_id",
@@ -228,6 +231,7 @@ def _assert_upgrade_columns(inspector) -> None:
         "runtime_manifest",
         "retention_expires_at",
         "files_changed_count",
+        "orchestration_runtime",
     } <= _column_names(inspector, "worker_runs")
     assert {
         "worker_id",
@@ -427,6 +431,56 @@ def test_fanout_metadata_migration_backfills_legacy_aggregation_roles(tmp_path: 
         "review": "validation",
         "verify": "validation",
     }
+
+
+def test_orchestration_runtime_migration_backfills_only_temporal_evidence(tmp_path: Path) -> None:
+    """Historical rows stay unknown unless durable Temporal state proves their runtime."""
+    database_path = tmp_path / "orchestration_runtime_backfill.db"
+    config = Config(str(Path("alembic.ini").resolve()))
+    config.set_main_option("script_location", str(Path("db/migrations").resolve()))
+    config.set_main_option("sqlalchemy.url", f"sqlite:///{database_path}")
+    command.upgrade(config, "20260718_0041")
+
+    engine = create_engine(f"sqlite:///{database_path}")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO tasks (id, session_id, task_text, status, priority) VALUES "
+                "('temporal-task', 'session', 'Temporal', 'pending', 0), "
+                "('unknown-task', 'session', 'Unknown', 'pending', 0)"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO temporal_task_states (id, task_id, state, created_at, updated_at) "
+                "VALUES ('temporal-state', 'temporal-task', '{}', CURRENT_TIMESTAMP, "
+                "CURRENT_TIMESTAMP)"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO worker_runs "
+                "(id, task_id, worker_type, started_at, status, files_changed_count) VALUES "
+                "('temporal-run', 'temporal-task', 'codex', CURRENT_TIMESTAMP, 'running', 0), "
+                "('unknown-run', 'unknown-task', 'codex', CURRENT_TIMESTAMP, 'running', 0)"
+            )
+        )
+
+    command.upgrade(config, "head")
+    with engine.connect() as connection:
+        task_runtimes = dict(
+            connection.execute(text("SELECT id, orchestration_runtime FROM tasks")).all()
+        )
+        run_runtimes = dict(
+            connection.execute(text("SELECT id, orchestration_runtime FROM worker_runs")).all()
+        )
+    assert task_runtimes == {"temporal-task": "temporal", "unknown-task": None}
+    assert run_runtimes == {"temporal-run": "temporal", "unknown-run": None}
+
+    command.downgrade(config, "20260718_0041")
+    inspector = inspect(engine)
+    assert "orchestration_runtime" not in _column_names(inspector, "tasks")
+    assert "orchestration_runtime" not in _column_names(inspector, "worker_runs")
 
 
 def test_personal_memory_scope_migration_deduplicates_and_removes_user_id(
