@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager  # noqa: E402
 from typing import Any
 
 from fastapi import FastAPI  # noqa: E402
+from sqlalchemy.orm import sessionmaker  # noqa: E402
 
 from apps.api.auth import (  # noqa: E402
     API_SHARED_SECRET_ENV_VAR,
@@ -105,8 +106,9 @@ def _build_lifespan(
                     outbound_http_clients=outbound_http_clients
                 )
                 app.state.task_service = built_service
-                if built_service is not None:
-                    initialize_persisted_cutover(built_service.session_factory)
+                session_factory = getattr(built_service, "session_factory", None)
+                if isinstance(session_factory, sessionmaker):
+                    initialize_persisted_cutover(session_factory)
                 _validate_security_config(app)
 
                 if app.state.task_service is not None:
@@ -144,8 +146,9 @@ def _build_lifespan(
                 app.state.api_auth_config = auth_config or ApiAuthConfig()
                 app.state.system_config = SystemConfig.load_from_env()
                 app.state.task_service = task_service
-                if hasattr(task_service, "session_factory"):
-                    initialize_persisted_cutover(task_service.session_factory)
+                session_factory = getattr(task_service, "session_factory", None)
+                if isinstance(session_factory, sessionmaker):
+                    initialize_persisted_cutover(session_factory)
                 yield
             finally:
                 shutdown_callback_dns_executor()

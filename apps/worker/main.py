@@ -8,6 +8,8 @@ import os
 from typing import Final
 from uuid import uuid4
 
+from sqlalchemy.orm import sessionmaker
+
 from apps.api.progress import create_outbound_http_clients
 from apps.api.task_service_factory import build_task_service_from_env
 from apps.observability import configure_tracing_from_env
@@ -62,7 +64,7 @@ async def run_worker_forever() -> None:
                 "Worker runtime requires CODE_AGENT_ENABLE_TASK_SERVICE=1 "
                 "with a valid database configuration."
             )
-        if hasattr(service, "session_factory"):
+        if isinstance(getattr(service, "session_factory", None), sessionmaker):
             initialize_persisted_cutover(service.session_factory)
 
         worker_id = os.environ.get(WORKER_ID_ENV_VAR, "").strip() or f"worker-{uuid4().hex[:8]}"
