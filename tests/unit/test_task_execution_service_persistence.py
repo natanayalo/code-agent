@@ -97,6 +97,26 @@ def _create_retained_worker_run(worker_run_repo, task_id, session_id, workspace_
     )
 
 
+def test_create_task_pins_selected_orchestration_runtime(monkeypatch) -> None:
+    """Runtime selection is persisted once instead of being re-evaluated during execution."""
+    session_factory = _setup_persistence_test_db()
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
+
+    task_snapshot, _ = service.create_task(
+        execution_module.TaskSubmission(task_text="Pin Temporal runtime")
+    )
+
+    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "legacy")
+    reloaded_snapshot = service.get_task(task_snapshot.task_id)
+    assert task_snapshot.orchestration_runtime == "temporal"
+    assert reloaded_snapshot is not None
+    assert reloaded_snapshot.orchestration_runtime == "temporal"
+
+
 def test_persist_execution_outcome_creates_error_worker_run_without_result() -> None:
     """Missing worker results should still leave an error worker-run record for observability."""
     session_factory = _setup_persistence_test_db()

@@ -7,6 +7,7 @@ import logging
 from datetime import UTC, datetime
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy.pool import StaticPool
 
 from db.base import Base
@@ -56,7 +57,9 @@ def _make_task_service(
     )
 
 
-def _persisted_context() -> execution_module._PersistedTaskContext:
+def _persisted_context(
+    *, orchestration_runtime: str | None = "legacy"
+) -> execution_module._PersistedTaskContext:
     return execution_module._PersistedTaskContext(
         user_id="user-1",
         session_id="session-1",
@@ -65,6 +68,7 @@ def _persisted_context() -> execution_module._PersistedTaskContext:
         task_id="task-1",
         attempt_count=1,
         trace_context={},
+        orchestration_runtime=orchestration_runtime,
     )
 
 
@@ -156,8 +160,8 @@ async def test_run_queued_task_skips_missing_persisted_submission(caplog, monkey
     service = _make_task_service(notifier=notifier)
 
     async def fake_run_blocking(func, /, *args, **kwargs):
-        assert getattr(func, "__name__", "") == "_load_submission_for_task"
-        return None
+        assert getattr(func, "__name__", "") == "_get_queued_task_ownership"
+        return False, None
 
     monkeypatch.setattr(service, "_run_blocking", fake_run_blocking)
 
@@ -166,6 +170,107 @@ async def test_run_queued_task_skips_missing_persisted_submission(caplog, monkey
 
     assert "Skipping queued task run: task no longer exists" in caplog.text
     assert notifier.events == []
+
+
+@pytest.mark.anyio
+async def test_run_queued_task_releases_nonlegacy_ownership_violation(monkeypatch, caplog) -> None:
+    """A directly invoked legacy worker must fail closed for a Temporal task."""
+    service = _make_task_service()
+    released: list[tuple[str, str]] = []
+
+    async def fake_run_blocking(func, /, *args, **kwargs):
+        if getattr(func, "__name__", "") == "_get_queued_task_ownership":
+            return True, "temporal"
+        if getattr(func, "__name__", "") == "_load_submission_for_task":
+            raise AssertionError("non-legacy ownership must be checked before submission loading")
+        if getattr(func, "__name__", "") == "_release_legacy_ownership_violation":
+            released.append((kwargs["task_id"], kwargs["worker_id"]))
+            return None
+        raise AssertionError(f"unexpected blocking call: {getattr(func, '__name__', '')}")
+
+    async def fail_run_orchestrator(*_args, **_kwargs):
+        raise AssertionError("A non-legacy task must not execute on the legacy worker")
+
+    monkeypatch.setattr(service, "_run_blocking", fake_run_blocking)
+    monkeypatch.setattr(service, "_run_orchestrator", fail_run_orchestrator)
+
+    with caplog.at_level(logging.ERROR, logger="orchestrator.execution"):
+        await service.run_queued_task(task_id="task-1", worker_id="worker-a")
+
+    assert released == [("task-1", "worker-a")]
+    assert "Legacy worker refused task with non-legacy runtime ownership" in caplog.text
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("runtime", ["temporal", None])
+async def test_invalid_nonlegacy_submission_never_reaches_legacy_validation_handler(
+    monkeypatch, runtime
+) -> None:
+    """Invalid Temporal or unknown payloads must be rejected before validation."""
+    service = _make_task_service()
+    calls: list[str] = []
+
+    try:
+        execution_module.TaskSubmission.model_validate({"task_text": None})
+    except ValidationError as exc:
+        invalid_submission = exc
+    else:  # pragma: no cover - guards the test fixture's invalid input
+        raise AssertionError("Expected an invalid TaskSubmission fixture")
+
+    async def fake_run_blocking(func, /, *args, **kwargs):
+        name = getattr(func, "__name__", "")
+        calls.append(name)
+        if name == "_get_queued_task_ownership":
+            return True, runtime
+        if name == "_load_submission_for_task":
+            raise invalid_submission
+        if name == "_release_legacy_ownership_violation":
+            return None
+        if name in {"_record_task_attempt_error", "_release_task_terminal_failure"}:
+            raise AssertionError("non-legacy tasks must not enter validation handling")
+        raise AssertionError(f"unexpected blocking call: {name}")
+
+    monkeypatch.setattr(service, "_run_blocking", fake_run_blocking)
+
+    await service.run_queued_task(task_id="task-1", worker_id="worker-a")
+
+    assert calls == ["_get_queued_task_ownership", "_release_legacy_ownership_violation"]
+
+
+@pytest.mark.anyio
+async def test_invalid_legacy_submission_reaches_legacy_validation_handler(monkeypatch) -> None:
+    """Only an owned legacy task should be classified as an invalid submission."""
+    service = _make_task_service()
+    calls: list[str] = []
+
+    try:
+        execution_module.TaskSubmission.model_validate({"task_text": None})
+    except ValidationError as exc:
+        invalid_submission = exc
+    else:  # pragma: no cover - guards the test fixture's invalid input
+        raise AssertionError("Expected an invalid TaskSubmission fixture")
+
+    async def fake_run_blocking(func, /, *args, **kwargs):
+        name = getattr(func, "__name__", "")
+        calls.append(name)
+        if name == "_get_queued_task_ownership":
+            return True, "legacy"
+        if name == "_load_submission_for_task":
+            raise invalid_submission
+        if name in {"_record_task_attempt_error", "_release_task_terminal_failure"}:
+            return None
+        raise AssertionError(f"unexpected blocking call: {name}")
+
+    monkeypatch.setattr(service, "_run_blocking", fake_run_blocking)
+
+    await service.run_queued_task(task_id="task-1", worker_id="worker-a")
+
+    assert calls == [
+        "_get_queued_task_ownership",
+        "_load_submission_for_task",
+        "_record_task_attempt_error",
+        "_release_task_terminal_failure",
+    ]
 
 
 @pytest.mark.anyio
@@ -179,6 +284,8 @@ async def test_run_queued_task_aborts_cleanly_when_task_was_cancelled(monkeypatc
 
     async def fake_run_blocking(func, /, *args, **kwargs):
         name = getattr(func, "__name__", "")
+        if name == "_get_queued_task_ownership":
+            return True, "legacy"
         if name == "_load_submission_for_task":
             return submission, persisted
         if name == "get_task":
@@ -227,6 +334,8 @@ async def test_run_queued_task_aborts_cleanly_when_lease_is_lost(monkeypatch, ca
 
     async def fake_run_blocking(func, /, *args, **kwargs):
         name = getattr(func, "__name__", "")
+        if name == "_get_queued_task_ownership":
+            return True, "legacy"
         if name == "_load_submission_for_task":
             return submission, persisted
         if name == "get_task":
@@ -276,6 +385,8 @@ async def test_run_queued_task_aborts_when_orchestrator_completes_after_cancella
 
     async def fake_run_blocking(func, /, *args, **kwargs):
         name = getattr(func, "__name__", "")
+        if name == "_get_queued_task_ownership":
+            return True, "legacy"
         if name == "_load_submission_for_task":
             return submission, persisted
         if name == "get_task":

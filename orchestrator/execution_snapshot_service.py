@@ -606,6 +606,7 @@ def _map_task_to_snapshot(self: Any, task: Task) -> TaskSnapshot:
             worker_type=_enum_value(latest_run_obj.worker_type) or "unknown",
             worker_profile=latest_run_obj.worker_profile,
             runtime_mode=_enum_value(latest_run_obj.runtime_mode),
+            orchestration_runtime=_enum_value(latest_run_obj.orchestration_runtime),
             workspace_id=latest_run_obj.workspace_id,
             status=_enum_value(latest_run_obj.status) or WorkerRunStatus.ERROR.value,
             started_at=latest_run_obj.started_at,
@@ -725,6 +726,7 @@ def _map_task_to_summary(
         chosen_worker=_enum_value(task.chosen_worker),
         chosen_profile=task.chosen_profile,
         runtime_mode=_enum_value(task.runtime_mode),
+        orchestration_runtime=_enum_value(task.orchestration_runtime),
         route_reason=task.route_reason,
         constraints=dict(task.constraints) if isinstance(task.constraints, dict) else {},
         created_at=task.created_at,
@@ -993,6 +995,7 @@ def get_operational_metrics(self: Any, window_hours: int | None = 24) -> Operati
         task_repo = TaskRepository(session)
         run_repo = WorkerRunRepository(session)
         task_metrics = task_repo.get_metrics(since=since)
+        runtime_drain_metrics = task_repo.get_runtime_drain_metrics()
         run_metrics = run_repo.get_metrics(since=since)
         return OperationalMetrics(
             total_tasks=task_metrics["total_tasks"],
@@ -1002,6 +1005,9 @@ def get_operational_metrics(self: Any, window_hours: int | None = 24) -> Operati
             worker_usage=run_metrics["worker_usage"],
             runtime_mode_usage=run_metrics["runtime_mode_usage"],
             legacy_tool_loop_usage=run_metrics["legacy_tool_loop_usage"],
+            orchestration_runtime_counts=runtime_drain_metrics["orchestration_runtime_counts"],
+            active_legacy_task_count=runtime_drain_metrics["active_legacy_task_count"],
+            active_unknown_task_count=runtime_drain_metrics["active_unknown_task_count"],
             avg_duration_seconds=run_metrics["avg_duration_seconds"],
             success_rate=run_metrics["success_rate"],
         )

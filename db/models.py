@@ -34,6 +34,7 @@ from db.enums import (
     HumanInteractionType,
     MemoryProposalCategory,
     MemoryProposalStatus,
+    OrchestrationRuntime,
     ProposalStatus,
     ProposalType,
     SessionStatus,
@@ -64,6 +65,7 @@ HUMAN_INTERACTION_HITL_MODE_ENUM = build_sql_enum(
     HumanInteractionHitlMode, name="human_interaction_hitl_mode"
 )
 WORKER_RUNTIME_MODE_ENUM = build_sql_enum(WorkerRuntimeMode, name="worker_runtime_mode")
+ORCHESTRATION_RUNTIME_ENUM = build_sql_enum(OrchestrationRuntime, name="orchestration_runtime")
 PROPOSAL_STATUS_ENUM = build_sql_enum(ProposalStatus, name="proposal_status")
 PROPOSAL_TYPE_ENUM = build_sql_enum(ProposalType, name="proposal_type")
 MEMORY_PROPOSAL_CATEGORY_ENUM = build_sql_enum(
@@ -280,6 +282,9 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     runtime_mode: Mapped[WorkerRuntimeMode | None] = mapped_column(
         WORKER_RUNTIME_MODE_ENUM, nullable=True
     )
+    orchestration_runtime: Mapped[OrchestrationRuntime | None] = mapped_column(
+        ORCHESTRATION_RUNTIME_ENUM, nullable=True, index=True
+    )
     route_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
     trace_context: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False, default=dict)
     repair_for_task_id: Mapped[str | None] = mapped_column(
@@ -346,6 +351,20 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             return None
         return WorkerRuntimeMode(value)
 
+    @validates("orchestration_runtime")
+    def _coerce_orchestration_runtime(
+        self,
+        _key: str,
+        value: OrchestrationRuntime | str | None,
+    ) -> OrchestrationRuntime | None:
+        """Normalize the runtime and prevent changing an already pinned task."""
+
+        normalized = OrchestrationRuntime(value) if value is not None else None
+        existing = self.__dict__.get("orchestration_runtime")
+        if existing is not None and normalized != existing:
+            raise ValueError("Task orchestration_runtime is immutable after creation.")
+        return normalized
+
 
 class TemporalTaskState(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """Encrypted durable activity handoff state for a Temporal task workflow."""
@@ -408,6 +427,9 @@ class WorkerRun(UUIDPrimaryKeyMixin, Base):
     runtime_mode: Mapped[WorkerRuntimeMode | None] = mapped_column(
         WORKER_RUNTIME_MODE_ENUM, nullable=True
     )
+    orchestration_runtime: Mapped[OrchestrationRuntime | None] = mapped_column(
+        ORCHESTRATION_RUNTIME_ENUM, nullable=True, index=True
+    )
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     requested_permission: Mapped[str | None] = mapped_column(String(64), nullable=True)
     budget_usage: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
@@ -449,6 +471,20 @@ class WorkerRun(UUIDPrimaryKeyMixin, Base):
         if value is None:
             return None
         return WorkerRuntimeMode(value)
+
+    @validates("orchestration_runtime")
+    def _coerce_orchestration_runtime(
+        self,
+        _key: str,
+        value: OrchestrationRuntime | str | None,
+    ) -> OrchestrationRuntime | None:
+        """Normalize runtime evidence and prevent mutation after creation."""
+
+        normalized = OrchestrationRuntime(value) if value is not None else None
+        existing = self.__dict__.get("orchestration_runtime")
+        if existing is not None and normalized != existing:
+            raise ValueError("WorkerRun orchestration_runtime is immutable after creation.")
+        return normalized
 
 
 class WorkerNode(UUIDPrimaryKeyMixin, TimestampMixin, Base):

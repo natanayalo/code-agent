@@ -20,13 +20,13 @@ from apps.observability import (
     with_span_kind,
 )
 from apps.observability_utils import ATTR_WORKER_ID
-from apps.runtime import uses_temporal_execution
 from db.base import utc_now
-from db.enums import TaskStatus
+from db.enums import OrchestrationRuntime, TaskStatus
 from orchestrator.execution_graph_input import build_orchestrator_graph_input
 from orchestrator.execution_policy import (
     _apply_execution_budget_policy,
 )
+from orchestrator.execution_queue_ownership_service import ensure_legacy_queued_task_ownership
 from orchestrator.execution_serialization import (
     _completion_progress_phase,
     _normalize_orchestrator_graph_output,
@@ -98,7 +98,7 @@ async def submit_task(
     persisted: _PersistedTaskContext,
 ) -> None:
     """Legacy direct execution entrypoint kept for compatibility/tests."""
-    if uses_temporal_execution():
+    if persisted.orchestration_runtime == OrchestrationRuntime.TEMPORAL.value:
         import temporalio.exceptions
 
         client = await self._get_temporal_client()
@@ -409,16 +409,14 @@ async def run_queued_task(
     lease_seconds: int = 60,
 ) -> None:
     """Execute one claimed queued task id and persist/release queue state."""
+    if not await ensure_legacy_queued_task_ownership(self, task_id=task_id, worker_id=worker_id):
+        return None
     try:
         loaded = await self._run_blocking(self._load_submission_for_task, task_id=task_id)
     except ValidationError as exc:
-        await _handle_invalid_queued_submission(self, exc, worker_id, task_id)
-        return None
+        return await _handle_invalid_queued_submission(self, exc, worker_id, task_id)
     if loaded is None:
-        logger.warning(
-            "Skipping queued task run: task no longer exists",
-            extra={"task_id": task_id},
-        )
+        logger.warning("Skipping queued task run: task was removed before loading; id=%s", task_id)
         return None
 
     submission, persisted = loaded

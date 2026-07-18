@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from db.enums import (
     HumanInteractionStatus,
+    OrchestrationRuntime,
     TaskStatus,
     WorkerNodeStatus,
     WorkerRuntimeMode,
@@ -47,6 +48,7 @@ class TaskRepository:
         chosen_worker: str | None = None,
         chosen_profile: str | None = None,
         runtime_mode: str | WorkerRuntimeMode | None = None,
+        orchestration_runtime: str | OrchestrationRuntime | None = None,
         route_reason: str | None = None,
         trace_context: dict[str, str] | None = None,
         repair_for_task_id: str | None = None,
@@ -71,6 +73,7 @@ class TaskRepository:
             chosen_worker=chosen_worker,
             chosen_profile=chosen_profile,
             runtime_mode=cast(WorkerRuntimeMode | None, runtime_mode),
+            orchestration_runtime=cast(OrchestrationRuntime | None, orchestration_runtime),
             route_reason=route_reason,
             trace_context=trace_context or {},
             repair_for_task_id=repair_for_task_id,
@@ -349,7 +352,10 @@ class TaskRepository:
             candidates = list(
                 self.session.scalars(
                     select(Task)
-                    .where(self._claimable_pending_filter(now=now))
+                    .where(
+                        self._claimable_pending_filter(now=now),
+                        Task.orchestration_runtime == OrchestrationRuntime.LEGACY,
+                    )
                     .order_by(
                         case((Task.queue_lane == "primary", 1), else_=2).asc(),
                         Task.priority.desc(),
@@ -378,6 +384,7 @@ class TaskRepository:
                     .where(
                         Task.id == candidate.id,
                         self._claimable_pending_filter(now=now),
+                        Task.orchestration_runtime == OrchestrationRuntime.LEGACY,
                     )
                     .values(
                         status=TaskStatus.IN_PROGRESS,
@@ -426,6 +433,7 @@ class TaskRepository:
         """Return expired leases to pending and rebuild affected worker load."""
         expired_tasks_info = self.session.execute(
             select(Task.id, Task.lease_owner).where(
+                Task.orchestration_runtime == OrchestrationRuntime.LEGACY,
                 Task.status == TaskStatus.IN_PROGRESS,
                 Task.lease_expires_at.is_not(None),
                 Task.lease_expires_at <= now,
@@ -444,7 +452,11 @@ class TaskRepository:
         # and prevent deadlocks with release_success/release_failure.
         updated = self.session.execute(
             update(Task)
-            .where(Task.id.in_(task_ids), Task.status == TaskStatus.IN_PROGRESS)
+            .where(
+                Task.id.in_(task_ids),
+                Task.orchestration_runtime == OrchestrationRuntime.LEGACY,
+                Task.status == TaskStatus.IN_PROGRESS,
+            )
             .values(
                 status=case(
                     (Task.attempt_count >= Task.max_attempts, TaskStatus.FAILED),
@@ -479,6 +491,7 @@ class TaskRepository:
             loads_query = (
                 select(Task.lease_owner, func.count(Task.id))
                 .where(
+                    Task.orchestration_runtime == OrchestrationRuntime.LEGACY,
                     Task.lease_owner.in_(affected_workers),
                     Task.status == TaskStatus.IN_PROGRESS,
                 )
@@ -505,6 +518,7 @@ class TaskRepository:
             update(Task)
             .where(
                 Task.id == task_id,
+                Task.orchestration_runtime == OrchestrationRuntime.LEGACY,
                 Task.status == TaskStatus.IN_PROGRESS,
                 Task.lease_owner == worker_id,
             )
@@ -521,7 +535,10 @@ class TaskRepository:
         task = self.get(task_id)
         if task is None:
             return None
-        if task.lease_owner != worker_id:
+        if (
+            task.orchestration_runtime != OrchestrationRuntime.LEGACY
+            or task.lease_owner != worker_id
+        ):
             return task
         task.status = TaskStatus.COMPLETED
         task.lease_owner = None
@@ -543,7 +560,11 @@ class TaskRepository:
         task = self.get(task_id)
         if task is None:
             return None
-        if task.status != TaskStatus.IN_PROGRESS or task.lease_owner != worker_id:
+        if (
+            task.orchestration_runtime != OrchestrationRuntime.LEGACY
+            or task.status != TaskStatus.IN_PROGRESS
+            or task.lease_owner != worker_id
+        ):
             return task
 
         previous_owner = task.lease_owner
@@ -570,7 +591,10 @@ class TaskRepository:
         task = self.get(task_id)
         if task is None:
             return None
-        if task.lease_owner != worker_id:
+        if (
+            task.orchestration_runtime != OrchestrationRuntime.LEGACY
+            or task.lease_owner != worker_id
+        ):
             return task
         previous_owner = task.lease_owner
         task.lease_owner = None
@@ -648,3 +672,60 @@ class TaskRepository:
             if retry_stats.attempted > 0
             else 0,
         }
+
+    def get_runtime_drain_metrics(self) -> dict[str, Any]:
+        """Return all-time runtime counts used to gate legacy retirement."""
+
+        runtime_counts = self.session.execute(
+            select(Task.orchestration_runtime, func.count(Task.id)).group_by(
+                Task.orchestration_runtime
+            )
+        ).all()
+        active_legacy_count = self.session.scalar(
+            select(func.count(Task.id)).where(
+                Task.orchestration_runtime == OrchestrationRuntime.LEGACY,
+                Task.status.in_((TaskStatus.PENDING, TaskStatus.IN_PROGRESS)),
+            )
+        )
+        active_unknown_count = self.session.scalar(
+            select(func.count(Task.id)).where(
+                Task.orchestration_runtime.is_(None),
+                Task.status.in_((TaskStatus.PENDING, TaskStatus.IN_PROGRESS)),
+            )
+        )
+        return {
+            "orchestration_runtime_counts": {
+                (runtime.value if runtime is not None else "unknown"): count
+                for runtime, count in runtime_counts
+            },
+            "active_legacy_task_count": int(active_legacy_count or 0),
+            "active_unknown_task_count": int(active_unknown_count or 0),
+        }
+
+    def release_runtime_ownership_violation(self, *, task_id: str, worker_id: str) -> bool:
+        """Release a non-legacy task accidentally handed to the legacy worker."""
+
+        released = self.session.execute(
+            update(Task)
+            .where(
+                Task.id == task_id,
+                Task.status == TaskStatus.IN_PROGRESS,
+                Task.lease_owner == worker_id,
+                or_(
+                    Task.orchestration_runtime.is_(None),
+                    Task.orchestration_runtime != OrchestrationRuntime.LEGACY,
+                ),
+            )
+            .values(
+                status=TaskStatus.PENDING,
+                lease_owner=None,
+                lease_expires_at=None,
+                attempt_count=case(
+                    (Task.attempt_count > 0, Task.attempt_count - 1),
+                    else_=0,
+                ),
+                last_error="Legacy worker refused task due to orchestration runtime ownership.",
+            )
+        )
+        self.session.flush()
+        return bool(getattr(released, "rowcount", 0))

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from db.enums import ArtifactType, WorkerRunStatus, WorkerRuntimeMode
+import pytest
+
+from db.enums import ArtifactType, OrchestrationRuntime, WorkerRunStatus, WorkerRuntimeMode
 from repositories import (
     ArtifactRepository,
     SessionRepository,
@@ -77,6 +79,46 @@ def test_worker_run_and_artifact_repositories_support_crud(session_factory) -> N
         artifacts = artifact_repo.list_by_run(worker_run.id)
         assert len(artifacts) == 1
         assert artifacts[0].artifact_type is ArtifactType.LOG
+
+
+def test_worker_run_created_for_task_inherits_pinned_orchestration_runtime(session_factory) -> None:
+    """Run evidence must preserve the runtime selected when the task was submitted."""
+    with session_scope(session_factory) as session:
+        user = UserRepository(session).create(
+            external_user_id="telegram:runtime",
+            display_name="Run",
+        )
+        conversation_session = SessionRepository(session).create(
+            user_id=user.id,
+            channel="telegram",
+            external_thread_id="runtime-thread",
+        )
+        task = TaskRepository(session).create(
+            session_id=conversation_session.id,
+            task_text="Preserve runtime",
+            orchestration_runtime=OrchestrationRuntime.TEMPORAL,
+        )
+        run = WorkerRunRepository(session).create_for_task(
+            task=task,
+            worker_type="codex",
+            started_at=datetime.now(UTC),
+            status="running",
+        )
+
+        assert run.orchestration_runtime is OrchestrationRuntime.TEMPORAL
+        direct_run = WorkerRunRepository(session).create(
+            task_id=task.id,
+            session_id="wrong-session",
+            worker_type="codex",
+            started_at=datetime.now(UTC),
+            status="running",
+        )
+        assert direct_run.session_id == "wrong-session"
+        assert direct_run.orchestration_runtime is OrchestrationRuntime.TEMPORAL
+        with pytest.raises(ValueError, match="immutable"):
+            task.orchestration_runtime = OrchestrationRuntime.LEGACY
+        with pytest.raises(ValueError, match="immutable"):
+            run.orchestration_runtime = OrchestrationRuntime.LEGACY
 
 
 def test_worker_run_complete_preserves_existing_optional_fields(session_factory) -> None:

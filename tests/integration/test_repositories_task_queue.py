@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from db.enums import HumanInteractionStatus, TaskStatus, WorkerNodeStatus
+from sqlalchemy import update
+
+from db.enums import HumanInteractionStatus, OrchestrationRuntime, TaskStatus, WorkerNodeStatus
 from repositories import (
     HumanInteractionRepository,
     SessionRepository,
@@ -31,6 +33,7 @@ def test_task_repository_release_terminal_failure_clears_lease(session_factory) 
         task = task_repo.create(
             session_id=conversation_session.id,
             task_text="Needs manual approval",
+            orchestration_runtime=OrchestrationRuntime.LEGACY,
         )
         claimed = task_repo.claim_next(
             worker_id="worker-a",
@@ -101,7 +104,11 @@ def test_task_repository_claim_next_returns_fresh_claimed_task(session_factory) 
             channel="telegram",
             external_thread_id="thread-claim-fresh",
         )
-        task = task_repo.create(session_id=conversation_session.id, task_text="claim me")
+        task = task_repo.create(
+            session_id=conversation_session.id,
+            task_text="claim me",
+            orchestration_runtime=OrchestrationRuntime.LEGACY,
+        )
 
         primed = task_repo.get(task.id)
         assert primed is not None
@@ -119,6 +126,88 @@ def test_task_repository_claim_next_returns_fresh_claimed_task(session_factory) 
         assert claimed.attempt_count == 1
 
 
+def test_task_repository_claim_next_only_claims_explicit_legacy_tasks(session_factory) -> None:
+    """The legacy worker must leave Temporal and unknown tasks for their owners."""
+    with session_scope(session_factory) as session:
+        user = UserRepository(session).create(
+            external_user_id="telegram:runtime-claim",
+            display_name="Runtime claim",
+        )
+        conversation_session = SessionRepository(session).create(
+            user_id=user.id,
+            channel="telegram",
+            external_thread_id="runtime-claim-thread",
+        )
+        task_repo = TaskRepository(session)
+        unknown = task_repo.create(session_id=conversation_session.id, task_text="unknown")
+        temporal = task_repo.create(
+            session_id=conversation_session.id,
+            task_text="temporal",
+            orchestration_runtime=OrchestrationRuntime.TEMPORAL,
+        )
+        legacy = task_repo.create(
+            session_id=conversation_session.id,
+            task_text="legacy",
+            orchestration_runtime=OrchestrationRuntime.LEGACY,
+        )
+
+        claimed = task_repo.claim_next(
+            worker_id="worker-runtime",
+            now=datetime.now(UTC),
+            lease_seconds=30,
+        )
+
+        assert claimed is not None
+        assert claimed.id == legacy.id
+        assert task_repo.get(unknown.id).status is TaskStatus.PENDING  # type: ignore[union-attr]
+        assert task_repo.get(temporal.id).status is TaskStatus.PENDING  # type: ignore[union-attr]
+
+
+def test_task_repository_claim_next_refuses_runtime_changed_during_claim(
+    session_factory, monkeypatch
+) -> None:
+    """The atomic claim predicate must still protect a candidate changed after selection."""
+    with session_scope(session_factory) as session:
+        user = UserRepository(session).create(
+            external_user_id="telegram:runtime-race",
+            display_name="Runtime race",
+        )
+        conversation_session = SessionRepository(session).create(
+            user_id=user.id,
+            channel="telegram",
+            external_thread_id="runtime-race-thread",
+        )
+        task = TaskRepository(session).create(
+            session_id=conversation_session.id,
+            task_text="legacy then temporal",
+            orchestration_runtime=OrchestrationRuntime.LEGACY,
+        )
+
+        def change_runtime_after_selection(candidate, _worker_node) -> bool:
+            session.execute(
+                update(type(candidate))
+                .where(type(candidate).id == candidate.id)
+                .values(orchestration_runtime=OrchestrationRuntime.TEMPORAL)
+            )
+            return True
+
+        monkeypatch.setattr(
+            TaskRepository,
+            "_task_matches_worker_node",
+            staticmethod(change_runtime_after_selection),
+        )
+        claimed = TaskRepository(session).claim_next(
+            worker_id="worker-runtime-race",
+            now=datetime.now(UTC),
+            lease_seconds=30,
+        )
+
+        assert claimed is None
+        session.refresh(task)
+        assert task.orchestration_runtime is OrchestrationRuntime.TEMPORAL
+        assert task.status is TaskStatus.PENDING
+
+
 def test_task_repository_claim_next_respects_worker_capacity(session_factory) -> None:
     """A worker cannot claim beyond its registered active capacity."""
     with session_scope(session_factory) as session:
@@ -133,8 +222,16 @@ def test_task_repository_claim_next_respects_worker_capacity(session_factory) ->
             channel="telegram",
             external_thread_id="thread-capacity",
         )
-        task_repo.create(session_id=conversation_session.id, task_text="first")
-        task_repo.create(session_id=conversation_session.id, task_text="second")
+        task_repo.create(
+            session_id=conversation_session.id,
+            task_text="first",
+            orchestration_runtime=OrchestrationRuntime.LEGACY,
+        )
+        task_repo.create(
+            session_id=conversation_session.id,
+            task_text="second",
+            orchestration_runtime=OrchestrationRuntime.LEGACY,
+        )
         worker_repo.register_worker(
             worker_id="worker-cap",
             worker_type="codex",
@@ -273,6 +370,7 @@ def test_task_repository_claim_next_requires_supported_profile(session_factory) 
             session_id=conversation_session.id,
             task_text="profile-specific",
             chosen_profile="codex-native-executor",
+            orchestration_runtime=OrchestrationRuntime.LEGACY,
         )
 
         missing_profile_claim = task_repo.claim_next(
@@ -317,8 +415,16 @@ def test_task_repository_reclaim_expired_leases_decrements_worker_load(
             channel="telegram",
             external_thread_id="thread-reclaim",
         )
-        first_task = task_repo.create(session_id=conversation_session.id, task_text="first")
-        second_task = task_repo.create(session_id=conversation_session.id, task_text="second")
+        first_task = task_repo.create(
+            session_id=conversation_session.id,
+            task_text="first",
+            orchestration_runtime=OrchestrationRuntime.LEGACY,
+        )
+        second_task = task_repo.create(
+            session_id=conversation_session.id,
+            task_text="second",
+            orchestration_runtime=OrchestrationRuntime.LEGACY,
+        )
         worker_repo.register_worker(
             worker_id="worker-reclaim",
             worker_type="codex",
@@ -385,6 +491,7 @@ def test_task_repository_reclaim_expired_leases_fails_task_after_max_attempts(
             session_id=conversation_session.id,
             task_text="max attempts task",
             max_attempts=3,
+            orchestration_runtime=OrchestrationRuntime.LEGACY,
         )
         worker_repo.register_worker(
             worker_id="worker-reclaim-max",
@@ -433,6 +540,7 @@ def test_task_repository_claim_next_pages_through_incompatible_candidates(
                 session_id=conversation_session.id,
                 task_text=f"incompatible {i}",
                 worker_override="gemini",
+                orchestration_runtime=OrchestrationRuntime.LEGACY,
             )
 
         # Create 1 task that is compatible (and was created last, so it's at the end)
@@ -440,6 +548,7 @@ def test_task_repository_claim_next_pages_through_incompatible_candidates(
             session_id=conversation_session.id,
             task_text="compatible",
             worker_override="codex",
+            orchestration_runtime=OrchestrationRuntime.LEGACY,
         )
 
         worker_repo.register_worker(
@@ -548,6 +657,7 @@ def test_task_repository_release_failure_marks_terminal_after_final_attempt(
             session_id=conversation_session.id,
             task_text="fail terminally",
             max_attempts=1,
+            orchestration_runtime=OrchestrationRuntime.LEGACY,
         )
         claimed = task_repo.claim_next(
             worker_id="worker-a",
@@ -595,6 +705,7 @@ def test_task_repository_supports_task_spec_lease_progress_and_metrics(session_f
             session_id=conversation_session.id,
             task_text="queue task",
             max_attempts=3,
+            orchestration_runtime=OrchestrationRuntime.LEGACY,
         )
         assert task_repo.set_task_spec(task_id="missing", task_spec={"goal": "missing"}) is None
         updated_spec = task_repo.set_task_spec(

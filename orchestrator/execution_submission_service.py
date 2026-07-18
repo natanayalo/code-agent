@@ -11,8 +11,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from apps.observability import capture_trace_context
+from apps.runtime import execution_runtime
 from db.base import utc_now
-from db.enums import TaskStatus, WorkerRunStatus
+from db.enums import OrchestrationRuntime, TaskStatus, WorkerRunStatus
 from db.models import Session as ConversationSession
 from db.models import User
 from orchestrator.execution_policy import (
@@ -263,6 +264,7 @@ def _persist_submission(
             priority=submission.priority,
             queue_lane=queue_lane,
             repair_for_task_id=submission.repair_for_task_id,
+            orchestration_runtime=OrchestrationRuntime(execution_runtime()),
         )
         interaction_repo.sync_task_spec_flags(task_id=task.id, task_spec=task_spec)
         session_repo.set_active_task(session_id=conversation_session.id, active_task_id=task.id)
@@ -276,6 +278,9 @@ def _persist_submission(
                 session.rollback()
                 return None, duplicate_task_id
 
+        if task.orchestration_runtime is None:
+            raise RuntimeError("Newly persisted task is missing its orchestration runtime.")
+
         return (
             _PersistedTaskContext(
                 user_id=user.id,
@@ -285,6 +290,7 @@ def _persist_submission(
                 task_id=task.id,
                 attempt_count=task.attempt_count,
                 task_spec=task_spec,
+                orchestration_runtime=task.orchestration_runtime.value,
             ),
             None,
         )
@@ -447,6 +453,9 @@ def _load_submission_for_task(
             timeline_events=serialized_events,
             decomposed_plan=decomposed_plan,
             node_outcomes=node_outcomes,
+            orchestration_runtime=(
+                task.orchestration_runtime.value if task.orchestration_runtime is not None else None
+            ),
         )
         return submission, persisted
 

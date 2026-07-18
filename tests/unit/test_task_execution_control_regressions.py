@@ -135,6 +135,8 @@ def test_record_interaction_response_clarification_requeues_without_approval_sid
 ) -> None:
     """Clarification answers should resume the task without mutating approval state."""
     service, session_factory = _make_task_service()
+    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
+    monkeypatch.setattr(service, "start_temporal_workflow_sync", lambda task_id: None)
     snapshot, _ = service.create_task(execution_module.TaskSubmission(task_text="debug this"))
 
     clarification = next(
@@ -160,7 +162,6 @@ def test_record_interaction_response_clarification_requeues_without_approval_sid
         assert active_transactions == 0
         temporal_signals.append((task_id, signal_name, arg))
 
-    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
     monkeypatch.setattr(interaction_module, "session_scope", tracking_session_scope)
     monkeypatch.setattr(service, "signal_temporal_workflow", signal_temporal_workflow)
 
@@ -201,6 +202,8 @@ def test_record_interaction_response_clarification_requeues_without_approval_sid
 def test_record_interaction_response_rejects_normal_permission(monkeypatch) -> None:
     """Generic permission rejection must project failure before signaling Temporal."""
     service, session_factory = _make_task_service()
+    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
+    monkeypatch.setattr(service, "start_temporal_workflow_sync", lambda task_id: None)
     task_snapshot, _ = service.create_task(
         execution_module.TaskSubmission(
             task_text="Reject elevated permission",
@@ -230,7 +233,6 @@ def test_record_interaction_response_rejects_normal_permission(monkeypatch) -> N
     async def signal_temporal_workflow(task_id: str, signal_name: str, arg: object) -> None:
         temporal_signals.append((task_id, signal_name, arg))
 
-    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
     monkeypatch.setattr(service, "signal_temporal_workflow", signal_temporal_workflow)
     refreshed = service.record_interaction_response(
         task_snapshot.task_id,
@@ -286,6 +288,8 @@ def test_record_interaction_response_ignores_missing_observation_dependency(
 def test_permission_escalation_response_signals_dedicated_temporal_handler(monkeypatch) -> None:
     """Worker escalation responses must not be confused with task approval."""
     service, session_factory = _make_task_service()
+    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
+    monkeypatch.setattr(service, "start_temporal_workflow_sync", lambda task_id: None)
     snapshot, _ = service.create_task(execution_module.TaskSubmission(task_text="debug this"))
     temporal_signals: list[tuple[str, str, object]] = []
 
@@ -305,7 +309,6 @@ def test_permission_escalation_response_signals_dedicated_temporal_handler(monke
         session.flush()
         interaction_id = interaction.id
 
-    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
     monkeypatch.setattr(service, "signal_temporal_workflow", signal_temporal_workflow)
     refreshed = service.record_interaction_response(
         snapshot.task_id,

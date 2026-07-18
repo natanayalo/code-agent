@@ -23,3 +23,4 @@ class _PersistedTaskContext:
     timeline_events: list[dict[str, Any]] = field(default_factory=list)
     decomposed_plan: dict[str, Any] | None = None
     node_outcomes: list[dict[str, Any]] = field(default_factory=list)
+    orchestration_runtime: str | None = None

@@ -593,8 +593,8 @@ Boundary:
 Design decisions:
 
 - persist `orchestration_runtime` on both `Task` (authoritative for drain metrics)
-  and `WorkerRun` (execution evidence), using a new `OrchestrationRuntime` Postgres
-  enum with values `temporal` and `legacy`
+  and `WorkerRun` (execution evidence), using a portable constrained
+  `OrchestrationRuntime` enum with values `temporal` and `legacy`
 - runtime is pinned to the task at submission and immutable — no re-evaluation per run
 - historical backfill uses conservative classification: positively identified rows
   get their runtime; ambiguous rows stay `NULL` (displayed as "unknown")
@@ -615,13 +615,15 @@ Design decisions:
 
 Progress:
 
-- [ ] Slice 1: runtime observability
+- [x] Slice 1: runtime observability
   - add `OrchestrationRuntime` enum and `orchestration_runtime` to Task and WorkerRun
   - conservative nullable backfill for historical rows
   - centralize WorkerRun creation to propagate the runtime marker
   - pin runtime to task at submission (immutable after creation)
-  - dashboard drain-gate widgets: tasks by runtime, active legacy count,
-    legacy submissions since cutover
+  - dashboard drain-gate widgets: tasks by runtime and active legacy count;
+    defer legacy submissions since cutover until Slice 2 persists the cutover timestamp
+  - deployment prerequisite: deploy with zero active tasks, or explicitly classify,
+    complete, or cancel every active unknown task before relying on the scheduler boundary
   - fix status.md Active Focus, add M25.3 to roadmap
 - [ ] Slice 2: production cutover
   - default `execution_runtime()` to `temporal` when unconfigured

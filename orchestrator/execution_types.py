@@ -136,6 +136,7 @@ class WorkerRunSnapshot(ExecutionModel):
     worker_type: str
     worker_profile: str | None = None
     runtime_mode: str | None = None
+    orchestration_runtime: str | None = None
     workspace_id: str | None = None
     status: str
     started_at: datetime
@@ -394,6 +395,7 @@ class TaskSummarySnapshot(ExecutionModel):
     chosen_worker: str | None = None
     chosen_profile: str | None = None
     runtime_mode: str | None = None
+    orchestration_runtime: str | None = None
     route_reason: str | None = None
     constraints: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
@@ -543,6 +545,9 @@ class OperationalMetrics(ExecutionModel):
     worker_usage: dict[str, int]
     runtime_mode_usage: dict[str, int]
     legacy_tool_loop_usage: dict[str, int]
+    orchestration_runtime_counts: dict[str, int]
+    active_legacy_task_count: int
+    active_unknown_task_count: int
     avg_duration_seconds: float
     success_rate: float
 

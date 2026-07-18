@@ -50,6 +50,11 @@ describe('MetricsPage', () => {
       retry_rate: 0.1,
       status_counts: { completed: 80, failed: 20, [longStatus]: 1 },
       worker_usage: { antigravity: 60, codex: 40, [longWorker]: 1 },
+      runtime_mode_usage: {},
+      legacy_tool_loop_usage: {},
+      orchestration_runtime_counts: { temporal: 80, legacy: 2, unknown: 18 },
+      active_legacy_task_count: 1,
+      active_unknown_task_count: 3,
       avg_duration_seconds: 45.5,
       success_rate: 0.8,
     };
@@ -71,7 +76,7 @@ describe('MetricsPage', () => {
     expect(screen.getByText('10.0%')).toBeInTheDocument(); // Retry rate
 
     expect(screen.getByText(/completed/i)).toBeInTheDocument();
-    expect(screen.getByText('80')).toBeInTheDocument();
+    expect(screen.getByText('80', { selector: '.status-count' })).toBeInTheDocument();
     expect(screen.getByText(/antigravity/i)).toBeInTheDocument();
     expect(screen.getByText(/60 runs/i)).toBeInTheDocument();
     expect(screen.getByText('Codex')).toBeInTheDocument();
@@ -80,7 +85,11 @@ describe('MetricsPage', () => {
     const expectedLongWorker = `Codex Worker ${'X' + 'x'.repeat(63)}`;
     expect(screen.getByText(expectedLongWorker)).toHaveClass('worker-label');
     expect(document.querySelector('.metrics-details-grid')).toBeInTheDocument();
-    expect(document.querySelectorAll('.metric-detail-card')).toHaveLength(2);
+    expect(screen.getByRole('heading', { name: 'Runtime Drain — all time' })).toBeInTheDocument();
+    expect(screen.getByText('Since-cutover submissions will be available after the Slice 2 cutover timestamp is persisted.')).toBeInTheDocument();
+    expect(screen.getByText('Active legacy').nextElementSibling).toHaveTextContent('1');
+    expect(screen.getByText('Active unknown').nextElementSibling).toHaveTextContent('3');
+    expect(document.querySelectorAll('.metric-detail-card')).toHaveLength(3);
   });
 
   it('renders low success rate with failure color', async () => {
@@ -90,6 +99,10 @@ describe('MetricsPage', () => {
       retry_rate: 0,
       status_counts: { failed: 10 },
       worker_usage: {},
+      runtime_mode_usage: {},
+      legacy_tool_loop_usage: {},
+      orchestration_runtime_counts: {},
+      active_legacy_task_count: 0,
       avg_duration_seconds: 0,
       success_rate: 0.1, // < 0.8 threshold
     };
@@ -112,6 +125,32 @@ describe('MetricsPage', () => {
     expect(icon).toHaveAttribute('stroke', 'var(--color-status-failed)');
   });
 
+  it('keeps the runtime drain visible while an older API omits its fields', async () => {
+    vi.mocked(api.getMetrics).mockResolvedValue({
+      total_tasks: 0,
+      retried_tasks: 0,
+      retry_rate: 0,
+      status_counts: {},
+      worker_usage: {},
+      runtime_mode_usage: {},
+      legacy_tool_loop_usage: {},
+      avg_duration_seconds: 0,
+      success_rate: 0,
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <MetricsPage />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    expect(await screen.findByRole('heading', { name: 'Runtime Drain — all time' })).toBeInTheDocument();
+    expect(screen.getByText('Temporal').nextElementSibling).toHaveTextContent('0');
+    expect(screen.getByText('Active unknown').nextElementSibling).toHaveTextContent('0');
+  });
+
   it('renders high retry rate with failure color', async () => {
     const highRetryMetrics = {
       total_tasks: 10,
@@ -119,6 +158,10 @@ describe('MetricsPage', () => {
       retry_rate: 0.5, // > 0.1 threshold
       status_counts: {},
       worker_usage: {},
+      runtime_mode_usage: {},
+      legacy_tool_loop_usage: {},
+      orchestration_runtime_counts: {},
+      active_legacy_task_count: 0,
       avg_duration_seconds: 0,
       success_rate: 1.0,
     };
@@ -146,6 +189,10 @@ describe('MetricsPage', () => {
       retry_rate: 0.05, // <= 0.1 threshold
       status_counts: {},
       worker_usage: {},
+      runtime_mode_usage: {},
+      legacy_tool_loop_usage: {},
+      orchestration_runtime_counts: {},
+      active_legacy_task_count: 0,
       avg_duration_seconds: 0,
       success_rate: 1.0,
     };
@@ -200,6 +247,10 @@ describe('MetricsPage', () => {
       retry_rate: 0,
       status_counts: {},
       worker_usage: {},
+      runtime_mode_usage: {},
+      legacy_tool_loop_usage: {},
+      orchestration_runtime_counts: {},
+      active_legacy_task_count: 0,
       avg_duration_seconds: 0,
       success_rate: 1,
     });

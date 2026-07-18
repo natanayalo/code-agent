@@ -7,8 +7,8 @@ Phase 4: selective autonomy after reliability.
 Active focus:
 
 - M25.3 Temporal-only cutover and legacy retirement.
-  - Runtime observability (persist orchestration runtime on Task and WorkerRun),
-    production cutover (Temporal-default, fail-fast worker, graceful API degradation),
+  - Runtime observability is complete (persisted orchestration runtime and dashboard
+    drain metrics); production cutover (Temporal-default, fail-fast worker, graceful API degradation),
     7-day active soak and ≥14-day/≥25-task retirement gate,
     legacy code deletion (dispatch + LangGraph lifecycle),
     and deferred schema cleanup.
@@ -68,7 +68,7 @@ Active focus:
 ## Next Slices Only
 
 1. M25.3: Temporal-only cutover and legacy retirement
-   - Slice 1 — runtime observability: persist `orchestration_runtime` on Task and WorkerRun, drain-gate dashboard widgets
+   - Slice 1 — complete: persist `orchestration_runtime` on Task and WorkerRun, drain-gate dashboard widgets
    - Slice 2 — production cutover: Temporal default, fail-fast worker, graceful API 503, remove `CODE_AGENT_USE_TEMPORAL`, operational evidence (14 scenarios)
    - Slice 3 — observation window: 7-day active soak then ≥14 days AND ≥25 completed tasks with task-class coverage
    - Slice 4 — legacy deletion: PR 4A removes dispatch (TaskQueueWorker, claims, leases); PR 4B removes LangGraph lifecycle
