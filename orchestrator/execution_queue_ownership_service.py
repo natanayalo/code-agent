@@ -53,6 +53,36 @@ async def legacy_worker_may_execute(
     return False
 
 
+async def ensure_legacy_queued_task_ownership(
+    self: Any,
+    *,
+    task_id: str,
+    worker_id: str,
+) -> bool:
+    """Check task ownership before loading any persisted submission payload."""
+    task_exists, runtime = await self._run_blocking(_get_queued_task_ownership, self, task_id)
+    if not task_exists:
+        # claim_next reserves load only after atomically claiming an existing task.
+        logger.warning("Skipping queued task run: task no longer exists; id=%s", task_id)
+        return False
+    return await legacy_worker_may_execute(
+        self,
+        task_id=task_id,
+        worker_id=worker_id,
+        orchestration_runtime=runtime,
+    )
+
+
+def _get_queued_task_ownership(self: Any, task_id: str) -> tuple[bool, str | None]:
+    """Return whether the task exists and its pinned runtime without validating it."""
+    with session_scope(self.session_factory) as session:
+        task = TaskRepository(session).get(task_id)
+        if task is None:
+            return False, None
+        runtime = task.orchestration_runtime
+        return True, runtime.value if runtime is not None else None
+
+
 def _release_legacy_ownership_violation(self: Any, *, task_id: str, worker_id: str) -> None:
     """Return a non-legacy task and release its worker capacity reservation."""
     with session_scope(self.session_factory) as session:

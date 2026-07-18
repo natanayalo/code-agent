@@ -104,6 +104,57 @@ def test_claim_next_task_allows_single_claim_and_lease_reclaim() -> None:
     assert reclaimed.attempt_count == 2
 
 
+@pytest.mark.parametrize("runtime", [OrchestrationRuntime.TEMPORAL, None])
+def test_run_queued_task_releases_invalid_nonlegacy_stale_lease(runtime, monkeypatch) -> None:
+    """Ownership rejection must release stale non-legacy leases before validation."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+
+    with session_scope(session_factory) as session:
+        conversation_session = SessionRepository(session).create(
+            user_id="runtime-owner", channel="test", external_thread_id="runtime-thread"
+        )
+        task = TaskRepository(session).create(
+            session_id=conversation_session.id,
+            task_text="invalid stale lease",
+            constraints={"worker_profile_override": 42},
+            orchestration_runtime=runtime,
+        )
+        task.status = TaskStatus.IN_PROGRESS
+        task.lease_owner = "worker-runtime"
+        task.lease_expires_at = utc_now()
+        task.attempt_count = 1
+        worker = WorkerNodeRepository(session).register_worker(
+            worker_id="worker-runtime", worker_type="codex", now=utc_now(), capacity=1
+        )
+        worker.current_load = 1
+
+    def fail_submission_load(*_args, **_kwargs):
+        raise AssertionError("non-legacy task must not be validated by the legacy worker")
+
+    monkeypatch.setattr(service, "_load_submission_for_task", fail_submission_load)
+    asyncio.run(service.run_queued_task(task_id=task.id, worker_id="worker-runtime"))
+
+    with session_scope(session_factory) as session:
+        stored_task = TaskRepository(session).get(task.id)
+        worker = WorkerNodeRepository(session).get_by_worker_id("worker-runtime")
+        assert stored_task is not None
+        assert worker is not None
+        assert stored_task.status is TaskStatus.PENDING
+        assert stored_task.attempt_count == 0
+        assert stored_task.lease_owner is None
+        assert worker.current_load == 0
+
+
 def test_claim_next_task_orders_by_queue_lane_then_priority_then_age() -> None:
     """Queue should yield primary before scout, then by priority, then by age."""
     engine = create_engine_from_url(
