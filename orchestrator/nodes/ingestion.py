@@ -84,16 +84,17 @@ def classify_task(state_input: OrchestratorState) -> dict[str, Any]:
 # [Moved to orchestrator/nodes/utils.py]
 
 
-def _qa_read_only_fanout_task_plan(complexity_reason: str) -> TaskPlan:
-    """Build a deterministic read-only plan for the isolated E2E fixture only."""
+def _read_only_analysis_task_plan(complexity_reason: str, task_text: str) -> TaskPlan:
+    """Build a task-specific, explicitly safe plan for read-only analysis."""
+    subject = " ".join(task_text.split())[:100]
     return TaskPlan(
         triggered=True,
         complexity_reason=complexity_reason,
         steps=[
             TaskPlanStep(
                 step_id="1",
-                title="Inspect Repository Documentation",
-                expected_outcome="Summarize the relevant repository documentation.",
+                title="Analyze Requested Repository Evidence",
+                expected_outcome=f"Gather evidence needed to analyze: {subject}",
                 depends_on=[],
                 node_kind="inspect",
                 aggregation_role="context",
@@ -102,8 +103,8 @@ def _qa_read_only_fanout_task_plan(complexity_reason: str) -> TaskPlan:
             ),
             TaskPlanStep(
                 step_id="2",
-                title="Inspect Repository Structure",
-                expected_outcome="List the relevant tracked repository files and structure.",
+                title="Independently Validate Requested Scope",
+                expected_outcome=f"Independently validate relevant scope for: {subject}",
                 depends_on=[],
                 node_kind="inspect",
                 aggregation_role="context",
@@ -125,13 +126,9 @@ def _qa_read_only_fanout_task_plan(complexity_reason: str) -> TaskPlan:
 
 def _build_task_plan(state: OrchestratorState, complexity_reason: str) -> TaskPlan:
     """Create an ordered, structured decomposition for complex tasks."""
-    # Fan-out itself remains selective over explicit planner metadata. This
-    # dedicated marker is intentionally only used by the local E2E fixture so
-    # ordinary read-only production requests retain task-specific planning.
-    if state.task.constraints.get("qa_fanout_plan") is True:
-        return _qa_read_only_fanout_task_plan(complexity_reason)
-
     task_text = state.normalized_task_text or state.task.task_text
+    if state.task.constraints.get("read_only") is True and complexity_reason == "ambiguous_task":
+        return _read_only_analysis_task_plan(complexity_reason, task_text)
     normalized_task_text = " ".join(task_text.split())
     task_text_preview = normalized_task_text[:100] + (
         "..." if len(normalized_task_text) > 100 else ""

@@ -170,8 +170,8 @@ def _build_effective_env(request: NativeAgentRunRequest) -> dict[str, str]:
     effective_env.update(
         {
             "HOME": agent_home_value,
-            "CODEX_HOME": "/root/.codex",
-            "GEMINI_HOME": "/root/.gemini",
+            "CODEX_HOME": str(agent_home / ".codex"),
+            "GEMINI_HOME": str(agent_home / ".gemini"),
             "CODE_AGENT_ENABLE_TRACING": "0",
             "CODE_AGENT_ENABLE_TASK_SERVICE": "0",
             "CODE_AGENT_INDEPENDENT_VERIFIER_ENABLED": "0",

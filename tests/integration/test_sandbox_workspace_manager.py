@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 
 from sandbox import WorkspaceManager, WorkspaceRequest
+from sandbox.scratch import workspace_scratch_root
 
 
 def _run_git(command: list[str], *, cwd: Path) -> str:
@@ -103,3 +104,19 @@ def test_workspace_manager_cleanup_policy_removes_successful_workspaces(tmp_path
     assert not successful_workspace.workspace_path.exists()
     assert deleted_failed is False
     assert failed_workspace.workspace_path.exists()
+
+
+def test_workspace_cleanup_removes_external_scratch_only_on_success(tmp_path: Path) -> None:
+    source_repo = _create_local_repo(tmp_path)
+    manager = WorkspaceManager(tmp_path / "workspaces")
+    successful = manager.create_workspace(
+        WorkspaceRequest(task_id="success", repo_url=str(source_repo))
+    )
+    failed = manager.create_workspace(WorkspaceRequest(task_id="failed", repo_url=str(source_repo)))
+    workspace_scratch_root(successful.workspace_path).mkdir(parents=True)
+    workspace_scratch_root(failed.workspace_path).mkdir(parents=True)
+
+    assert manager.cleanup_workspace(successful, succeeded=True) is True
+    assert not workspace_scratch_root(successful.workspace_path).exists()
+    assert manager.cleanup_workspace(failed, succeeded=False) is False
+    assert workspace_scratch_root(failed.workspace_path).exists()

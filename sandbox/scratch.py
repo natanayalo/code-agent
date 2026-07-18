@@ -21,12 +21,12 @@ def node_run_root(workspace_path: Path, namespace: str | None) -> Path:
 
 def node_scratch_root(workspace_path: Path, namespace: str | None) -> Path:
     """Return a node-private writable root that is never inside the repository."""
-    return (
-        workspace_path.parent
-        / ".code-agent-scratch"
-        / workspace_path.name
-        / scratch_namespace_component(namespace)
-    )
+    return workspace_scratch_root(workspace_path) / scratch_namespace_component(namespace)
+
+
+def workspace_scratch_root(workspace_path: Path) -> Path:
+    """Return the validated external scratch directory for one workspace."""
+    return workspace_path.parent / ".code-agent-scratch" / workspace_path.name
 
 
 def node_agent_home(workspace_path: Path, namespace: str | None) -> Path:

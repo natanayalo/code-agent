@@ -9,7 +9,7 @@ def test_qa_fanout_fixture_generates_parallel_safe_read_only_inspections() -> No
         {
             "task": {
                 "task_text": "Inspect documentation across files",
-                "constraints": {"read_only": True, "qa_fanout_plan": True},
+                "constraints": {"read_only": True},
             },
             "task_kind": "ambiguous",
         }
@@ -38,4 +38,4 @@ def test_read_only_request_retains_task_specific_production_plan() -> None:
     result = plan_task(state)
 
     assert result["task_plan"]["steps"][0]["title"] != "Inspect Repository Documentation"
-    assert result["task_plan"]["steps"][1]["node_kind"] == "implement"
+    assert result["task_plan"]["steps"][1]["parallel_safe"] is True

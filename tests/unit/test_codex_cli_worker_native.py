@@ -621,4 +621,6 @@ def test_codex_native_runs_isolate_all_writable_output_paths_by_hashed_namespace
         node_agent_home(workspace.workspace_path, first.scratch_namespace)
     )
     assert first_env["HOME"] != second_env["HOME"]
+    assert first_env["CODEX_HOME"] != second_env["CODEX_HOME"]
+    assert ".code-agent-scratch" in first_env["CODEX_HOME"]
     assert first_env["DATABASE_URL"] != second_env["DATABASE_URL"]

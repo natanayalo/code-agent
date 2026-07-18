@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from repositories import ArtifactRepository, WorkerRunRepository, session_scope
+from sandbox.scratch import workspace_scratch_root
 
 logger = logging.getLogger("orchestrator.execution")
 
@@ -37,12 +38,22 @@ def _workspace_path_for_run(self: Any, workspace_id: str | None) -> Path | None:
 def _delete_retained_workspace_path(self: Any, workspace_id: str | None) -> bool:
     """Delete a retained workspace directory from disk, if configured."""
     workspace_path = self._workspace_path_for_run(workspace_id)
-    if workspace_path is None or not workspace_path.exists():
+    if workspace_path is None:
         return False
 
     try:
-        shutil.rmtree(workspace_path)
-        return True
+        deleted = False
+        if workspace_path.exists():
+            shutil.rmtree(workspace_path)
+            deleted = True
+        scratch_root = workspace_scratch_root(workspace_path)
+        scratch_parent = (self.workspace_root / ".code-agent-scratch").resolve()
+        if not scratch_root.is_relative_to(scratch_parent):
+            return deleted
+        if scratch_root.exists():
+            shutil.rmtree(scratch_root)
+            deleted = True
+        return deleted
     except OSError as exc:
         logger.warning(
             "Failed to delete retained workspace directory",
