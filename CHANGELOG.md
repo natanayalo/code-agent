@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: add orchestration runtime observability ([#322](https://github.com/natanayalo/code-agent/pull/322))
+
 - Feat: add bounded Temporal DAG fan-out ([#320](https://github.com/natanayalo/code-agent/pull/320))
 
 - Feat: add Temporal one-node-wave orchestration ([#319](https://github.com/natanayalo/code-agent/pull/319))
