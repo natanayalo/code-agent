@@ -6,9 +6,12 @@ Phase 4: selective autonomy after reliability.
 
 Active focus:
 
-- M25.0 explicit DAG dependency and parallel-safety semantics are complete.
-  - Planner intent, durable node metadata, legacy compatibility, and
-    read-only fan-out eligibility are now defined without enabling concurrency.
+- M25.3 Temporal-only cutover and legacy retirement.
+  - Runtime observability (persist orchestration runtime on Task and WorkerRun),
+    production cutover (Temporal-default, fail-fast worker, graceful API degradation),
+    7-day active soak and ≥14-day/≥25-task retirement gate,
+    legacy code deletion (dispatch + LangGraph lifecycle),
+    and deferred schema cleanup.
 
 ## Phase 3 Reliability Baseline
 - **Baseline cases**: 25 baseline cases run, 25 passed according to the frozen evaluation report.
@@ -64,8 +67,15 @@ Active focus:
 
 ## Next Slices Only
 
-1. M26: review comment repair
+1. M25.3: Temporal-only cutover and legacy retirement
+   - Slice 1 — runtime observability: persist `orchestration_runtime` on Task and WorkerRun, drain-gate dashboard widgets
+   - Slice 2 — production cutover: Temporal default, fail-fast worker, graceful API 503, remove `CODE_AGENT_USE_TEMPORAL`, operational evidence (14 scenarios)
+   - Slice 3 — observation window: 7-day active soak then ≥14 days AND ≥25 completed tasks with task-class coverage
+   - Slice 4 — legacy deletion: PR 4A removes dispatch (TaskQueueWorker, claims, leases); PR 4B removes LangGraph lifecycle
+   - Slice 5 — schema cleanup: drop `lease_owner`, `lease_expires_at`, `next_attempt_at` after compatibility soak
+2. M26: review comment repair
    - extend the PR repair loop from CI failures to actionable review feedback
+   - may begin during M25.3 observation window
 
 ## Current Backlog
 

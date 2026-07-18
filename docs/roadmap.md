@@ -574,6 +574,124 @@ Progress:
   - version-gated two-node waves, queue permits, ordered transactional merge,
     task-specific read-only planning, and isolated provider/scratch lifecycle
 
+### M25.3 Temporal-Only Cutover and Legacy Retirement
+
+Goal:
+
+- retire the legacy Postgres-polling scheduler and LangGraph durable lifecycle,
+  making Temporal the sole durable execution orchestrator
+
+Boundary:
+
+- Temporal becomes the only durable execution scheduler and lifecycle engine
+- Postgres retains tasks, interactions, timelines, worker evidence, artifacts,
+  memory, delivery metadata, and dashboard queries
+- code-agent retains planning, decomposition, routing policy, worker/provider
+  behavior, sandbox policy, validation, review, and memory governance
+- no new Temporal feature development — this is legacy retirement and operational cutover
+
+Design decisions:
+
+- persist `orchestration_runtime` on both `Task` (authoritative for drain metrics)
+  and `WorkerRun` (execution evidence), using a new `OrchestrationRuntime` Postgres
+  enum with values `temporal` and `legacy`
+- runtime is pinned to the task at submission and immutable — no re-evaluation per run
+- historical backfill uses conservative classification: positively identified rows
+  get their runtime; ambiguous rows stay `NULL` (displayed as "unknown")
+- worker fail-fast: bounded connection retries, then exit non-zero
+- API graceful degradation: remains available for reads/dashboard/interactions,
+  returns 503 for new submissions when Temporal is unreachable, no automatic
+  fallback to legacy
+- two-stage observation gate: 7-day active soak, then ≥14 days AND ≥25 completed
+  tasks with full task-class coverage before legacy deletion
+- persisted cutover timestamp (`TEMPORAL_ONLY_CUTOVER_AT`) for drain queries
+  instead of rolling windows
+- legacy deletion split into two PRs: dispatch (TaskQueueWorker, claims, leases)
+  and LangGraph lifecycle (StateGraph, checkpoints, interrupts)
+- `graph.py` retains reusable domain nodes; only LangGraph lifecycle is removed
+- schema cleanup deferred with compatibility soak after code deletion
+- rollback via last-known-good image + configuration + schema compatibility
+  runbook, not git revert alone
+
+Progress:
+
+- [ ] Slice 1: runtime observability
+  - add `OrchestrationRuntime` enum and `orchestration_runtime` to Task and WorkerRun
+  - conservative nullable backfill for historical rows
+  - centralize WorkerRun creation to propagate the runtime marker
+  - pin runtime to task at submission (immutable after creation)
+  - dashboard drain-gate widgets: tasks by runtime, active legacy count,
+    legacy submissions since cutover
+  - fix status.md Active Focus, add M25.3 to roadmap
+- [ ] Slice 2: production cutover
+  - default `execution_runtime()` to `temporal` when unconfigured
+  - remove `CODE_AGENT_USE_TEMPORAL` env var support
+  - worker fail-fast: bounded Temporal connection retries, then exit non-zero
+  - API graceful degradation: 503 for new submissions, reads stay available,
+    ongoing Temporal readiness check
+  - persist `TEMPORAL_ONLY_CUTOVER_AT` cutover timestamp
+  - complete and document all 14 operational evidence scenarios in
+    `docs/m25_3_temporal_cutover_verification.md`
+- [ ] Slice 3: observation window (two-stage)
+  - Stage 1 — active soak (7 days): zero accidental legacy submissions,
+    no severe Temporal incidents, all 14 scenarios verified,
+    no product-state divergence
+  - Stage 2 — retirement gate (≥14 days AND ≥25 tasks): zero legacy submissions
+    since cutover, zero unfinished legacy tasks, ≥25 successful Temporal
+    completions, full task-class coverage (simple read-only, mutable
+    implementation, sequential DAG, fan-out DAG, approval, clarification,
+    permission escalation, cancellation, provider retry, terminal failure),
+    zero stuck workflows, zero projection mismatches, operator sign-off
+  - M26 work may begin during the observation window
+- [ ] Slice 4: legacy deletion (two PRs)
+  - PR 4A — remove legacy dispatch: `TaskQueueWorker`, polling, task claims,
+    lease heartbeat, retry scheduling, stale reclaim, legacy worker entrypoint
+    branch, runtime selector, `CODE_AGENT_EXECUTION_RUNTIME` env var
+  - PR 4B — remove LangGraph durable lifecycle: StateGraph compilation,
+    checkpoint restoration, interrupt-based HITL, checkpoint modules,
+    LangGraph dependency (after import audit)
+  - pre-implementation reference inventory of all legacy symbols classified as
+    legacy-only, shared product policy, test fixture, or migration compatibility
+  - method-level WorkerNode audit: keep profile/capability/health/operator policy,
+    remove only claim/lease/reclaim mechanics
+  - rollback plan: retain last-known-good legacy-capable image, old configuration
+    template, DB schema backward compatibility confirmation, documented rollback
+    commands
+- [ ] Slice 5: schema cleanup (after compatibility soak)
+  - remove `lease_owner`, `lease_expires_at`, `next_attempt_at` from Task
+  - retain `attempt_count`, `max_attempts`, `priority`, `queue_lane`
+  - at least one release interval after Slice 4 code deletion
+  - verify no application code reads or writes targeted columns before migration
+
+Operational evidence scenarios (documented before Slice 3):
+
+1. authenticated Compose execution (full task lifecycle)
+2. approval, clarification, and permission resume via Temporal signals
+3. cancellation while a provider worker is running
+4. worker restart during an Activity (Temporal retries/recovers)
+5. Temporal server/worker outage behavior (graceful degradation)
+6. sequential DAG execution
+7. two-node fan-out execution
+8. replay of older Temporal workflow histories
+9. full Python test suite and pre-commit pass
+10. API/worker configuration mismatch fails visibly (not silent fallback)
+11. Temporal unavailable while API remains inspectable (503 for submissions)
+12. Temporal recovers after API has rejected submissions (tasks resume)
+13. workflow and Postgres terminal states reconcile after worker restart
+14. existing M25.1/M25.2 workflow histories replay after deployment
+
+Task field disposition after retirement:
+
+| Field              | Action | Reason                                     |
+| ------------------ | ------ | ------------------------------------------ |
+| `lease_owner`      | remove | legacy scheduler only                      |
+| `lease_expires_at` | remove | legacy scheduler only                      |
+| `next_attempt_at`  | remove | Temporal handles retry scheduling          |
+| `attempt_count`    | keep   | product-level logical attempt evidence     |
+| `max_attempts`     | keep   | product-level policy                       |
+| `priority`         | keep   | routing policy, useful without PG dispatch |
+| `queue_lane`       | keep   | routing policy for multi-queue scenarios   |
+
 ### M26 Review Comment Repair
 
 Goal:
@@ -632,10 +750,11 @@ Phase 4:
 
 1. Milestone 22 [x]
 2. Milestone 23 [x]
-3. Milestone 24
-4. Milestone 25
-5. Milestone 26
-6. Milestone 27
+3. Milestone 24 [x]
+4. Milestone 25 (fan-out) [x]
+5. M25.3 (Temporal cutover and legacy retirement)
+6. Milestone 26
+7. Milestone 27
 
 ## Open Planning Questions
 
