@@ -22,7 +22,7 @@ from apps.observability import (
     with_span_kind,
 )
 from sandbox.redact import SecretRedactor, sanitize_command
-from sandbox.scratch import node_run_root, scratch_namespace_component
+from sandbox.scratch import node_agent_home, node_run_root
 from workers.adapter_utils import truncate_detail_keep_tail
 from workers.base import ArtifactReference
 from workers.cli_runtime import collect_changed_files_since_ref_from_repo_path
@@ -143,10 +143,11 @@ def _build_effective_env(request: NativeAgentRunRequest) -> dict[str, str]:
         k: v for k, v in os.environ.items() if k.upper() in SAFE_SYSTEM_ENV_ALLOWLIST
     }
     auth_home_overrides: dict[str, str] = {}
-    namespace = scratch_namespace_component(request.scratch_namespace)
-    agent_home = request.workspace_path / ".agent_home"
-    if request.scratch_namespace:
-        agent_home /= namespace
+    agent_home = (
+        node_agent_home(request.workspace_path, request.scratch_namespace)
+        if request.scratch_namespace
+        else request.workspace_path / ".agent_home"
+    )
     agent_home.mkdir(parents=True, exist_ok=True)
     agent_home_value = str(agent_home)
     effective_env["HOME"] = agent_home_value

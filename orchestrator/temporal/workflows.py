@@ -118,11 +118,21 @@ class TaskExecutionWorkflow:
         # workflow-task crash on the same contract version as the original run.
         fanout_contract_enabled = workflow.patched(M25_2_FANOUT_PATCH_ID)
         while True:
-            selection = await workflow.execute_activity(
-                "select_next_node",
-                args=[task_id, fanout_contract_enabled],
-                **activity_options("select_next_node"),
-            )
+            # The legacy selector's input is part of M25.1B history. Keep its
+            # one-argument command byte-for-byte compatible for patch-false
+            # replays; V2 uses a separately named Activity contract.
+            if fanout_contract_enabled:
+                selection = await workflow.execute_activity(
+                    "select_next_node_v2",
+                    task_id,
+                    **activity_options("select_next_node_v2"),
+                )
+            else:
+                selection = await workflow.execute_activity(
+                    "select_next_node",
+                    task_id,
+                    **activity_options("select_next_node"),
+                )
             if (
                 fanout_contract_enabled
                 and selection.get("schema_version") == 2

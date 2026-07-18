@@ -16,4 +16,24 @@ def scratch_namespace_component(namespace: str | None) -> str:
 
 def node_run_root(workspace_path: Path, namespace: str | None) -> Path:
     """Return the isolated writable root for one node execution."""
-    return workspace_path / ".code-agent" / "node-runs" / scratch_namespace_component(namespace)
+    return node_scratch_root(workspace_path, namespace) / "code-agent"
+
+
+def node_scratch_root(workspace_path: Path, namespace: str | None) -> Path:
+    """Return a node-private writable root that is never inside the repository."""
+    return (
+        workspace_path.parent
+        / ".code-agent-scratch"
+        / workspace_path.name
+        / scratch_namespace_component(namespace)
+    )
+
+
+def node_agent_home(workspace_path: Path, namespace: str | None) -> Path:
+    """Return the isolated provider home for one node execution."""
+    return node_scratch_root(workspace_path, namespace) / "agent-home"
+
+
+def node_artifacts_root(workspace_path: Path, namespace: str | None) -> Path:
+    """Return the isolated artifact root for one node execution."""
+    return node_scratch_root(workspace_path, namespace) / "artifacts"

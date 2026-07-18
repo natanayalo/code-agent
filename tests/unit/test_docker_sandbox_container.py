@@ -20,7 +20,7 @@ from sandbox.container import (
     _run_docker_command,
     build_container_name,
 )
-from sandbox.scratch import scratch_namespace_component
+from sandbox.scratch import node_agent_home, node_artifacts_root, node_run_root
 from sandbox.workspace import WorkspaceCleanupPolicy, WorkspaceHandle
 
 
@@ -92,12 +92,55 @@ def test_read_only_container_uses_distinct_writable_node_namespaces(tmp_path: Pa
     assert build_container_name(workspace, first.scratch_namespace) != build_container_name(
         workspace, second.scratch_namespace
     )
-    first_namespace = scratch_namespace_component(first.scratch_namespace)
-    second_namespace = scratch_namespace_component(second.scratch_namespace)
-    assert f"source={root / '.agent_home' / first_namespace}" in first_mounts
-    assert f"source={root / '.agent_home' / second_namespace}" in second_mounts
-    assert f"source={root / 'artifacts' / first_namespace}" in first_mounts
-    assert f"source={root / 'artifacts' / second_namespace}" in second_mounts
+    first_agent_home = node_agent_home(root, first.scratch_namespace)
+    second_agent_home = node_agent_home(root, second.scratch_namespace)
+    first_artifacts = node_artifacts_root(root, first.scratch_namespace)
+    second_artifacts = node_artifacts_root(root, second.scratch_namespace)
+    assert f"source={first_agent_home}" in first_mounts
+    assert f"source={second_agent_home}" in second_mounts
+    assert f"source={first_artifacts}" in first_mounts
+    assert f"source={second_artifacts}" in second_mounts
+    assert f"source={node_run_root(root, first.scratch_namespace)}" in first_mounts
+    assert not str(first_agent_home).startswith(f"{root}/")
+    assert not (root / ".sandbox.db").exists()
+
+
+def test_node_scratch_is_not_reported_by_a_git_backed_repository(tmp_path: Path) -> None:
+    """Read-only node setup must not create mutation evidence in the repository."""
+    workspace = _workspace_handle(tmp_path)
+    root = workspace.workspace_path
+    subprocess.run(["git", "init"], cwd=root, check=True, capture_output=True)
+    (root / "README.md").write_text("# test\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=root, check=True, capture_output=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-m",
+            "init",
+        ],
+        cwd=root,
+        check=True,
+        capture_output=True,
+    )
+
+    namespace = "node-activity:v1:plan:node:1"
+    for path in (
+        node_agent_home(root, namespace),
+        node_artifacts_root(root, namespace),
+        node_run_root(root, namespace),
+    ):
+        path.mkdir(parents=True, exist_ok=True)
+        (path / "scratch.txt").write_text("scratch", encoding="utf-8")
+
+    status = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=root, check=True, capture_output=True, text=True
+    )
+    assert status.stdout == ""
 
 
 def test_build_docker_container_run_command_raises_on_comma_in_path(tmp_path: Path) -> None:

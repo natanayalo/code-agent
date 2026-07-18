@@ -21,7 +21,7 @@ from sandbox import (
     WorkspaceHandle,
 )
 from sandbox.redact import SecretRedactor
-from sandbox.scratch import scratch_namespace_component
+from sandbox.scratch import node_agent_home
 from tools import (
     ToolPermissionLevel,
 )
@@ -111,10 +111,11 @@ def _workspace_artifacts(workspace: WorkspaceHandle) -> list[ArtifactReference]:
 
 
 def _native_gemini_home(workspace_path: Path, scratch_namespace: str | None) -> Path:
-    """Return the native provider home for an optional isolated node namespace."""
-    agent_home = workspace_path / ".agent_home"
-    if scratch_namespace:
-        agent_home /= scratch_namespace_component(scratch_namespace)
+    agent_home = (
+        node_agent_home(workspace_path, scratch_namespace)
+        if scratch_namespace
+        else workspace_path / ".agent_home"
+    )
     return agent_home / ".gemini"
 
 

@@ -68,7 +68,7 @@ from orchestrator.nodes.provisioning import (
 )
 from orchestrator.nodes.utils import _available_workers
 from orchestrator.nodes.verification import build_verify_result_node
-from orchestrator.state import NodeOutcome, OrchestratorState, is_task_read_only
+from orchestrator.state import NodeOutcome, OrchestratorState
 from orchestrator.temporal.node_wave import (
     DecomposeTaskResult,
     NodeSelectionResult,
@@ -87,22 +87,32 @@ from repositories import (
     TemporalTaskStateRepository,
     session_scope,
 )
+from sandbox.scratch import scratch_namespace_component
 from workers import WorkerResult
 
 logger = logging.getLogger(__name__)
 
 EXECUTION_CAPACITY_LEASE_SECONDS = 60
-_NODE_SCRATCH_PATH_PREFIX = ".code-agent/node-runs/"
 
 
-def _source_file_changes(files_changed: list[str]) -> list[str]:
-    """Exclude the per-node scratch namespace from source mutation evidence."""
+def _source_file_changes(files_changed: list[str], logical_activity_key: str) -> list[str]:
+    """Exclude only this node's legacy in-repository scratch paths.
+
+    New node scratch is outside the repository. The exact legacy paths remain
+    filtered for resumed workspaces without hiding another node's evidence.
+    """
+    namespace = scratch_namespace_component(logical_activity_key)
+    scratch_prefixes = (
+        f".code-agent/node-runs/{namespace}/",
+        f".agent_home/{namespace}/",
+        f"artifacts/{namespace}/",
+    )
     source_paths: list[str] = []
     for path in files_changed:
         normalized = path.replace("\\", "/")
         while normalized.startswith("./"):
             normalized = normalized[2:]
-        if not normalized.startswith(_NODE_SCRATCH_PATH_PREFIX):
+        if not normalized.startswith(scratch_prefixes):
             source_paths.append(path)
     return source_paths
 
@@ -614,8 +624,18 @@ class TaskExecutionActivities:
 
     @activity.defn(name="select_next_node")
     @_restore_task_trace_context
-    async def select_next_node(
-        self, task_id: str, fanout_contract_enabled: bool = False
+    async def select_next_node(self, task_id: str) -> dict[str, Any]:
+        """Select one legacy M25.1B node action with its original input shape."""
+        return await self._select_next_node(task_id, fanout_contract_enabled=False)
+
+    @activity.defn(name="select_next_node_v2")
+    @_restore_task_trace_context
+    async def select_next_node_v2(self, task_id: str) -> dict[str, Any]:
+        """Select a versioned V2 wave after the workflow patch marker is recorded."""
+        return await self._select_next_node(task_id, fanout_contract_enabled=True)
+
+    async def _select_next_node(
+        self, task_id: str, *, fanout_contract_enabled: bool
     ) -> dict[str, Any]:
         """Read durable state and choose one deterministic node-wave action."""
         state = await self.service._run_blocking(self._get_current_state, task_id)
@@ -730,9 +750,6 @@ class TaskExecutionActivities:
                         ),
                         effective_input_digest=digest,
                         task_trace_id=trace_parts[1] if len(trace_parts) > 1 else None,
-                        execution_capacity_key=execution_task_queue_for_profile(
-                            state.route.chosen_profile if state.route else None
-                        ),
                     )
                     singleton = NodeSelectionResult(
                         action="execute",
@@ -743,16 +760,41 @@ class TaskExecutionActivities:
                         node_id=node.node_id,
                         logical_activity_key=request.logical_activity_key,
                     )
-                    profile = self.service.worker_profiles.get(
-                        state.route.chosen_profile if state.route else None
+                    node_state = state.model_copy(
+                        update={"task_plan": None, "task_spec": node_contract.task_spec}
+                    )
+                    node_task_text = (
+                        f"Parent task:\n{state.normalized_task_text or state.task.task_text}\n\n"
+                        f"Current DAG node ({node.node_id}): {node_contract.task_spec.goal}\n"
+                        "Node acceptance criteria: "
+                        f"{'; '.join(node_contract.task_spec.acceptance_criteria)}"
+                    )
+                    effective_request = _build_worker_request(
+                        node_state,
+                        task_spec_override=node_contract.task_spec,
+                        task_text_override=node_task_text,
+                        prior_node_context=prior_context,
+                    )
+                    effective_profile = self.service.worker_profiles.get(
+                        effective_request.worker_profile
+                    )
+                    effective_queue = execution_task_queue_for_profile(
+                        effective_request.worker_profile
+                    )
+                    singleton = singleton.model_copy(
+                        update={"execution_task_queue": effective_queue}
+                    )
+                    effective_manifest = effective_request.runtime_manifest or {}
+                    effective_read_only = bool(effective_request.read_only) and (
+                        effective_manifest.get("task", {}).get("read_only") is True
                     )
                     if not (
                         fanout_contract_enabled
                         and self.service.decomposed_fanout_enabled
-                        and profile is not None
+                        and effective_profile is not None
                         and is_read_only_fanout_eligible(
-                            parent_read_only=is_task_read_only(state),
-                            selected_profile_mutation_policy=profile.mutation_policy,
+                            parent_read_only=effective_read_only,
+                            selected_profile_mutation_policy=effective_profile.mutation_policy,
                             node=node_contract,
                             completed_node_ids={
                                 node_id
@@ -775,24 +817,9 @@ class TaskExecutionActivities:
                     second = plan.nodes[position + 1]
                     second_contract = state_nodes[second.node_id]
                     second_dependencies = list(second.depends_on or [])
-                    if (
-                        second.status != ExecutionPlanNodeStatus.PENDING
-                        or any(
-                            plan_nodes[dependency].status != ExecutionPlanNodeStatus.COMPLETED
-                            for dependency in second_dependencies
-                        )
-                        or not is_read_only_fanout_eligible(
-                            parent_read_only=is_task_read_only(state),
-                            selected_profile_mutation_policy=profile.mutation_policy,
-                            node=second_contract,
-                            completed_node_ids={
-                                node_id
-                                for node_id, persisted in plan_nodes.items()
-                                if persisted.status == ExecutionPlanNodeStatus.COMPLETED
-                            },
-                            has_unresolved_blocker=False,
-                            fanout_disabled=state.fanout_disabled_for_remainder,
-                        )
+                    if second.status != ExecutionPlanNodeStatus.PENDING or any(
+                        plan_nodes[dependency].status != ExecutionPlanNodeStatus.COMPLETED
+                        for dependency in second_dependencies
                     ):
                         return singleton
                     second_context = {
@@ -809,9 +836,49 @@ class TaskExecutionActivities:
                     _evidence, second_digest = _effective_input_evidence(
                         state, second_contract, second_context
                     )
-                    queue = execution_task_queue_for_profile(
-                        state.route.chosen_profile if state.route else None
+                    second_node_state = state.model_copy(
+                        update={"task_plan": None, "task_spec": second_contract.task_spec}
                     )
+                    second_task_text = (
+                        f"Parent task:\n{state.normalized_task_text or state.task.task_text}\n\n"
+                        f"Current DAG node ({second.node_id}): {second_contract.task_spec.goal}\n"
+                        "Node acceptance criteria: "
+                        f"{'; '.join(second_contract.task_spec.acceptance_criteria)}"
+                    )
+                    second_effective_request = _build_worker_request(
+                        second_node_state,
+                        task_spec_override=second_contract.task_spec,
+                        task_text_override=second_task_text,
+                        prior_node_context=second_context,
+                    )
+                    second_profile = self.service.worker_profiles.get(
+                        second_effective_request.worker_profile
+                    )
+                    second_manifest = second_effective_request.runtime_manifest or {}
+                    second_read_only = bool(second_effective_request.read_only) and (
+                        second_manifest.get("task", {}).get("read_only") is True
+                    )
+                    queue = effective_queue
+                    second_queue = execution_task_queue_for_profile(
+                        second_effective_request.worker_profile
+                    )
+                    if (
+                        second_profile is None
+                        or not second_read_only
+                        or not is_read_only_fanout_eligible(
+                            parent_read_only=second_read_only,
+                            selected_profile_mutation_policy=second_profile.mutation_policy,
+                            node=second_contract,
+                            completed_node_ids={
+                                node_id
+                                for node_id, persisted in plan_nodes.items()
+                                if persisted.status == ExecutionPlanNodeStatus.COMPLETED
+                            },
+                            has_unresolved_blocker=False,
+                            fanout_disabled=state.fanout_disabled_for_remainder,
+                        )
+                    ):
+                        return singleton
                     second_request = NodeActivityRequest(
                         task_id=task_id,
                         plan_id=plan.id,
@@ -822,12 +889,14 @@ class TaskExecutionActivities:
                         ),
                         effective_input_digest=second_digest,
                         task_trace_id=trace_parts[1] if len(trace_parts) > 1 else None,
-                        execution_capacity_key=queue,
+                        execution_capacity_key=second_queue,
                     )
                     items = [
                         NodeWaveItem(
                             node_id=node.node_id,
-                            activity_request=request,
+                            activity_request=request.model_copy(
+                                update={"execution_capacity_key": queue}
+                            ),
                             execution_task_queue=queue,
                         ),
                         NodeWaveItem(
@@ -915,7 +984,9 @@ class TaskExecutionActivities:
                 session_id=request.session_id,
                 timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
             )
-            source_files_changed = _source_file_changes(result.files_changed)
+            source_files_changed = _source_file_changes(
+                result.files_changed, node_activity.logical_activity_key
+            )
             if node.parallel_safe and (
                 source_files_changed
                 or result.diff_text

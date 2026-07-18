@@ -15,6 +15,7 @@ from orchestrator.node_execution import (
 )
 from orchestrator.state import OrchestratorState
 from orchestrator.temporal.activities import TaskExecutionActivities, _source_file_changes
+from sandbox.scratch import scratch_namespace_component
 from workers import WorkerRequest
 
 
@@ -56,14 +57,20 @@ def _worker_request() -> WorkerRequest:
     return WorkerRequest(task_text="Run node")
 
 
-def test_source_file_changes_excludes_per_node_scratch() -> None:
+def test_source_file_changes_excludes_only_the_current_node_scratch() -> None:
+    logical_key = "node-activity:v1:plan:node-one:1"
+    own_namespace = scratch_namespace_component(logical_key)
+    sibling_namespace = scratch_namespace_component("node-activity:v1:plan:node-two:1")
     assert _source_file_changes(
         [
-            ".code-agent/node-runs/node-one/stdout.txt",
-            "./.code-agent/node-runs/node-two/final-message.txt",
+            f".code-agent/node-runs/{own_namespace}/stdout.txt",
+            f"./.agent_home/{own_namespace}/settings.json",
+            f"artifacts/{own_namespace}/result.json",
+            f".code-agent/node-runs/{sibling_namespace}/final-message.txt",
             "README.md",
-        ]
-    ) == ["README.md"]
+        ],
+        logical_key,
+    ) == [f".code-agent/node-runs/{sibling_namespace}/final-message.txt", "README.md"]
 
 
 @pytest.mark.anyio

@@ -12,7 +12,7 @@ from typing import Any
 from uuid import uuid4
 
 from sandbox import WorkspaceHandle
-from sandbox.scratch import node_run_root, scratch_namespace_component
+from sandbox.scratch import node_agent_home, node_run_root
 from workers.antigravity_cli_adapter import (
     AntigravityCliRuntimeAdapter,
     write_antigravity_settings,
@@ -213,9 +213,11 @@ def prepare_antigravity_workspace_migration(
     scratch_namespace: str | None = None,
 ) -> tuple[Path, list[str]]:
     """Prepare Antigravity-compatible Gemini config without mutating host config."""
-    agent_home = workspace.workspace_path / ".agent_home"
-    if scratch_namespace:
-        agent_home /= scratch_namespace_component(scratch_namespace)
+    agent_home = (
+        node_agent_home(workspace.workspace_path, scratch_namespace)
+        if scratch_namespace
+        else workspace.workspace_path / ".agent_home"
+    )
     gemini_home = agent_home / ".gemini"
     actions: list[str] = []
     symlink_source: Path | None = None
@@ -331,9 +333,11 @@ def build_antigravity_native_command(
     prompt = config.prompt
     native_sandbox_enabled = config.native_sandbox_enabled
     tool_permission = antigravity_tool_permission(adapter, request)
-    agent_home = workspace.workspace_path / ".agent_home"
-    if request.scratch_namespace:
-        agent_home /= scratch_namespace_component(request.scratch_namespace)
+    agent_home = (
+        node_agent_home(workspace.workspace_path, request.scratch_namespace)
+        if request.scratch_namespace
+        else workspace.workspace_path / ".agent_home"
+    )
     gemini_home, migration_actions = prepare_antigravity_workspace_migration(
         adapter=adapter,
         workspace=workspace,

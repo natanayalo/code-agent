@@ -6,6 +6,7 @@ from typing import Final
 from urllib.parse import quote
 
 import httpx
+from temporalio.client import Client
 
 
 def _clean_env_value(raw_value: str) -> str | None:
@@ -75,6 +76,7 @@ FANOUT_TASK_TEXT: Final[str] = os.environ.get(
 EXPECT_DECOMPOSED_DAG: Final[bool] = os.environ.get(
     "CODE_AGENT_QA_EXPECT_DECOMPOSED_DAG", ""
 ).strip().lower() in {"1", "true", "yes", "on"}
+TEMPORAL_ADDRESS: Final[str] = os.environ.get("CODE_AGENT_QA_TEMPORAL_ADDRESS", "127.0.0.1:7233")
 
 
 # Read workspace root from .env to match the docker compose volume mapping
@@ -157,11 +159,13 @@ async def main():
         payload["constraints"] = {
             "read_only": True,
             "delivery_mode": "summary",
+            "qa_fanout_plan": True,
         }
         payload["worker_profile_override"] = os.environ.get(
             "CODE_AGENT_QA_FANOUT_PROFILE",
             "codex-native-executor-read-only",
         )
+        worker_override = os.environ.get("CODE_AGENT_QA_FANOUT_WORKER_OVERRIDE", "codex").strip()
     if worker_override:
         payload["worker_override"] = worker_override
 
@@ -219,6 +223,7 @@ async def main():
 
         if FANOUT_QA_ENABLED:
             verify_fanout_plan(task_data)
+            await verify_fanout_overlap(task_id)
         elif EXPECT_DECOMPOSED_DAG:
             verify_decomposed_dag(task_data)
 
@@ -320,6 +325,35 @@ def verify_fanout_plan(task_data: dict) -> None:
     if len(safe_nodes) < 2:
         raise RuntimeError("Fan-out task did not complete two eligible read-only nodes.")
     print("[+] Verified two completed read-only, parallel-safe nodes.")
+
+
+async def verify_fanout_overlap(task_id: str) -> None:
+    """Prove the first two node executions were scheduled before either started."""
+    temporal = await Client.connect(TEMPORAL_ADDRESS)
+    handle = temporal.get_workflow_handle(f"task-{task_id}")
+    scheduled_ids: list[int] = []
+    started_ids: set[int] = set()
+    async for event in handle.fetch_history_events():
+        if event.HasField("activity_task_scheduled_event_attributes"):
+            attrs = event.activity_task_scheduled_event_attributes
+            if attrs.activity_type.name == "run_decomposed_node":
+                scheduled_ids.append(event.event_id)
+        elif event.HasField("activity_task_started_event_attributes"):
+            started_id = event.activity_task_started_event_attributes.scheduled_event_id
+            if started_id in scheduled_ids:
+                if len(scheduled_ids) < 2:
+                    raise RuntimeError(
+                        "Fan-out node execution started before both V2 wave activities were scheduled."
+                    )
+                started_ids.add(started_id)
+                if len(started_ids) >= 2:
+                    print("[+] Verified two node Activities overlapped before either completed.")
+                    return
+        elif event.HasField("activity_task_completed_event_attributes"):
+            completed_id = event.activity_task_completed_event_attributes.scheduled_event_id
+            if completed_id in scheduled_ids and len(started_ids) < 2:
+                raise RuntimeError("A fan-out node completed before its sibling started.")
+    raise RuntimeError("Temporal history did not prove two concurrent fan-out node Activities.")
 
 
 async def wait_for_span_export(

@@ -16,7 +16,7 @@ from sandbox import (
     WorkspaceCleanupPolicy,
     WorkspaceHandle,
 )
-from sandbox.scratch import node_run_root, scratch_namespace_component
+from sandbox.scratch import node_agent_home, node_run_root
 from tools import DEFAULT_TOOL_REGISTRY
 from workers import CodexCliWorker, ReviewResult, WorkerRequest
 from workers.base import ArtifactReference
@@ -618,9 +618,7 @@ def test_codex_native_runs_isolate_all_writable_output_paths_by_hashed_namespace
         )
     )
     assert first_env["HOME"] == str(
-        workspace.workspace_path
-        / ".agent_home"
-        / scratch_namespace_component(first.scratch_namespace)
+        node_agent_home(workspace.workspace_path, first.scratch_namespace)
     )
     assert first_env["HOME"] != second_env["HOME"]
     assert first_env["DATABASE_URL"] != second_env["DATABASE_URL"]

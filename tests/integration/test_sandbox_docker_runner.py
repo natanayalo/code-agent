@@ -17,6 +17,7 @@ from sandbox import (
     WorkspaceManager,
     WorkspaceRequest,
 )
+from sandbox.scratch import node_artifacts_root
 
 
 def _run_git(command: list[str], *, cwd: Path) -> str:
@@ -206,7 +207,7 @@ def test_docker_sandbox_runner_read_only_workspace(
         )
     )
     assert result_success.exit_code == 0
-    assert (workspace.workspace_path / "artifacts" / "default" / "should_succeed.txt").exists()
+    assert (node_artifacts_root(workspace.workspace_path, None) / "should_succeed.txt").exists()
 
     # 3. Attempt to write to local repo should fail (using ContainerManager)
     monkeypatch.setenv("CODE_AGENT_ALLOWED_LOCAL_REMOTES", str(source_repo))

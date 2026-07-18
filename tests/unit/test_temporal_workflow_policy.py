@@ -122,7 +122,9 @@ async def test_decomposed_workflow_runs_one_node_wave_before_the_next_selection(
             return {"continuation": "continue"}
         return {}
 
-    monkeypatch.setattr(workflow, "patched", lambda _patch_id: True)
+    monkeypatch.setattr(
+        workflow, "patched", lambda patch_id: patch_id != "m25-2-bounded-selective-fanout"
+    )
     monkeypatch.setattr(workflow, "execute_activity", execute_activity)
 
     result = await TaskExecutionWorkflow()._run_lifecycle("task-id")
@@ -176,7 +178,7 @@ async def test_v2_fanout_starts_both_nodes_before_ordered_merge(monkeypatch) -> 
             return {}
         if name == "decompose_task":
             return {"execution_shape": "decomposed"}
-        if name == "select_next_node":
+        if name == "select_next_node_v2":
             return next(selections)
         if name == "run_decomposed_node":
             request = kwargs["args"][1]
@@ -241,7 +243,7 @@ async def test_v2_fanout_permission_continues_through_the_shared_hitl_state_mach
             return {}
         if name == "decompose_task":
             return {"execution_shape": "decomposed"}
-        if name == "select_next_node":
+        if name == "select_next_node_v2":
             return next(selections)
         if name == "run_decomposed_node":
             return {"status": "completed"}
@@ -318,7 +320,7 @@ async def test_patch_decision_is_recorded_before_selecting_v2_contract(monkeypat
         if name == "decompose_task":
             return {"execution_shape": "decomposed"}
         if name == "select_next_node":
-            selection_args.extend(kwargs["args"])
+            selection_args.extend(args)
             return {"action": "complete"}
         return {}
 
@@ -333,7 +335,7 @@ async def test_patch_decision_is_recorded_before_selecting_v2_contract(monkeypat
 
     assert result["status"] == "completed"
     assert patch_calls.index("m25-2-bounded-selective-fanout") < len(patch_calls)
-    assert selection_args == ["task-id", False]
+    assert selection_args == ["task-id"]
 
 
 @pytest.mark.anyio
@@ -351,7 +353,9 @@ async def test_decomposed_workflow_bounds_permission_escalations(monkeypatch) ->
     async def wait_condition(_predicate) -> None:
         workflow_instance.permission_escalation_decision = True
 
-    monkeypatch.setattr(workflow, "patched", lambda _patch_id: True)
+    monkeypatch.setattr(
+        workflow, "patched", lambda patch_id: patch_id != "m25-2-bounded-selective-fanout"
+    )
     monkeypatch.setattr(workflow, "execute_activity", execute_activity)
     monkeypatch.setattr(workflow, "wait_condition", wait_condition)
 

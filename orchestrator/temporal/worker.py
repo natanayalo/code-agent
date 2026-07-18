@@ -39,6 +39,7 @@ async def start_temporal_worker(
             activities.classify_and_plan,
             activities.decompose_task,
             activities.select_next_node,
+            activities.select_next_node_v2,
             activities.merge_node_wave,
             activities.fail_node_permission_escalation,
             activities.load_memory,

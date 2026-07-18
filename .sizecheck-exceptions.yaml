@@ -84,6 +84,7 @@ function_exceptions:
     execute: Coordinates the node claim, worker execution, and fenced terminal projection across separate transactions.
   orchestrator/temporal/activities.py:
     select_next_node: Reads the durable plan and snapshot together to produce a deterministic node-wave selection without parent-state writes.
+    _select_next_node: Versioned selector wrapper keeps M25.1B and V2 contracts on one deterministic plan-read path.
     _select: Keeps plan ordering, terminal replay, dependency, and logical-attempt selection in one read-only transaction.
     run_decomposed_node: Reconstructs one worker request while coordinating Temporal and durable-claim heartbeat ownership.
     merge_node_wave: Validates durable result payloads and projects the sole parent node-wave state transition atomically.

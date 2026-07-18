@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from db.base import Base
 from db.enums import ExecutionPlanNodeStatus
 from orchestrator.node_execution import NodeActivityResultRef
-from orchestrator.state import NodeOutcome, OrchestratorState
+from orchestrator.state import NodeOutcome, OrchestratorState, WorkerDispatch
 from orchestrator.temporal.activities import TaskExecutionActivities
 from repositories import (
     ExecutionPlanRepository,
@@ -188,19 +188,52 @@ def _persist_terminal_result(
 async def test_select_next_node_returns_ordered_v2_wave_for_two_eligible_nodes() -> None:
     fixture = _build_fixture()
 
-    selection = await fixture.activity.select_next_node(fixture.task_id, True)
+    selection = await fixture.activity.select_next_node_v2(fixture.task_id)
 
     assert selection["schema_version"] == 2
     assert selection["fanout_applied"] is True
     assert [item["node_id"] for item in selection["items"]] == ["first", "second"]
     assert selection["wave_id"].startswith(f"node-wave:v2:{fixture.plan_id}:")
+    assert {item["activity_request"]["execution_capacity_key"] for item in selection["items"]} == {
+        item["execution_task_queue"] for item in selection["items"]
+    }
+
+
+@pytest.mark.anyio
+async def test_legacy_selection_does_not_acquire_a_fanout_capacity_permit() -> None:
+    fixture = _build_fixture()
+
+    selection = await fixture.activity.select_next_node(fixture.task_id)
+
+    assert selection["action"] == "execute"
+    assert selection["activity_request"]["execution_capacity_key"] is None
+
+
+@pytest.mark.anyio
+async def test_v2_selection_uses_the_effective_dispatch_profile_for_safety() -> None:
+    fixture = _build_fixture()
+    fixture.activity.service.worker_profiles["mutable-profile"] = WorkerProfile(
+        name="mutable-profile",
+        worker_type="codex",
+        runtime_mode="native_agent",
+        mutation_policy="patch_allowed",
+    )
+    dispatch_state = fixture.state.model_copy(
+        update={"dispatch": WorkerDispatch(worker_profile="mutable-profile")}
+    )
+    fixture.activity._get_current_state = lambda _task_id: dispatch_state
+
+    selection = await fixture.activity.select_next_node_v2(fixture.task_id)
+
+    assert selection["action"] == "execute"
+    assert selection["activity_request"]["execution_capacity_key"] is None
 
 
 @pytest.mark.anyio
 async def test_select_next_node_does_not_overtake_an_ineligible_second_node() -> None:
     fixture = _build_fixture(second_parallel_safe=False)
 
-    selection = await fixture.activity.select_next_node(fixture.task_id, True)
+    selection = await fixture.activity.select_next_node_v2(fixture.task_id)
 
     assert selection["action"] == "execute"
     assert selection["node_id"] == "first"
@@ -222,7 +255,7 @@ async def test_merge_v2_wave_projects_ordered_multi_result_outcomes(
     continuation: str,
 ) -> None:
     fixture = _build_fixture()
-    selection = await fixture.activity.select_next_node(fixture.task_id, True)
+    selection = await fixture.activity.select_next_node_v2(fixture.task_id)
     refs = [
         _persist_terminal_result(
             fixture,
@@ -262,7 +295,7 @@ async def test_merge_v2_wave_prioritizes_permission_over_retryable_failure(
 ) -> None:
     """A retryable sibling cannot bypass the earlier/later blocked-node HITL flow."""
     fixture = _build_fixture()
-    selection = await fixture.activity.select_next_node(fixture.task_id, True)
+    selection = await fixture.activity.select_next_node_v2(fixture.task_id)
     refs = [
         _persist_terminal_result(fixture, item, status=status, failure_kind="worker_failure")
         for item, status in zip(selection["items"], statuses, strict=True)
@@ -278,7 +311,7 @@ async def test_merge_v2_wave_prioritizes_permission_over_retryable_failure(
 async def test_merge_v2_wave_keeps_terminal_sibling_when_other_evidence_is_missing() -> None:
     """An Activity exception reconciles committed evidence before failing the parent."""
     fixture = _build_fixture()
-    selection = await fixture.activity.select_next_node(fixture.task_id, True)
+    selection = await fixture.activity.select_next_node_v2(fixture.task_id)
     first_ref = _persist_terminal_result(fixture, selection["items"][0], status="completed")
 
     result = fixture.activity._merge_v2_wave(

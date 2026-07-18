@@ -84,8 +84,8 @@ def classify_task(state_input: OrchestratorState) -> dict[str, Any]:
 # [Moved to orchestrator/nodes/utils.py]
 
 
-def _read_only_task_plan(complexity_reason: str) -> TaskPlan:
-    """Build the safe two-inspection wave followed by a synthesis step."""
+def _qa_read_only_fanout_task_plan(complexity_reason: str) -> TaskPlan:
+    """Build a deterministic read-only plan for the isolated E2E fixture only."""
     return TaskPlan(
         triggered=True,
         complexity_reason=complexity_reason,
@@ -125,8 +125,11 @@ def _read_only_task_plan(complexity_reason: str) -> TaskPlan:
 
 def _build_task_plan(state: OrchestratorState, complexity_reason: str) -> TaskPlan:
     """Create an ordered, structured decomposition for complex tasks."""
-    if state.task.constraints.get("read_only") is True:
-        return _read_only_task_plan(complexity_reason)
+    # Fan-out itself remains selective over explicit planner metadata. This
+    # dedicated marker is intentionally only used by the local E2E fixture so
+    # ordinary read-only production requests retain task-specific planning.
+    if state.task.constraints.get("qa_fanout_plan") is True:
+        return _qa_read_only_fanout_task_plan(complexity_reason)
 
     task_text = state.normalized_task_text or state.task.task_text
     normalized_task_text = " ".join(task_text.split())

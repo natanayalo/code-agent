@@ -16,7 +16,7 @@ from pydantic import Field
 
 from sandbox.policy import LocalRepoPolicyError, validate_local_repo_path
 from sandbox.redact import mask_url_credentials as _mask_url_credentials
-from sandbox.scratch import node_run_root, scratch_namespace_component
+from sandbox.scratch import node_agent_home, node_artifacts_root, node_run_root
 from sandbox.workspace import SandboxModel, WorkspaceHandle
 
 logger = logging.getLogger(__name__)
@@ -104,36 +104,22 @@ def append_workspace_mount_options(
     )
 
     if read_only_workspace:
-        namespace = scratch_namespace_component(scratch_namespace)
         code_agent_path = node_run_root(workspace_path, scratch_namespace)
         code_agent_path.mkdir(parents=True, exist_ok=True)
-        agent_home_path = workspace_path / ".agent_home" / namespace
+        agent_home_path = node_agent_home(workspace_path, scratch_namespace)
         agent_home_path.mkdir(parents=True, exist_ok=True)
-        artifacts_path = workspace_path / "artifacts" / namespace
+        artifacts_path = node_artifacts_root(workspace_path, scratch_namespace)
         artifacts_path.mkdir(parents=True, exist_ok=True)
-        sandbox_db_path = code_agent_path / ".sandbox.db"
-
-        symlink_path = workspace_path / ".sandbox.db"
-        if symlink_path.exists() or symlink_path.is_symlink():
-            try:
-                if symlink_path.is_symlink():
-                    target = os.readlink(symlink_path)
-                    if Path(target).as_posix() != ".code-agent/.sandbox.db":
-                        symlink_path.unlink()
-                else:
-                    if symlink_path.is_file() and not sandbox_db_path.exists():
-                        symlink_path.rename(sandbox_db_path)
-                    else:
-                        symlink_path.unlink()
-            except OSError:
-                pass
-        if not symlink_path.exists() and not symlink_path.is_symlink():
-            try:
-                symlink_path.symlink_to(".code-agent/.sandbox.db")
-            except OSError:
-                pass
-
-        sandbox_db_path.touch(exist_ok=True)
+        (code_agent_path / ".sandbox.db").touch(exist_ok=True)
+        # Docker must find bind-mount targets before applying the read-only
+        # repository mount. These directories are only empty mountpoints; all
+        # writable contents are kept in the external node scratch paths above.
+        for mountpoint in (
+            workspace_path / ".code-agent",
+            workspace_path / ".agent_home",
+            workspace_path / "artifacts",
+        ):
+            mountpoint.mkdir(parents=True, exist_ok=True)
 
         command.extend(
             ["--mount", f"type=bind,source={code_agent_path},target={target_path}/.code-agent"]
