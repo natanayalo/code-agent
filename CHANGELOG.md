@@ -581,6 +581,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Documentation
 
+- Docs: add M25.3 Temporal-only cutover and legacy retirement milestone ([#321](https://github.com/natanayalo/code-agent/pull/321))
+
 - Docs: reframe m23 next slices ([#305](https://github.com/natanayalo/code-agent/pull/305))
 
 - Docs: mark M20.4 Worker Supervisor v1 as completed ([#286](https://github.com/natanayalo/code-agent/pull/286))
