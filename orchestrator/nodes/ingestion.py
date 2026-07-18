@@ -84,8 +84,50 @@ def classify_task(state_input: OrchestratorState) -> dict[str, Any]:
 # [Moved to orchestrator/nodes/utils.py]
 
 
+def _read_only_task_plan(complexity_reason: str) -> TaskPlan:
+    """Build the safe two-inspection wave followed by a synthesis step."""
+    return TaskPlan(
+        triggered=True,
+        complexity_reason=complexity_reason,
+        steps=[
+            TaskPlanStep(
+                step_id="1",
+                title="Inspect Repository Documentation",
+                expected_outcome="Summarize the relevant repository documentation.",
+                depends_on=[],
+                node_kind="inspect",
+                aggregation_role="context",
+                execution_mode="read_only",
+                parallel_safe=True,
+            ),
+            TaskPlanStep(
+                step_id="2",
+                title="Inspect Repository Structure",
+                expected_outcome="List the relevant tracked repository files and structure.",
+                depends_on=[],
+                node_kind="inspect",
+                aggregation_role="context",
+                execution_mode="read_only",
+                parallel_safe=True,
+            ),
+            TaskPlanStep(
+                step_id="3",
+                title="Synthesize Inspection Findings",
+                expected_outcome="Combine the independent evidence into a concise summary.",
+                depends_on=["1", "2"],
+                node_kind="verify",
+                aggregation_role="validation",
+                execution_mode="read_only",
+            ),
+        ],
+    )
+
+
 def _build_task_plan(state: OrchestratorState, complexity_reason: str) -> TaskPlan:
     """Create an ordered, structured decomposition for complex tasks."""
+    if state.task.constraints.get("read_only") is True:
+        return _read_only_task_plan(complexity_reason)
+
     task_text = state.normalized_task_text or state.task.task_text
     normalized_task_text = " ".join(task_text.split())
     task_text_preview = normalized_task_text[:100] + (

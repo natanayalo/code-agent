@@ -4,6 +4,7 @@ from contextlib import contextmanager
 
 import pytest
 
+from orchestrator.state import OrchestratorState
 from orchestrator.temporal.activities import TaskExecutionActivities, _restore_task_trace_context
 
 
@@ -66,3 +67,46 @@ def test_temporal_activity_ignores_empty_node_updates() -> None:
     activity._merge_updates(state, None)
 
     assert state == {"value": 42}
+
+
+@pytest.mark.anyio
+async def test_decompose_task_does_not_skip_generic_planning_event() -> None:
+    """A plan event precedes decomposition and is not an idempotency marker."""
+
+    class FakeService:
+        async def _run_blocking(self, func, *args, **kwargs):
+            return func(*args, **kwargs)
+
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_id": "task-123", "task_text": "Inspect across files"},
+            "timeline_events": [{"event_type": "task_planned", "message": "plan created"}],
+        }
+    )
+    activity = object.__new__(TaskExecutionActivities)
+    activity.service = FakeService()
+    activity._get_current_state = lambda _task_id: state
+    activity._persist_intermediate_state = lambda **_kwargs: None
+
+    async def decompose_node(_state: dict[str, object]) -> dict[str, object]:
+        return {
+            "decomposed_plan": {
+                "triggered": True,
+                "status": "decomposed",
+                "nodes": [
+                    {
+                        "node_id": "1",
+                        "title": "Inspect",
+                        "task_spec": {"goal": "Inspect"},
+                        "node_kind": "inspect",
+                        "aggregation_role": "context",
+                    }
+                ],
+            }
+        }
+
+    activity.decompose_task_node = decompose_node
+
+    result = await TaskExecutionActivities.decompose_task.__wrapped__(activity, "task-123")
+
+    assert result["execution_shape"] == "decomposed"

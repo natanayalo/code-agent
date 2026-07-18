@@ -39,6 +39,10 @@ def _required_env_value(name: str) -> str:
     return value
 
 
+def _is_enabled(raw_value: str | None) -> bool:
+    return (raw_value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 # Configuration
 API_URL: Final[str] = os.environ.get("CODE_AGENT_API_URL", "http://127.0.0.1:8000")
 SHARED_SECRET = _required_env_value("CODE_AGENT_API_SHARED_SECRET")
@@ -59,6 +63,15 @@ TASK_TEXT: Final[str] = os.environ.get(
     "CODE_AGENT_QA_TASK_TEXT",
     "Create a file named qa-hello.txt containing the text 'Hello QA' and commit it.",
 )
+FANOUT_QA_ENABLED: Final[bool] = _is_enabled(os.environ.get("CODE_AGENT_QA_FANOUT"))
+FANOUT_TASK_TEXT: Final[str] = os.environ.get(
+    "CODE_AGENT_QA_FANOUT_TASK_TEXT",
+    (
+        "Perform two independent read-only repository inspections across files: summarize "
+        "README.md and list the top-level tracked files. Do not modify files, create artifacts, "
+        "or commit."
+    ),
+)
 EXPECT_DECOMPOSED_DAG: Final[bool] = os.environ.get(
     "CODE_AGENT_QA_EXPECT_DECOMPOSED_DAG", ""
 ).strip().lower() in {"1", "true", "yes", "on"}
@@ -71,10 +84,6 @@ workspace_root = _read_env_value("CODE_AGENT_WORKSPACE_ROOT") or DEFAULT_WORKSPA
 workspace_root = os.path.expandvars(os.path.expanduser(workspace_root))
 
 DUMMY_REPO_DIR = os.path.join(workspace_root, "dummy_repo")
-
-
-def _is_enabled(raw_value: str | None) -> bool:
-    return (raw_value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def setup_dummy_repo():
@@ -130,8 +139,9 @@ async def main():
 
     print("[*] Submitting task via webhook")
     worker_override = os.environ.get("CODE_AGENT_WORKER_OVERRIDE", "antigravity").strip()
+    task_text = FANOUT_TASK_TEXT if FANOUT_QA_ENABLED else TASK_TEXT
     payload = {
-        "task_text": TASK_TEXT,
+        "task_text": task_text,
         "repo_key": QA_REPO_KEY,
         "branch": "master",
         "source": "qa",
@@ -143,6 +153,15 @@ async def main():
             ],
         },
     }
+    if FANOUT_QA_ENABLED:
+        payload["constraints"] = {
+            "read_only": True,
+            "delivery_mode": "summary",
+        }
+        payload["worker_profile_override"] = os.environ.get(
+            "CODE_AGENT_QA_FANOUT_PROFILE",
+            "codex-native-executor-read-only",
+        )
     if worker_override:
         payload["worker_override"] = worker_override
 
@@ -150,6 +169,8 @@ async def main():
         resp = await client.post(
             f"{API_URL}/webhook", json=payload, headers={"X-Webhook-Token": SHARED_SECRET}
         )
+        if resp.is_error:
+            raise RuntimeError(f"Webhook submission failed ({resp.status_code}): {resp.text}")
         resp.raise_for_status()
         data = resp.json()
         task_id = data.get("task_id")
@@ -196,7 +217,9 @@ async def main():
         else:
             raise RuntimeError("Task timed out.")
 
-        if EXPECT_DECOMPOSED_DAG:
+        if FANOUT_QA_ENABLED:
+            verify_fanout_plan(task_data)
+        elif EXPECT_DECOMPOSED_DAG:
             verify_decomposed_dag(task_data)
 
         if _is_enabled(_read_env_value("CODE_AGENT_ENABLE_TRACING")):
@@ -205,6 +228,10 @@ async def main():
                 task_id=task_id,
                 span_name="orchestrator.memory.observation_bridge",
             )
+
+    if FANOUT_QA_ENABLED:
+        print("[+] Verified read-only fan-out task evidence.")
+        return
 
     print("\n[*] Verifying dummy repository artifacts")
 
@@ -270,6 +297,29 @@ def verify_decomposed_dag(task_data: dict) -> None:
             raise RuntimeError(f"DAG node {node_id} did not persist result evidence.")
 
     print("[+] Verified completed sequential DAG nodes and persisted evidence.")
+
+
+def verify_fanout_plan(task_data: dict) -> None:
+    """Assert that the completed task persisted at least one safe two-node wave."""
+    execution_plan = task_data.get("execution_plan")
+    nodes = execution_plan.get("nodes") if isinstance(execution_plan, dict) else None
+    if not isinstance(nodes, list) or len(nodes) < 2:
+        raise RuntimeError("Fan-out task did not persist at least two execution-plan nodes.")
+    chosen_profile = task_data.get("chosen_profile")
+    if not isinstance(chosen_profile, str) or not chosen_profile.endswith("-read-only"):
+        raise RuntimeError(f"Fan-out task did not use a read-only profile: {chosen_profile!r}")
+    safe_nodes = [
+        node
+        for node in nodes
+        if isinstance(node, dict)
+        and node.get("status") == "completed"
+        and node.get("execution_mode") == "read_only"
+        and node.get("parallel_safe") is True
+        and node.get("aggregation_role") != "mutation"
+    ]
+    if len(safe_nodes) < 2:
+        raise RuntimeError("Fan-out task did not complete two eligible read-only nodes.")
+    print("[+] Verified two completed read-only, parallel-safe nodes.")
 
 
 async def wait_for_span_export(

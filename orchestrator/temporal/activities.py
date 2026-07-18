@@ -92,6 +92,19 @@ from workers import WorkerResult
 logger = logging.getLogger(__name__)
 
 EXECUTION_CAPACITY_LEASE_SECONDS = 60
+_NODE_SCRATCH_PATH_PREFIX = ".code-agent/node-runs/"
+
+
+def _source_file_changes(files_changed: list[str]) -> list[str]:
+    """Exclude the per-node scratch namespace from source mutation evidence."""
+    source_paths: list[str] = []
+    for path in files_changed:
+        normalized = path.replace("\\", "/")
+        while normalized.startswith("./"):
+            normalized = normalized[2:]
+        if not normalized.startswith(_NODE_SCRATCH_PATH_PREFIX):
+            source_paths.append(path)
+    return source_paths
 
 
 def _restore_task_trace_context(func: Any) -> Any:
@@ -425,7 +438,7 @@ class TaskExecutionActivities:
     @_restore_task_trace_context
     async def decompose_task(self, task_id: str) -> dict[str, Any]:
         state = await self.service._run_blocking(self._get_current_state, task_id)
-        if self._has_event(state, TimelineEventType.TASK_PLANNED):
+        if state.decomposed_plan is not None:
             logger.info("decompose_task already executed for task %s, skipping", task_id)
             return self._decompose_result(state).model_dump(mode="json")
 
@@ -902,8 +915,9 @@ class TaskExecutionActivities:
                 session_id=request.session_id,
                 timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
             )
+            source_files_changed = _source_file_changes(result.files_changed)
             if node.parallel_safe and (
-                result.files_changed
+                source_files_changed
                 or result.diff_text
                 or (result.delivery_metadata if hasattr(result, "delivery_metadata") else None)
             ):
@@ -914,7 +928,7 @@ class TaskExecutionActivities:
                         "summary": "Read-only fan-out node reported mutation evidence.",
                     }
                 )
-            return result
+            return result.model_copy(update={"files_changed": source_files_changed})
 
         active_permit_token: str | None = None
 

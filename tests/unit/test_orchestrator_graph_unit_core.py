@@ -738,7 +738,7 @@ def test_summarize_result_attaches_task_plan_artifact_when_present():
     artifact = res["result"]["artifacts"][0]
     assert artifact["name"] == "task_plan"
     assert artifact["artifact_type"] == "result_summary"
-    assert artifact["uri"].startswith("data:application/json;base64,")
+    assert artifact["uri"].startswith("task-plan://sha256/")
 
 
 def test_summarize_result_reviewer_findings_without_leading_newline_when_summary_empty():

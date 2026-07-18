@@ -14,7 +14,7 @@ from orchestrator.node_execution import (
     NodeActivityResultRef,
 )
 from orchestrator.state import OrchestratorState
-from orchestrator.temporal.activities import TaskExecutionActivities
+from orchestrator.temporal.activities import TaskExecutionActivities, _source_file_changes
 from workers import WorkerRequest
 
 
@@ -54,6 +54,16 @@ def _activity(state: OrchestratorState) -> TaskExecutionActivities:
 
 def _worker_request() -> WorkerRequest:
     return WorkerRequest(task_text="Run node")
+
+
+def test_source_file_changes_excludes_per_node_scratch() -> None:
+    assert _source_file_changes(
+        [
+            ".code-agent/node-runs/node-one/stdout.txt",
+            "./.code-agent/node-runs/node-two/final-message.txt",
+            "README.md",
+        ]
+    ) == ["README.md"]
 
 
 @pytest.mark.anyio
