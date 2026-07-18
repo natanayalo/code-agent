@@ -5,6 +5,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from sqlalchemy import select
+
+from db.models import Task
 from repositories import TaskRepository, WorkerNodeRepository, session_scope
 
 logger = logging.getLogger("orchestrator.execution")
@@ -76,10 +79,12 @@ async def ensure_legacy_queued_task_ownership(
 def _get_queued_task_ownership(self: Any, task_id: str) -> tuple[bool, str | None]:
     """Return whether the task exists and its pinned runtime without validating it."""
     with session_scope(self.session_factory) as session:
-        task = TaskRepository(session).get(task_id)
-        if task is None:
+        row = session.execute(
+            select(Task.id, Task.orchestration_runtime).where(Task.id == task_id)
+        ).one_or_none()
+        if row is None:
             return False, None
-        runtime = task.orchestration_runtime
+        runtime = row.orchestration_runtime
         return True, runtime.value if runtime is not None else None
 
 

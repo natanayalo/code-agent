@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from sqlalchemy import select
+
 from db.enums import OrchestrationRuntime
 from repositories import WorkerNodeRepository
 from tests.unit.task_execution_service_support import *  # noqa: F403
@@ -106,7 +108,7 @@ def test_claim_next_task_allows_single_claim_and_lease_reclaim() -> None:
 
 @pytest.mark.parametrize("runtime", [OrchestrationRuntime.TEMPORAL, None])
 def test_run_queued_task_releases_invalid_nonlegacy_stale_lease(runtime, monkeypatch) -> None:
-    """Ownership rejection must release stale non-legacy leases before validation."""
+    """Ownership lookup must avoid unreadable encrypted payload fields before release."""
     engine = create_engine_from_url(
         "sqlite+pysqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -114,6 +116,7 @@ def test_run_queued_task_releases_invalid_nonlegacy_stale_lease(runtime, monkeyp
     )
     Base.metadata.create_all(engine)
     session_factory = create_session_factory(engine)
+    monkeypatch.setenv("CODE_AGENT_ENCRYPTION_KEY", Fernet.generate_key().decode())
     service = execution_module.TaskExecutionService(
         session_factory=session_factory,
         worker=_StaticWorker(),
@@ -127,6 +130,7 @@ def test_run_queued_task_releases_invalid_nonlegacy_stale_lease(runtime, monkeyp
             session_id=conversation_session.id,
             task_text="invalid stale lease",
             constraints={"worker_profile_override": 42},
+            secrets={"token": "secret"},
             orchestration_runtime=runtime,
         )
         task.status = TaskStatus.IN_PROGRESS
@@ -137,6 +141,10 @@ def test_run_queued_task_releases_invalid_nonlegacy_stale_lease(runtime, monkeyp
             worker_id="worker-runtime", worker_type="codex", now=utc_now(), capacity=1
         )
         worker.current_load = 1
+        session.execute(
+            text("UPDATE tasks SET secrets = :secrets WHERE id = :task_id"),
+            {"secrets": "gAAAA-unreadable-secret", "task_id": task.id},
+        )
 
     def fail_submission_load(*_args, **_kwargs):
         raise AssertionError("non-legacy task must not be validated by the legacy worker")
@@ -145,9 +153,10 @@ def test_run_queued_task_releases_invalid_nonlegacy_stale_lease(runtime, monkeyp
     asyncio.run(service.run_queued_task(task_id=task.id, worker_id="worker-runtime"))
 
     with session_scope(session_factory) as session:
-        stored_task = TaskRepository(session).get(task.id)
+        stored_task = session.execute(
+            select(Task.status, Task.attempt_count, Task.lease_owner).where(Task.id == task.id)
+        ).one()
         worker = WorkerNodeRepository(session).get_by_worker_id("worker-runtime")
-        assert stored_task is not None
         assert worker is not None
         assert stored_task.status is TaskStatus.PENDING
         assert stored_task.attempt_count == 0
