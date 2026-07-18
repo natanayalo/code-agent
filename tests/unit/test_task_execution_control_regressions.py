@@ -6,7 +6,6 @@ import asyncio
 import builtins
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
 from threading import Barrier
 
 from sqlalchemy.pool import StaticPool
@@ -19,9 +18,8 @@ from db.enums import (
     TaskStatus,
     TimelineEventType,
 )
-from db.models import HumanInteraction
+from db.models import HumanInteraction, TemporalCommand
 from orchestrator import execution as execution_module
-from orchestrator import execution_interaction_service as interaction_module
 from repositories import (
     HumanInteractionRepository,
     TaskRepository,
@@ -144,27 +142,6 @@ def test_record_interaction_response_clarification_requeues_without_approval_sid
         for interaction in snapshot.pending_interactions
         if interaction.interaction_type == "clarification"
     )
-    temporal_signals: list[tuple[str, str, object]] = []
-    active_transactions = 0
-    original_session_scope = interaction_module.session_scope
-
-    @contextmanager
-    def tracking_session_scope(factory):
-        nonlocal active_transactions
-        active_transactions += 1
-        try:
-            with original_session_scope(factory) as session:
-                yield session
-        finally:
-            active_transactions -= 1
-
-    async def signal_temporal_workflow(task_id: str, signal_name: str, arg: object) -> None:
-        assert active_transactions == 0
-        temporal_signals.append((task_id, signal_name, arg))
-
-    monkeypatch.setattr(interaction_module, "session_scope", tracking_session_scope)
-    monkeypatch.setattr(service, "signal_temporal_workflow", signal_temporal_workflow)
-
     refreshed = service.record_interaction_response(
         snapshot.task_id,
         clarification.interaction_id,
@@ -178,8 +155,6 @@ def test_record_interaction_response_clarification_requeues_without_approval_sid
     assert refreshed.pending_interaction_count == 0
     assert refreshed.pending_interactions == []
     assert any(event.event_type == "task_spec_and_route_generated" for event in refreshed.timeline)
-    assert temporal_signals == [(snapshot.task_id, "handle_clarification", None)]
-
     with session_scope(session_factory) as session:
         task = TaskRepository(session).get(snapshot.task_id)
         interactions = HumanInteractionRepository(session).list_by_task(task_id=snapshot.task_id)
@@ -197,6 +172,13 @@ def test_record_interaction_response_clarification_requeues_without_approval_sid
             "symptom": "failing retry path",
         }
         assert timeline[-1].event_type.value == "task_spec_and_route_generated"
+        signals = session.query(TemporalCommand).filter_by(command_type="signal").all()
+        assert [(signal.task_id, signal.payload) for signal in signals] == [
+            (
+                snapshot.task_id,
+                {"signal_name": "handle_clarification", "signal_arg": None},
+            )
+        ]
 
 
 def test_record_interaction_response_rejects_normal_permission(monkeypatch) -> None:
@@ -228,12 +210,6 @@ def test_record_interaction_response_rejects_normal_permission(monkeypatch) -> N
             if row.interaction_type is HumanInteractionType.PERMISSION
         )
 
-    temporal_signals: list[tuple[str, str, object]] = []
-
-    async def signal_temporal_workflow(task_id: str, signal_name: str, arg: object) -> None:
-        temporal_signals.append((task_id, signal_name, arg))
-
-    monkeypatch.setattr(service, "signal_temporal_workflow", signal_temporal_workflow)
     refreshed = service.record_interaction_response(
         task_snapshot.task_id,
         permission_interaction.id,
@@ -242,7 +218,6 @@ def test_record_interaction_response_rejects_normal_permission(monkeypatch) -> N
 
     assert refreshed is not None
     assert refreshed.status == TaskStatus.FAILED.value
-    assert temporal_signals == [(task_snapshot.task_id, "handle_approval", False)]
     with session_scope(session_factory) as session:
         task = TaskRepository(session).get(task_snapshot.task_id)
         assert task is not None
@@ -252,6 +227,8 @@ def test_record_interaction_response_rejects_normal_permission(monkeypatch) -> N
         assert task.last_error == "Manual approval rejected via interaction response."
         timeline = TaskTimelineRepository(session).list_by_task(task_snapshot.task_id)
         assert timeline[-1].event_type is TimelineEventType.APPROVAL_REJECTED
+        signal = session.query(TemporalCommand).filter_by(command_type="signal").one()
+        assert signal.payload == {"signal_name": "handle_approval", "signal_arg": False}
 
 
 def test_record_interaction_response_ignores_missing_observation_dependency(
@@ -291,11 +268,6 @@ def test_permission_escalation_response_signals_dedicated_temporal_handler(monke
     monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
     monkeypatch.setattr(service, "start_temporal_workflow_sync", lambda task_id: None)
     snapshot, _ = service.create_task(execution_module.TaskSubmission(task_text="debug this"))
-    temporal_signals: list[tuple[str, str, object]] = []
-
-    async def signal_temporal_workflow(task_id: str, signal_name: str, arg: object) -> None:
-        temporal_signals.append((task_id, signal_name, arg))
-
     with session_scope(session_factory) as session:
         interaction = HumanInteraction(
             task_id=snapshot.task_id,
@@ -309,7 +281,6 @@ def test_permission_escalation_response_signals_dedicated_temporal_handler(monke
         session.flush()
         interaction_id = interaction.id
 
-    monkeypatch.setattr(service, "signal_temporal_workflow", signal_temporal_workflow)
     refreshed = service.record_interaction_response(
         snapshot.task_id,
         interaction_id,
@@ -317,19 +288,21 @@ def test_permission_escalation_response_signals_dedicated_temporal_handler(monke
     )
 
     assert refreshed is not None
-    assert temporal_signals == [(snapshot.task_id, "handle_permission_escalation", False)]
-
     service.record_interaction_response(
         snapshot.task_id,
         interaction_id,
         execution_module.InteractionResponse(response_data={"approved": False}),
     )
-    assert temporal_signals == [(snapshot.task_id, "handle_permission_escalation", False)]
-
     with session_scope(session_factory) as session:
         task = TaskRepository(session).get(snapshot.task_id)
         assert task is not None
         assert task.status is TaskStatus.PENDING
+        signals = session.query(TemporalCommand).filter_by(command_type="signal").all()
+        assert len(signals) == 1
+        assert signals[0].payload == {
+            "signal_name": "handle_permission_escalation",
+            "signal_arg": False,
+        }
 
 
 def test_record_interaction_response_logs_observation_capture_failures(

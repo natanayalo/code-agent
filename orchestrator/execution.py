@@ -256,6 +256,14 @@ class TaskExecutionService:
                     snapshot = self.get_task(existing.task_id)
                     if snapshot is None:
                         raise RuntimeError("Inbound delivery references a missing task.")
+                    logger.warning(
+                        "Duplicate task delivery detected and deduplicated",
+                        extra={
+                            "task_id": existing.task_id,
+                            "delivery_id": delivery_key.delivery_id,
+                            "channel": delivery_key.channel,
+                        },
+                    )
                     return CreateTaskOutcome(task_snapshot=snapshot, persisted=None, duplicate=True)
         if self.enforce_temporal_availability:
             self.ensure_temporal_available()

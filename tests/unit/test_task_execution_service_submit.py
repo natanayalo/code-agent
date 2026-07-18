@@ -339,6 +339,7 @@ async def test_submit_task_marks_task_failed_when_outcome_persistence_crashes(
     monkeypatch,
 ) -> None:
     """Persistence failures should not leave the task stuck in progress."""
+    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "legacy")
     service, session_factory = _make_task_service()
     submission = execution_module.TaskSubmission(
         task_text="Fail after orchestration finishes",

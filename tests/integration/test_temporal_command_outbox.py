@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 from sqlalchemy.pool import StaticPool
 
@@ -10,7 +11,12 @@ from db.base import Base
 from db.models import TemporalCommand
 from orchestrator.execution import TaskExecutionService, TaskSubmission
 from orchestrator.temporal.command_dispatcher import TemporalCommandDispatcher
-from repositories import create_engine_from_url, create_session_factory, session_scope
+from repositories import (
+    TemporalCommandRepository,
+    create_engine_from_url,
+    create_session_factory,
+    session_scope,
+)
 from workers import Worker, WorkerRequest, WorkerResult
 
 
@@ -25,6 +31,27 @@ class _TemporalClient:
 
     async def start_workflow(self, _name, task_id, **_kwargs) -> None:
         self.started.append(task_id)
+
+
+class _WorkflowHandle:
+    def __init__(self) -> None:
+        self.signals: list[tuple[str, object]] = []
+        self.cancelled = False
+
+    async def signal(self, name: str, value: object) -> None:
+        self.signals.append((name, value))
+
+    async def cancel(self) -> None:
+        self.cancelled = True
+
+
+class _CommandClient(_TemporalClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.handle = _WorkflowHandle()
+
+    def get_workflow_handle(self, _workflow_id: str) -> _WorkflowHandle:
+        return self.handle
 
 
 def test_temporal_start_command_survives_submission_until_dispatch(monkeypatch) -> None:
@@ -48,3 +75,79 @@ def test_temporal_start_command_survives_submission_until_dispatch(monkeypatch) 
     assert client.started == [snapshot.task_id]
     with session_scope(session_factory) as session:
         assert session.query(TemporalCommand).one().delivered_at is not None
+
+
+def test_temporal_signal_and_cancel_commands_are_delivered() -> None:
+    """Interaction signals and cancellation use the same durable dispatcher."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+    service = TaskExecutionService(session_factory=session_factory, worker=_Worker())
+    snapshot, _ = service.create_task(TaskSubmission(task_text="durable commands"))
+    with session_scope(session_factory) as session:
+        commands = TemporalCommandRepository(session)
+        commands.enqueue(
+            task_id=snapshot.task_id,
+            command_type="signal",
+            command_key=f"{snapshot.task_id}:signal",
+            payload={"signal_name": "handle_approval", "signal_arg": True},
+        )
+        commands.enqueue(
+            task_id=snapshot.task_id,
+            command_type="cancel",
+            command_key=f"{snapshot.task_id}:cancel",
+            payload={},
+        )
+
+    client = _CommandClient()
+    dispatcher = TemporalCommandDispatcher(client=client, session_factory=session_factory)
+    asyncio.run(dispatcher.dispatch_pending())
+
+    assert client.handle.signals == [("handle_approval", True)]
+    assert client.handle.cancelled is True
+    with session_scope(session_factory) as session:
+        assert all(command.delivered_at is not None for command in session.query(TemporalCommand))
+
+
+def test_temporal_command_delivery_failure_remains_pending_for_retry() -> None:
+    """A transport failure records an attempt without discarding the command."""
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+    service = TaskExecutionService(session_factory=session_factory, worker=_Worker())
+    snapshot, _ = service.create_task(TaskSubmission(task_text="retry command"))
+
+    class _FailingClient:
+        async def start_workflow(self, *_args, **_kwargs) -> None:
+            raise ConnectionError("Temporal unavailable")
+
+    dispatcher = TemporalCommandDispatcher(client=_FailingClient(), session_factory=session_factory)
+    asyncio.run(dispatcher.dispatch_pending())
+
+    with session_scope(session_factory) as session:
+        command = session.query(TemporalCommand).one()
+        assert command.task_id == snapshot.task_id
+        assert command.delivered_at is None
+        assert command.attempts == 1
+        assert command.last_error == "Temporal unavailable"
+
+
+def test_unknown_temporal_command_type_is_rejected() -> None:
+    """Dispatcher rejects unexpected rows instead of sending an ambiguous RPC."""
+    dispatcher = TemporalCommandDispatcher(client=_CommandClient(), session_factory=object())
+    command = SimpleNamespace(task_id="task-id", command_type="unexpected", payload={})
+
+    try:
+        asyncio.run(dispatcher._deliver(command))
+    except ValueError as exc:
+        assert str(exc) == "Unknown Temporal command type: unexpected"
+    else:  # pragma: no cover - protects the assertion if behavior changes
+        raise AssertionError("Unexpected command type should be rejected.")
