@@ -16,6 +16,7 @@ from orchestrator.execution import TaskExecutionService, TaskSubmission
 from orchestrator.execution_types import InteractionResponse
 from orchestrator.state import OrchestratorState, VerificationReport, VerificationReportItem
 from orchestrator.temporal.activities import TaskExecutionActivities
+from orchestrator.temporal.command_dispatcher import TemporalCommandDispatcher
 from orchestrator.temporal.queues import CODEX_EXECUTION_TASK_QUEUE
 from orchestrator.temporal.workflows import TaskExecutionWorkflow
 from repositories import (
@@ -601,6 +602,9 @@ async def test_temporal_runtime_clarification_interaction_resumes_workflow(
             ],
         )
         async with temporal_worker:
+            dispatcher = TemporalCommandDispatcher(
+                client=env.client, session_factory=session_factory
+            )
             with env.auto_time_skipping_disabled():
                 run_task = asyncio.create_task(service.submit_task(submission, persisted))
                 for _ in range(20):
@@ -618,6 +622,7 @@ async def test_temporal_runtime_clarification_interaction_resumes_workflow(
                     clarification.interaction_id,
                     InteractionResponse(response_data={"answer": "Update README only."}),
                 )
+                await dispatcher.dispatch_pending()
                 await run_task
 
     with session_scope(session_factory) as session:
@@ -1004,6 +1009,9 @@ async def test_temporal_runtime_cancellation_projects_terminal_state(
         )
 
         async with temporal_worker:
+            dispatcher = TemporalCommandDispatcher(
+                client=env.client, session_factory=session_factory
+            )
             with env.auto_time_skipping_disabled():
                 run_task = asyncio.create_task(service.submit_task(submission, persisted))
                 for _ in range(20):
@@ -1019,6 +1027,7 @@ async def test_temporal_runtime_cancellation_projects_terminal_state(
                 cancelled = service.cancel_task(task_id=snapshot.task_id)
                 assert cancelled is not None
                 assert cancelled.status == "failed"
+                await dispatcher.dispatch_pending()
                 with pytest.raises(WorkflowFailureError):
                     await run_task
 
