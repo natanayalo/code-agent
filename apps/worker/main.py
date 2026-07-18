@@ -15,6 +15,7 @@ from apps.runtime import (
     RUN_WORKER_ENV_VAR,
     should_run_worker,
     uses_temporal_execution,
+    validate_runtime_configuration,
 )
 from apps.runtime import (
     coerce_positive_int_env as _coerce_positive_int,
@@ -48,6 +49,7 @@ async def run_worker_forever() -> None:
         raise RuntimeError(
             f"Worker runtime is disabled for this process. Set {RUN_WORKER_ENV_VAR}=1 to enable it."
         )
+    validate_runtime_configuration()
 
     configure_tracing_from_env(service_name="code-agent-worker")
 

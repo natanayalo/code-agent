@@ -8,6 +8,7 @@ from temporalio.client import Client
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
 from orchestrator.temporal.activities import TaskExecutionActivities
+from orchestrator.temporal.command_dispatcher import TemporalCommandDispatcher
 from orchestrator.temporal.queues import CODEX_EXECUTION_TASK_QUEUE
 from orchestrator.temporal.workflows import TaskExecutionWorkflow
 
@@ -83,6 +84,10 @@ async def start_temporal_worker(
     )
 
     logger.info("Temporal workers successfully started. Running worker loops...")
+    dispatcher = TemporalCommandDispatcher(
+        client=client, session_factory=task_service.session_factory
+    )
     async with asyncio.TaskGroup() as task_group:
+        task_group.create_task(dispatcher.run_forever())
         task_group.create_task(worker.run())
         task_group.create_task(codex_execution_worker.run())

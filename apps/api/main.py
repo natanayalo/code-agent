@@ -31,7 +31,11 @@ from apps.api.routes.webhook import router as webhook_router  # noqa: E402
 from apps.api.scheduler import ScoutScheduler  # noqa: E402
 from apps.api.task_service_factory import build_task_service_from_env  # noqa: E402
 from apps.observability import configure_tracing_from_env  # noqa: E402
-from apps.runtime import RUN_API_ENV_VAR, should_run_api  # noqa: E402
+from apps.runtime import (  # noqa: E402
+    RUN_API_ENV_VAR,
+    should_run_api,
+    validate_runtime_configuration,
+)
 from orchestrator.execution import (  # noqa: E402
     TaskExecutionService,
     bootstrap_phoenix_project_id,
@@ -82,6 +86,7 @@ def _build_lifespan(
             raise RuntimeError(
                 f"API runtime is disabled for this process. Set {RUN_API_ENV_VAR}=1 to enable it."
             )
+        validate_runtime_configuration()
 
         configure_tracing_from_env(service_name="code-agent-api")
         bootstrap_phoenix_project_id()

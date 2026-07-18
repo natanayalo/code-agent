@@ -306,6 +306,9 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     temporal_state: Mapped[TemporalTaskState | None] = relationship(
         back_populates="task", cascade="all, delete-orphan", passive_deletes=True
     )
+    temporal_commands: Mapped[list[TemporalCommand]] = relationship(
+        back_populates="task", cascade="all, delete-orphan", passive_deletes=True
+    )
     repair_for_task: Mapped[Task | None] = relationship(
         remote_side="Task.id", back_populates="repairing_tasks"
     )
@@ -377,6 +380,25 @@ class TemporalTaskState(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     state: Mapped[dict[str, Any]] = mapped_column(EncryptedJSON, nullable=False)
 
     task: Mapped[Task] = relationship(back_populates="temporal_state")
+
+
+class TemporalCommand(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Transactional commands awaiting idempotent delivery to Temporal."""
+
+    __tablename__ = "temporal_commands"
+    __table_args__ = (UniqueConstraint("command_key", name="uq_temporal_commands_command_key"),)
+
+    task_id: Mapped[str] = mapped_column(
+        ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    command_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    command_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    task: Mapped[Task] = relationship(back_populates="temporal_commands")
 
 
 class ExecutionCapacityPermit(UUIDPrimaryKeyMixin, TimestampMixin, Base):

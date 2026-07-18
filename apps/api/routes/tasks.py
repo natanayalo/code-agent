@@ -139,7 +139,6 @@ def submit_task(
         )
 
         try:
-            task_service.ensure_temporal_available()
             task_snapshot, _ = task_service.create_task(submission)
             set_current_span_attribute(TASK_ID_ATTRIBUTE, task_snapshot.task_id)
             set_current_span_attribute(SESSION_ID_ATTRIBUTE, task_snapshot.session_id)
@@ -218,7 +217,6 @@ def trigger_scout_task(
     ):
         set_span_input_output(input_data=submission.model_dump(exclude={"secrets"}))
         try:
-            task_service.ensure_temporal_available()
             task_snapshot, _ = task_service.create_task(submission)
             set_current_span_attribute(TASK_ID_ATTRIBUTE, task_snapshot.task_id)
             set_current_span_attribute(SESSION_ID_ATTRIBUTE, task_snapshot.session_id)

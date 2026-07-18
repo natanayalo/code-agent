@@ -72,8 +72,8 @@ inspection and interaction endpoints remain available.
 
 Do not remove the fallback until the drain gates in
 [M24.9.5 legacy runtime drain plan](m24_9_5_legacy_drain_plan.md) are met:
-no unfinished legacy tasks, a 30-day Temporal-default observation window, and
-an operator-approved rollback alternative.
+no unfinished legacy tasks, a 7-day active Temporal soak followed by at least
+14 days and 25 completed tasks, and an operator-approved rollback alternative.
 
 Queue lifecycle:
 

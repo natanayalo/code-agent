@@ -117,6 +117,27 @@ def test_create_task_pins_selected_orchestration_runtime(monkeypatch) -> None:
     assert reloaded_snapshot.orchestration_runtime == "temporal"
 
 
+def test_temporal_task_creation_persists_a_start_command_with_the_task(monkeypatch) -> None:
+    """A crash after commit leaves durable work for the worker dispatcher to reconcile."""
+    session_factory = _setup_persistence_test_db()
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+    )
+    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
+
+    snapshot, _ = service.create_task(execution_module.TaskSubmission(task_text="Start durably"))
+
+    from db.models import TemporalCommand
+
+    with session_scope(session_factory) as session:
+        command = session.query(TemporalCommand).one()
+        assert command.task_id == snapshot.task_id
+        assert command.command_type == "start"
+        assert command.command_key == f"task:{snapshot.task_id}:start"
+        assert command.delivered_at is None
+
+
 def test_temporal_availability_retries_then_allows_a_recovered_submission(monkeypatch) -> None:
     """A transient outage should not require restarting the API process."""
     session_factory = _setup_persistence_test_db()

@@ -23,10 +23,7 @@ from apps.observability import (
     with_restored_trace_context as _with_restored_trace_context,
 )
 from apps.runtime import execution_runtime
-from db.enums import (
-    OrchestrationRuntime,
-    TaskStatus,
-)
+from db.enums import TaskStatus
 from db.models import Task as _Task
 from orchestrator import (
     execution_heartbeat_service,
@@ -155,6 +152,7 @@ class TaskExecutionService:
         retention_seconds: int | None = 7 * 24 * 60 * 60,
         checkpoint_path: str | Path | None = None,
         decomposed_fanout_enabled: bool = False,
+        enforce_temporal_availability: bool = False,
     ) -> None:
         self.session_factory = session_factory
         self.worker = worker
@@ -177,6 +175,7 @@ class TaskExecutionService:
         # Read once at service construction; Temporal workflows replay the
         # decision returned by selection rather than consulting process state.
         self.decomposed_fanout_enabled = decomposed_fanout_enabled
+        self.enforce_temporal_availability = enforce_temporal_availability
         self._checkpointer: BaseCheckpointSaver | None = None
         self._checkpointer_cm: AbstractAsyncContextManager[BaseCheckpointSaver] | None = None
         self._graph: Any | None = None
@@ -246,6 +245,20 @@ class TaskExecutionService:
             raise ValueError(
                 "delivery_key.channel must match submission.session.channel for dedupe."
             )
+        if delivery_key is not None:
+            from repositories import InboundDeliveryRepository, session_scope
+
+            with session_scope(self.session_factory) as session:
+                existing = InboundDeliveryRepository(session).get_by_channel_delivery(
+                    channel=delivery_key.channel, delivery_id=delivery_key.delivery_id
+                )
+                if existing is not None and existing.task_id is not None:
+                    snapshot = self.get_task(existing.task_id)
+                    if snapshot is None:
+                        raise RuntimeError("Inbound delivery references a missing task.")
+                    return CreateTaskOutcome(task_snapshot=snapshot, persisted=None, duplicate=True)
+        if self.enforce_temporal_availability:
+            self.ensure_temporal_available()
         persisted, duplicate_task_id = self._persist_submission(
             submission,
             status=TaskStatus.PENDING,
@@ -273,9 +286,6 @@ class TaskExecutionService:
                     "channel": delivery_key.channel if delivery_key else None,
                 },
             )
-        else:
-            if task_snapshot.orchestration_runtime == OrchestrationRuntime.TEMPORAL.value:
-                self.start_temporal_workflow_sync(task_id)
         return outcome
 
     def ensure_temporal_available(self) -> None:

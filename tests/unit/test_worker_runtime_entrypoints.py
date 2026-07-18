@@ -55,7 +55,8 @@ def test_execution_runtime_defaults_to_temporal_with_explicit_legacy_fallback() 
         == runtime_module.LEGACY_EXECUTION_RUNTIME
     )
     assert runtime_module.uses_temporal_execution({"CODE_AGENT_EXECUTION_RUNTIME": "temporal"})
-    assert runtime_module.uses_temporal_execution({"CODE_AGENT_EXECUTION_RUNTIME": "unexpected"})
+    with pytest.raises(ValueError, match="must be 'temporal' or 'legacy'"):
+        runtime_module.uses_temporal_execution({"CODE_AGENT_EXECUTION_RUNTIME": "unexpected"})
 
 
 def test_temporal_only_cutover_at_requires_an_aware_iso_timestamp() -> None:

@@ -216,7 +216,7 @@ def test_submit_task_returns_422_for_validation_errors() -> None:
 def test_submit_task_returns_503_without_persisting_when_temporal_is_unavailable() -> None:
     """Submission outage must leave the API inspectable and create no task."""
     service = _FakeTaskService()
-    service.availability_error = TemporalUnavailableError("Temporal is unavailable")
+    service.create_error = TemporalUnavailableError("Temporal is unavailable")
 
     with _task_client(service) as client:
         response = client.post("/tasks", json={"task_text": "Create the task"})
@@ -224,7 +224,7 @@ def test_submit_task_returns_503_without_persisting_when_temporal_is_unavailable
 
     assert response.status_code == 503
     assert response.json() == {"detail": "Temporal is unavailable"}
-    assert service.create_calls == []
+    assert len(service.create_calls) == 1
     assert read_response.status_code == 200
 
 

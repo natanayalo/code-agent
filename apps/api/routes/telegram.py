@@ -186,7 +186,6 @@ def receive_telegram_update(
 
     submission = _to_task_submission(msg, text, config)
     try:
-        task_service.ensure_temporal_available()
         outcome = task_service.create_task_outcome(
             submission,
             delivery_key=DeliveryKey(
