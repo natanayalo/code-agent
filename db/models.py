@@ -386,12 +386,17 @@ class TemporalCommand(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """Transactional commands awaiting idempotent delivery to Temporal."""
 
     __tablename__ = "temporal_commands"
-    __table_args__ = (UniqueConstraint("command_key", name="uq_temporal_commands_command_key"),)
+    __table_args__ = (
+        UniqueConstraint("command_key", name="uq_temporal_commands_command_key"),
+        UniqueConstraint("task_id", "sequence_number", name="uq_temporal_commands_task_sequence"),
+        Index("ix_temporal_commands_task_sequence", "task_id", "sequence_number"),
+    )
 
     task_id: Mapped[str] = mapped_column(
         ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False, index=True
     )
     command_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    sequence_number: Mapped[int] = mapped_column(Integer, nullable=False)
     command_key: Mapped[str] = mapped_column(String(512), nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -123,6 +123,16 @@ def test_execution_capacity_permits_store_a_fenced_acquisition_token() -> None:
     assert "lease_token" in Base.metadata.tables["execution_capacity_permits"].c
 
 
+def test_temporal_commands_store_a_task_local_delivery_sequence() -> None:
+    """The durable outbox needs a stable order for each task."""
+    commands = Base.metadata.tables["temporal_commands"]
+    assert "sequence_number" in commands.c
+    assert any(
+        constraint.name == "uq_temporal_commands_task_sequence"
+        for constraint in commands.constraints
+    )
+
+
 def test_model_metadata_enforces_memory_observation_constraints() -> None:
     """Metadata-created DBs should match migration constraints for observations."""
     engine = create_engine("sqlite:///:memory:")

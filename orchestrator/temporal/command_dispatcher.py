@@ -106,10 +106,7 @@ class TemporalCommandDispatcher:
 
     @staticmethod
     def _is_non_retryable(error: Exception) -> bool:
-        message = str(error).lower()
-        return isinstance(error, ValueError) or any(
-            marker in message for marker in ("not found", "already completed", "already closed")
-        )
+        return isinstance(error, ValueError)
 
     async def _deliver(
         self,

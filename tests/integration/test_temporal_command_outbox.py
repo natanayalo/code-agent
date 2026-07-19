@@ -51,6 +51,9 @@ class _CommandClient(_TemporalClient):
         super().__init__()
         self.handle = _WorkflowHandle()
 
+    async def start_workflow(self, _name, task_id, **_kwargs) -> None:
+        await super().start_workflow(_name, task_id, **_kwargs)
+
     def get_workflow_handle(self, _workflow_id: str) -> _WorkflowHandle:
         return self.handle
 
@@ -79,7 +82,7 @@ def test_temporal_start_command_survives_submission_until_dispatch(monkeypatch) 
 
 
 def test_temporal_signal_and_cancel_commands_are_delivered(monkeypatch) -> None:
-    """Interaction signals and cancellation use the same durable dispatcher."""
+    """Interaction signals and cancellation follow the durable start command."""
     monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
     engine = create_engine_from_url(
         "sqlite+pysqlite:///:memory:",
@@ -109,12 +112,21 @@ def test_temporal_signal_and_cancel_commands_are_delivered(monkeypatch) -> None:
     dispatcher = TemporalCommandDispatcher(client=client, session_factory=session_factory)
     asyncio.run(dispatcher.dispatch_pending())
 
+    assert client.started == [snapshot.task_id]
+    assert client.handle.signals == []
+    assert client.handle.cancelled is False
+
+    asyncio.run(dispatcher.dispatch_pending())
+
     assert client.handle.signals == [
         (
             "handle_approval",
             {"command_key": f"{snapshot.task_id}:signal", "value": True},
         )
     ]
+    assert client.handle.cancelled is False
+
+    asyncio.run(dispatcher.dispatch_pending())
     assert client.handle.cancelled is True
     with session_scope(session_factory) as session:
         assert all(command.delivered_at is not None for command in session.query(TemporalCommand))
@@ -169,7 +181,7 @@ def test_unknown_temporal_command_type_is_rejected() -> None:
 
 
 def test_two_dispatchers_claim_only_one_logical_signal(monkeypatch) -> None:
-    """A second dispatcher cannot deliver a command fenced by the first claim."""
+    """A second dispatcher cannot overtake an earlier command held by the first."""
     monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
     engine = create_engine_from_url(
         "sqlite+pysqlite:///:memory:",
@@ -189,23 +201,117 @@ def test_two_dispatchers_claim_only_one_logical_signal(monkeypatch) -> None:
         )
     with session_scope(session_factory) as session:
         first = TemporalCommandRepository(session).claim_pending(limit=10, lease_seconds=30)
-        assert len(first) == 2
+        assert len(first) == 1
+        assert first[0].command_type == "start"
 
     client = _CommandClient()
     asyncio.run(
         TemporalCommandDispatcher(client=client, session_factory=session_factory).dispatch_pending()
     )
     assert client.handle.signals == []
+    assert client.started == []
 
     with session_scope(session_factory) as session:
-        signal = session.query(TemporalCommand).filter_by(command_key="fenced-signal").one()
-        assert signal.claim_token is not None
-        signal.claim_expires_at = utc_now()
+        start = (
+            session.query(TemporalCommand)
+            .filter_by(
+                task_id=snapshot.task_id,
+                command_type="start",
+            )
+            .one()
+        )
+        assert start.claim_token is not None
+        start.claim_expires_at = utc_now()
+
+    asyncio.run(
+        TemporalCommandDispatcher(client=client, session_factory=session_factory).dispatch_pending()
+    )
+    assert client.started == [snapshot.task_id]
+    assert client.handle.signals == []
 
     asyncio.run(
         TemporalCommandDispatcher(client=client, session_factory=session_factory).dispatch_pending()
     )
     assert len(client.handle.signals) == 1
+
+
+def test_workflow_not_found_signal_is_retried_after_start(monkeypatch) -> None:
+    """A transient absent workflow cannot permanently discard an interaction signal."""
+    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+    service = TaskExecutionService(session_factory=session_factory, worker=_Worker())
+    snapshot, _ = service.create_task(TaskSubmission(task_text="retry signal"))
+    with session_scope(session_factory) as session:
+        commands = TemporalCommandRepository(session)
+        start = session.query(TemporalCommand).filter_by(task_id=snapshot.task_id).one()
+        start.delivered_at = utc_now()
+        commands.enqueue(
+            task_id=snapshot.task_id,
+            command_type="signal",
+            command_key="retry-not-found-signal",
+            payload={"signal_name": "handle_approval", "signal_arg": True},
+        )
+        signal = commands.claim_pending(limit=1, lease_seconds=30)[0]
+
+    dispatcher = TemporalCommandDispatcher(client=_CommandClient(), session_factory=session_factory)
+    dispatcher._record_failure(signal.id, signal.claim_token, RuntimeError("workflow not found"))
+
+    with session_scope(session_factory) as session:
+        signal = session.get(TemporalCommand, signal.id)
+        assert signal is not None
+        assert signal.dead_lettered_at is None
+        assert signal.attempts == 1
+        signal.next_attempt_at = utc_now()
+
+    client = _CommandClient()
+    asyncio.run(
+        TemporalCommandDispatcher(client=client, session_factory=session_factory).dispatch_pending()
+    )
+    assert client.handle.signals == [
+        ("handle_approval", {"command_key": "retry-not-found-signal", "value": True})
+    ]
+
+
+def test_start_and_signal_stay_ordered_across_batch_boundaries(monkeypatch) -> None:
+    """A signal at batch N+1 cannot pass a start at the end of batch N."""
+    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+    service = TaskExecutionService(session_factory=session_factory, worker=_Worker())
+    snapshot, _ = service.create_task(TaskSubmission(task_text="batch order"))
+    with session_scope(session_factory) as session:
+        TemporalCommandRepository(session).enqueue(
+            task_id=snapshot.task_id,
+            command_type="signal",
+            command_key="batch-boundary-signal",
+            payload={"signal_name": "handle_approval", "signal_arg": True},
+        )
+
+    client = _CommandClient()
+    dispatcher = TemporalCommandDispatcher(
+        client=client,
+        session_factory=session_factory,
+        batch_size=1,
+    )
+    asyncio.run(dispatcher.dispatch_pending())
+    assert client.started == [snapshot.task_id]
+    assert client.handle.signals == []
+
+    asyncio.run(dispatcher.dispatch_pending())
+    assert client.handle.signals == [
+        ("handle_approval", {"command_key": "batch-boundary-signal", "value": True})
+    ]
 
 
 def test_workflow_signal_envelope_ignores_stale_permission_command() -> None:

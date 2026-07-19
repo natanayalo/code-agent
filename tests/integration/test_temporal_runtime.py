@@ -58,6 +58,20 @@ def _docker_available() -> bool:
         return False
 
 
+def _mark_direct_temporal_start_delivered(session_factory, task_id: str) -> None:
+    """Keep direct-start fixtures from replaying their durable start via the dispatcher."""
+    with session_scope(session_factory) as session:
+        start_command = (
+            session.query(TemporalCommand)
+            .filter_by(
+                task_id=task_id,
+                command_type="start",
+            )
+            .one()
+        )
+        start_command.delivered_at = utc_now()
+
+
 class _ScriptedAdapter(CliRuntimeAdapter):
     def __init__(self, steps: list[CliRuntimeStep]) -> None:
         self._steps = list(steps)
@@ -474,9 +488,7 @@ async def test_temporal_runtime_hitl_approval(session_factory, tmp_path: Path, m
 
         snapshot, persisted = service.create_task(submission)
         task_id = snapshot.task_id
-        with session_scope(session_factory) as session:
-            start_command = session.query(TemporalCommand).filter_by(task_id=task_id).one()
-            start_command.delivered_at = utc_now()
+        _mark_direct_temporal_start_delivered(session_factory, task_id)
 
         activities = TaskExecutionActivities(service=service)
         temporal_worker = Worker(
@@ -599,6 +611,7 @@ async def test_temporal_runtime_clarification_interaction_resumes_workflow(
 
         monkeypatch.setattr(Client, "connect", _mock_connect)
         snapshot, persisted = service.create_task(submission)
+        _mark_direct_temporal_start_delivered(session_factory, snapshot.task_id)
         activities = TaskExecutionActivities(service=service)
         temporal_worker = Worker(
             env.client,
@@ -1012,6 +1025,7 @@ async def test_temporal_runtime_cancellation_projects_terminal_state(
 
         monkeypatch.setattr(Client, "connect", _mock_connect)
         snapshot, persisted = service.create_task(submission)
+        _mark_direct_temporal_start_delivered(session_factory, snapshot.task_id)
         activities = TaskExecutionActivities(service=service)
         temporal_worker = Worker(
             env.client,

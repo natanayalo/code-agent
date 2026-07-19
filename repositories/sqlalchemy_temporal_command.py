@@ -6,8 +6,8 @@ from datetime import timedelta
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import and_, or_, select, update
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, exists, func, or_, select, update
+from sqlalchemy.orm import Session, aliased
 
 from db.base import utc_now
 from db.models import TemporalCommand
@@ -27,17 +27,24 @@ class TemporalCommandRepository:
         )
         if existing:
             return
+        next_sequence = self.session.scalar(
+            select(func.coalesce(func.max(TemporalCommand.sequence_number), 0) + 1).where(
+                TemporalCommand.task_id == task_id
+            )
+        )
         self.session.add(
             TemporalCommand(
                 task_id=task_id,
                 command_type=command_type,
                 command_key=command_key,
                 payload=payload,
+                sequence_number=int(next_sequence or 1),
             )
         )
 
     def claim_pending(self, *, limit: int, lease_seconds: int) -> list[TemporalCommand]:
         """Atomically fence a bounded batch before any Temporal network call."""
+        self.session.flush()
         now = utc_now()
         eligible = and_(
             TemporalCommand.delivered_at.is_(None),
@@ -49,11 +56,23 @@ class TemporalCommandRepository:
                 TemporalCommand.claim_expires_at <= now,
             ),
         )
+        earlier = aliased(TemporalCommand)
+        ordered_eligible = and_(
+            eligible,
+            ~exists(
+                select(1).where(
+                    earlier.task_id == TemporalCommand.task_id,
+                    earlier.sequence_number < TemporalCommand.sequence_number,
+                    earlier.delivered_at.is_(None),
+                    earlier.dead_lettered_at.is_(None),
+                )
+            ),
+        )
         candidate_ids = list(
             self.session.scalars(
                 select(TemporalCommand.id)
-                .where(eligible)
-                .order_by(TemporalCommand.created_at.asc())
+                .where(ordered_eligible)
+                .order_by(TemporalCommand.created_at.asc(), TemporalCommand.sequence_number.asc())
                 .limit(limit)
             )
         )
@@ -62,7 +81,7 @@ class TemporalCommandRepository:
             claim_token = str(uuid4())
             updated = self.session.execute(
                 update(TemporalCommand)
-                .where(TemporalCommand.id == command_id, eligible)
+                .where(TemporalCommand.id == command_id, ordered_eligible)
                 .values(
                     claim_token=claim_token,
                     claim_expires_at=now + timedelta(seconds=lease_seconds),
