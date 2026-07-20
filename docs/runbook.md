@@ -70,10 +70,15 @@ production cutover starts. The metrics page uses it to show legacy submissions
 since cutover. If Temporal is unavailable, new submissions return HTTP 503;
 inspection and interaction endpoints remain available.
 
-Do not remove the fallback until the drain gates in
-[M24.9.5 legacy runtime drain plan](m24_9_5_legacy_drain_plan.md) are met:
-no unfinished legacy tasks, a 7-day active Temporal soak followed by at least
-14 days and 25 completed tasks, and an operator-approved rollback alternative.
+Do not remove the fallback until the M25.3 two-stage drain gate is met and
+recorded in the [Temporal observation evidence ledger](m25_3_observation_ledger.md):
+all 14 prerequisite Compose scenarios pass before the seven-day active soak,
+then at least 14 days and 25 successful Temporal completions cover every
+required task class with no legacy submissions, unfinished legacy tasks, stuck
+workflows, or projection mismatches. An operator-approved rollback alternative
+is also required. Continue to use `CODE_AGENT_EXECUTION_RUNTIME=legacy` only
+as an explicit incident fallback or local recovery investigation; never make it
+an automatic fallback.
 
 Queue lifecycle:
 

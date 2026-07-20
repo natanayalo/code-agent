@@ -9,10 +9,10 @@ Active focus:
 - M25.3 Temporal-only cutover and legacy retirement.
   - Slice 2 production cutover is complete: Temporal is the default runtime,
     submission failures degrade with API 503, workers fail fast, and dashboard
-    drain metrics expose the persisted cutover boundary. The recorded Compose
-    scenarios are the entry gate for Slice 3's 7-day active soak and
-    ≥14-day/≥25-task retirement gate; legacy deletion and schema cleanup remain
-    deferred to later slices.
+    drain metrics expose the persisted cutover boundary. The
+    [observation evidence ledger](m25_3_observation_ledger.md) records the
+    Compose-scenario gate, 7-day active soak, and ≥14-day/≥25-task retirement
+    gate; legacy deletion and schema cleanup remain deferred to later slices.
 
 ## Phase 3 Reliability Baseline
 - **Baseline cases**: 25 baseline cases run, 25 passed according to the frozen evaluation report.
