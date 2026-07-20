@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import builtins
 import logging
-from concurrent.futures import ThreadPoolExecutor
-from threading import Barrier
 
 from sqlalchemy.pool import StaticPool
 
@@ -53,88 +50,12 @@ def _make_task_service() -> tuple[execution_module.TaskExecutionService, object]
     return service, session_factory
 
 
-def test_temporal_client_cache_is_scoped_to_event_loop(monkeypatch) -> None:
-    """Sync fallbacks must not reuse a client bound to a closed event loop."""
-    service, _ = _make_task_service()
-    clients: list[object] = []
-
-    async def connect(_address: str) -> object:
-        client = object()
-        clients.append(client)
-        return client
-
-    from temporalio.client import Client
-
-    monkeypatch.setattr(Client, "connect", connect)
-
-    first_client = asyncio.run(service._get_temporal_client())
-    second_client = asyncio.run(service._get_temporal_client())
-    third_client = asyncio.run(service._get_temporal_client())
-
-    assert first_client is clients[0]
-    assert second_client is clients[1]
-    assert first_client is not second_client
-    assert third_client is clients[2]
-    assert len(service._temporal_clients) == 1
-    assert len(service._temporal_locks) == 1
-
-
-def test_temporal_client_cache_supports_concurrent_event_loops(monkeypatch) -> None:
-    """Concurrent sync fallbacks must keep each loop's client isolated."""
-    service, _ = _make_task_service()
-    clients: list[object] = []
-    both_connecting = Barrier(2)
-
-    async def connect(_address: str) -> object:
-        client = object()
-        clients.append(client)
-        both_connecting.wait()
-        return client
-
-    from temporalio.client import Client
-
-    monkeypatch.setattr(Client, "connect", connect)
-
-    def get_client(_index: int) -> object:
-        return asyncio.run(service._get_temporal_client())
-
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        results = list(executor.map(get_client, range(2)))
-
-    assert len(set(results)) == 2
-    assert len(clients) == 2
-    assert len(service._temporal_clients) == 2
-    assert len(service._temporal_locks) == 2
-
-
-def test_start_temporal_workflow_sync_dispatches_background_thread(monkeypatch) -> None:
-    """Sync submission must not block while Temporal retries connection failures."""
-    service, _ = _make_task_service()
-    started: list[tuple[object, bool]] = []
-
-    class FakeThread:
-        def __init__(self, *, target, daemon: bool) -> None:
-            self.target = target
-            self.daemon = daemon
-
-        def start(self) -> None:
-            started.append((self.target, self.daemon))
-
-    monkeypatch.setattr(execution_module.threading, "Thread", FakeThread)
-
-    service.start_temporal_workflow_sync("task-id")
-
-    assert len(started) == 1
-    assert started[0][1] is True
-
-
 def test_record_interaction_response_clarification_requeues_without_approval_side_effects(
     monkeypatch,
 ) -> None:
     """Clarification answers should resume the task without mutating approval state."""
     service, session_factory = _make_task_service()
     monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
-    monkeypatch.setattr(service, "start_temporal_workflow_sync", lambda task_id: None)
     snapshot, _ = service.create_task(execution_module.TaskSubmission(task_text="debug this"))
 
     clarification = next(
@@ -185,7 +106,6 @@ def test_record_interaction_response_rejects_normal_permission(monkeypatch) -> N
     """Generic permission rejection must project failure before signaling Temporal."""
     service, session_factory = _make_task_service()
     monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
-    monkeypatch.setattr(service, "start_temporal_workflow_sync", lambda task_id: None)
     task_snapshot, _ = service.create_task(
         execution_module.TaskSubmission(
             task_text="Reject elevated permission",
@@ -266,7 +186,6 @@ def test_permission_escalation_response_signals_dedicated_temporal_handler(monke
     """Worker escalation responses must not be confused with task approval."""
     service, session_factory = _make_task_service()
     monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
-    monkeypatch.setattr(service, "start_temporal_workflow_sync", lambda task_id: None)
     snapshot, _ = service.create_task(execution_module.TaskSubmission(task_text="debug this"))
     with session_scope(session_factory) as session:
         interaction = HumanInteraction(

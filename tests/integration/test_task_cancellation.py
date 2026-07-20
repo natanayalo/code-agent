@@ -97,13 +97,11 @@ def test_cancel_pending_task_prevents_claim(client: TestClient, session_factory)
     assert claim is None
 
 
-def test_cancel_temporal_task_requests_workflow_cancellation(
+def test_cancel_temporal_task_queues_workflow_cancellation(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ):
-    """Temporal-backed cancellation should cancel the durable workflow too."""
+    """Temporal-backed cancellation should enqueue a durable cancel command."""
     monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
-    service = client.app.state.task_service
-    monkeypatch.setattr(service, "start_temporal_workflow_sync", lambda task_id: None)
     response = client.post("/tasks", json={"task_text": "Temporal cancellation"})
     task_id = response.json()["task_id"]
 
