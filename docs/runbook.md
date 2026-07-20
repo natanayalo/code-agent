@@ -70,15 +70,14 @@ production cutover starts. The metrics page uses it to show legacy submissions
 since cutover. If Temporal is unavailable, new submissions return HTTP 503;
 inspection and interaction endpoints remain available.
 
-Do not remove the fallback until the M25.3 two-stage drain gate is met and
-recorded in the [Temporal observation evidence ledger](m25_3_observation_ledger.md):
-all 14 prerequisite Compose scenarios pass before the seven-day active soak,
-then at least 14 days and 25 successful Temporal completions cover every
-required task class with no legacy submissions, unfinished legacy tasks, stuck
-workflows, or projection mismatches. An operator-approved rollback alternative
-is also required. Continue to use `CODE_AGENT_EXECUTION_RUNTIME=legacy` only
-as an explicit incident fallback or local recovery investigation; never make it
-an automatic fallback.
+Do not remove the fallback until the M25.3 evidence gate is met and recorded
+in the [Temporal evidence-gate ledger](m25_3_observation_ledger.md): all 14
+operational scenarios must pass (with integration-test evidence allowed only
+for scenarios 9 through 12), all 10 task classes must be covered, the required
+automated suites must be green, a last-known-good legacy-capable image must be
+tagged, and an operator must sign off. Continue to use
+`CODE_AGENT_EXECUTION_RUNTIME=legacy` only as an explicit incident fallback or
+local recovery investigation; never make it an automatic fallback.
 
 Queue lifecycle:
 

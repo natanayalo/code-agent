@@ -87,7 +87,7 @@ scripts/up.sh
 ```
 
 The Compose stack uses the Temporal execution runtime by default. To run the
-legacy queue intentionally during the retirement observation window, set
+legacy queue intentionally during the retirement evidence gate, set
 `CODE_AGENT_EXECUTION_RUNTIME=legacy`.
 
 The M25.2 decomposed-task fan-out pilot is disabled by default. Set
