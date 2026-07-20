@@ -75,7 +75,9 @@ in the [Temporal evidence-gate ledger](m25_3_observation_ledger.md): all 14
 operational scenarios must pass (with integration-test evidence allowed only
 for scenarios 9 through 12), all 10 task classes must be covered, the required
 automated suites must be green, a last-known-good legacy-capable image must be
-tagged, and an operator must sign off. Continue to use
+tagged, the runtime-drain snapshot must show zero active legacy/unknown tasks
+and zero post-cutover legacy submissions, and an operator must sign off.
+Continue to use
 `CODE_AGENT_EXECUTION_RUNTIME=legacy` only as an explicit incident fallback or
 local recovery investigation; never make it an automatic fallback.
 

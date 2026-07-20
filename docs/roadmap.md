@@ -604,8 +604,9 @@ Design decisions:
   fallback to legacy
 - flat evidence gate before legacy deletion: all 14 operational scenarios, all
   10 task classes, required automated suites, last-known-good rollback image,
-  and operator sign-off; scenarios 9 through 12 may cite passing integration
-  tests instead of manual Compose execution
+  a runtime-drain snapshot with zero active legacy/unknown tasks and zero
+  post-cutover legacy submissions, and operator sign-off; scenarios 9 through
+  12 may cite passing integration tests instead of manual Compose execution
 - persisted cutover timestamp (`TEMPORAL_ONLY_CUTOVER_AT`) for drain queries
   instead of rolling windows
 - legacy deletion and schema cleanup are two PRs: one code-deletion PR for
@@ -644,21 +645,26 @@ Progress:
     escalation, cancellation, provider retry or restart, terminal failure); a
     single task may cover multiple classes
   - record passing unit, integration, pre-commit, and dashboard coverage suites,
-    tag a last-known-good legacy-capable image, and obtain operator sign-off
+    capture a clean runtime-drain snapshot, tag a last-known-good
+    legacy-capable image, and obtain operator sign-off
 - [ ] Slice 4: legacy deletion and schema cleanup (two PRs)
   - PR 4A — remove legacy dispatch, LangGraph durable lifecycle, and runtime
     selector/configuration after a reference inventory and method-level
     WorkerNode audit
   - PR 4B — remove `lease_owner`, `lease_expires_at`, and `next_attempt_at`
     through a schema migration after PR 4A; the PRs may merge on the same day
+    only after the schema rollback procedure is verified
   - pre-implementation reference inventory of all legacy symbols classified as
     legacy-only, shared product policy, test fixture, or migration compatibility
   - method-level WorkerNode audit: keep profile/capability/health/operator policy,
     remove only claim/lease/reclaim mechanics
   - retain `attempt_count`, `max_attempts`, `priority`, and `queue_lane`
-  - rollback plan: retain last-known-good legacy-capable image, old
-    configuration template, DB schema backward compatibility confirmation, and
-    documented rollback commands
+  - before PR 4B, take a restorable database snapshot and verify the migration's
+    upgrade, downgrade, and re-upgrade on a disposable database; record the
+    exact tagged image plus database restore sequence
+  - if PR 4B must be rolled back, stop the application, restore the pre-PR-4B
+    database snapshot, deploy the tagged legacy-capable image and matching
+    configuration, then verify the restored schema revision before resuming
 
 Operational evidence scenarios (documented before Slice 3):
 

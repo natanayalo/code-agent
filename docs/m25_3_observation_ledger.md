@@ -21,9 +21,9 @@ secrets, or raw sensitive logs here; link to the approved artifact instead.
 ## Operational scenarios
 
 Complete all 14 scenarios. Scenarios 9 through 12 may cite the specified
-passing integration-test evidence instead of a manual Compose run. Manual
+passing automated-test evidence instead of a manual Compose run. Manual
 scenarios must record the timestamp, task or workflow ID when applicable,
-outcome, and supporting evidence. Integration-test scenarios must record the
+outcome, and supporting evidence. Automated-test scenarios must record the
 test name, suite-run timestamp, pass/fail result, and CI URL or local-output
 reference.
 
@@ -44,23 +44,38 @@ reference.
 | 13 | After worker restart, Temporal and Postgres terminal states reconcile. | Manual Compose | `<timestamp>` | `<id>` | `pending` | `<reference>` | |
 | 14 | Existing M25.1 and M25.2 workflow histories replay after deployment. | Manual Compose | `<timestamp>` | `<workflow-id>` | `pending` | `<reference>` | |
 
+### Required automated-test mappings
+
+Use these exact tests when recording automated evidence for scenarios 10
+through 12. Do not substitute a test whose assertion does not establish the
+listed behavior.
+
+| Scenario | Required automated evidence |
+| --- | --- |
+| 10 | `tests/unit/test_worker_runtime_entrypoints.py::test_execution_runtime_defaults_to_temporal_with_explicit_legacy_fallback` proves invalid runtime selection raises visibly. |
+| 11 | `tests/unit/test_task_routes.py::test_submit_task_returns_503_without_persisting_when_temporal_is_unavailable` proves a failed `POST /tasks` returns 503 while `GET /tasks` remains available. |
+| 12 | `tests/unit/test_task_execution_service_persistence.py::test_temporal_submission_succeeds_after_recovery_without_service_restart` proves one service instance first rejects an unavailable submission, then persists a Temporal-owned task and `start` command after recovery. |
+
 ## Task-class coverage
 
-One task may cover multiple classes. Record the task ID once for every class it
-covers and link the evidence that establishes the listed behavior.
+One task may cover multiple classes. All manual scenario and task-class
+evidence must run against the deployment identity above, show
+`orchestration_runtime = temporal`, and record its execution or completion
+timestamp. Rerun the relevant evidence after a later code, workflow, schema,
+or material runtime-configuration change invalidates it.
 
-| Class | Task ID | Classes covered by this task | Evidence reference |
-| --- | --- | --- | --- |
-| Simple read-only | `<pending>` | `<classes>` | `<reference>` |
-| Mutable implementation | `<pending>` | `<classes>` | `<reference>` |
-| Sequential DAG | `<pending>` | `<classes>` | `<reference>` |
-| Fan-out DAG | `<pending>` | `<classes>` | `<reference>` |
-| Approval wait | `<pending>` | `<classes>` | `<reference>` |
-| Clarification wait | `<pending>` | `<classes>` | `<reference>` |
-| Permission escalation | `<pending>` | `<classes>` | `<reference>` |
-| Cancellation | `<pending>` | `<classes>` | `<reference>` |
-| Provider retry or restart | `<pending>` | `<classes>` | `<reference>` |
-| Terminal failure | `<pending>` | `<classes>` | `<reference>` |
+| Class | Task ID | Runtime | Completion timestamp (UTC) | Deployment revision | Classes covered by this task | Evidence reference |
+| --- | --- | --- | --- | --- | --- | --- |
+| Simple read-only | `<pending>` | `temporal` | `<timestamp>` | `<revision>` | `<classes>` | `<reference>` |
+| Mutable implementation | `<pending>` | `temporal` | `<timestamp>` | `<revision>` | `<classes>` | `<reference>` |
+| Sequential DAG | `<pending>` | `temporal` | `<timestamp>` | `<revision>` | `<classes>` | `<reference>` |
+| Fan-out DAG | `<pending>` | `temporal` | `<timestamp>` | `<revision>` | `<classes>` | `<reference>` |
+| Approval wait | `<pending>` | `temporal` | `<timestamp>` | `<revision>` | `<classes>` | `<reference>` |
+| Clarification wait | `<pending>` | `temporal` | `<timestamp>` | `<revision>` | `<classes>` | `<reference>` |
+| Permission escalation | `<pending>` | `temporal` | `<timestamp>` | `<revision>` | `<classes>` | `<reference>` |
+| Cancellation | `<pending>` | `temporal` | `<timestamp>` | `<revision>` | `<classes>` | `<reference>` |
+| Provider retry or restart | `<pending>` | `temporal` | `<timestamp>` | `<revision>` | `<classes>` | `<reference>` |
+| Terminal failure | `<pending>` | `temporal` | `<timestamp>` | `<revision>` | `<classes>` | `<reference>` |
 
 ## Automated suites
 
@@ -78,6 +93,7 @@ covers and link the evidence that establishes the listed behavior.
 | All 14 operational scenarios passed or are satisfied by the permitted integration-test evidence | `<pending>` |
 | All 10 task classes covered | `<pending>` |
 | All automated suites green | `<pending>` |
+| Runtime drain snapshot | `<timestamp>` and evidence show `active_legacy_task_count = 0`, `active_unknown_task_count = 0`, and `legacy_submissions_since_cutover = 0` |
 | Last-known-good legacy-capable image tagged | `<pending>` |
 | Operator sign-off | `<pending>` |
 
