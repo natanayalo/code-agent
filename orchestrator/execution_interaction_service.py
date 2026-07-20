@@ -412,10 +412,12 @@ def cancel_task(self: Any, *, task_id: str) -> TaskSnapshot | None:
                 message="Task was cancelled by operator.",
             )
             if task.orchestration_runtime == OrchestrationRuntime.TEMPORAL:
-                TemporalCommandRepository(session).enqueue(
+                temporal_commands = TemporalCommandRepository(session)
+                temporal_commands.enqueue(
                     task_id=task_id,
                     command_type="cancel",
                     command_key=f"task:{task_id}:cancel",
                     payload={},
                 )
+                temporal_commands.supersede_for_cancel(task_id=task_id)
     return self.get_task(task_id)

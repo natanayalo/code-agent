@@ -51,7 +51,11 @@ class TemporalCommandDispatcher:
     async def _dispatch_one(self, command_id: str, claim_token: str) -> None:
         with session_scope(self.session_factory) as session:
             command = session.get(TemporalCommand, command_id)
-            if command is None or command.claim_token != claim_token:
+            if (
+                command is None
+                or command.claim_token != claim_token
+                or command.superseded_at is not None
+            ):
                 return
             command_type = command.command_type
             command_key = command.command_key

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 from types import SimpleNamespace
 
 from sqlalchemy.pool import StaticPool
 
 from db.base import Base, utc_now
-from db.models import TemporalCommand
+from db.models import Task, TemporalCommand, TemporalTaskState, WorkerRun
 from orchestrator.execution import TaskExecutionService, TaskSubmission
 from orchestrator.temporal.command_dispatcher import TemporalCommandDispatcher
 from orchestrator.temporal.workflows import TaskExecutionWorkflow
@@ -130,6 +132,114 @@ def test_temporal_signal_and_cancel_commands_are_delivered(monkeypatch) -> None:
     assert client.handle.cancelled is True
     with session_scope(session_factory) as session:
         assert all(command.delivered_at is not None for command in session.query(TemporalCommand))
+
+
+def test_cancel_supersedes_an_undelivered_temporal_start(monkeypatch) -> None:
+    """Cancellation before dispatch resolves both commands without creating a workflow."""
+    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+    service = TaskExecutionService(session_factory=session_factory, worker=_Worker())
+    snapshot, _ = service.create_task(TaskSubmission(task_text="cancel before temporal start"))
+
+    cancelled = service.cancel_task(task_id=snapshot.task_id)
+    assert cancelled is not None
+    assert cancelled.status == "failed"
+
+    client = _CommandClient()
+    asyncio.run(
+        TemporalCommandDispatcher(client=client, session_factory=session_factory).dispatch_pending()
+    )
+
+    assert client.started == []
+    assert client.handle.signals == []
+    assert client.handle.cancelled is False
+    with session_scope(session_factory) as session:
+        task = session.get(Task, snapshot.task_id)
+        commands = session.query(TemporalCommand).filter_by(task_id=snapshot.task_id).all()
+        assert task is not None
+        assert task.status.value == "failed"
+        assert {command.command_type for command in commands} == {"start", "cancel"}
+        assert all(command.superseded_at is not None for command in commands)
+        assert all(command.delivered_at is None for command in commands)
+        assert session.query(TemporalTaskState).filter_by(task_id=snapshot.task_id).count() == 0
+        assert session.query(WorkerRun).filter_by(task_id=snapshot.task_id).count() == 0
+
+
+def test_cancellation_supersedes_a_start_held_by_another_dispatcher(monkeypatch) -> None:
+    """A claimed start cannot run after cancellation clears its fence."""
+    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+    service = TaskExecutionService(session_factory=session_factory, worker=_Worker())
+    snapshot, _ = service.create_task(TaskSubmission(task_text="claimed start cancellation"))
+    with session_scope(session_factory) as session:
+        start = TemporalCommandRepository(session).claim_pending(limit=1, lease_seconds=30)[0]
+        assert start.command_type == "start"
+        assert start.claim_token is not None
+        start_id = start.id
+        claim_token = start.claim_token
+
+    cancelled = service.cancel_task(task_id=snapshot.task_id)
+    assert cancelled is not None
+
+    client = _CommandClient()
+    dispatcher = TemporalCommandDispatcher(client=client, session_factory=session_factory)
+    asyncio.run(dispatcher._dispatch_one(start_id, claim_token))
+    asyncio.run(dispatcher.dispatch_pending())
+
+    assert client.started == []
+    assert client.handle.cancelled is False
+    with session_scope(session_factory) as session:
+        commands = session.query(TemporalCommand).filter_by(task_id=snapshot.task_id).all()
+        assert all(command.superseded_at is not None for command in commands)
+
+
+def test_concurrent_enqueues_receive_distinct_task_local_sequences(monkeypatch, tmp_path) -> None:
+    """Concurrent operator commands cannot collide on a task-local sequence number."""
+    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
+    engine = create_engine_from_url(
+        f"sqlite+pysqlite:///{tmp_path / 'temporal-command-sequences.db'}",
+        connect_args={"check_same_thread": False, "timeout": 10},
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+    service = TaskExecutionService(session_factory=session_factory, worker=_Worker())
+    snapshot, _ = service.create_task(TaskSubmission(task_text="concurrent command sequences"))
+
+    barrier = Barrier(2)
+
+    def enqueue(command_key: str) -> None:
+        barrier.wait()
+        with session_scope(session_factory) as session:
+            TemporalCommandRepository(session).enqueue(
+                task_id=snapshot.task_id,
+                command_type="signal",
+                command_key=command_key,
+                payload={"signal_name": "handle_approval", "signal_arg": True},
+            )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        list(executor.map(enqueue, ["concurrent-signal-1", "concurrent-signal-2"]))
+
+    with session_scope(session_factory) as session:
+        commands = (
+            session.query(TemporalCommand)
+            .filter_by(task_id=snapshot.task_id)
+            .order_by(TemporalCommand.sequence_number)
+            .all()
+        )
+        assert [command.sequence_number for command in commands] == [1, 2, 3]
 
 
 def test_temporal_command_delivery_failure_remains_pending_for_retry(monkeypatch) -> None:

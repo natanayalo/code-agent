@@ -131,6 +131,7 @@ def test_temporal_commands_store_a_task_local_delivery_sequence() -> None:
         constraint.name == "uq_temporal_commands_task_sequence"
         for constraint in commands.constraints
     )
+    assert "superseded_at" in commands.c
 
 
 def test_model_metadata_enforces_memory_observation_constraints() -> None:
