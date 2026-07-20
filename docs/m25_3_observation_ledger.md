@@ -2,9 +2,10 @@
 
 Use this blank release-record template for the production-like deployment that
 begins the M25.3 observation window. It is an audit aid, not evidence by
-itself: replace every placeholder with the corresponding deployment evidence.
-Do not record credentials, secrets, or raw sensitive logs here; link to the
-approved release artifact instead.
+itself. Copy it to a release-specific record in the approved immutable release
+artifact before replacing placeholders; never overwrite this blank template or
+a prior observation record. Do not record credentials, secrets, or raw
+sensitive logs here; link to the approved release artifact instead.
 
 ## Deployment identity
 
@@ -17,6 +18,20 @@ approved release artifact instead.
 | Operator | `<name-or-identifier>` |
 | Last-known-good rollback image / revision | `<image-or-revision>` |
 | Rollback configuration and schema compatibility evidence | `<approved-artifact-reference>` |
+
+## Pre-observation admission gate
+
+Complete this gate before running the prerequisite Compose scenarios. An
+ambiguous historical task cannot be allowed to retain unresolved runtime
+ownership while the scheduler boundary is being evaluated.
+
+| Check | Required evidence | Status / reference |
+| --- | --- | --- |
+| Active unknown drain | `/metrics` shows `active_unknown_task_count = 0`, and every previously active unknown task is explicitly classified, completed, or cancelled. | `<pending>` |
+
+**Admission decision:** `<passed / blocked>`
+**Decision recorded at (UTC):** `<timestamp>`
+**Operator:** `<name-or-identifier>`
 
 ## Prerequisite Compose scenarios
 
@@ -50,6 +65,17 @@ evidence reference, or unresolved divergence blocks the soak; investigate or
 roll back with the compatible last-known-good image rather than automatically
 falling back to the legacy runtime.
 
+## Deployment changes during observation
+
+Record every deployment change while this release record is active. A material
+runtime, workflow, schema, or configuration change restarts the seven-day
+active soak unless the operator explicitly records why evidence continuity is
+valid.
+
+| Changed at (UTC) | Image / revision | Change summary | Material change? | Continuity decision and operator | Evidence reference |
+| --- | --- | --- | --- | --- | --- |
+| `<timestamp>` | `<image-or-revision>` | `<summary>` | `<yes-or-no>` | `<restart-soak-or-documented-continuity>` | `<reference>` |
+
 ## Stage 1 — Seven-day active soak
 
 | Check | Required evidence | Status / reference |
@@ -70,12 +96,21 @@ Do not begin legacy deletion until every row is satisfied. Stage 2 may overlap
 with Stage 1, but it cannot pass until both the elapsed-time and task-count
 thresholds have been met.
 
+All task-class evidence must identify the task ID, created and completed UTC
+timestamps, `orchestration_runtime = temporal`, deployment/revision, and an
+evidence reference. The 25-task completion population must be demonstrated by
+the task IDs or a reproducible database/query artifact; tasks count only when
+they completed after `TEMPORAL_ONLY_CUTOVER_AT` against the observed deployment
+or a documented compatible successor.
+
 | Gate | Required evidence | Status / reference |
 | --- | --- | --- |
 | Observation duration | At least 14 days since the cutover timestamp | `<pending>` |
-| Temporal completions | At least 25 successful Temporal task completions | `<pending>` |
+| Temporal completions | At least 25 successful Temporal-owned tasks completed after `TEMPORAL_ONLY_CUTOVER_AT` against the observed deployment or a documented compatible successor | `<pending>` |
+| Completion population evidence | The 25 qualifying task IDs or a reproducible database/query artifact | `<pending>` |
 | No legacy submissions | `/metrics` shows `legacy_submissions_since_cutover = 0` | `<pending>` |
 | Legacy drain | `/metrics` and task review show zero unfinished legacy tasks | `<pending>` |
+| Active unknown drain | `/metrics` shows `active_unknown_task_count = 0`, with every previously active unknown task explicitly classified, completed, or cancelled | `<pending>` |
 | Simple read-only task class | Successful task ID and evidence | `<pending>` |
 | Mutable implementation task class | Successful task ID and evidence | `<pending>` |
 | Sequential DAG task class | Successful task ID and evidence | `<pending>` |
@@ -99,4 +134,5 @@ thresholds have been met.
 
 An approved retirement gate authorizes planning the separately scoped Slice 4
 deletion PRs; it does not itself delete the legacy runtime, change deployment
-configuration, merge code, or deploy a release.
+configuration, merge code, or deploy a release. The closeout evidence must
+show both `active_legacy_task_count = 0` and `active_unknown_task_count = 0`.

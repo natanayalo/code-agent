@@ -34,7 +34,8 @@ outcome in the [Temporal observation evidence ledger](m25_3_observation_ledger.m
 
 1. Deploy with `CODE_AGENT_EXECUTION_RUNTIME=temporal` and set immutable `TEMPORAL_ONLY_CUTOVER_AT` to the UTC deployment timestamp.
 2. Run `scripts/up.sh`; it always starts `temporal` and `temporal-ui` with the API, worker, and dashboard.
-3. Complete and attach evidence for all scenarios above in the
-   [Temporal observation evidence ledger](m25_3_observation_ledger.md). Start
-   the 7-day active soak only after all 14 scenarios pass.
+3. Copy the [Temporal observation evidence ledger](m25_3_observation_ledger.md)
+   to an immutable, release-specific evidence record. Complete and attach the
+   evidence for all scenarios there. Start the 7-day active soak only after all
+   14 scenarios pass.
 4. Roll back with the last known-good image and compatible schema/configuration; do not use legacy as an automatic runtime fallback.
