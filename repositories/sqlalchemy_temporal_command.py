@@ -168,15 +168,23 @@ class TemporalCommandRepository:
         return bool(getattr(updated, "rowcount", 0))
 
     def supersede_for_cancel(self, *, task_id: str) -> bool:
-        """Resolve pending task commands when cancellation wins before Temporal start."""
-        start_pending = self.session.scalar(
-            select(TemporalCommand.id).where(
+        """Resolve commands only when cancellation beats an unclaimed Temporal start."""
+        superseded_at = utc_now()
+        start_superseded = self.session.execute(
+            update(TemporalCommand)
+            .where(
                 TemporalCommand.task_id == task_id,
                 TemporalCommand.command_type == "start",
                 TemporalCommand.delivered_at.is_(None),
+                TemporalCommand.claim_token.is_(None),
+                TemporalCommand.superseded_at.is_(None),
+            )
+            .values(
+                superseded_at=superseded_at,
+                last_error="Superseded by cancellation before Temporal workflow start.",
             )
         )
-        if start_pending is None:
+        if not getattr(start_superseded, "rowcount", 0):
             return False
         self.session.execute(
             update(TemporalCommand)
@@ -185,11 +193,10 @@ class TemporalCommandRepository:
                 TemporalCommand.delivered_at.is_(None),
                 TemporalCommand.dead_lettered_at.is_(None),
                 TemporalCommand.superseded_at.is_(None),
+                TemporalCommand.claim_token.is_(None),
             )
             .values(
-                superseded_at=utc_now(),
-                claim_token=None,
-                claim_expires_at=None,
+                superseded_at=superseded_at,
                 last_error="Superseded by cancellation before Temporal workflow start.",
             )
         )

@@ -60,6 +60,18 @@ class _CommandClient(_TemporalClient):
         return self.handle
 
 
+class _BlockingStartClient(_CommandClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.start_entered = asyncio.Event()
+        self.allow_start_result = asyncio.Event()
+
+    async def start_workflow(self, _name, task_id, **_kwargs) -> None:
+        self.started.append(task_id)
+        self.start_entered.set()
+        await self.allow_start_result.wait()
+
+
 def test_temporal_start_command_survives_submission_until_dispatch(monkeypatch) -> None:
     """A task committed before worker recovery is started exactly once by reconciliation."""
     monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
@@ -171,8 +183,8 @@ def test_cancel_supersedes_an_undelivered_temporal_start(monkeypatch) -> None:
         assert session.query(WorkerRun).filter_by(task_id=snapshot.task_id).count() == 0
 
 
-def test_cancellation_supersedes_a_start_held_by_another_dispatcher(monkeypatch) -> None:
-    """A claimed start cannot run after cancellation clears its fence."""
+def test_cancellation_keeps_a_start_held_by_another_dispatcher_deliverable(monkeypatch) -> None:
+    """Cancellation remains queued when another dispatcher already owns the start."""
     monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
     engine = create_engine_from_url(
         "sqlite+pysqlite:///:memory:",
@@ -198,11 +210,61 @@ def test_cancellation_supersedes_a_start_held_by_another_dispatcher(monkeypatch)
     asyncio.run(dispatcher._dispatch_one(start_id, claim_token))
     asyncio.run(dispatcher.dispatch_pending())
 
-    assert client.started == []
-    assert client.handle.cancelled is False
+    assert client.started == [snapshot.task_id]
+    assert client.handle.cancelled is True
     with session_scope(session_factory) as session:
-        commands = session.query(TemporalCommand).filter_by(task_id=snapshot.task_id).all()
-        assert all(command.superseded_at is not None for command in commands)
+        commands = {
+            command.command_type: command
+            for command in session.query(TemporalCommand).filter_by(task_id=snapshot.task_id)
+        }
+        assert commands["start"].delivered_at is not None
+        assert commands["start"].superseded_at is None
+        assert commands["cancel"].delivered_at is not None
+        assert commands["cancel"].superseded_at is None
+
+
+def test_cancellation_during_start_rpc_preserves_follow_up_cancel(monkeypatch) -> None:
+    """An in-flight start is acknowledged before its pending cancellation is delivered."""
+    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+    service = TaskExecutionService(session_factory=session_factory, worker=_Worker())
+    snapshot, _ = service.create_task(TaskSubmission(task_text="cancel during temporal start"))
+    client = _BlockingStartClient()
+    dispatcher = TemporalCommandDispatcher(client=client, session_factory=session_factory)
+
+    async def exercise_race() -> None:
+        dispatching = asyncio.create_task(dispatcher.dispatch_pending())
+        await asyncio.wait_for(client.start_entered.wait(), timeout=1)
+        cancelled = service.cancel_task(task_id=snapshot.task_id)
+        assert cancelled is not None
+        client.allow_start_result.set()
+        await dispatching
+        await dispatcher.dispatch_pending()
+
+    asyncio.run(exercise_race())
+
+    assert client.started == [snapshot.task_id]
+    assert client.handle.cancelled is True
+    with session_scope(session_factory) as session:
+        task = session.get(Task, snapshot.task_id)
+        commands = {
+            command.command_type: command
+            for command in session.query(TemporalCommand).filter_by(task_id=snapshot.task_id)
+        }
+        assert task is not None
+        assert task.status.value == "failed"
+        assert commands["start"].delivered_at is not None
+        assert commands["start"].superseded_at is None
+        assert commands["cancel"].delivered_at is not None
+        assert commands["cancel"].superseded_at is None
+        assert session.query(TemporalTaskState).filter_by(task_id=snapshot.task_id).count() == 0
+        assert session.query(WorkerRun).filter_by(task_id=snapshot.task_id).count() == 0
 
 
 def test_concurrent_enqueues_receive_distinct_task_local_sequences(monkeypatch, tmp_path) -> None:
