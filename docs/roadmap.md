@@ -625,15 +625,16 @@ Progress:
   - deployment prerequisite: deploy with zero active tasks, or explicitly classify,
     complete, or cancel every active unknown task before relying on the scheduler boundary
   - fix status.md Active Focus, add M25.3 to roadmap
-- [ ] Slice 2: production cutover
+- [x] Slice 2: production cutover
   - default `execution_runtime()` to `temporal` when unconfigured
   - remove `CODE_AGENT_USE_TEMPORAL` env var support
   - worker fail-fast: bounded Temporal connection retries, then exit non-zero
   - API graceful degradation: 503 for new submissions, reads stay available,
     ongoing Temporal readiness check
   - persist `TEMPORAL_ONLY_CUTOVER_AT` cutover timestamp
-  - complete and document all 14 operational evidence scenarios in
-    `docs/m25_3_temporal_cutover_verification.md`
+  - document all 14 operational evidence scenarios in
+    `docs/m25_3_temporal_cutover_verification.md`; recording their Compose
+    results is the entry gate for Slice 3
 - [ ] Slice 3: observation window (two-stage)
   - Stage 1 — active soak (7 days): zero accidental legacy submissions,
     no severe Temporal incidents, all 14 scenarios verified,

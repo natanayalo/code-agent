@@ -4,6 +4,10 @@
 
 - Runtime defaults, explicit legacy fallback, timestamp parsing, worker retry exhaustion, submission outage, recovery, and dashboard metrics are covered by the focused unit and integration suites.
 - The existing Temporal integration suite covers workflow lifecycle, interaction signals, cancellation, sequential DAGs, bounded fan-out, and replay compatibility.
+- The Slice 2 implementation and automated verification are complete. Compose
+  scenario results below must be recorded against the deployment that begins
+  Slice 3; this document does not represent unperformed manual scenarios as
+  passed.
 
 ## Operational scenarios
 
