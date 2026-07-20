@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: cut over task submissions to Temporal ([#323](https://github.com/natanayalo/code-agent/pull/323))
+
 - Feat: add orchestration runtime observability ([#322](https://github.com/natanayalo/code-agent/pull/322))
 
 - Feat: add bounded Temporal DAG fan-out ([#320](https://github.com/natanayalo/code-agent/pull/320))
