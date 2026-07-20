@@ -10,6 +10,12 @@ from repositories import WorkerNodeRepository
 from tests.unit.task_execution_service_support import *  # noqa: F403
 
 
+@pytest.fixture(autouse=True)
+def _use_legacy_runtime_for_queue_tests(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Queue tests exercise the explicit legacy fallback only."""
+    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "legacy")
+
+
 def _build_fake_orchestrator_state(
     submitted: execution_module.TaskSubmission,
     persisted: execution_module.TaskSnapshot,

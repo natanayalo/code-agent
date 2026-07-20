@@ -87,9 +87,8 @@ scripts/up.sh
 ```
 
 The Compose stack uses the Temporal execution runtime by default. To run the
-legacy queue intentionally (for fallback or API-only development), set
-`CODE_AGENT_EXECUTION_RUNTIME=legacy`; the older `CODE_AGENT_USE_TEMPORAL`
-boolean remains a compatibility fallback only.
+legacy queue intentionally during the retirement observation window, set
+`CODE_AGENT_EXECUTION_RUNTIME=legacy`.
 
 The M25.2 decomposed-task fan-out pilot is disabled by default. Set
 `CODE_AGENT_DECOMPOSED_FANOUT_ENABLED=true` only to enable version-gated,

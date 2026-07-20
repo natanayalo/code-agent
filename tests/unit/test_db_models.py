@@ -42,9 +42,11 @@ EXPECTED_TABLES = {
     "memory_proposals",
     "memory_project",
     "proposals",
+    "runtime_cutovers",
     "sessions",
     "session_states",
     "tasks",
+    "temporal_commands",
     "temporal_task_states",
     "task_timeline_events",
     "users",
@@ -119,6 +121,17 @@ def test_model_metadata_defines_runtime_manifest_column_type() -> None:
 def test_execution_capacity_permits_store_a_fenced_acquisition_token() -> None:
     """Permit release and renewal require more than a reusable logical owner."""
     assert "lease_token" in Base.metadata.tables["execution_capacity_permits"].c
+
+
+def test_temporal_commands_store_a_task_local_delivery_sequence() -> None:
+    """The durable outbox needs a stable order for each task."""
+    commands = Base.metadata.tables["temporal_commands"]
+    assert "sequence_number" in commands.c
+    assert any(
+        constraint.name == "uq_temporal_commands_task_sequence"
+        for constraint in commands.constraints
+    )
+    assert "superseded_at" in commands.c
 
 
 def test_model_metadata_enforces_memory_observation_constraints() -> None:

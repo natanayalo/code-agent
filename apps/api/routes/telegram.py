@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from apps.api.config import SystemConfig
@@ -14,6 +14,7 @@ from orchestrator.execution import (
     SubmissionSession,
     TaskExecutionService,
     TaskSubmission,
+    TemporalUnavailableError,
 )
 
 logger = logging.getLogger(__name__)
@@ -184,13 +185,18 @@ def receive_telegram_update(
         return TelegramWebhookResponse(ok=True, detail="text_too_long")
 
     submission = _to_task_submission(msg, text, config)
-    outcome = task_service.create_task_outcome(
-        submission,
-        delivery_key=DeliveryKey(
-            channel=_CHANNEL,
-            delivery_id=str(update.update_id),
-        ),
-    )
+    try:
+        outcome = task_service.create_task_outcome(
+            submission,
+            delivery_key=DeliveryKey(
+                channel=_CHANNEL,
+                delivery_id=str(update.update_id),
+            ),
+        )
+    except TemporalUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+        ) from exc
 
     logger.info(
         "telegram update_id=%d %s task_id=%s",

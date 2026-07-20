@@ -94,6 +94,21 @@ def test_postgres_service_has_healthcheck_and_port_mapping(
     ]
 
 
+def test_worker_waits_for_a_healthy_temporal_service(
+    compose_config: dict[str, Any],
+) -> None:
+    """Temporal must be ready before the worker accepts durable commands."""
+    temporal_service = compose_config["services"]["temporal"]
+    worker_service = compose_config["services"]["worker"]
+
+    assert temporal_service["healthcheck"]["test"] == [
+        "CMD-SHELL",
+        'tctl --address "$(hostname -i):7233" cluster health',
+    ]
+    assert worker_service["depends_on"]["temporal"]["condition"] == "service_healthy"
+    assert worker_service["restart"] == "on-failure"
+
+
 def test_compose_includes_optional_phoenix_observability_service(
     compose_config: dict[str, Any],
 ) -> None:

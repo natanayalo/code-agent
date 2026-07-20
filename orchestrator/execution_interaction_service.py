@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections.abc import Mapping
 from typing import Any
@@ -29,6 +28,7 @@ from repositories import (
     HumanInteractionRepository,
     TaskRepository,
     TaskTimelineRepository,
+    TemporalCommandRepository,
     TemporalTaskStateRepository,
     WorkerRunRepository,
     session_scope,
@@ -61,18 +61,27 @@ def _capture_interaction_resolution_observation(
         )
 
 
-def _dispatch_temporal_signal(
-    service: Any,
-    task_id: str,
-    signal_name: str,
-    signal_arg: object,
+def _enqueue_temporal_signal(
+    session: Any, task_id: str, signal_name: str, signal_arg: object, key: str
 ) -> None:
-    """Dispatch a Temporal signal from outside the committing DB transaction."""
-    try:
-        loop = asyncio.get_running_loop()
-        loop.create_task(service.signal_temporal_workflow(task_id, signal_name, signal_arg))
-    except RuntimeError:
-        asyncio.run(service.signal_temporal_workflow(task_id, signal_name, signal_arg))
+    """Persist a resumable Temporal signal in the same transaction as its decision."""
+    TemporalCommandRepository(session).enqueue(
+        task_id=task_id,
+        command_type="signal",
+        command_key=key,
+        payload={"signal_name": signal_name, "signal_arg": signal_arg},
+    )
+
+
+def _enqueue_approval_signal(session: Any, task_id: str, approved: bool) -> None:
+    """Persist the workflow approval signal with an idempotency key."""
+    _enqueue_temporal_signal(
+        session,
+        task_id,
+        "handle_approval",
+        approved,
+        f"task:{task_id}:approval:{approved}",
+    )
 
 
 def _persist_resolved_interaction(
@@ -232,10 +241,14 @@ def record_interaction_response(
                 temporal_signal = ("handle_approval", approved)
             elif interaction.interaction_type == HumanInteractionType.CLARIFICATION:
                 temporal_signal = ("handle_clarification", None)
-
-    if temporal_signal is not None:
-        signal_name, signal_arg = temporal_signal
-        _dispatch_temporal_signal(self, task_id, signal_name, signal_arg)
+            if temporal_signal is not None:
+                _enqueue_temporal_signal(
+                    session,
+                    task_id,
+                    temporal_signal[0],
+                    temporal_signal[1],
+                    f"interaction:{interaction.id}:signal",
+                )
 
     return self.get_task(task_id)
 
@@ -367,10 +380,9 @@ def apply_task_approval_decision(
         task.constraints = constraints
         task.lease_owner = None
         task.lease_expires_at = None
+        if task.orchestration_runtime == OrchestrationRuntime.TEMPORAL:
+            _enqueue_approval_signal(session, task_id, approved)
         session.flush()
-
-    if task.orchestration_runtime == OrchestrationRuntime.TEMPORAL:
-        _dispatch_temporal_signal(self, task_id, "handle_approval", approved)
 
     snapshot = self.get_task(task_id)
     if snapshot is None:
@@ -399,10 +411,13 @@ def cancel_task(self: Any, *, task_id: str) -> TaskSnapshot | None:
                 event_key=f"task:{task_id}:cancelled",
                 message="Task was cancelled by operator.",
             )
-    if was_cancelled and task.orchestration_runtime == OrchestrationRuntime.TEMPORAL:
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(self.cancel_temporal_workflow(task_id))
-        except RuntimeError:
-            asyncio.run(self.cancel_temporal_workflow(task_id))
+            if task.orchestration_runtime == OrchestrationRuntime.TEMPORAL:
+                temporal_commands = TemporalCommandRepository(session)
+                temporal_commands.enqueue(
+                    task_id=task_id,
+                    command_type="cancel",
+                    command_key=f"task:{task_id}:cancel",
+                    payload={},
+                )
+                temporal_commands.supersede_for_cancel(task_id=task_id)
     return self.get_task(task_id)

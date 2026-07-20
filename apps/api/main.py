@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager  # noqa: E402
 from typing import Any
 
 from fastapi import FastAPI  # noqa: E402
+from sqlalchemy.orm import sessionmaker  # noqa: E402
 
 from apps.api.auth import (  # noqa: E402
     API_SHARED_SECRET_ENV_VAR,
@@ -31,7 +32,12 @@ from apps.api.routes.webhook import router as webhook_router  # noqa: E402
 from apps.api.scheduler import ScoutScheduler  # noqa: E402
 from apps.api.task_service_factory import build_task_service_from_env  # noqa: E402
 from apps.observability import configure_tracing_from_env  # noqa: E402
-from apps.runtime import RUN_API_ENV_VAR, should_run_api  # noqa: E402
+from apps.runtime import (  # noqa: E402
+    RUN_API_ENV_VAR,
+    initialize_persisted_cutover,
+    should_run_api,
+    validate_runtime_configuration,
+)
 from orchestrator.execution import (  # noqa: E402
     TaskExecutionService,
     bootstrap_phoenix_project_id,
@@ -82,6 +88,7 @@ def _build_lifespan(
             raise RuntimeError(
                 f"API runtime is disabled for this process. Set {RUN_API_ENV_VAR}=1 to enable it."
             )
+        validate_runtime_configuration()
 
         configure_tracing_from_env(service_name="code-agent-api")
         bootstrap_phoenix_project_id()
@@ -95,9 +102,13 @@ def _build_lifespan(
                 )
                 app.state.system_config = SystemConfig.load_from_env()
 
-                app.state.task_service = build_task_service_from_env(
+                built_service = build_task_service_from_env(
                     outbound_http_clients=outbound_http_clients
                 )
+                app.state.task_service = built_service
+                session_factory = getattr(built_service, "session_factory", None)
+                if isinstance(session_factory, sessionmaker):
+                    initialize_persisted_cutover(session_factory)
                 _validate_security_config(app)
 
                 if app.state.task_service is not None:
@@ -135,6 +146,9 @@ def _build_lifespan(
                 app.state.api_auth_config = auth_config or ApiAuthConfig()
                 app.state.system_config = SystemConfig.load_from_env()
                 app.state.task_service = task_service
+                session_factory = getattr(task_service, "session_factory", None)
+                if isinstance(session_factory, sessionmaker):
+                    initialize_persisted_cutover(session_factory)
                 yield
             finally:
                 shutdown_callback_dns_executor()

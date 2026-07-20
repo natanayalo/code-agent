@@ -86,10 +86,26 @@ describe('MetricsPage', () => {
     expect(screen.getByText(expectedLongWorker)).toHaveClass('worker-label');
     expect(document.querySelector('.metrics-details-grid')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Runtime Drain — all time' })).toBeInTheDocument();
-    expect(screen.getByText('Since-cutover submissions will be available after the Slice 2 cutover timestamp is persisted.')).toBeInTheDocument();
+    expect(screen.getByText('Set TEMPORAL_ONLY_CUTOVER_AT to enable since-cutover drain metrics.')).toBeInTheDocument();
     expect(screen.getByText('Active legacy').nextElementSibling).toHaveTextContent('1');
     expect(screen.getByText('Active unknown').nextElementSibling).toHaveTextContent('3');
     expect(document.querySelectorAll('.metric-detail-card')).toHaveLength(3);
+  });
+
+  it('shows legacy submissions after a configured cutover', async () => {
+    vi.mocked(api.getMetrics).mockResolvedValue({
+      total_tasks: 1, retried_tasks: 0, retry_rate: 0, status_counts: {}, worker_usage: {},
+      runtime_mode_usage: {}, legacy_tool_loop_usage: {}, orchestration_runtime_counts: {},
+      active_legacy_task_count: 0, active_unknown_task_count: 0,
+      temporal_only_cutover_at: '2026-07-18T12:00:00Z', legacy_submissions_since_cutover: 2,
+      avg_duration_seconds: 0, success_rate: 1,
+    });
+
+    render(<QueryClientProvider client={queryClient}><MemoryRouter><MetricsPage /></MemoryRouter></QueryClientProvider>);
+
+    expect(await screen.findByText('Legacy since cutover')).toBeInTheDocument();
+    expect(screen.getByText('Legacy since cutover').nextElementSibling).toHaveTextContent('2');
+    expect(screen.getByText(/Cutover:/)).toBeInTheDocument();
   });
 
   it('renders low success rate with failure color', async () => {

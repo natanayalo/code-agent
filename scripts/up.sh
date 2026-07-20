@@ -88,16 +88,11 @@ mkdir -p "$CODE_AGENT_WORKSPACE_ROOT"
 echo "[run-production-like] Using shared workspace root: $CODE_AGENT_WORKSPACE_ROOT"
 echo "[run-production-like] Codex sandbox mode: $CODE_AGENT_CODEX_SANDBOX"
 
-services="postgres migrate api worker dashboard"
+services="postgres temporal temporal-ui migrate api worker dashboard"
 if is_enabled "${CODE_AGENT_ENABLE_TRACING:-0}"; then
   echo "[run-production-like] Tracing enabled (CODE_AGENT_ENABLE_TRACING=1); starting phoenix too"
   services="$services phoenix"
 fi
-if is_enabled "${CODE_AGENT_USE_TEMPORAL:-0}"; then
-  echo "[run-production-like] Temporal enabled (CODE_AGENT_USE_TEMPORAL=true); starting temporal and temporal-ui too"
-  services="$services temporal temporal-ui"
-fi
-
 echo "[run-production-like] Starting $services"
 if is_enabled "${CODE_AGENT_ENABLE_TRACING:-0}"; then
   # shellcheck disable=SC2086
@@ -108,8 +103,14 @@ else
 fi
 
 api_container_id="$(docker compose --env-file "$ENV_FILE" ps -q api)"
+temporal_container_id="$(docker compose --env-file "$ENV_FILE" ps -q temporal)"
+worker_container_id="$(docker compose --env-file "$ENV_FILE" ps -q worker)"
 if [ -z "$api_container_id" ]; then
   echo "[run-production-like][error] API container ID not found after compose up." >&2
+  exit 1
+fi
+if [ -z "$temporal_container_id" ] || [ -z "$worker_container_id" ]; then
+  echo "[run-production-like][error] Temporal or worker container ID not found after compose up." >&2
   exit 1
 fi
 
@@ -129,7 +130,15 @@ if [ "$api_health" != "healthy" ]; then
   exit 1
 fi
 curl -fsS http://127.0.0.1:8000/health >/dev/null
+temporal_health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$temporal_container_id")"
+worker_status="$(docker inspect -f '{{.State.Status}}:{{.RestartCount}}' "$worker_container_id")"
+if [ "$temporal_health" != "healthy" ] || [ "${worker_status%%:*}" != "running" ] || [ "${worker_status##*:}" != "0" ]; then
+  echo "[run-production-like][error] Temporal/worker readiness failed: temporal=$temporal_health worker=$worker_status" >&2
+  docker compose --env-file "$ENV_FILE" ps >&2
+  exit 1
+fi
 echo "[run-production-like] API is healthy at http://127.0.0.1:8000"
+echo "[run-production-like] Temporal and worker are ready"
 echo "[run-production-like] Dashboard is available at http://localhost:3000"
 echo "[run-production-like] Services running:"
 docker compose --env-file "$ENV_FILE" ps

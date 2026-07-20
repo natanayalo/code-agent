@@ -8,13 +8,17 @@ import os
 from typing import Final
 from uuid import uuid4
 
+from sqlalchemy.orm import sessionmaker
+
 from apps.api.progress import create_outbound_http_clients
 from apps.api.task_service_factory import build_task_service_from_env
 from apps.observability import configure_tracing_from_env
 from apps.runtime import (
     RUN_WORKER_ENV_VAR,
+    initialize_persisted_cutover,
     should_run_worker,
     uses_temporal_execution,
+    validate_runtime_configuration,
 )
 from apps.runtime import (
     coerce_positive_int_env as _coerce_positive_int,
@@ -48,6 +52,7 @@ async def run_worker_forever() -> None:
         raise RuntimeError(
             f"Worker runtime is disabled for this process. Set {RUN_WORKER_ENV_VAR}=1 to enable it."
         )
+    validate_runtime_configuration()
 
     configure_tracing_from_env(service_name="code-agent-worker")
 
@@ -59,6 +64,8 @@ async def run_worker_forever() -> None:
                 "Worker runtime requires CODE_AGENT_ENABLE_TASK_SERVICE=1 "
                 "with a valid database configuration."
             )
+        if isinstance(getattr(service, "session_factory", None), sessionmaker):
+            initialize_persisted_cutover(service.session_factory)
 
         worker_id = os.environ.get(WORKER_ID_ENV_VAR, "").strip() or f"worker-{uuid4().hex[:8]}"
         poll_interval = _coerce_positive_float(

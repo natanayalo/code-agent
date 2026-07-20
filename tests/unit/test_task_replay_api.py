@@ -37,6 +37,12 @@ class _StaticWorker(Worker):
         )
 
 
+@pytest.fixture(autouse=True)
+def _use_legacy_runtime_for_replay_tests(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Replay endpoint tests exercise the legacy queue worker explicitly."""
+    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "legacy")
+
+
 def _run_one_queued_task(client: TestClient) -> None:
     """Claim one queued task and execute it through the worker service."""
     service = client.app.state.task_service

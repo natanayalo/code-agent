@@ -8,6 +8,7 @@ from temporalio.client import Client
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
 from orchestrator.temporal.activities import TaskExecutionActivities
+from orchestrator.temporal.command_dispatcher import TemporalCommandDispatcher
 from orchestrator.temporal.queues import CODEX_EXECUTION_TASK_QUEUE
 from orchestrator.temporal.workflows import TaskExecutionWorkflow
 
@@ -24,7 +25,24 @@ async def start_temporal_worker(
         "Starting Temporal worker",
         extra={"address": temporal_address, "queue": task_queue},
     )
-    client = await Client.connect(temporal_address)
+    last_error: Exception | None = None
+    for attempt in range(3):
+        try:
+            client = await Client.connect(temporal_address)
+            break
+        except Exception as exc:
+            last_error = exc
+            if attempt == 2:
+                raise RuntimeError(
+                    f"Temporal worker could not connect to {temporal_address} after 3 attempts."
+                ) from exc
+            logger.warning(
+                "Temporal worker connection failed; retrying",
+                extra={"attempt": attempt + 1},
+            )
+            await asyncio.sleep(2**attempt)
+    else:  # pragma: no cover - loop either breaks or raises
+        raise RuntimeError("Temporal worker connection retries exhausted.") from last_error
 
     # Initialize our activities class with the service
     activities = TaskExecutionActivities(service=task_service)
@@ -66,6 +84,10 @@ async def start_temporal_worker(
     )
 
     logger.info("Temporal workers successfully started. Running worker loops...")
+    dispatcher = TemporalCommandDispatcher(
+        client=client, session_factory=task_service.session_factory
+    )
     async with asyncio.TaskGroup() as task_group:
+        task_group.create_task(dispatcher.run_forever())
         task_group.create_task(worker.run())
         task_group.create_task(codex_execution_worker.run())

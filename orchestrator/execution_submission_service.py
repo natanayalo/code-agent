@@ -46,6 +46,7 @@ from repositories import (
     SessionRepository,
     TaskRepository,
     TaskTimelineRepository,
+    TemporalCommandRepository,
     UserRepository,
     WorkerRunRepository,
     session_scope,
@@ -267,6 +268,13 @@ def _persist_submission(
             orchestration_runtime=OrchestrationRuntime(execution_runtime()),
         )
         interaction_repo.sync_task_spec_flags(task_id=task.id, task_spec=task_spec)
+        if task.orchestration_runtime is OrchestrationRuntime.TEMPORAL:
+            TemporalCommandRepository(session).enqueue(
+                task_id=task.id,
+                command_type="start",
+                command_key=f"task:{task.id}:start",
+                payload={},
+            )
         session_repo.set_active_task(session_id=conversation_session.id, active_task_id=task.id)
         if delivery_key is not None:
             duplicate_task_id = self._link_delivery_to_task(

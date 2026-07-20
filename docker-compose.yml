@@ -28,6 +28,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "tctl --address \"$(hostname -i):7233\" cluster health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
   temporal-ui:
     image: temporalio/ui:2.24.0
     ports:
@@ -84,6 +90,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD?Please set POSTGRES_PASSWORD in .env}
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${DATABASE_HOST:-postgres}:${DATABASE_PORT:-5432}/${POSTGRES_DB}
       CODE_AGENT_EXECUTION_RUNTIME: ${CODE_AGENT_EXECUTION_RUNTIME:-temporal}
+      TEMPORAL_ONLY_CUTOVER_AT: ${TEMPORAL_ONLY_CUTOVER_AT:-}
       TEMPORAL_ADDRESS: ${TEMPORAL_ADDRESS_DOCKER:-temporal:7233}
     ports:
       - "8000:8000"
@@ -146,6 +153,9 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+      temporal:
+        condition: service_healthy
+    restart: on-failure
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${CODE_AGENT_CODEX_AUTH_DIR?Please set CODE_AGENT_CODEX_AUTH_DIR in env}:/root/.codex

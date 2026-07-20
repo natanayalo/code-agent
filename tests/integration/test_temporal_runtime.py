@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
-from temporalio.client import Client, WorkflowFailureError
+from temporalio.client import WorkflowFailureError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
@@ -16,11 +16,13 @@ from orchestrator.execution import TaskExecutionService, TaskSubmission
 from orchestrator.execution_types import InteractionResponse
 from orchestrator.state import OrchestratorState, VerificationReport, VerificationReportItem
 from orchestrator.temporal.activities import TaskExecutionActivities
+from orchestrator.temporal.command_dispatcher import TemporalCommandDispatcher
 from orchestrator.temporal.queues import CODEX_EXECUTION_TASK_QUEUE
 from orchestrator.temporal.workflows import TaskExecutionWorkflow
 from repositories import (
     ExecutionPlanRepository,
     TaskTimelineRepository,
+    TemporalCommandRepository,
     TemporalTaskStateRepository,
     create_engine_from_url,
     create_session_factory,
@@ -53,6 +55,15 @@ def _docker_available() -> bool:
         return docker_info.returncode == 0
     except FileNotFoundError:
         return False
+
+
+async def _start_workflow_via_dispatcher(
+    dispatcher: TemporalCommandDispatcher, client, task_id: str
+) -> asyncio.Task[object]:
+    """Start a Temporal workflow through the durable command dispatcher."""
+    await dispatcher.dispatch_pending()
+    handle = client.get_workflow_handle(f"task-{task_id}")
+    return asyncio.create_task(handle.result())
 
 
 class _ScriptedAdapter(CliRuntimeAdapter):
@@ -101,41 +112,6 @@ class _PermissionEscalationWorker:
         return WorkerResult(status="success", summary="Completed after permission grant.")
 
 
-@pytest.mark.anyio
-async def test_temporal_runtime_startup_failure_marks_task_failed(session_factory, monkeypatch):
-    """A Temporal startup failure must leave visible terminal task evidence."""
-    service = TaskExecutionService(
-        session_factory=session_factory,
-        worker=CodexCliWorker(runtime_adapter=_ScriptedAdapter([])),
-    )
-    snapshot, _ = service.create_task(TaskSubmission(task_text="Temporal unavailable"))
-
-    async def unavailable_client():
-        raise ConnectionError("Temporal is unavailable")
-
-    async def skip_backoff(_: float) -> None:
-        return None
-
-    monkeypatch.setattr(service, "_get_temporal_client", unavailable_client)
-    monkeypatch.setattr("orchestrator.execution.asyncio.sleep", skip_backoff)
-
-    await service.start_temporal_workflow(snapshot.task_id)
-
-    with session_scope(session_factory) as session:
-        task = session.get(Task, snapshot.task_id)
-        assert task is not None
-        assert task.status == "failed"
-        assert "Temporal workflow startup failed" in task.last_error
-        events = (
-            session.execute(
-                select(TaskTimelineEvent).where(TaskTimelineEvent.task_id == snapshot.task_id)
-            )
-            .scalars()
-            .all()
-        )
-        assert [event.event_type for event in events].count(TimelineEventType.WORKER_ERROR) == 1
-
-
 def test_temporal_snapshot_reconciles_operator_approval(session_factory):
     """A paused Temporal snapshot must reflect the operator's approval decision."""
     service = TaskExecutionService(
@@ -170,8 +146,9 @@ def test_temporal_snapshot_reconciles_operator_approval(session_factory):
 
 
 @pytest.mark.anyio
-async def test_temporal_activity_failure_projects_terminal_task(session_factory):
+async def test_temporal_activity_failure_projects_terminal_task(session_factory, monkeypatch):
     """An exhausted workflow activity must not leave the product task pending."""
+    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "legacy")
     service = TaskExecutionService(
         session_factory=session_factory,
         worker=CodexCliWorker(runtime_adapter=_ScriptedAdapter([])),
@@ -344,14 +321,8 @@ async def test_temporal_runtime_happy_path(session_factory, tmp_path: Path, monk
 
     # Start local Temporal test server
     async with await WorkflowEnvironment.start_time_skipping() as env:
-        # Patch Client.connect to return the test client directly
-        async def _mock_connect(*args, **kwargs):
-            return env.client
-
-        monkeypatch.setattr(Client, "connect", _mock_connect)
-
         # Create task context
-        snapshot, persisted = service.create_task(submission)
+        snapshot, _ = service.create_task(submission)
         task_id = snapshot.task_id
         assert task_id is not None
 
@@ -376,8 +347,11 @@ async def test_temporal_runtime_happy_path(session_factory, tmp_path: Path, monk
         )
 
         async with temporal_worker:
-            # Submit task: will block until workflow completes when using Temporal
-            await service.submit_task(submission, persisted)
+            dispatcher = TemporalCommandDispatcher(
+                client=env.client, session_factory=session_factory
+            )
+            run_task = await _start_workflow_via_dispatcher(dispatcher, env.client, task_id)
+            await run_task
 
     # Verify the database outcome matches expectations
     with session_scope(session_factory) as session:
@@ -462,13 +436,7 @@ async def test_temporal_runtime_hitl_approval(session_factory, tmp_path: Path, m
     monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
 
     async with await WorkflowEnvironment.start_time_skipping() as env:
-
-        async def _mock_connect(*args, **kwargs):
-            return env.client
-
-        monkeypatch.setattr(Client, "connect", _mock_connect)
-
-        snapshot, persisted = service.create_task(submission)
+        snapshot, _ = service.create_task(submission)
         task_id = snapshot.task_id
 
         activities = TaskExecutionActivities(service=service)
@@ -491,10 +459,14 @@ async def test_temporal_runtime_hitl_approval(session_factory, tmp_path: Path, m
         )
 
         async with temporal_worker:
+            dispatcher = TemporalCommandDispatcher(
+                client=env.client,
+                session_factory=session_factory,
+            )
             # Awaiting a workflow result unlocks automatic time skipping. Keep
             # real time while an operator-style signal is deliberately pending.
             with env.auto_time_skipping_disabled():
-                run_task = asyncio.create_task(service.submit_task(submission, persisted))
+                run_task = await _start_workflow_via_dispatcher(dispatcher, env.client, task_id)
 
                 for _ in range(20):
                     with session_scope(session_factory) as session:
@@ -515,7 +487,14 @@ async def test_temporal_runtime_hitl_approval(session_factory, tmp_path: Path, m
                         f"{error!r}; cause={getattr(error, 'cause', None)!r}"
                     )
 
-                await service.signal_temporal_workflow(task_id, "handle_approval", True)
+                with session_scope(session_factory) as session:
+                    TemporalCommandRepository(session).enqueue(
+                        task_id=task_id,
+                        command_type="signal",
+                        command_key=f"task:{task_id}:approval:test",
+                        payload={"signal_name": "handle_approval", "signal_arg": True},
+                    )
+                await dispatcher.dispatch_pending()
                 await run_task
 
     # Verify task successfully completed
@@ -575,12 +554,7 @@ async def test_temporal_runtime_clarification_interaction_resumes_workflow(
     )
 
     async with await WorkflowEnvironment.start_time_skipping() as env:
-
-        async def _mock_connect(*args, **kwargs):
-            return env.client
-
-        monkeypatch.setattr(Client, "connect", _mock_connect)
-        snapshot, persisted = service.create_task(submission)
+        snapshot, _ = service.create_task(submission)
         activities = TaskExecutionActivities(service=service)
         temporal_worker = Worker(
             env.client,
@@ -600,8 +574,13 @@ async def test_temporal_runtime_clarification_interaction_resumes_workflow(
             ],
         )
         async with temporal_worker:
+            dispatcher = TemporalCommandDispatcher(
+                client=env.client, session_factory=session_factory
+            )
             with env.auto_time_skipping_disabled():
-                run_task = asyncio.create_task(service.submit_task(submission, persisted))
+                run_task = await _start_workflow_via_dispatcher(
+                    dispatcher, env.client, snapshot.task_id
+                )
                 for _ in range(20):
                     cards = service.list_pending_interactions()
                     if cards:
@@ -617,6 +596,7 @@ async def test_temporal_runtime_clarification_interaction_resumes_workflow(
                     clarification.interaction_id,
                     InteractionResponse(response_data={"answer": "Update README only."}),
                 )
+                await dispatcher.dispatch_pending()
                 await run_task
 
     with session_scope(session_factory) as session:
@@ -662,12 +642,7 @@ async def _exercise_permission_escalation_workflow_with_docker(
     )
 
     async with await WorkflowEnvironment.start_time_skipping() as env:
-
-        async def _mock_connect(*args, **kwargs):
-            return env.client
-
-        monkeypatch.setattr(Client, "connect", _mock_connect)
-        snapshot, persisted = service.create_task(submission)
+        snapshot, _ = service.create_task(submission)
         activities = TaskExecutionActivities(service=service)
         attempts = 0
 
@@ -720,8 +695,13 @@ async def _exercise_permission_escalation_workflow_with_docker(
             activities=[activities.run_worker],
         )
         async with temporal_worker, execution_worker:
+            dispatcher = TemporalCommandDispatcher(
+                client=env.client, session_factory=session_factory
+            )
             with env.auto_time_skipping_disabled():
-                run_task = asyncio.create_task(service.submit_task(submission, persisted))
+                run_task = await _start_workflow_via_dispatcher(
+                    dispatcher, env.client, snapshot.task_id
+                )
                 for _ in range(300):
                     cards = service.list_pending_interactions()
                     escalation = next(
@@ -766,8 +746,11 @@ async def _exercise_permission_escalation_workflow_with_docker(
 
 
 @pytest.mark.anyio
-async def test_permission_escalation_activities_persist_and_apply_grant(session_factory):
+async def test_permission_escalation_activities_persist_and_apply_grant(
+    session_factory, monkeypatch
+):
     """Escalation activities create one interaction and reset durable state on grant."""
+    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "legacy")
     service = TaskExecutionService(
         session_factory=session_factory,
         worker=CodexCliWorker(runtime_adapter=_ScriptedAdapter([])),
@@ -857,8 +840,11 @@ async def test_permission_escalation_rejection_projects_terminal_state(session_f
 
 
 @pytest.mark.anyio
-async def test_cancelling_pending_permission_escalation_removes_resumable_state(session_factory):
+async def test_cancelling_pending_permission_escalation_removes_resumable_state(
+    session_factory, monkeypatch
+):
     """Operator cancellation must win over a pending worker escalation."""
+    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "legacy")
     service = TaskExecutionService(
         session_factory=session_factory,
         worker=CodexCliWorker(runtime_adapter=_ScriptedAdapter([])),
@@ -978,12 +964,7 @@ async def test_temporal_runtime_cancellation_projects_terminal_state(
     )
 
     async with await WorkflowEnvironment.start_time_skipping() as env:
-
-        async def _mock_connect(*args, **kwargs):
-            return env.client
-
-        monkeypatch.setattr(Client, "connect", _mock_connect)
-        snapshot, persisted = service.create_task(submission)
+        snapshot, _ = service.create_task(submission)
         activities = TaskExecutionActivities(service=service)
         temporal_worker = Worker(
             env.client,
@@ -997,8 +978,13 @@ async def test_temporal_runtime_cancellation_projects_terminal_state(
         )
 
         async with temporal_worker:
+            dispatcher = TemporalCommandDispatcher(
+                client=env.client, session_factory=session_factory
+            )
             with env.auto_time_skipping_disabled():
-                run_task = asyncio.create_task(service.submit_task(submission, persisted))
+                run_task = await _start_workflow_via_dispatcher(
+                    dispatcher, env.client, snapshot.task_id
+                )
                 for _ in range(20):
                     with session_scope(session_factory) as session:
                         task = session.get(Task, snapshot.task_id)
@@ -1012,6 +998,7 @@ async def test_temporal_runtime_cancellation_projects_terminal_state(
                 cancelled = service.cancel_task(task_id=snapshot.task_id)
                 assert cancelled is not None
                 assert cancelled.status == "failed"
+                await dispatcher.dispatch_pending()
                 with pytest.raises(WorkflowFailureError):
                     await run_task
 
@@ -1079,13 +1066,7 @@ async def test_temporal_runtime_idempotency_and_retry(session_factory, tmp_path:
     monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
 
     async with await WorkflowEnvironment.start_time_skipping() as env:
-
-        async def _mock_connect(*args, **kwargs):
-            return env.client
-
-        monkeypatch.setattr(Client, "connect", _mock_connect)
-
-        snapshot, persisted = service.create_task(submission)
+        snapshot, _ = service.create_task(submission)
         task_id = snapshot.task_id
 
         activities = TaskExecutionActivities(service=service)
@@ -1125,7 +1106,11 @@ async def test_temporal_runtime_idempotency_and_retry(session_factory, tmp_path:
         )
 
         async with temporal_worker:
-            await service.submit_task(submission, persisted)
+            dispatcher = TemporalCommandDispatcher(
+                client=env.client, session_factory=session_factory
+            )
+            run_task = await _start_workflow_via_dispatcher(dispatcher, env.client, task_id)
+            await run_task
 
     # Verify task successfully completed
     with session_scope(session_factory) as session:

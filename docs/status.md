@@ -7,11 +7,12 @@ Phase 4: selective autonomy after reliability.
 Active focus:
 
 - M25.3 Temporal-only cutover and legacy retirement.
-  - Runtime observability is complete (persisted orchestration runtime and dashboard
-    drain metrics); production cutover (Temporal-default, fail-fast worker, graceful API degradation),
-    7-day active soak and ≥14-day/≥25-task retirement gate,
-    legacy code deletion (dispatch + LangGraph lifecycle),
-    and deferred schema cleanup.
+  - Slice 2 production cutover is complete: Temporal is the default runtime,
+    submission failures degrade with API 503, workers fail fast, and dashboard
+    drain metrics expose the persisted cutover boundary. The recorded Compose
+    scenarios are the entry gate for Slice 3's 7-day active soak and
+    ≥14-day/≥25-task retirement gate; legacy deletion and schema cleanup remain
+    deferred to later slices.
 
 ## Phase 3 Reliability Baseline
 - **Baseline cases**: 25 baseline cases run, 25 passed according to the frozen evaluation report.
@@ -69,8 +70,8 @@ Active focus:
 
 1. M25.3: Temporal-only cutover and legacy retirement
    - Slice 1 — complete: persist `orchestration_runtime` on Task and WorkerRun, drain-gate dashboard widgets
-   - Slice 2 — production cutover: Temporal default, fail-fast worker, graceful API 503, remove `CODE_AGENT_USE_TEMPORAL`, operational evidence (14 scenarios)
-   - Slice 3 — observation window: 7-day active soak then ≥14 days AND ≥25 completed tasks with task-class coverage
+   - Slice 2 — complete: Temporal default, fail-fast worker, graceful API 503, removed `CODE_AGENT_USE_TEMPORAL`, persisted cutover timestamp, dashboard drain metrics, and automated verification
+   - Slice 3 — observation window: record the 14 Compose scenarios, then complete the 7-day active soak and ≥14-day/≥25-task retirement gate with task-class coverage
    - Slice 4 — legacy deletion: PR 4A removes dispatch (TaskQueueWorker, claims, leases); PR 4B removes LangGraph lifecycle
    - Slice 5 — schema cleanup: drop `lease_owner`, `lease_expires_at`, `next_attempt_at` after compatibility soak
 2. M26: review comment repair

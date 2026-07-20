@@ -22,6 +22,7 @@ from orchestrator.execution import (
     TaskSubmission,
     TaskSubmissionValidationError,
     TaskSummarySnapshot,
+    TemporalUnavailableError,
 )
 
 
@@ -49,6 +50,7 @@ class _FakeTaskService:
         self.created_snapshot = _task_snapshot()
         self.create_calls: list[TaskSubmission] = []
         self.create_error: Exception | None = None
+        self.availability_error: Exception | None = None
         self.list_result = [_task_summary()]
         self.list_calls: list[dict[str, Any]] = []
         self.get_result: TaskSnapshot | None = None
@@ -67,6 +69,10 @@ class _FakeTaskService:
         if self.create_error is not None:
             raise self.create_error
         return self.created_snapshot, object()
+
+    def ensure_temporal_available(self) -> None:
+        if self.availability_error is not None:
+            raise self.availability_error
 
     def list_tasks(
         self,
@@ -205,6 +211,21 @@ def test_submit_task_returns_422_for_validation_errors() -> None:
 
     assert response.status_code == 422
     assert response.json() == {"detail": "submission is invalid"}
+
+
+def test_submit_task_returns_503_without_persisting_when_temporal_is_unavailable() -> None:
+    """Submission outage must leave the API inspectable and create no task."""
+    service = _FakeTaskService()
+    service.create_error = TemporalUnavailableError("Temporal is unavailable")
+
+    with _task_client(service) as client:
+        response = client.post("/tasks", json={"task_text": "Create the task"})
+        read_response = client.get("/tasks")
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Temporal is unavailable"}
+    assert len(service.create_calls) == 1
+    assert read_response.status_code == 200
 
 
 def test_get_task_returns_snapshot_when_found() -> None:

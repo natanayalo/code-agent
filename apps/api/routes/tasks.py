@@ -31,6 +31,7 @@ from orchestrator.execution import (
     TaskSubmission,
     TaskSubmissionValidationError,
     TaskSummarySnapshot,
+    TemporalUnavailableError,
     validate_callback_url,
 )
 
@@ -147,6 +148,10 @@ def submit_task(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=str(exc),
             ) from exc
+        except TemporalUnavailableError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+            ) from exc
 
 
 @router.post("/scout/trigger", response_model=TaskSnapshot, status_code=status.HTTP_202_ACCEPTED)
@@ -220,6 +225,10 @@ def trigger_scout_task(
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=str(exc),
+            ) from exc
+        except TemporalUnavailableError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
             ) from exc
 
 

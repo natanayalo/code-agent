@@ -27,6 +27,7 @@ from orchestrator.execution import (
     TaskSnapshot,
     TaskSubmission,
     TaskSubmissionValidationError,
+    TemporalUnavailableError,
     validate_callback_url,
 )
 
@@ -161,6 +162,10 @@ def receive_webhook(
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=str(exc),
+            ) from exc
+        except TemporalUnavailableError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
             ) from exc
 
         set_current_span_attribute(TASK_ID_ATTRIBUTE, outcome.task_snapshot.task_id)

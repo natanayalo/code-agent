@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from datetime import timedelta
+from datetime import UTC, timedelta
 from typing import Any, cast
 
 from sqlalchemy import select
@@ -991,11 +991,17 @@ def _map_project_memory_to_snapshot(
 def get_operational_metrics(self: Any, window_hours: int | None = 24) -> OperationalMetrics:
     """Return aggregated operational metrics across tasks and runs."""
     since = utc_now() - timedelta(hours=window_hours) if window_hours else None
+    from repositories import RuntimeCutoverRepository
+
     with session_scope(self.session_factory) as session:
+        cutover = RuntimeCutoverRepository(session).temporal_only_cutover()
+        cutover_at = cutover.cutover_at if cutover is not None else None
+        if cutover_at is not None and cutover_at.tzinfo is None:
+            cutover_at = cutover_at.replace(tzinfo=UTC)
         task_repo = TaskRepository(session)
         run_repo = WorkerRunRepository(session)
         task_metrics = task_repo.get_metrics(since=since)
-        runtime_drain_metrics = task_repo.get_runtime_drain_metrics()
+        runtime_drain_metrics = task_repo.get_runtime_drain_metrics(cutover_at=cutover_at)
         run_metrics = run_repo.get_metrics(since=since)
         return OperationalMetrics(
             total_tasks=task_metrics["total_tasks"],
@@ -1008,6 +1014,10 @@ def get_operational_metrics(self: Any, window_hours: int | None = 24) -> Operati
             orchestration_runtime_counts=runtime_drain_metrics["orchestration_runtime_counts"],
             active_legacy_task_count=runtime_drain_metrics["active_legacy_task_count"],
             active_unknown_task_count=runtime_drain_metrics["active_unknown_task_count"],
+            temporal_only_cutover_at=cutover_at,
+            legacy_submissions_since_cutover=runtime_drain_metrics[
+                "legacy_submissions_since_cutover"
+            ],
             avg_duration_seconds=run_metrics["avg_duration_seconds"],
             success_rate=run_metrics["success_rate"],
         )

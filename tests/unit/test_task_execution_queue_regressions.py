@@ -29,6 +29,12 @@ class _StaticWorker(Worker):
         return WorkerResult(status="success", summary=f"stubbed: {request.task_text}")
 
 
+@pytest.fixture(autouse=True)
+def _use_legacy_runtime_for_queue_tests(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Queue tests exercise the explicit legacy fallback only."""
+    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "legacy")
+
+
 def _make_task_service() -> tuple[execution_module.TaskExecutionService, object]:
     engine = create_engine_from_url(
         "sqlite+pysqlite:///:memory:",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 from temporalio import workflow
 
@@ -17,6 +18,7 @@ class TaskExecutionWorkflow:
         self.approval_decision: bool | None = None
         self.clarification_resolved = False
         self.permission_escalation_decision: bool | None = None
+        self.processed_command_keys: set[str] = set()
 
     @workflow.run
     async def run(self, task_id: str) -> dict:
@@ -328,13 +330,31 @@ class TaskExecutionWorkflow:
         return bool(approved)
 
     @workflow.signal
-    async def handle_approval(self, approved: bool) -> None:
-        self.approval_decision = approved
+    async def handle_approval(self, approved: Any) -> None:
+        accepted, value = self._accept_signal(approved)
+        if accepted:
+            self.approval_decision = bool(value)
 
     @workflow.signal
-    async def handle_clarification(self, _response: object | None = None) -> None:
-        self.clarification_resolved = True
+    async def handle_clarification(self, response: Any = None) -> None:
+        accepted, _ = self._accept_signal(response)
+        if accepted:
+            self.clarification_resolved = True
 
     @workflow.signal
-    async def handle_permission_escalation(self, approved: bool) -> None:
-        self.permission_escalation_decision = approved
+    async def handle_permission_escalation(self, approved: Any) -> None:
+        accepted, value = self._accept_signal(approved)
+        if accepted:
+            self.permission_escalation_decision = bool(value)
+
+    def _accept_signal(self, payload: Any) -> tuple[bool, Any]:
+        """Deduplicate new command envelopes while accepting historical raw signals."""
+        if not isinstance(payload, dict) or "command_key" not in payload:
+            return True, payload
+        command_key = payload.get("command_key")
+        if not isinstance(command_key, str) or not command_key:
+            return True, payload.get("value")
+        if command_key in self.processed_command_keys:
+            return False, payload.get("value")
+        self.processed_command_keys.add(command_key)
+        return True, payload.get("value")

@@ -91,8 +91,11 @@ export function MetricsPage() {
                 <RuntimeDrainMetric label="Unknown" value={metrics.orchestration_runtime_counts?.unknown ?? 0} />
                 <RuntimeDrainMetric label="Active legacy" value={metrics.active_legacy_task_count ?? 0} alert />
                 <RuntimeDrainMetric label="Active unknown" value={metrics.active_unknown_task_count ?? 0} alert />
+                {metrics.temporal_only_cutover_at ? (
+                  <RuntimeDrainMetric label="Legacy since cutover" value={metrics.legacy_submissions_since_cutover ?? 0} alert />
+                ) : null}
               </div>
-              <p className="metric-note"><GitBranch size={14} aria-hidden="true" /> Since-cutover submissions will be available after the Slice 2 cutover timestamp is persisted.</p>
+              <p className="metric-note"><GitBranch size={14} aria-hidden="true" /> {metrics.temporal_only_cutover_at ? `Cutover: ${new Date(metrics.temporal_only_cutover_at).toLocaleString()}` : 'Set TEMPORAL_ONLY_CUTOVER_AT to enable since-cutover drain metrics.'}</p>
             </section>
             <div className="metric-detail-card card">
               <h3>Status Distribution</h3>

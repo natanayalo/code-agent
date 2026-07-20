@@ -572,4 +572,5 @@ def build_task_service_from_env(
         decomposed_fanout_enabled=_is_enabled(
             resolved_env.get("CODE_AGENT_DECOMPOSED_FANOUT_ENABLED")
         ),
+        enforce_temporal_availability=True,
     )
