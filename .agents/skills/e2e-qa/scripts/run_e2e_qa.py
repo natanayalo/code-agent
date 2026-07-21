@@ -68,7 +68,7 @@ FANOUT_QA_ENABLED: Final[bool] = _is_enabled(os.environ.get("CODE_AGENT_QA_FANOU
 FANOUT_TASK_TEXT: Final[str] = os.environ.get(
     "CODE_AGENT_QA_FANOUT_TASK_TEXT",
     (
-        "Analyze two independent read-only repository inspections across files: summarize "
+        "Audit two independent read-only repository inspections across files: summarize "
         "README.md and list the top-level tracked files. Do not modify files, create artifacts, "
         "or commit."
     ),
