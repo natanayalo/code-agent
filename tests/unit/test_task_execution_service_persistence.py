@@ -164,6 +164,47 @@ def test_temporal_availability_retries_then_allows_a_recovered_submission(monkey
     assert attempts == ["localhost:7233", "localhost:7233"]
 
 
+def test_temporal_submission_succeeds_after_recovery_without_service_restart(monkeypatch) -> None:
+    """A recovered Temporal connection should let the same service persist a new start command."""
+    session_factory = _setup_persistence_test_db()
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+        enforce_temporal_availability=True,
+    )
+    availability = {"ready": False}
+
+    async def connect(_address: str) -> object:
+        if not availability["ready"]:
+            raise ConnectionError("Temporal unavailable")
+        return object()
+
+    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
+    from temporalio.client import Client
+
+    monkeypatch.setattr(Client, "connect", connect)
+    monkeypatch.setattr(execution_module.time, "sleep", lambda _seconds: None)
+
+    with pytest.raises(execution_module.TemporalUnavailableError):
+        service.create_task(execution_module.TaskSubmission(task_text="Unavailable submission"))
+
+    availability["ready"] = True
+    snapshot, _ = service.create_task(
+        execution_module.TaskSubmission(task_text="Recovered submission")
+    )
+
+    from db.models import Task, TemporalCommand
+
+    with session_scope(session_factory) as session:
+        task = session.get(Task, snapshot.task_id)
+        command = session.query(TemporalCommand).one()
+
+    assert task is not None
+    assert task.orchestration_runtime.value == "temporal"
+    assert command.task_id == snapshot.task_id
+    assert command.command_type == "start"
+
+
 def test_persist_execution_outcome_creates_error_worker_run_without_result() -> None:
     """Missing worker results should still leave an error worker-run record for observability."""
     session_factory = _setup_persistence_test_db()

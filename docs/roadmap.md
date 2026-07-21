@@ -602,14 +602,16 @@ Design decisions:
 - API graceful degradation: remains available for reads/dashboard/interactions,
   returns 503 for new submissions when Temporal is unreachable, no automatic
   fallback to legacy
-- two-stage observation gate: 7-day active soak, then ≥14 days AND ≥25 completed
-  tasks with full task-class coverage before legacy deletion
+- flat evidence gate before legacy deletion: all 14 operational scenarios, all
+  10 task classes, required automated suites, last-known-good rollback image,
+  a runtime-drain snapshot with zero active legacy/unknown tasks and zero
+  post-cutover legacy submissions, and operator sign-off; scenarios 9 through
+  12 may cite passing integration tests instead of manual Compose execution
 - persisted cutover timestamp (`TEMPORAL_ONLY_CUTOVER_AT`) for drain queries
   instead of rolling windows
-- legacy deletion split into two PRs: dispatch (TaskQueueWorker, claims, leases)
-  and LangGraph lifecycle (StateGraph, checkpoints, interrupts)
+- legacy deletion and schema cleanup are two PRs: one code-deletion PR for
+  dispatch, LangGraph lifecycle, and configuration; one schema-migration PR
 - `graph.py` retains reusable domain nodes; only LangGraph lifecycle is removed
-- schema cleanup deferred with compatibility soak after code deletion
 - rollback via last-known-good image + configuration + schema compatibility
   runbook, not git revert alone
 
@@ -635,36 +637,34 @@ Progress:
   - document all 14 operational evidence scenarios in
     `docs/m25_3_temporal_cutover_verification.md`; recording their Compose
     results is the entry gate for Slice 3
-- [ ] Slice 3: observation window (two-stage)
-  - Stage 1 — active soak (7 days): zero accidental legacy submissions,
-    no severe Temporal incidents, all 14 scenarios verified,
-    no product-state divergence
-  - Stage 2 — retirement gate (≥14 days AND ≥25 tasks): zero legacy submissions
-    since cutover, zero unfinished legacy tasks, ≥25 successful Temporal
-    completions, full task-class coverage (simple read-only, mutable
-    implementation, sequential DAG, fan-out DAG, approval, clarification,
-    permission escalation, cancellation, provider retry, terminal failure),
-    zero stuck workflows, zero projection mismatches, operator sign-off
-  - M26 work may begin during the observation window
-- [ ] Slice 4: legacy deletion (two PRs)
-  - PR 4A — remove legacy dispatch: `TaskQueueWorker`, polling, task claims,
-    lease heartbeat, retry scheduling, stale reclaim, legacy worker entrypoint
-    branch, runtime selector, `CODE_AGENT_EXECUTION_RUNTIME` env var
-  - PR 4B — remove LangGraph durable lifecycle: StateGraph compilation,
-    checkpoint restoration, interrupt-based HITL, checkpoint modules,
-    LangGraph dependency (after import audit)
+- [ ] Slice 3: evidence gate
+  - record all 14 operational scenarios; scenarios 9 through 12 may cite
+    passing integration-test evidence instead of manual Compose execution
+  - record full task-class coverage (simple read-only, mutable implementation,
+    sequential DAG, fan-out DAG, approval, clarification, permission
+    escalation, cancellation, provider retry or restart, terminal failure); a
+    single task may cover multiple classes
+  - record passing unit, integration, pre-commit, and dashboard coverage suites,
+    capture a clean runtime-drain snapshot, tag a last-known-good
+    legacy-capable image, and obtain operator sign-off
+- [ ] Slice 4: legacy deletion and schema cleanup (two PRs)
+  - PR 4A — remove legacy dispatch, LangGraph durable lifecycle, and runtime
+    selector/configuration after a reference inventory and method-level
+    WorkerNode audit
+  - PR 4B — remove `lease_owner`, `lease_expires_at`, and `next_attempt_at`
+    through a schema migration after PR 4A; the PRs may merge on the same day
+    only after the schema rollback procedure is verified
   - pre-implementation reference inventory of all legacy symbols classified as
     legacy-only, shared product policy, test fixture, or migration compatibility
   - method-level WorkerNode audit: keep profile/capability/health/operator policy,
     remove only claim/lease/reclaim mechanics
-  - rollback plan: retain last-known-good legacy-capable image, old configuration
-    template, DB schema backward compatibility confirmation, documented rollback
-    commands
-- [ ] Slice 5: schema cleanup (after compatibility soak)
-  - remove `lease_owner`, `lease_expires_at`, `next_attempt_at` from Task
-  - retain `attempt_count`, `max_attempts`, `priority`, `queue_lane`
-  - at least one release interval after Slice 4 code deletion
-  - verify no application code reads or writes targeted columns before migration
+  - retain `attempt_count`, `max_attempts`, `priority`, and `queue_lane`
+  - before PR 4B, take a restorable database snapshot and verify the migration's
+    upgrade, downgrade, and re-upgrade on a disposable database; record the
+    exact tagged image plus database restore sequence
+  - if PR 4B must be rolled back, stop the application, restore the pre-PR-4B
+    database snapshot, deploy the tagged legacy-capable image and matching
+    configuration, then verify the restored schema revision before resuming
 
 Operational evidence scenarios (documented before Slice 3):
 

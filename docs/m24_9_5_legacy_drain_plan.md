@@ -29,21 +29,19 @@ fallback path.
 4. [x] Supported sequential legacy routes have been compared explicitly with
    Temporal. Parallel DAG execution remains M25 scope, not a drain prerequisite.
 
-## Measurable drain gates
+## Evidence gate
 
-- New Compose-stack tasks use Temporal by default for 30 consecutive days.
-- No unfinished legacy-created task remains in the product DB.
-- Legacy is used only through explicit fallback with no unresolved incidents
-  during the same period.
-- Temporal integration coverage includes approval, clarification, worker
-  permission escalation, cancellation, retry, and terminal failure.
-- An operator-approved rollback alternative exists before deleting the runtime
-  selector.
+The M25.3 [Temporal evidence-gate ledger](m25_3_observation_ledger.md)
+supersedes the earlier time-based drain period. Before deleting the runtime
+selector, record all 14 operational scenarios, coverage for every required task
+class, passing unit/integration/pre-commit/dashboard suites, a tagged
+last-known-good legacy-capable image, and operator sign-off. Legacy remains an
+explicit fallback only until that gate is approved.
 
 ## Deletion order
 
 1. Freeze legacy queue/lease and LangGraph lifecycle feature work.
-2. Complete parity and set a fallback-retirement date.
+2. Complete the evidence gate and obtain operator sign-off.
 3. Disable legacy in production-like Compose while retaining a bounded local
    recovery window.
 4. Remove polling, claims, lease heartbeats, and stale reclaim together.
@@ -53,5 +51,5 @@ fallback path.
 ## M25 consequence
 
 M25 uses Temporal for bounded read-only DAG fan-out. M24.9.5 is closed for
-pre-M25 purposes; the legacy fallback remains available until the measurable
-30-day retirement gates are met, not because of an interaction-parity blocker.
+pre-M25 purposes; the legacy fallback remains available until the M25.3
+evidence gate is approved, not because of an interaction-parity blocker.

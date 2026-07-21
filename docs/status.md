@@ -9,10 +9,10 @@ Active focus:
 - M25.3 Temporal-only cutover and legacy retirement.
   - Slice 2 production cutover is complete: Temporal is the default runtime,
     submission failures degrade with API 503, workers fail fast, and dashboard
-    drain metrics expose the persisted cutover boundary. The recorded Compose
-    scenarios are the entry gate for Slice 3's 7-day active soak and
-    ≥14-day/≥25-task retirement gate; legacy deletion and schema cleanup remain
-    deferred to later slices.
+    drain metrics expose the persisted cutover boundary. The
+    [evidence-gate ledger](m25_3_observation_ledger.md) records the 14
+    operational scenarios, task-class coverage, automated suites, and operator
+    sign-off required before legacy deletion and schema cleanup.
 
 ## Phase 3 Reliability Baseline
 - **Baseline cases**: 25 baseline cases run, 25 passed according to the frozen evaluation report.
@@ -71,12 +71,11 @@ Active focus:
 1. M25.3: Temporal-only cutover and legacy retirement
    - Slice 1 — complete: persist `orchestration_runtime` on Task and WorkerRun, drain-gate dashboard widgets
    - Slice 2 — complete: Temporal default, fail-fast worker, graceful API 503, removed `CODE_AGENT_USE_TEMPORAL`, persisted cutover timestamp, dashboard drain metrics, and automated verification
-   - Slice 3 — observation window: record the 14 Compose scenarios, then complete the 7-day active soak and ≥14-day/≥25-task retirement gate with task-class coverage
-   - Slice 4 — legacy deletion: PR 4A removes dispatch (TaskQueueWorker, claims, leases); PR 4B removes LangGraph lifecycle
-   - Slice 5 — schema cleanup: drop `lease_owner`, `lease_expires_at`, `next_attempt_at` after compatibility soak
+   - Slice 3 — evidence gate: record the 14 scenarios, task-class coverage, automated suites, and operator sign-off
+   - Slice 4 — legacy deletion and schema cleanup: code-deletion PR, then schema-migration PR
 2. M26: review comment repair
    - extend the PR repair loop from CI failures to actionable review feedback
-   - may begin during M25.3 observation window
+   - may begin during the M25.3 evidence gate
 
 ## Current Backlog
 
