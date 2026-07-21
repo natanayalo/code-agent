@@ -11,7 +11,8 @@ Active focus:
     rehearsal covered the 14 scenarios, task classes, automated suites, worker
     recovery, and workflow-history replay. The production release handoff must
     still capture its deployment-specific immutable evidence record and cutover
-    timestamp before legacy deletion and schema cleanup.
+    timestamp before legacy deletion and schema cleanup. See the
+    [Slice 3 closeout](m25_3_slice_3_evidence_summary.md).
 
 ## Phase 3 Reliability Baseline
 - **Baseline cases**: 25 baseline cases run, 25 passed according to the frozen evaluation report.
