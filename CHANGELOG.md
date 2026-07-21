@@ -628,6 +628,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Fixed
 
+- Fix(dashboard): show clarification prompts ([#329](https://github.com/natanayalo/code-agent/pull/329))
+
 - Fix: short-circuit verify_result and review_result nodes for scout tasks ([#267](https://github.com/natanayalo/code-agent/pull/267))
 
 - Fix: E2E Forensic Investigation & Runtime Hardening (T-178) + Phase 2 Docs Refresh ([#217](https://github.com/natanayalo/code-agent/pull/217))
