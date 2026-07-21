@@ -8,6 +8,7 @@ const mobileNavItems = [
   { label: 'Sessions', to: '/sessions' },
   { label: 'Triggers', to: '/triggers' },
   { label: 'Idea Inbox', to: '/proposals' },
+  { label: 'Milestones', to: '/milestones' },
   { label: 'Knowledge Base', to: '/knowledge-base' },
   { label: 'Metrics', to: '/metrics' },
   { label: 'System', to: '/system' },

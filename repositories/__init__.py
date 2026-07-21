@@ -27,6 +27,7 @@ from repositories.sqlalchemy import (
     WorkerRunRepository,
 )
 from repositories.sqlalchemy_capacity import ExecutionCapacityPermitRepository
+from repositories.sqlalchemy_milestone import MilestoneRepository
 from repositories.sqlalchemy_plan import ExecutionPlanRepository
 
 __all__ = [
@@ -37,6 +38,7 @@ __all__ = [
     "InboundDeliveryRepository",
     "MemoryAdmissionDecisionRepository",
     "MemoryProposalRepository",
+    "MilestoneRepository",
     "ObservationRepository",
     "PersonalMemoryRepository",
     "ProjectMemoryRepository",

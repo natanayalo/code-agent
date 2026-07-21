@@ -17,6 +17,9 @@ from db.enums import (
     HumanInteractionType,
     MemoryProposalCategory,
     MemoryProposalStatus,
+    MilestoneAutonomyMode,
+    MilestoneReadinessStatus,
+    MilestoneStatus,
     OrchestrationRuntime,
     ProposalStatus,
     ProposalType,
@@ -41,6 +44,8 @@ EXPECTED_TABLES = {
     "memory_personal",
     "memory_proposals",
     "memory_project",
+    "milestones",
+    "milestone_readiness_assessments",
     "proposals",
     "runtime_cutovers",
     "sessions",
@@ -83,6 +88,9 @@ def test_model_metadata_uses_canonical_enums_for_constrained_columns() -> None:
         ("proposals", "proposal_type"): ProposalType,
         ("task_timeline_events", "event_type"): TimelineEventType,
         ("execution_plan_nodes", "status"): ExecutionPlanNodeStatus,
+        ("milestones", "status"): MilestoneStatus,
+        ("milestones", "active_autonomy_mode"): MilestoneAutonomyMode,
+        ("milestone_readiness_assessments", "status"): MilestoneReadinessStatus,
     }
 
     for (table_name, column_name), enum_class in expected_columns.items():

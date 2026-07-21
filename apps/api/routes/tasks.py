@@ -85,6 +85,7 @@ class CreateTaskRequest(BaseModel):
     tools: list[str] | None = None
     callback_url: str | None = Field(default=None, max_length=2048)
     session: SubmissionSession | None = None
+    milestone_id: str | None = None
 
     @field_validator("callback_url")
     @classmethod
@@ -130,6 +131,7 @@ def submit_task(
             secrets=payload.secrets,
             tools=payload.tools,
             callback_url=payload.callback_url,
+            milestone_id=payload.milestone_id,
             session=payload.session
             or SubmissionSession(
                 channel="http",

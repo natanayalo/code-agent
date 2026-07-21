@@ -9,6 +9,7 @@ import {
   BookOpen,
   Server,
   Lightbulb,
+  Flag,
   Send,
 } from 'lucide-react';
 
@@ -48,6 +49,7 @@ export function Sidebar() {
           <SidebarItem icon={<MessageSquare size={20} />} label="Sessions" to="/sessions" />
           <SidebarItem icon={<Send size={20} />} label="Triggers" to="/triggers" />
           <SidebarItem icon={<Lightbulb size={20} />} label="Idea Inbox" to="/proposals" />
+          <SidebarItem icon={<Flag size={20} />} label="Milestones" to="/milestones" />
           <SidebarItem icon={<BookOpen size={20} />} label="Knowledge Base" to="/knowledge-base" />
           <SidebarItem icon={<Activity size={20} />} label="Metrics" to="/metrics" />
         </div>

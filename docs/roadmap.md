@@ -715,18 +715,24 @@ Boundary:
 
 Goal:
 
-- let low-risk work move from blocking approval toward `proceed_with_flag` or `notify_only`
-  when measured outcomes support it
+- evaluate whether the completed milestone supplies enough evidence for a bounded,
+  human-approved operating-mode change for its successor
 
 Scope:
 
-- define risk/category thresholds using M20/M22 metrics
-- keep high-risk categories blocking
-- show autonomy policy decisions in task timelines and dashboard
+- persist ordered M25.3-and-later milestones and immutable readiness evidence snapshots
+- queue one read-only review when a milestone is completed; require operator approval
+  before applying any successor policy
+- use a structured rubric for delivery reliability, operator independence, safety and
+  recovery, and successor readiness
+- support `human_led`, `agent_led_approval_gated`, and bounded `autonomous_delivery`
+- inject approved policy into successor-scoped tasks and show assessments in the dashboard
 
 Boundary:
 
-- autonomy increases are reversible and scoped by repo/category
+- recommendations are advisory; reopening a milestone supersedes its readiness assessment
+- no mode permits auto-merge, deployment, security/auth/billing/sandbox-policy changes,
+  new secret access, or destructive operations without existing explicit approval
 
 ## Phase Sequencing Summary
 

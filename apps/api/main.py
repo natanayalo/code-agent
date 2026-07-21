@@ -23,6 +23,7 @@ from apps.api.routes.auth import router as auth_router  # noqa: E402
 from apps.api.routes.health import router as health_router  # noqa: E402
 from apps.api.routes.knowledge_base import router as knowledge_base_router  # noqa: E402
 from apps.api.routes.metrics import router as metrics_router  # noqa: E402
+from apps.api.routes.milestones import router as milestones_router  # noqa: E402
 from apps.api.routes.proposals import router as proposals_router  # noqa: E402
 from apps.api.routes.sessions import router as sessions_router  # noqa: E402
 from apps.api.routes.system import router as system_router  # noqa: E402
@@ -161,6 +162,7 @@ def _register_routers(app: FastAPI) -> None:
     app.include_router(metrics_router)
     app.include_router(auth_router)
     app.include_router(tasks_router)
+    app.include_router(milestones_router)
     app.include_router(proposals_router)
     app.include_router(sessions_router)
     app.include_router(system_router)

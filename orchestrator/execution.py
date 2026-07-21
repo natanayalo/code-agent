@@ -28,6 +28,7 @@ from orchestrator import (
     execution_heartbeat_service,
     execution_improvement_proposal_service,
     execution_interaction_service,
+    execution_milestone_service,
     execution_outcome_service,
     execution_proposal_service,
     execution_retention_service,
@@ -237,6 +238,7 @@ class TaskExecutionService:
     ) -> CreateTaskOutcome:
         """Persist a task request or return the previously created task for a duplicate delivery."""
         submission = self._normalize_and_validate_submission(submission)
+        submission = self._apply_milestone_policy(submission)
         if delivery_key is not None and delivery_key.channel != submission.session.channel:
             raise ValueError(
                 "delivery_key.channel must match submission.session.channel for dedupe."
@@ -349,6 +351,15 @@ class TaskExecutionService:
     list_proposals = execution_proposal_service.list_proposals
     accept_proposal = execution_proposal_service.accept_proposal
     reject_proposal = execution_proposal_service.reject_proposal
+    list_milestones = execution_milestone_service.list_milestones
+    get_milestone = execution_milestone_service.get_milestone
+    list_milestone_readiness_assessments = (
+        execution_milestone_service.list_milestone_readiness_assessments
+    )
+    complete_milestone = execution_milestone_service.complete_milestone
+    reopen_milestone = execution_milestone_service.reopen_milestone
+    decide_milestone_readiness = execution_milestone_service.decide_milestone_readiness
+    _apply_milestone_policy = execution_milestone_service._apply_milestone_policy
     _is_pending_interaction = staticmethod(execution_snapshot_service._is_pending_interaction)
     _map_human_interaction_snapshot = staticmethod(
         execution_snapshot_service._map_human_interaction_snapshot

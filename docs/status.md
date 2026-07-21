@@ -13,6 +13,8 @@ Active focus:
     [evidence-gate ledger](m25_3_observation_ledger.md) records the 14
     operational scenarios, task-class coverage, automated suites, and operator
     sign-off required before legacy deletion and schema cleanup.
+- M27 milestone readiness and autonomy graduation is implemented as an operator-approved,
+  evidence-led mechanism; no successor autonomy policy activates automatically.
 
 ## Phase 3 Reliability Baseline
 - **Baseline cases**: 25 baseline cases run, 25 passed according to the frozen evaluation report.
@@ -54,6 +56,8 @@ Active focus:
 - deterministic memory retrieval evaluation to separate full-text regressions from known semantic gaps
 - reviewable memory proposal flow for curated corpus seeding, with Slice 5 unifying worker memory candidates and proposals through a memory-admission service plus a local library adoption spike
 - dashboard visibility for TaskSpec, interactions, timeline events, logs, artifacts, replay controls, traces, memory, and tool inventory
+- milestone readiness records, advisory rubric evidence, and operator approval controls for
+  bounded successor operating modes
 - CI now measures Python coverage from `tests/unit` only and runs `tests/integration` as a separate pass
 - pre-commit Ruff checks repo Python files for non-top-level imports while preserving a few intentional lazy imports in guarded modules
 - shipped changes are tracked in [`CHANGELOG.md`](../CHANGELOG.md)

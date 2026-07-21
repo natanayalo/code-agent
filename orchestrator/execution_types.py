@@ -12,6 +12,9 @@ from db.enums import (
     HumanInteractionStatus,
     MemoryProposalCategory,
     MemoryProposalStatus,
+    MilestoneAutonomyMode,
+    MilestoneReadinessStatus,
+    MilestoneStatus,
     ProposalType,
     TaskStatus,
     WorkerType,
@@ -77,6 +80,7 @@ class TaskSubmission(ExecutionModel):
     callback_url: str | None = Field(default=None, max_length=2048)
     session: SubmissionSession = Field(default_factory=SubmissionSession)
     repair_for_task_id: str | None = None
+    milestone_id: str | None = None
 
     @field_validator("callback_url")
     @classmethod
@@ -89,6 +93,37 @@ class TaskApprovalDecision(ExecutionModel):
     """Decision payload for a paused task approval checkpoint."""
 
     approved: bool
+
+
+class MilestoneDecision(ExecutionModel):
+    mode: MilestoneAutonomyMode | None = None
+    reason: str | None = Field(default=None, max_length=4000)
+
+
+class MilestoneSnapshot(ExecutionModel):
+    milestone_id: str
+    key: str
+    title: str
+    sequence: int
+    status: MilestoneStatus
+    successor_id: str | None = None
+    active_autonomy_mode: MilestoneAutonomyMode
+    completed_at: datetime | None = None
+
+
+class MilestoneReadinessSnapshot(ExecutionModel):
+    assessment_id: str
+    completed_milestone_id: str
+    next_milestone_id: str | None = None
+    status: MilestoneReadinessStatus
+    evidence_snapshot: dict[str, Any]
+    rubric: dict[str, Any]
+    reviewer_narrative: str | None = None
+    recommended_mode: MilestoneAutonomyMode | None = None
+    approved_mode: MilestoneAutonomyMode | None = None
+    decision_reason: str | None = None
+    reviewed_at: datetime | None = None
+    decided_at: datetime | None = None
 
 
 class TaskReplayRequest(ExecutionModel):

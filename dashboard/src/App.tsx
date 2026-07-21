@@ -17,6 +17,7 @@ import { TaskDetailPanel } from './components/TaskDetailPanel';
 import { OperatorInbox } from './components/OperatorInbox';
 import { IdeaInboxPage } from './components/IdeaInboxPage';
 import { TriggerActionsPage } from './components/TriggerActionsPage';
+import { MilestonesPage } from './components/MilestonesPage';
 
 const REFRESH_INTERVAL_MS = 30000;
 
@@ -175,6 +176,7 @@ function AppRoutes() {
           </AuthGuard>
         }
       />
+      <Route path="/milestones" element={<AuthGuard><MilestonesPage /></AuthGuard>} />
       <Route
         path="/triggers"
         element={

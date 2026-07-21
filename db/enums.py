@@ -182,6 +182,28 @@ class MemoryProposalStatus(StrEnum):
     REJECTED = "rejected"
 
 
+class MilestoneStatus(StrEnum):
+    PLANNED = "planned"
+    ACTIVE = "active"
+    COMPLETED = "completed"
+
+
+class MilestoneReadinessStatus(StrEnum):
+    QUEUED = "queued"
+    REVIEWING = "reviewing"
+    PENDING_APPROVAL = "pending_approval"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    FAILED = "failed"
+    SUPERSEDED = "superseded"
+
+
+class MilestoneAutonomyMode(StrEnum):
+    HUMAN_LED = "human_led"
+    AGENT_LED_APPROVAL_GATED = "agent_led_approval_gated"
+    AUTONOMOUS_DELIVERY = "autonomous_delivery"
+
+
 def coerce_worker_type(value: object) -> WorkerType:
     """Normalize worker identifiers to the canonical worker enum."""
 

@@ -30,6 +30,7 @@ class TaskRepository:
         self,
         *,
         session_id: str,
+        milestone_id: str | None = None,
         task_text: str,
         repo_url: str | None = None,
         branch: str | None = None,
@@ -55,6 +56,7 @@ class TaskRepository:
     ) -> Task:
         task = Task(
             session_id=session_id,
+            milestone_id=milestone_id,
             task_text=task_text,
             repo_url=repo_url,
             branch=branch,

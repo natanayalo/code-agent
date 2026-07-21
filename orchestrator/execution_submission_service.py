@@ -248,6 +248,7 @@ def _persist_submission(
         trace_context = capture_trace_context()
         task = task_repo.create(
             session_id=conversation_session.id,
+            milestone_id=submission.milestone_id,
             task_text=persisted_task_text,
             repo_url=submission.repo_url,
             branch=submission.branch,

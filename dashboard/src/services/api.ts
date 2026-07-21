@@ -22,6 +22,11 @@ import {
 } from '../types/memory';
 import { ProposalSnapshot, ProposalStatus, ProposalType } from '../types/proposal';
 import { ToolDefinition, SandboxStatusResponse, RuntimeManifest } from '../types/system';
+import {
+  MilestoneAutonomyMode,
+  MilestoneReadinessSnapshot,
+  MilestoneSnapshot,
+} from '../types/milestone';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 type InteractionResponseStatus = 'resolved' | 'rejected' | 'cancelled' | 'pending';
@@ -131,6 +136,25 @@ export const api = {
       console.warn('Failed to fetch tasks from API', error);
       throw error;
     }
+  },
+
+  async listMilestones(): Promise<MilestoneSnapshot[]> {
+    return await fetchWithAuth('/milestones');
+  },
+
+  async listMilestoneReadinessAssessments(): Promise<MilestoneReadinessSnapshot[]> {
+    return await fetchWithAuth('/milestone-readiness-assessments');
+  },
+
+  async decideMilestoneReadiness(
+    assessmentId: string,
+    approved: boolean,
+    mode?: MilestoneAutonomyMode,
+  ): Promise<MilestoneReadinessSnapshot> {
+    return await fetchWithAuth(
+      `/milestone-readiness-assessments/${assessmentId}/${approved ? 'approve' : 'reject'}`,
+      { method: 'POST', body: JSON.stringify(approved ? { mode } : {}) },
+    );
   },
 
   async submitTask(payload: TaskSubmissionRequest): Promise<TaskSnapshot> {

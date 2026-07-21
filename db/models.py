@@ -34,6 +34,9 @@ from db.enums import (
     HumanInteractionType,
     MemoryProposalCategory,
     MemoryProposalStatus,
+    MilestoneAutonomyMode,
+    MilestoneReadinessStatus,
+    MilestoneStatus,
     OrchestrationRuntime,
     ProposalStatus,
     ProposalType,
@@ -72,6 +75,11 @@ MEMORY_PROPOSAL_CATEGORY_ENUM = build_sql_enum(
     MemoryProposalCategory, name="memory_proposal_category"
 )
 MEMORY_PROPOSAL_STATUS_ENUM = build_sql_enum(MemoryProposalStatus, name="memory_proposal_status")
+MILESTONE_STATUS_ENUM = build_sql_enum(MilestoneStatus, name="milestone_status")
+MILESTONE_READINESS_STATUS_ENUM = build_sql_enum(
+    MilestoneReadinessStatus, name="milestone_readiness_status"
+)
+MILESTONE_AUTONOMY_MODE_ENUM = build_sql_enum(MilestoneAutonomyMode, name="milestone_autonomy_mode")
 EXECUTION_PLAN_NODE_STATUS_ENUM = build_sql_enum(
     ExecutionPlanNodeStatus, name="execution_plan_node_status"
 )
@@ -248,6 +256,9 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKey("sessions.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
+    )
+    milestone_id: Mapped[str | None] = mapped_column(
+        ForeignKey("milestones.id", ondelete="SET NULL"), nullable=True, index=True
     )
     repo_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     branch: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -833,6 +844,56 @@ class HumanInteraction(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     ) -> HumanInteractionHitlMode:
         """Normalize assigned hitl_mode to the canonical enum."""
         return HumanInteractionHitlMode(value)
+
+
+class Milestone(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """A tracked roadmap milestone with an optional approved autonomy policy."""
+
+    __tablename__ = "milestones"
+    __table_args__ = (UniqueConstraint("key", name="uq_milestones_key"),)
+
+    key: Mapped[str] = mapped_column(String(64), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
+    status: Mapped[MilestoneStatus] = mapped_column(MILESTONE_STATUS_ENUM, nullable=False)
+    successor_id: Mapped[str | None] = mapped_column(ForeignKey("milestones.id"), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    active_autonomy_mode: Mapped[MilestoneAutonomyMode] = mapped_column(
+        MILESTONE_AUTONOMY_MODE_ENUM, nullable=False, default=MilestoneAutonomyMode.HUMAN_LED
+    )
+
+
+class MilestoneReadinessAssessment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Immutable evidence and advisory recommendation for a successor milestone."""
+
+    __tablename__ = "milestone_readiness_assessments"
+    __table_args__ = (
+        UniqueConstraint(
+            "completed_milestone_id", "generation", name="uq_readiness_completed_generation"
+        ),
+        Index("ix_readiness_next_milestone_status", "next_milestone_id", "status"),
+    )
+
+    completed_milestone_id: Mapped[str] = mapped_column(ForeignKey("milestones.id"), nullable=False)
+    next_milestone_id: Mapped[str | None] = mapped_column(
+        ForeignKey("milestones.id"), nullable=True
+    )
+    generation: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[MilestoneReadinessStatus] = mapped_column(
+        MILESTONE_READINESS_STATUS_ENUM, nullable=False, default=MilestoneReadinessStatus.QUEUED
+    )
+    evidence_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    rubric: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    reviewer_narrative: Mapped[str | None] = mapped_column(Text, nullable=True)
+    recommended_mode: Mapped[MilestoneAutonomyMode | None] = mapped_column(
+        MILESTONE_AUTONOMY_MODE_ENUM, nullable=True
+    )
+    approved_mode: Mapped[MilestoneAutonomyMode | None] = mapped_column(
+        MILESTONE_AUTONOMY_MODE_ENUM, nullable=True
+    )
+    decision_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Proposal(UUIDPrimaryKeyMixin, TimestampMixin, Base):

@@ -22,6 +22,8 @@ EXPECTED_TABLES = {
     "memory_personal",
     "memory_proposals",
     "memory_project",
+    "milestones",
+    "milestone_readiness_assessments",
     "proposals",
     "runtime_cutovers",
     "sessions",
@@ -36,6 +38,25 @@ EXPECTED_TABLES = {
 }
 
 EXPECTED_CHECK_CONSTRAINTS = {
+    "milestones": {
+        "ck_milestones_milestone_status": {"planned", "active", "completed"},
+        "ck_milestones_milestone_autonomy_mode": {
+            "human_led",
+            "agent_led_approval_gated",
+            "autonomous_delivery",
+        },
+    },
+    "milestone_readiness_assessments": {
+        "ck_milestone_readiness_assessments_milestone_readiness_status": {
+            "queued",
+            "reviewing",
+            "pending_approval",
+            "approved",
+            "rejected",
+            "failed",
+            "superseded",
+        },
+    },
     "memory_observations": {
         "ck_memory_observations_memory_observation_admission_status": {
             "not_required",
@@ -222,6 +243,7 @@ def _assert_upgrade_columns(inspector) -> None:
         "chosen_worker",
         "route_reason",
         "orchestration_runtime",
+        "milestone_id",
     } <= _column_names(inspector, "tasks")
     assert {
         "session_id",
