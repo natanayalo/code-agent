@@ -86,7 +86,7 @@ async def test_verify_node_runs_independent_verifier_on_read_only(
     state.result = WorkerResult(
         status="success",
         summary="ok",
-        files_changed=["a.py"],
+        files_changed=[".vscode/settings.json"],
         test_results=[],
         commands_run=[],
     )

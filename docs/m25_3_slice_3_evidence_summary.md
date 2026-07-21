@@ -1,6 +1,7 @@
 # M25.3 Slice 3 — Evidence Gate Closeout
 
-**Status:** complete by operator acceptance on 2026-07-22.
+**Status:** local rehearsal complete by operator acceptance on 2026-07-22;
+production evidence gate pending.
 
 This is the durable reviewer and next-slice handoff for the local Compose
 rehearsal. It summarizes what was verified; it is not the immutable,
@@ -9,10 +10,12 @@ deployment-specific release ledger described in
 
 ## Scope and outcome
 
-Slice 3 exercised the Temporal-only cutover evidence gate locally. The
+Slice 3A exercised the Temporal-only cutover evidence gate locally. The
 rehearsal covered the 14 operational scenarios, the required task classes,
 automated suites, worker recovery, and workflow-history replay. The operator
-accepted the local evidence gate and authorized Slice 4 planning.
+accepted the local rehearsal evidence and authorized Slice 4 planning. Slice
+3B remains open until deployment-specific immutable release evidence is
+recorded and approved.
 
 The detailed, mutable local rehearsal log is intentionally kept outside the
 repository. It contains no release authority and must not be substituted for a
@@ -34,7 +37,7 @@ production evidence artifact.
 | --- | --- |
 | Task lifecycle | Authenticated Temporal-owned dummy task completed through API, workflow, worker, verification, and artifact checks. |
 | HITL | Clarification, approval, task-spec permission, and worker-originated permission escalation resume paths were exercised. |
-| DAGs | Sequential DAG and concurrent read-only fan-out DAG completed; fan-out roots began 12 ms apart. |
+| DAGs | Sequential DAG and concurrent read-only fan-out DAG completed in task `4ee125bb-498b-46b6-a810-c95c1177f775`; its fan-out roots began 12 ms apart and terminal Antigravity completion was observed. |
 | Recovery | Cancellation during active provider work, worker restart recovery, and Temporal/Postgres terminal reconciliation were observed. |
 | Availability | With Temporal stopped, reads remained available and new submissions returned 503; submission recovered after Temporal returned. |
 | Replay | Older workflow history plus M25.1B fixture and existing M25.2 sequential/fan-out histories replayed without failure. |

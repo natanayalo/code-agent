@@ -7,11 +7,12 @@ Phase 4: selective autonomy after reliability.
 Active focus:
 
 - M25.3 Temporal-only cutover and legacy retirement.
-  - Slice 3 evidence gate is complete by operator acceptance: local Compose
+  - Slice 3A local rehearsal is complete by operator acceptance: local Compose
     rehearsal covered the 14 scenarios, task classes, automated suites, worker
-    recovery, and workflow-history replay. The production release handoff must
-    still capture its deployment-specific immutable evidence record and cutover
-    timestamp before legacy deletion and schema cleanup. See the
+    recovery, and workflow-history replay. Slice 3B, the production release
+    evidence gate, remains pending: it must capture its deployment-specific
+    immutable evidence record and cutover timestamp before legacy deletion and
+    schema cleanup. See the
     [Slice 3 closeout](m25_3_slice_3_evidence_summary.md).
 
 ## Phase 3 Reliability Baseline
@@ -71,7 +72,8 @@ Active focus:
 1. M25.3: Temporal-only cutover and legacy retirement
    - Slice 1 — complete: persist `orchestration_runtime` on Task and WorkerRun, drain-gate dashboard widgets
    - Slice 2 — complete: Temporal default, fail-fast worker, graceful API 503, removed `CODE_AGENT_USE_TEMPORAL`, persisted cutover timestamp, dashboard drain metrics, and automated verification
-   - Slice 3 — complete: local evidence gate accepted after the 14 scenarios, task-class coverage, automated suites, and operator approval
+   - Slice 3A — complete: local rehearsal accepted after the 14 scenarios, task-class coverage, automated suites, and operator approval
+   - Slice 3B — pending: immutable production release evidence, cutover timestamp, drain snapshot, rollback artifact, and operator approval
    - Slice 4 — legacy deletion and schema cleanup: code-deletion PR, then schema-migration PR
 2. M26: review comment repair
    - extend the PR repair loop from CI failures to actionable review feedback
