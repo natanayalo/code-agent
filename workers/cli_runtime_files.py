@@ -8,6 +8,7 @@ import subprocess
 from pathlib import Path
 
 from sandbox import DockerShellSessionError
+from sandbox.audit import _should_ignore_path
 from workers.adapter_utils import truncate_detail_keep_tail
 from workers.cli_runtime_types import ShellSessionProtocol
 from workers.constants import DEFAULT_CHANGED_FILES_TIMEOUT_SECONDS
@@ -219,7 +220,7 @@ def collect_changed_files_from_repo_path(
         path = item[3:]
         if "R" in status or "C" in status:
             next(items, None)
-        if path:
+        if path and not _should_ignore_path(path):
             changed_files.append(path)
 
     return list(dict.fromkeys(changed_files))
@@ -291,5 +292,9 @@ def collect_changed_files_since_ref_from_repo_path(
         )
         return working_tree_files
 
-    baseline_files = [path for path in _decode_safely(completed.stdout).split("\0") if path]
+    baseline_files = [
+        path
+        for path in _decode_safely(completed.stdout).split("\0")
+        if path and not _should_ignore_path(path)
+    ]
     return list(dict.fromkeys([*baseline_files, *working_tree_files]))

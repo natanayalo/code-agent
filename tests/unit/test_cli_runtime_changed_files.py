@@ -157,6 +157,51 @@ def test_collect_changed_files_from_repo_path_parses_porcelain_z_output(monkeypa
     assert changed_files == ["README.md", "runtime_ok_2.txt"]
 
 
+def test_collect_changed_files_from_repo_path_ignores_native_agent_paths(monkeypatch) -> None:
+    """Native provider homes and runner logs are not repository mutations."""
+
+    def _fake_run(*args, **kwargs):
+        return subprocess.CompletedProcess(
+            args=args[0],
+            returncode=0,
+            stdout=(
+                b" M README.md\0"
+                b"?? .agent_home/.gemini/antigravity-cli/cache.json\0"
+                b"?? .code-agent/native-agent-runner/stdout.txt\0"
+            ),
+            stderr=b"",
+        )
+
+    monkeypatch.setattr("workers.cli_runtime_files.subprocess.run", _fake_run)
+
+    changed_files = collect_changed_files_from_repo_path(Path("/tmp/repo"))
+
+    assert changed_files == ["README.md"]
+
+
+def test_collect_changed_files_since_ref_ignores_internal_baseline_paths(monkeypatch) -> None:
+    """Baseline diffs apply the same internal-path filtering as working-tree status."""
+
+    def _fake_run(args, **_kwargs):
+        if "status" in args:
+            return subprocess.CompletedProcess(args=args, returncode=0, stdout=b"", stderr=b"")
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=0,
+            stdout=b"README.md\0.agent_home/.gemini/settings.json\0",
+            stderr=b"",
+        )
+
+    monkeypatch.setattr("workers.cli_runtime_files.subprocess.run", _fake_run)
+
+    changed_files = collect_changed_files_since_ref_from_repo_path(
+        Path("/tmp/repo"),
+        base_ref="base-ref",
+    )
+
+    assert changed_files == ["README.md"]
+
+
 def test_collect_changed_files_from_repo_path_logs_timeout_details(monkeypatch) -> None:
     """Host fallback should log timeout details when git status exceeds timeout."""
 
