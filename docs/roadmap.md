@@ -637,7 +637,7 @@ Progress:
   - document all 14 operational evidence scenarios in
     `docs/m25_3_temporal_cutover_verification.md`; recording their Compose
     results is the entry gate for Slice 3
-- [ ] Slice 3: evidence gate
+- [x] Slice 3: evidence gate
   - record all 14 operational scenarios; scenarios 9 through 12 may cite
     passing integration-test evidence instead of manual Compose execution
   - record full task-class coverage (simple read-only, mutable implementation,
@@ -647,6 +647,8 @@ Progress:
   - record passing unit, integration, pre-commit, and dashboard coverage suites,
     capture a clean runtime-drain snapshot, tag a last-known-good
     legacy-capable image, and obtain operator sign-off
+  - completed by operator acceptance after local Compose rehearsal; production
+    release deployment must retain its own immutable cutover/evidence record
 - [ ] Slice 4: legacy deletion and schema cleanup (two PRs)
   - PR 4A — remove legacy dispatch, LangGraph durable lifecycle, and runtime
     selector/configuration after a reference inventory and method-level
