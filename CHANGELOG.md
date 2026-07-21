@@ -585,6 +585,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Documentation
 
+- Docs: add Temporal observation evidence ledger ([#327](https://github.com/natanayalo/code-agent/pull/327))
+
 - Docs: add M25.3 Temporal-only cutover and legacy retirement milestone ([#321](https://github.com/natanayalo/code-agent/pull/321))
 
 - Docs: reframe m23 next slices ([#305](https://github.com/natanayalo/code-agent/pull/305))
