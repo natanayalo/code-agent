@@ -921,6 +921,30 @@ describe('TaskDetailPanel', () => {
     expect(onRefresh).toHaveBeenCalled();
   });
 
+  it('renders nonempty clarification questions from interaction data', () => {
+    const task = buildTask({
+      pending_interactions: [
+        {
+          interaction_id: 'interaction-clarify',
+          interaction_type: 'clarification',
+          status: 'pending',
+          summary: 'Task requires clarification before execution can continue.',
+          hitl_mode: 'require_approval',
+          data: { questions: ['Which branch should receive the fix?', '   ', 7] },
+          response_data: null,
+          created_at: '2026-04-28T00:00:00.000Z',
+          updated_at: '2026-04-28T00:00:00.000Z',
+        },
+      ],
+    });
+
+    render(<TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />);
+
+    expect(screen.getByRole('heading', { name: 'Clarification needed' })).toBeInTheDocument();
+    expect(screen.getByText('Which branch should receive the fix?')).toBeInTheDocument();
+    expect(screen.queryByText('7')).not.toBeInTheDocument();
+  });
+
   it('captures and sends answer text for clarification interactions', async () => {
     vi.mocked(api.recordInteractionResponse).mockResolvedValue(baseTask);
     const task = buildTask({

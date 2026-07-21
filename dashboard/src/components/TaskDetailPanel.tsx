@@ -133,6 +133,12 @@ function asStringArray(value: unknown): string[] {
   return value.filter((entry): entry is string => typeof entry === 'string');
 }
 
+function clarificationQuestions(data: Record<string, unknown>): string[] {
+  return asStringArray(data.questions)
+    .map((question) => question.trim())
+    .filter(Boolean);
+}
+
 function renderMemoryLoadedPayload(payload: unknown) {
   const data = asRecord(payload);
   if (!data) {
@@ -735,21 +741,33 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
                     </p>
                     <p className="task-detail-muted">Status: {formatLabel(interaction.status)}</p>
                     {interaction.interaction_type === 'clarification' && (
-                      <div className="task-interaction-input">
-                        <textarea
-                          className="task-interaction-textarea"
-                          placeholder="Type your response here..."
-                          value={interactionResponses[interaction.interaction_id] || ''}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setInteractionResponses((prev) => ({
-                              ...prev,
-                              [interaction.interaction_id]: val,
-                            }));
-                          }}
-                          disabled={isSubmittingAction || isTaskTerminal}
-                        />
-                      </div>
+                      <>
+                        {clarificationQuestions(interaction.data).length > 0 ? (
+                          <div className="task-detail-group">
+                            <h5>Clarification needed</h5>
+                            <ul>
+                              {clarificationQuestions(interaction.data).map((question, index) => (
+                                <li key={`${interaction.interaction_id}-${index}`}>{question}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : null}
+                        <div className="task-interaction-input">
+                          <textarea
+                            className="task-interaction-textarea"
+                            placeholder="Type your response here..."
+                            value={interactionResponses[interaction.interaction_id] || ''}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setInteractionResponses((prev) => ({
+                                ...prev,
+                                [interaction.interaction_id]: val,
+                              }));
+                            }}
+                            disabled={isSubmittingAction || isTaskTerminal}
+                          />
+                        </div>
+                      </>
                     )}
                     <div className="task-interaction-actions">
                       <button
