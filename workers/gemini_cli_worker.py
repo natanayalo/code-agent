@@ -234,7 +234,8 @@ class GeminiCliWorker(GeminiCliWorkerNativeMixin, Worker):
         system_prompt_override: str | None,
         cancel_token: Callable[[], bool] | None,
     ) -> tuple[WorkerResult, DockerSandboxContainer | None, ShellSessionProtocol | None]:
-        _prepare_workspace_gemini_home(workspace_path=workspace.workspace_path)
+        if request.scratch_namespace is None:
+            _prepare_workspace_gemini_home(workspace_path=workspace.workspace_path)
         runtime_mode = self._resolve_runtime_mode(request)
         container: DockerSandboxContainer | None = None
         session: ShellSessionProtocol | None = None
