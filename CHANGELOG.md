@@ -628,6 +628,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Fixed
 
+- Fix(e2e): avoid fan-out clarification gate ([#330](https://github.com/natanayalo/code-agent/pull/330))
+
 - Fix(dashboard): show clarification prompts ([#329](https://github.com/natanayalo/code-agent/pull/329))
 
 - Fix: short-circuit verify_result and review_result nodes for scout tasks ([#267](https://github.com/natanayalo/code-agent/pull/267))
