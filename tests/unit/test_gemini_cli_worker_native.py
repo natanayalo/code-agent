@@ -394,3 +394,77 @@ def test_gemini_cli_worker_run_prepares_workspace_home_before_native_dispatch(
     assert result.status == "success"
     prepare_home.assert_called_once_with(workspace_path=workspace.workspace_path)
     execute_native.assert_called_once()
+
+
+def test_gemini_cli_worker_run_prepares_workspace_home_for_blank_scratch_namespace(
+    tmp_path: Path,
+) -> None:
+    """A blank namespace is not an isolated fan-out namespace."""
+    workspace = _make_workspace(tmp_path)
+    container = _make_container(workspace)
+    worker = GeminiCliWorker(
+        runtime_adapter=_ScriptedAdapter([]),
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(container),
+        session_factory=lambda _, **__: _FakeSession({}),
+    )
+
+    with (
+        patch("workers.gemini_cli_worker._prepare_workspace_gemini_home") as prepare_home,
+        patch.object(
+            worker,
+            "_execute_native_runtime",
+            return_value=WorkerResult(status="success", summary="ok"),
+        ) as execute_native,
+    ):
+        result = asyncio.run(
+            worker.run(
+                WorkerRequest(
+                    task_text="run",
+                    repo_url="https://example.com/repo.git",
+                    runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+                    scratch_namespace="",
+                )
+            )
+        )
+
+    assert result.status == "success"
+    prepare_home.assert_called_once_with(workspace_path=workspace.workspace_path)
+    execute_native.assert_called_once()
+
+
+def test_gemini_cli_worker_run_skips_workspace_home_for_scratch_node(
+    tmp_path: Path,
+) -> None:
+    """Fan-out nodes keep provider state in their external scratch namespace."""
+    workspace = _make_workspace(tmp_path)
+    container = _make_container(workspace)
+    worker = GeminiCliWorker(
+        runtime_adapter=_ScriptedAdapter([]),
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(container),
+        session_factory=lambda _, **__: _FakeSession({}),
+    )
+
+    with (
+        patch("workers.gemini_cli_worker._prepare_workspace_gemini_home") as prepare_home,
+        patch.object(
+            worker,
+            "_execute_native_runtime",
+            return_value=WorkerResult(status="success", summary="ok"),
+        ) as execute_native,
+    ):
+        result = asyncio.run(
+            worker.run(
+                WorkerRequest(
+                    task_text="inspect",
+                    repo_url="https://example.com/repo.git",
+                    runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+                    scratch_namespace="node-activity:v1:plan:inspect:1",
+                )
+            )
+        )
+
+    assert result.status == "success"
+    prepare_home.assert_not_called()
+    execute_native.assert_called_once()

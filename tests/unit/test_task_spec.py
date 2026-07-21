@@ -79,6 +79,26 @@ def test_build_task_spec_flags_ambiguous_task_for_clarification() -> None:
     assert validate_task_spec_policy(spec) == []
 
 
+def test_build_task_spec_allows_specific_read_only_audit_without_clarification() -> None:
+    """The fan-out QA fixture must enter the read-only DAG instead of waiting for input."""
+    spec = build_task_spec(
+        task_text=(
+            "Audit two independent read-only repository inspections across files: summarize "
+            "README.md and list the top-level tracked files. "
+            "Do not modify files, create artifacts, or commit."
+        ),
+        repo_url="https://github.com/natanayalo/code-agent",
+        target_branch="master",
+        constraints={"read_only": True},
+        task_kind="ambiguous",
+    )
+
+    assert spec.requires_clarification is False
+    assert spec.clarification_questions == []
+    assert spec.delivery_mode == "summary"
+    assert validate_task_spec_policy(spec) == []
+
+
 @pytest.mark.parametrize(
     ("task_text", "expected_type", "expected_risk"),
     [

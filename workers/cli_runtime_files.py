@@ -14,6 +14,19 @@ from workers.constants import DEFAULT_CHANGED_FILES_TIMEOUT_SECONDS
 
 logger = logging.getLogger(__name__)
 _GIT_ERROR_OUTPUT_MAX_CHARACTERS = 2048
+_UNTRACKED_NATIVE_RUNTIME_PREFIXES = (
+    ".agent_home/",
+    ".code-agent/native-agent-runner/",
+)
+
+
+def _is_untracked_native_runtime_path(status: str, path: str) -> bool:
+    """Return whether an untracked path is created by a native worker runtime."""
+    if status != "??":
+        return False
+    return path in {".agent_home", ".code-agent/native-agent-runner"} or path.startswith(
+        _UNTRACKED_NATIVE_RUNTIME_PREFIXES
+    )
 
 
 def _decode_safely(data: bytes | str | None) -> str:
@@ -219,7 +232,7 @@ def collect_changed_files_from_repo_path(
         path = item[3:]
         if "R" in status or "C" in status:
             next(items, None)
-        if path:
+        if path and not _is_untracked_native_runtime_path(status, path):
             changed_files.append(path)
 
     return list(dict.fromkeys(changed_files))

@@ -157,6 +157,93 @@ def test_collect_changed_files_from_repo_path_parses_porcelain_z_output(monkeypa
     assert changed_files == ["README.md", "runtime_ok_2.txt"]
 
 
+def test_collect_changed_files_from_repo_path_ignores_only_untracked_native_paths(
+    monkeypatch,
+) -> None:
+    """Keep tracked repository paths even when their names look internal."""
+
+    def _fake_run(*args, **kwargs):
+        return subprocess.CompletedProcess(
+            args=args[0],
+            returncode=0,
+            stdout=(
+                b" M README.md\0"
+                b" M .vscode/settings.json\0"
+                b" M .agent_home/.gemini/settings.json\0"
+                b"?? .agent_home/.gemini/antigravity-cli/cache.json\0"
+                b"?? .code-agent/native-agent-runner/stdout.txt\0"
+            ),
+            stderr=b"",
+        )
+
+    monkeypatch.setattr("workers.cli_runtime_files.subprocess.run", _fake_run)
+
+    changed_files = collect_changed_files_from_repo_path(Path("/tmp/repo"))
+
+    assert changed_files == [
+        "README.md",
+        ".vscode/settings.json",
+        ".agent_home/.gemini/settings.json",
+    ]
+
+
+def test_collect_changed_files_from_repo_path_preserves_tracked_renames_and_copies(
+    monkeypatch,
+) -> None:
+    """Keep tracked rename and copy destinations in changed-file evidence."""
+
+    def _fake_run(*args, **kwargs):
+        return subprocess.CompletedProcess(
+            args=args[0],
+            returncode=0,
+            stdout=(
+                b"R  .agent_home/.gemini/settings.json\0old-settings.json\0"
+                b"C  .vscode/copied-settings.json\0source-settings.json\0"
+            ),
+            stderr=b"",
+        )
+
+    monkeypatch.setattr("workers.cli_runtime_files.subprocess.run", _fake_run)
+
+    changed_files = collect_changed_files_from_repo_path(Path("/tmp/repo"))
+
+    assert changed_files == [
+        ".agent_home/.gemini/settings.json",
+        ".vscode/copied-settings.json",
+    ]
+
+
+def test_collect_changed_files_since_ref_preserves_all_baseline_paths(monkeypatch) -> None:
+    """Baseline diffs preserve all paths, including internal-looking names."""
+
+    def _fake_run(args, **_kwargs):
+        if "status" in args:
+            return subprocess.CompletedProcess(args=args, returncode=0, stdout=b"", stderr=b"")
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=0,
+            stdout=(
+                b"README.md\0"
+                b".agent_home/.gemini/settings.json\0"
+                b".vscode/copied-settings.json\0"
+            ),
+            stderr=b"",
+        )
+
+    monkeypatch.setattr("workers.cli_runtime_files.subprocess.run", _fake_run)
+
+    changed_files = collect_changed_files_since_ref_from_repo_path(
+        Path("/tmp/repo"),
+        base_ref="base-ref",
+    )
+
+    assert changed_files == [
+        "README.md",
+        ".agent_home/.gemini/settings.json",
+        ".vscode/copied-settings.json",
+    ]
+
+
 def test_collect_changed_files_from_repo_path_logs_timeout_details(monkeypatch) -> None:
     """Host fallback should log timeout details when git status exceeds timeout."""
 
