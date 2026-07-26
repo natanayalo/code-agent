@@ -365,6 +365,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Changed
 
+- Build(deps): bump fastapi from 0.139.0 to 0.140.0 ([#334](https://github.com/natanayalo/code-agent/pull/334))
+
 - Build(deps-dev): bump pre-commit from 4.6.0 to 4.6.1 ([#333](https://github.com/natanayalo/code-agent/pull/333))
 
 - Build(deps): bump actions/setup-python from 6 to 7 ([#332](https://github.com/natanayalo/code-agent/pull/332))
