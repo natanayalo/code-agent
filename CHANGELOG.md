@@ -365,6 +365,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Changed
 
+- Build(deps-dev): bump fast-uri from 3.1.2 to 3.1.4 in /dashboard ([#331](https://github.com/natanayalo/code-agent/pull/331))
+
 - Build(deps): bump actions/setup-node from 6 to 7 ([#324](https://github.com/natanayalo/code-agent/pull/324))
 
 - Build(deps): bump langchain-core from 1.4.8 to 1.4.9 ([#314](https://github.com/natanayalo/code-agent/pull/314))
