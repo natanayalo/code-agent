@@ -326,7 +326,7 @@ def test_orchestrator_runner_preserves_error_status() -> None:
     assert "worker crashed" in outcome.summary
 
 
-def test_orchestrator_runner_handles_approval_interrupt_as_failure() -> None:
+def test_orchestrator_runner_handles_approval_gate_as_failure() -> None:
     case = FrozenTaskCase(
         case_id="destructive-case",
         repo_fixture="fixtures/empty",
@@ -343,7 +343,7 @@ def test_orchestrator_runner_handles_approval_interrupt_as_failure() -> None:
     outcome = asyncio.run(runner.run_case(case))
 
     assert outcome.status == "failure"
-    assert "paused for operator input" in outcome.summary.lower()
+    assert "paused for operator approval" in outcome.summary.lower()
 
 
 # ---------------------------------------------------------------------------

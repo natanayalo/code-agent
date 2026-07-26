@@ -111,10 +111,17 @@ class DomainEvaluationPipeline:
             if clarification_required
             else state.approval.reason or "Task requires approval."
         )
+        interaction_kind = (
+            "approval"
+            if state.approval.required
+            else "clarification"
+            if clarification_required
+            else "input"
+        )
         return WorkerResult(
             status="failure",
             failure_kind="interaction",
-            summary=f"Evaluation paused for operator input. {reason}",
+            summary=f"Evaluation paused for operator {interaction_kind}. {reason}",
             commands_run=[],
             files_changed=[],
             test_results=[],
