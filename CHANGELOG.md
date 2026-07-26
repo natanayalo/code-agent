@@ -365,6 +365,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Changed
 
+- Build(deps): bump langchain-core from 1.4.9 to 1.5.1 ([#335](https://github.com/natanayalo/code-agent/pull/335))
+
 - Build(deps): bump fastapi from 0.139.0 to 0.140.0 ([#334](https://github.com/natanayalo/code-agent/pull/334))
 
 - Build(deps-dev): bump pre-commit from 4.6.0 to 4.6.1 ([#333](https://github.com/natanayalo/code-agent/pull/333))
