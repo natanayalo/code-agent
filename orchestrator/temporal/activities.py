@@ -1580,13 +1580,48 @@ class TaskExecutionActivities:
             logger.info("verify_result already executed for task %s, skipping", task_id)
             return
 
-        started_at = utc_now()
-        state_dict = state.model_dump()
-        for node in [self.verify_result_node, self.review_result_node]:
-            updates = await self._run_node(node, state_dict)
-            self._merge_updates(state_dict, updates)
+        async def send_heartbeats() -> None:
+            try:
+                while True:
+                    activity.heartbeat()
+                    await asyncio.sleep(5)
+            except asyncio.CancelledError:
+                raise
+            except RuntimeError as exc:
+                logger.debug("Temporal verification heartbeat failed for task %s: %s", task_id, exc)
+                raise
 
-        state = OrchestratorState.model_validate(state_dict)
+        async def run_verification() -> OrchestratorState:
+            state_dict = state.model_dump()
+            for node in [self.verify_result_node, self.review_result_node]:
+                updates = await self._run_node(node, state_dict)
+                self._merge_updates(state_dict, updates)
+            return OrchestratorState.model_validate(state_dict)
+
+        started_at = utc_now()
+        heartbeat_task = asyncio.create_task(
+            send_heartbeats(), name=f"temporal-verification-heartbeat-{task_id}"
+        )
+        verification_task = asyncio.create_task(
+            run_verification(), name=f"temporal-verification-{task_id}"
+        )
+        try:
+            done, _ = await asyncio.wait(
+                {verification_task, heartbeat_task}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if heartbeat_task in done:
+                heartbeat_error = heartbeat_task.exception()
+                verification_task.cancel()
+                await asyncio.gather(verification_task, return_exceptions=True)
+                raise heartbeat_error or RuntimeError("Temporal verification heartbeat stopped.")
+            state = await verification_task
+        finally:
+            if not verification_task.done():
+                verification_task.cancel()
+                await asyncio.gather(verification_task, return_exceptions=True)
+            heartbeat_task.cancel()
+            await asyncio.gather(heartbeat_task, return_exceptions=True)
+
         finished_at = utc_now()
 
         await self.service._run_blocking(
