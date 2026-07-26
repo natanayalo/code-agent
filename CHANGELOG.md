@@ -365,6 +365,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Changed
 
+- Build(deps): bump actions/setup-python from 6 to 7 ([#332](https://github.com/natanayalo/code-agent/pull/332))
+
 - Build(deps-dev): bump fast-uri from 3.1.2 to 3.1.4 in /dashboard ([#331](https://github.com/natanayalo/code-agent/pull/331))
 
 - Build(deps): bump actions/setup-node from 6 to 7 ([#324](https://github.com/natanayalo/code-agent/pull/324))
