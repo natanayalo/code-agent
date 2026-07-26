@@ -38,16 +38,25 @@ async def test_verify_result_heartbeats_while_verification_runs(monkeypatch) -> 
     activities._run_node = run_node
     heartbeats: list[None] = []
     monkeypatch.setattr(activities_module.activity, "heartbeat", lambda: heartbeats.append(None))
+    original_sleep = asyncio.sleep
+    repeated_heartbeats = asyncio.Event()
+
+    async def advance_heartbeat_interval(delay: float) -> None:
+        if delay == 5 and len(heartbeats) >= 2:
+            repeated_heartbeats.set()
+        await original_sleep(0)
+
+    monkeypatch.setattr(activities_module.asyncio, "sleep", advance_heartbeat_interval)
 
     verification_task = asyncio.create_task(
         TaskExecutionActivities.verify_result.__wrapped__(activities, "task-id")
     )
     await verification_started.wait()
-    await asyncio.sleep(0)
+    await asyncio.wait_for(repeated_heartbeats.wait(), timeout=1)
     release_verification.set()
     await verification_task
 
-    assert heartbeats
+    assert len(heartbeats) >= 2
 
 
 async def _run_blocking(func, *args, **kwargs):
