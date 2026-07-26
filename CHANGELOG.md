@@ -365,6 +365,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Changed
 
+- Build(deps): bump actions/setup-node from 6 to 7 ([#324](https://github.com/natanayalo/code-agent/pull/324))
+
 - Build(deps): bump langchain-core from 1.4.8 to 1.4.9 ([#314](https://github.com/natanayalo/code-agent/pull/314))
 
 - Build(deps): bump openai from 2.44.0 to 2.45.0 ([#315](https://github.com/natanayalo/code-agent/pull/315))
