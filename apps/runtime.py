@@ -9,9 +9,6 @@ from typing import Any, Final
 
 RUN_API_ENV_VAR: Final[str] = "CODE_AGENT_RUN_API"
 RUN_WORKER_ENV_VAR: Final[str] = "CODE_AGENT_RUN_WORKER"
-EXECUTION_RUNTIME_ENV_VAR: Final[str] = "CODE_AGENT_EXECUTION_RUNTIME"
-TEMPORAL_EXECUTION_RUNTIME: Final[str] = "temporal"
-LEGACY_EXECUTION_RUNTIME: Final[str] = "legacy"
 TEMPORAL_ONLY_CUTOVER_AT_ENV_VAR: Final[str] = "TEMPORAL_ONLY_CUTOVER_AT"
 
 
@@ -54,19 +51,6 @@ def coerce_non_negative_int_env(value: str | None, *, default: int) -> int:
     return parsed if parsed >= 0 else default
 
 
-def execution_runtime(environ: Mapping[str, str] | None = None) -> str:
-    """Return the selected execution runtime, defaulting to Temporal."""
-    resolved_env = os.environ if environ is None else environ
-    selected = resolved_env.get(EXECUTION_RUNTIME_ENV_VAR, "").strip().lower()
-    if selected and selected not in {TEMPORAL_EXECUTION_RUNTIME, LEGACY_EXECUTION_RUNTIME}:
-        raise ValueError(
-            f"{EXECUTION_RUNTIME_ENV_VAR} must be 'temporal' or 'legacy', got {selected!r}."
-        )
-    if selected in {TEMPORAL_EXECUTION_RUNTIME, LEGACY_EXECUTION_RUNTIME}:
-        return selected
-    return TEMPORAL_EXECUTION_RUNTIME
-
-
 def temporal_only_cutover_at(environ: Mapping[str, str] | None = None) -> datetime | None:
     """Return the configured immutable UTC cutover timestamp, if valid."""
     resolved_env = os.environ if environ is None else environ
@@ -82,10 +66,9 @@ def temporal_only_cutover_at(environ: Mapping[str, str] | None = None) -> dateti
     return parsed.astimezone(UTC)
 
 
-def validate_runtime_configuration(environ: Mapping[str, str] | None = None) -> None:
-    """Fail startup visibly for invalid runtime or cutover deployment configuration."""
+def validate_cutover_configuration(environ: Mapping[str, str] | None = None) -> None:
+    """Fail startup visibly for invalid cutover deployment configuration."""
     resolved_env = os.environ if environ is None else environ
-    execution_runtime(resolved_env)
     raw_cutover = resolved_env.get(TEMPORAL_ONLY_CUTOVER_AT_ENV_VAR, "").strip()
     if raw_cutover and temporal_only_cutover_at(resolved_env) is None:
         raise ValueError(f"{TEMPORAL_ONLY_CUTOVER_AT_ENV_VAR} must be an aware ISO-8601 timestamp.")
@@ -99,11 +82,6 @@ def initialize_persisted_cutover(session_factory: Any) -> datetime | None:
         return RuntimeCutoverRepository(session).initialize_temporal_only(
             temporal_only_cutover_at()
         )
-
-
-def uses_temporal_execution(environ: Mapping[str, str] | None = None) -> bool:
-    """Return whether the selected execution runtime is Temporal."""
-    return execution_runtime(environ) == TEMPORAL_EXECUTION_RUNTIME
 
 
 def should_run_api(environ: Mapping[str, str] | None = None) -> bool:

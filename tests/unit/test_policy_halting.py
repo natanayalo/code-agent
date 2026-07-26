@@ -2,7 +2,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from orchestrator.graph import _route_after_generate_task_spec, generate_task_spec
+from orchestrator.graph import generate_task_spec
 from orchestrator.state import OrchestratorState, TaskRequest, TaskSpec
 from workers import WorkerResult
 
@@ -44,37 +44,6 @@ async def test_generate_task_spec_halts_on_policy_violation(monkeypatch):
     assert result.status == "error"
     assert "safety policy violations" in result.summary
     assert result.next_action_hint == "halt_policy_violation"
-
-
-def test_route_after_generate_task_spec_with_policy_violation():
-    """Verify that the router correctly routes to summarize_result on early gates."""
-    # Case: Policy violation error exists
-    state = OrchestratorState(
-        task=TaskRequest(task_id="t", task_text="t", repo_url="r", branch="b"),
-        errors=["task_spec_policy:some_violation"],
-    )
-    assert _route_after_generate_task_spec(state) == "summarize_result"
-
-    # Case: No policy violation
-    state = OrchestratorState(
-        task=TaskRequest(task_id="t", task_text="t", repo_url="r", branch="b"), errors=[]
-    )
-    assert _route_after_generate_task_spec(state) == "load_memory"
-
-    # Case: Clarification-required TaskSpec should route to clarification interrupt.
-    clarification_state = OrchestratorState(
-        task=TaskRequest(task_id="t", task_text="fix it", repo_url="r", branch="b"),
-        task_spec=TaskSpec(
-            goal="fix it",
-            task_type="investigation",
-            risk_level="low",
-            delivery_mode="workspace",
-            forbidden_actions=["hardcode_secrets"],
-            requires_clarification=True,
-            clarification_questions=["What exact failure should be fixed?"],
-        ),
-    )
-    assert _route_after_generate_task_spec(clarification_state) == "await_clarification"
 
 
 @pytest.mark.asyncio

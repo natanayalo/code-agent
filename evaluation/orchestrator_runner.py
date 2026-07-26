@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Awaitable, Callable
+from typing import Any
 
+from evaluation.domain_pipeline import DomainEvaluationPipeline
 from evaluation.harness import (
     EvaluationRunner,
     normalize_path_for_scoring,
 )
 from evaluation.models import FrozenTaskCase, ReliabilityMetrics, ReviewOutcome, WorkerOutcome
-from orchestrator import OrchestratorState, build_orchestrator_graph
-from orchestrator.checkpoints import create_in_memory_checkpointer
+from orchestrator import OrchestratorState
 from orchestrator.task_spec import is_destructive_task
 from workers import ArtifactReference, Worker, WorkerRequest, WorkerResult, WorkerTestResult
 from workers.facade import WorkerFacade
@@ -277,7 +279,7 @@ def _extract_reliability_metrics(state: OrchestratorState) -> ReliabilityMetrics
 
 
 class OrchestratorReplayRunner(EvaluationRunner):
-    """Execute frozen-suite cases through the real orchestrator graph path."""
+    """Execute frozen-suite cases through retained orchestration domain callables."""
 
     def __init__(
         self,
@@ -287,9 +289,13 @@ class OrchestratorReplayRunner(EvaluationRunner):
     ) -> None:
         self._worker = _FrozenOutcomeWorker(outcomes_by_case_id=outcomes_by_case_id)
         self._worker_override = worker_override
-        self._graph = build_orchestrator_graph(
-            worker=WorkerFacade(codex_worker=self._worker, antigravity_worker=self._worker),
-            checkpointer=create_in_memory_checkpointer(),
+        self._worker_facade = WorkerFacade(
+            codex_worker=self._worker,
+            antigravity_worker=self._worker,
+        )
+        pipeline = DomainEvaluationPipeline(worker=self._worker_facade)
+        self._run_evaluation: Callable[[dict[str, Any]], Awaitable[OrchestratorState]] = (
+            pipeline.run
         )
 
     def _extract_review_outcome(self, state: OrchestratorState) -> ReviewOutcome | None:
@@ -355,7 +361,7 @@ class OrchestratorReplayRunner(EvaluationRunner):
                 "reason": "Frozen evaluation unattended non-destructive task auto-approved.",
             }
 
-        raw_state = await self._graph.ainvoke(
+        state = await self._run_evaluation(
             {
                 "task": {
                     "task_text": case.task_text,
@@ -371,24 +377,8 @@ class OrchestratorReplayRunner(EvaluationRunner):
                         "orchestrator_timeout_seconds": 35,
                     },
                 }
-            },
-            config={"configurable": {"thread_id": f"frozen-eval-{case.case_id}"}},
+            }
         )
-        if "__interrupt__" in raw_state:
-            safe_state = {k: v for k, v in raw_state.items() if k != "__interrupt__"}
-            state = OrchestratorState.model_validate(safe_state)
-            reliability = _extract_reliability_metrics(state)
-            return WorkerOutcome(
-                status="failure",
-                summary=(
-                    "Orchestrator execution was interrupted awaiting approval in "
-                    "unattended evaluation mode."
-                ),
-                files_changed=(),
-                tests_passed=False,
-                reliability=reliability,
-            )
-        state = OrchestratorState.model_validate(raw_state)
         result = state.result
         if result is None:
             return WorkerOutcome(

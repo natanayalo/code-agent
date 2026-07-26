@@ -372,44 +372,6 @@ def test_execution_mapping_helpers_cover_fallback_paths(caplog: pytest.LogCaptur
     assert "codex default" in caplog.text
 
 
-def test_interrupt_helpers_normalize_payloads_and_summaries() -> None:
-    """Interrupt normalization should handle mapping/object inputs and readable summaries."""
-
-    class _InterruptObject:
-        def __init__(self, value):
-            self.value = value
-
-    assert execution_module._interrupt_payload_from_object(
-        {"value": {"approval_type": "manual"}}
-    ) == {"approval_type": "manual"}
-    assert execution_module._interrupt_payload_from_object({"reason": "Need approval"}) == {
-        "reason": "Need approval"
-    }
-    assert execution_module._interrupt_payload_from_object(
-        _InterruptObject({"approval_type": "permission_escalation"})
-    ) == {"approval_type": "permission_escalation"}
-    assert (
-        execution_module._interrupt_payload_from_object(_InterruptObject("not-a-mapping")) is None
-    )
-
-    permission_summary = execution_module._interrupt_summary(
-        [
-            {
-                "approval_type": "permission_escalation",
-                "requested_permission": "workspace_write",
-                "reason": "Needs elevated access.",
-            }
-        ]
-    )
-    typed_summary = execution_module._interrupt_summary([{"approval_type": "manual_review"}])
-    fallback_summary = execution_module._interrupt_summary([{}])
-
-    assert "workspace_write" in permission_summary
-    assert permission_summary.endswith("Needs elevated access.")
-    assert typed_summary == "Run paused pending manual review approval."
-    assert fallback_summary == "Run paused pending manual approval."
-
-
 def test_trace_and_phoenix_helpers_cover_cache_and_fallback_paths(monkeypatch) -> None:
     """Tracing helpers should parse traceparent values and fall back safely on lookup failures."""
     execution_tracing_module._PHOENIX_PROJECT_ID_CACHE = None

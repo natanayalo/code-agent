@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any, cast
 
-from sqlalchemy import case, select, update
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from db.enums import WorkerNodeStatus, WorkerType, coerce_worker_type
@@ -107,67 +107,6 @@ class WorkerNodeRepository:
             node.status = WorkerNodeStatus.ACTIVE
         self.session.flush()
         return node.status
-
-    def reserve_load(self, *, worker_id: str) -> bool:
-        """Atomically reserve one unit of capacity for an active worker."""
-        updated = self.session.execute(
-            update(WorkerNode)
-            .where(
-                WorkerNode.worker_id == worker_id,
-                WorkerNode.status == WorkerNodeStatus.ACTIVE,
-                WorkerNode.current_load < WorkerNode.capacity,
-            )
-            .values(current_load=WorkerNode.current_load + 1)
-            .execution_options(synchronize_session="fetch")
-        )
-        updated_rows = int(getattr(updated, "rowcount", 0) or 0)
-        if updated_rows <= 0:
-            return False
-        self.session.flush()
-        return True
-
-    def release_load(self, *, worker_id: str, count: int = 1) -> bool:
-        """Atomically release worker capacity without allowing negative load."""
-        bounded_count = max(1, count)
-        updated = self.session.execute(
-            update(WorkerNode)
-            .where(WorkerNode.worker_id == worker_id)
-            .values(
-                current_load=case(
-                    (
-                        WorkerNode.current_load >= bounded_count,
-                        WorkerNode.current_load - bounded_count,
-                    ),
-                    else_=0,
-                )
-            )
-            .execution_options(synchronize_session="fetch")
-        )
-        updated_rows = int(getattr(updated, "rowcount", 0) or 0)
-        if updated_rows <= 0:
-            return False
-        self.session.flush()
-        return True
-
-    def set_load(self, *, worker_id: str, current_load: int) -> bool:
-        """Set load from authoritative lease state after reconciliation."""
-        bounded_load = max(0, current_load)
-        updated = self.session.execute(
-            update(WorkerNode)
-            .where(WorkerNode.worker_id == worker_id)
-            .values(
-                current_load=case(
-                    (WorkerNode.capacity >= bounded_load, bounded_load),
-                    else_=WorkerNode.capacity,
-                )
-            )
-            .execution_options(synchronize_session="fetch")
-        )
-        updated_rows = int(getattr(updated, "rowcount", 0) or 0)
-        if updated_rows <= 0:
-            return False
-        self.session.flush()
-        return True
 
     def record_failure(
         self,

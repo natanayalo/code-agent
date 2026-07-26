@@ -109,6 +109,28 @@ def test_worker_waits_for_a_healthy_temporal_service(
     assert worker_service["restart"] == "on-failure"
 
 
+def test_compose_exposes_no_legacy_runtime_selector_or_task_queue_controls(
+    compose_config: dict[str, Any],
+) -> None:
+    """Production-like startup must not expose a Postgres polling fallback."""
+    services = compose_config["services"]
+    api_env = services["api"]["environment"]
+    worker_env = services["worker"]["environment"]
+    retired_settings = {
+        "CODE_AGENT_EXECUTION_RUNTIME",
+        "CODE_AGENT_QUEUE_POLL_INTERVAL_SECONDS",
+        "CODE_AGENT_QUEUE_LEASE_SECONDS",
+        "CODE_AGENT_QUEUE_CAPACITY",
+        "CODE_AGENT_QUEUE_WORKER_ID",
+        "CODE_AGENT_CHECKPOINT_DB_PATH",
+    }
+
+    assert retired_settings.isdisjoint(api_env)
+    assert retired_settings.isdisjoint(worker_env)
+    assert worker_env["TEMPORAL_ADDRESS"] == "${TEMPORAL_ADDRESS_DOCKER:-temporal:7233}"
+    assert worker_env["CODE_AGENT_QUEUE_MAX_ATTEMPTS"] == "${CODE_AGENT_QUEUE_MAX_ATTEMPTS:-3}"
+
+
 def test_compose_includes_optional_phoenix_observability_service(
     compose_config: dict[str, Any],
 ) -> None:

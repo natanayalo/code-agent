@@ -14,6 +14,8 @@ Active focus:
     state, and recorded clean drain plus rollback evidence in the immutable
     `m25.3-temporal-cutover-20260726T213001Z` release. See the
     [Slice 3 closeout](m25_3_slice_3_evidence_summary.md).
+  - Slice 4A retires the Postgres task scheduler, LangGraph lifecycle, and
+    runtime selector. PR 4B is next and owns the snapshot-backed schema cleanup.
 
 ## Phase 3 Reliability Baseline
 - **Baseline cases**: 25 baseline cases run, 25 passed according to the frozen evaluation report.
@@ -26,8 +28,9 @@ Active focus:
 - API + Telegram ingress for task intake
 - shared-secret API auth for protected ingress routes
 - durable Postgres persistence for users/sessions/tasks/runs/artifacts/memory
-- split API/worker runtime with queue polling and lease claims
-- LangGraph orchestrator and Temporal workflow engine for execution lifecycle, approval checkpoints, verifier stage, and timeline persistence
+- split API/worker runtime with transactional Temporal command dispatch
+- Temporal workflow lifecycle with shared routing, approval, memory, verifier,
+  review, and timeline domain callables
 - worker adapters for Codex CLI, Antigravity CLI, and OpenRouter-backed execution
 - sandboxed workspace/container execution with command artifact capture and retention controls
 - skeptical memory + compact session state persistence
@@ -56,8 +59,8 @@ Active focus:
 
 ## Next Slices Only
 
-1. M25.3: Temporal-only cutover and legacy retirement
-   - Slice 4 — legacy deletion and schema cleanup: code-deletion PR, then schema-migration PR
+1. M25.3 Slice 4B: snapshot-backed schema cleanup
+   - remove the retained task lease columns after verifying migration and restore procedures
 2. M26: review comment repair
    - extend the PR repair loop from CI failures to actionable review feedback
    - may begin during the M25.3 evidence gate

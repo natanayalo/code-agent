@@ -28,6 +28,7 @@ from db.utils import compute_interaction_content_hash
 from orchestrator.decomposition import is_read_only_fanout_eligible
 from orchestrator.execution_graph_input import build_orchestrator_graph_input
 from orchestrator.execution_policy import _apply_execution_budget_policy
+from orchestrator.execution_types import ProgressEvent, ProgressPhase
 from orchestrator.graph import (
     _aggregate_decomposed_results,
     _await_worker_with_timeout,
@@ -216,6 +217,42 @@ class TaskExecutionActivities:
     def _release_execution_capacity(self, owner: str, token: str) -> None:
         with session_scope(self.service.session_factory) as session:
             ExecutionCapacityPermitRepository(session).release(owner=owner, token=token)
+
+    async def _notify_progress(
+        self,
+        task_id: str,
+        *,
+        phase: ProgressPhase,
+        summary: str | None = None,
+    ) -> None:
+        """Deliver best-effort product progress from durable Temporal activities."""
+        notifier = self.service.progress_notifier
+        if notifier is None:
+            return
+        loaded = await self.service._run_blocking(
+            self.service._load_submission_for_task,
+            task_id=task_id,
+        )
+        if loaded is None:
+            return
+        submission, persisted = loaded
+        event = ProgressEvent(
+            phase=phase,
+            task_id=task_id,
+            session_id=persisted.session_id,
+            channel=persisted.channel,
+            external_thread_id=persisted.external_thread_id,
+            task_text=submission.task_text,
+            summary=summary,
+        )
+        try:
+            await notifier.notify(submission=submission, event=event)
+        except Exception:
+            logger.warning(
+                "Temporal progress notification failed",
+                exc_info=True,
+                extra={"task_id": task_id, "phase": phase},
+            )
 
     def _get_current_state(self, task_id: str) -> OrchestratorState:
         with session_scope(self.service.session_factory) as session:
@@ -433,6 +470,12 @@ class TaskExecutionActivities:
             finished_at=finished_at,
         )
         state.timeline_persisted_count = len(state.timeline_events)
+        await self._notify_progress(task_id, phase="started")
+        await self._notify_progress(
+            task_id,
+            phase="awaiting_approval" if state.approval.required else "running",
+            summary=state.approval.reason if state.approval.required else None,
+        )
 
         return {
             "requires_clarification": bool(
@@ -1477,7 +1520,6 @@ class TaskExecutionActivities:
                 if not approved:
                     task.status = TaskStatus.FAILED
                     task.last_error = "Worker permission escalation rejected by operator."
-                    task.next_attempt_at = None
                     TaskTimelineRepository(session).create_next_for_attempt(
                         task_id=task_id,
                         attempt_number=task.attempt_count,
@@ -1532,7 +1574,6 @@ class TaskExecutionActivities:
                     return
                 task.status = TaskStatus.FAILED
                 task.last_error = f"Temporal workflow failed: {failure}"
-                task.next_attempt_at = None
                 TaskTimelineRepository(session).create_next_for_attempt(
                     task_id=task_id,
                     attempt_number=task.attempt_count,
@@ -1673,6 +1714,16 @@ class TaskExecutionActivities:
             force_status=force_status,
         )
         state.timeline_persisted_count = len(state.timeline_events)
+        phase: ProgressPhase = (
+            "completed"
+            if state.result is not None and state.result.status == "success"
+            else "failed"
+        )
+        await self._notify_progress(
+            task_id,
+            phase=phase,
+            summary=state.result.summary if state.result is not None else None,
+        )
 
     @activity.defn(name="persist_memory")
     @_restore_task_trace_context

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy.pool import StaticPool
 
-from db.base import Base, utc_now
+from db.base import Base
 from db.enums import TaskStatus, WorkerRuntimeMode, WorkerType
 from orchestrator import execution as execution_module
 from repositories import (
@@ -475,7 +475,6 @@ def test_replay_avoids_redundant_provenance() -> None:
             task_text="Recursive provenance",
             constraints={"replayed_from": ["self_id", "old_id"]},
             status=TaskStatus.COMPLETED,
-            next_attempt_at=utc_now(),
         )
         task3.id = "self_id"
         session.flush()

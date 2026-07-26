@@ -6,10 +6,8 @@ from typing import Any
 
 from db.base import utc_now
 from db.enums import WorkerNodeStatus, WorkerType, coerce_worker_type
-from orchestrator.state import OrchestratorState
-from repositories import TaskRepository, WorkerNodeRepository, session_scope
+from repositories import WorkerNodeRepository, session_scope
 from workers.base import normalize_worker_profile_name
-from workers.failure_taxonomy import classify_failure_kind
 
 LEGACY_PROFILE_COMPATIBILITY_NAMES = (
     "antigravity-native-discovery",
@@ -127,7 +125,7 @@ def register_worker_node(
     capacity: int = 1,
     process_identity: str | None = None,
 ) -> WorkerNodeStatus:
-    """Register a queue worker process and return its effective state."""
+    """Register a Temporal worker process and return its effective state."""
     now = utc_now()
     payload = _worker_node_registration_payload(self, capacity=capacity)
     with session_scope(self.session_factory) as session:
@@ -141,7 +139,7 @@ def register_worker_node(
 
 
 def ensure_worker_node(self: Any, *, worker_id: str) -> WorkerNodeStatus:
-    """Create a default worker node for compatibility with direct claim callers."""
+    """Create a default worker node for health and capability tracking."""
     now = utc_now()
     payload = _worker_node_registration_payload(self, capacity=1)
     with session_scope(self.session_factory) as session:
@@ -160,52 +158,26 @@ def heartbeat_worker_node(self: Any, *, worker_id: str) -> WorkerNodeStatus | No
 
 
 def sweep_worker_nodes(self: Any, *, stale_seconds: int) -> dict[str, int]:
-    """Sweep stale worker heartbeats and expired task leases."""
+    """Sweep stale worker heartbeats."""
     now = utc_now()
     with session_scope(self.session_factory) as session:
-        reclaimed_leases = TaskRepository(session).reclaim_expired_leases(now=now)
         stale_workers = WorkerNodeRepository(session).sweep_stale_workers(
             now=now,
             threshold_seconds=stale_seconds,
         )
-        return {
-            "reclaimed_leases": reclaimed_leases,
-            "stale_workers": stale_workers,
-        }
+        return {"stale_workers": stale_workers}
 
 
 def record_worker_node_success(self: Any, *, worker_id: str) -> None:
-    """Reset worker failure accounting after a successful queued run."""
+    """Reset worker failure accounting after a successful worker run."""
     with session_scope(self.session_factory) as session:
         WorkerNodeRepository(session).record_success(worker_id=worker_id)
 
 
 def record_worker_node_failure(self: Any, *, worker_id: str, failure_kind: str | None) -> None:
-    """Record a typed queued-run failure against the worker node."""
+    """Record a typed worker-run failure against the worker node."""
     with session_scope(self.session_factory) as session:
         WorkerNodeRepository(session).record_failure(
             worker_id=worker_id,
             failure_kind=failure_kind,
         )
-
-
-def worker_node_failure_kind_from_state(state: OrchestratorState) -> str | None:
-    """Resolve the typed failure kind used for worker-node health accounting."""
-    if state.result is None:
-        return "unknown"
-    failure_kind = getattr(state.result, "failure_kind", None)
-    if failure_kind and failure_kind != "unknown":
-        return failure_kind
-    return classify_failure_kind(
-        status=state.result.status,
-        summary=state.result.summary,
-        commands_run=state.result.commands_run,
-    )
-
-
-def worker_node_failure_kind_from_exception(exc: Exception) -> str | None:
-    """Classify an exception raised by queued task execution."""
-    return classify_failure_kind(
-        status="error",
-        summary=f"{type(exc).__name__}: {exc}",
-    )

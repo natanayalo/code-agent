@@ -20,7 +20,7 @@ from repositories import (
 from tests.integration.task_endpoints_support import (
     DEFAULT_SHARED_SECRET,
     StaticWorker,
-    _run_one_queued_task,
+    _run_one_temporal_task,
 )
 from workers import WorkerProfile, WorkerResult
 
@@ -134,7 +134,7 @@ def test_submit_task_persists_execution_path_and_allows_polling(
 
     _assert_task_response_payload(payload)
 
-    _run_one_queued_task(client)
+    _run_one_temporal_task(client)
 
     get_response = client.get(f"/tasks/{task_id}")
     latest_run = get_response.json()["latest_run"]
@@ -243,7 +243,7 @@ def test_task_endpoints_expose_profile_and_runtime_metadata_when_profile_routing
 
         assert response.status_code == 202
         task_id = response.json()["task_id"]
-        _run_one_queued_task(profiled_client)
+        _run_one_temporal_task(profiled_client)
 
         get_response = profiled_client.get(f"/tasks/{task_id}")
         assert get_response.status_code == 200
@@ -336,7 +336,7 @@ def test_task_endpoints_accept_worker_profile_override_for_explicit_legacy_opt_i
 
         assert response.status_code == 202
         task_id = response.json()["task_id"]
-        _run_one_queued_task(profiled_client)
+        _run_one_temporal_task(profiled_client)
 
         get_response = profiled_client.get(f"/tasks/{task_id}")
         assert get_response.status_code == 200

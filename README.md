@@ -13,8 +13,8 @@ The platform is built for one operator-first use case: reliable coding execution
 - FastAPI ingress for `/tasks`, `/webhook`, and Telegram updates
 - API authentication for task-ingress endpoints via shared secret
 - durable task/session/run persistence in Postgres
-- queue + lease worker runtime split (`api` process and `worker` process)
-- LangGraph orchestrator with routing, approval checkpoints, retries, verifier stage, and timeline events
+- split API/Temporal worker runtime with durable command outbox submission
+- Temporal workflows with shared routing, approval, memory, verification, review, and timeline domain callables
 - CLI-driven worker adapters for Codex CLI, Antigravity CLI, and OpenRouter-backed runtime
 - persistent Docker sandbox workspaces with audit artifacts and retention
 - structured skeptical memory + compact session state persistence
@@ -49,7 +49,7 @@ Detailed architecture: [`docs/architecture.md`](docs/architecture.md)
 ## Repository Layout
 
 - `apps/`: runtime entrypoints and API routes
-- `orchestrator/`: workflow graph, execution service, state transitions
+- `orchestrator/`: Temporal workflows, execution service, domain state transitions
 - `workers/`: worker contract + runtime-specific adapters
 - `sandbox/`: workspace/container lifecycle and sandbox controls
 - `memory/`: memory-domain models and retrieval helpers
@@ -86,9 +86,8 @@ cp .env.example .env
 scripts/up.sh
 ```
 
-The Compose stack uses the Temporal execution runtime by default. To run the
-legacy queue intentionally during the retirement evidence gate, set
-`CODE_AGENT_EXECUTION_RUNTIME=legacy`.
+The Compose stack uses Temporal unconditionally. If Temporal is unavailable,
+new submissions fail visibly; there is no runtime selector or polling fallback.
 
 The M25.2 decomposed-task fan-out pilot is disabled by default. Set
 `CODE_AGENT_DECOMPOSED_FANOUT_ENABLED=true` only to enable version-gated,
@@ -137,7 +136,7 @@ CODE_AGENT_TRACING_OTLP_ENDPOINT=http://phoenix:6006/v1/traces
 ```
 
 Then start the stack with `scripts/up.sh` and open Phoenix at
-`http://localhost:6006` to inspect LangGraph/orchestrator traces.
+`http://localhost:6006` to inspect Temporal activity and orchestrator-domain traces.
 
 ## Dashboard / Operator UI
 

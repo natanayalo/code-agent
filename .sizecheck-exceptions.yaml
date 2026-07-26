@@ -3,7 +3,7 @@ file_exceptions:
   db/models.py: Central ORM definitions; tightly coupled models.
   memory/observation.py: Cohesive service containing all observation-related logic (capture, context retrieval, bridging) that naturally spans multiple models.
   orchestrator/brain.py: Optional orchestrator-brain contracts for TaskSpec enrichment and routing. (coupled to models preventing extraction)
-  orchestrator/graph.py: LangGraph workflow skeleton for the orchestrator happy path. (coupled to models preventing extraction)
+  orchestrator/graph.py: Reusable orchestration domain callables for routing, memory, worker execution, verification, review, and delivery. (coupled to models preventing extraction)
   orchestrator/nodes/verification_result.py: Maps complex verification states and validation rules into structured report items.
   orchestrator/verification.py: Coordinates the entire verification loop including code building, execution, parsing, and state updates. (Tightly coupled logic boundary)
   orchestrator/execution_outcome_service.py: Master orchestration flow persisting numerous task aspects including plans, heavily integrated.
@@ -54,10 +54,8 @@ function_exceptions:
     _apply_brain_route_suggestion: Applies routing suggestions by merging them securely into state; tightly coupled mapping block.
     _aggregate_decomposed_results: Aggregates all node-level worker outputs into the existing parent WorkerResult contract; keeping the field mapping together prevents delivery and memory fields from being dropped.
     _await_decomposed_nodes: Sequential DAG execution loop coordinates dependency readiness, retries, shared worker context, and permission-blocked resume state.
-    _add_orchestrator_edges: LangGraph edge declarations are a single cohesive workflow topology and splitting them would obscure routing behavior.
-    await_result: Existing worker-result boundary now includes the sequential decomposed execution branch while preserving legacy worker behavior.
-    build_await_result_node: Graph node builder for awaiting worker results, handling parsing, progress, and fallback logic cleanly without artificial splitting.
-    _add_orchestrator_complex_nodes: Graph node builder block; splitting degrades readability.
+    await_result: Worker-result boundary includes the sequential decomposed execution branch while preserving single-worker behavior.
+    build_await_result_node: Domain callable builder for awaiting worker results, handling parsing, progress, and fallback logic cleanly without artificial splitting.
   orchestrator/task_spec.py:
     apply_task_spec_brain_suggestion: Merges AI suggestions into TaskSpec; involves deep nested dictionary and model updates.
     build_task_spec: Parses raw request into structured contract; highly coupled to input validation rules.

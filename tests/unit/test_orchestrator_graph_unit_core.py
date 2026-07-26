@@ -58,18 +58,6 @@ def test_task_requires_approval_accepts_trusted_approved_status() -> None:
     assert _task_requires_approval(state) is False
 
 
-def test_coerce_approval_decision():
-    assert _coerce_approval_decision(True) is True
-    assert _coerce_approval_decision({"approved": True}) is True
-    assert _coerce_approval_decision({"approved": False}) is False
-    assert _coerce_approval_decision({"approved": "y"}) is True
-    assert _coerce_approval_decision({"approved": "no"}) is False
-    assert _coerce_approval_decision({"approved": 123}) is False
-    assert _coerce_approval_decision({"other": "field"}) is False
-    assert _coerce_approval_decision("yes") is True
-    assert _coerce_approval_decision("no") is False
-
-
 def test_default_worker_result_provider():
     request = WorkerRequest(task_text="demo")
     res = _default_worker_result_provider(request)
@@ -779,8 +767,3 @@ def test_summarize_result_reviewer_findings_without_leading_newline_when_summary
 
     assert summary.startswith("---\n### Reviewer Findings")
     assert not summary.startswith("\n")
-
-
-def test_create_in_memory_checkpointer():
-    cp = create_in_memory_checkpointer()
-    assert cp is not None

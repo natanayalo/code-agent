@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
 
 from db.base import Base
-from db.enums import TaskStatus, TimelineEventType
+from db.enums import TaskStatus
 from db.models import TemporalCommand
 from orchestrator.execution import TaskExecutionService
 from repositories import (
@@ -81,27 +81,10 @@ def client(session_factory, slow_worker) -> TestClient:
         yield test_client
 
 
-def test_cancel_pending_task_prevents_claim(client: TestClient, session_factory):
-    """A cancelled task should never be picked up by a worker."""
-    response = client.post("/tasks", json={"task_text": "Pending task"})
-    task_id = response.json()["task_id"]
-
-    # Cancel it immediately
-    cancel_response = client.post(f"/tasks/{task_id}/cancel")
-    assert cancel_response.status_code == 200
-    assert cancel_response.json()["status"] == "failed"
-
-    # Try to claim it
-    service = client.app.state.task_service
-    claim = service.claim_next_task(worker_id="test-worker", lease_seconds=60)
-    assert claim is None
-
-
 def test_cancel_temporal_task_queues_workflow_cancellation(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+    client: TestClient,
 ):
     """Temporal-backed cancellation should enqueue a durable cancel command."""
-    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
     response = client.post("/tasks", json={"task_text": "Temporal cancellation"})
     task_id = response.json()["task_id"]
 
@@ -112,61 +95,6 @@ def test_cancel_temporal_task_queues_workflow_cancellation(
     with session_scope(client.app.state.task_service.session_factory) as session:
         command = session.query(TemporalCommand).filter_by(command_type="cancel").one()
         assert command.task_id == task_id
-
-
-def test_cancel_in_progress_task_aborts_execution(client: TestClient, session_factory, slow_worker):
-    """Cancelling an in-progress task should stop the heartbeat and abort the orchestrator."""
-    response = client.post("/tasks", json={"task_text": "Long task"})
-    task_id = response.json()["task_id"]
-
-    service = client.app.state.task_service
-    claim = service.claim_next_task(worker_id="test-worker", lease_seconds=3)
-    assert claim is not None
-
-    async def run_task():
-        return await service.run_queued_task(
-            task_id=task_id, worker_id="test-worker", lease_seconds=3
-        )
-
-    async def test_flow():
-        # Start execution
-        exec_task = asyncio.create_task(run_task())
-
-        # Wait for worker to start
-        await asyncio.wait_for(slow_worker.started.wait(), timeout=5.0)
-
-        # Cancel the task via API
-        cancel_response = client.post(f"/tasks/{task_id}/cancel")
-        assert cancel_response.status_code == 200
-
-        # Wait for execution to be aborted by heartbeat (lease is 3s, interval is 1s)
-        await asyncio.wait_for(exec_task, timeout=10.0)
-
-        return exec_task.result()
-
-    asyncio.run(test_flow())
-
-    assert slow_worker.cancelled is True
-
-    # Verify final status
-    get_response = client.get(f"/tasks/{task_id}")
-    assert get_response.json()["status"] == "failed"
-    assert "cancelled" in get_response.json()["last_error"].lower()
-
-    # Verify timeline
-    with session_scope(session_factory) as session:
-        task = TaskRepository(session).get(task_id)
-        events = [e.event_type for e in task.timeline_events]
-        assert events.count(TimelineEventType.TASK_CANCELLED) == 1
-
-    # Call cancel again and verify no duplicate event
-    cancel_response = client.post(f"/tasks/{task_id}/cancel")
-    assert cancel_response.status_code == 200
-
-    with session_scope(session_factory) as session:
-        task = TaskRepository(session).get(task_id)
-        events = [e.event_type for e in task.timeline_events]
-        assert events.count(TimelineEventType.TASK_CANCELLED) == 1
 
 
 def test_cancel_terminal_task_is_ignored(client: TestClient, session_factory):
@@ -191,13 +119,6 @@ def test_cancelled_task_is_terminal(client: TestClient, session_factory):
     task_id = response.json()["task_id"]
 
     client.post(f"/tasks/{task_id}/cancel")
-
-    # Attempt to "re-queue" it by manually setting status in DB
-    # (if we could, but repo should block it)
-    # Actually, we should check if claim_next_task ignores it.
-    service = client.app.state.task_service
-    claim = service.claim_next_task(worker_id="test-worker", lease_seconds=60)
-    assert claim is None
 
     # Try to approve it if it was waiting (it shouldn't be, but let's test the state machine)
     # Re-using the conflict logic in apply_task_approval_decision

@@ -1,55 +1,53 @@
-# M24.9.5d — Legacy Runtime Drain Plan
+# M24.9.5d — Legacy Runtime Drain Inventory
 
 ## Decision
 
-Temporal is the normal runtime for new sequential Compose-stack tasks. The
-Postgres queue/lease runtime and LangGraph workflow remain an explicit
-`CODE_AGENT_EXECUTION_RUNTIME=legacy` fallback until parity and rollback
-conditions are completed. This document classifies code; it does not delete a
-fallback path.
+The M25.3 release evidence gate is accepted. PR 4A makes Temporal unconditional
+for new task submission and worker startup and removes the Postgres task
+polling/lease scheduler plus the LangGraph lifecycle. The retained
+legacy-capable image and matching configuration remain the rollback artifact
+until PR 4B completes schema cleanup.
 
-## Classification
+## Post-4A classification
 
-| Area | Current locations | Classification | Drain condition |
-| --- | --- | --- | --- |
-| Runtime selection | `apps/runtime.py`, submission services | Keep | Retain the explicit selector until an operator-approved rollback alternative exists. |
-| Temporal lifecycle | `orchestrator/temporal/` | Primary | Extend for M25; do not duplicate scheduling in the legacy runtime. |
-| Queue claims and leases | `repositories/sqlalchemy_task.py`, `orchestrator/execution_runtime_service.py`, `apps/worker/main.py` | Fallback-only deletion candidate | No production-like tasks use legacy after all parity gates pass. |
-| WorkerNode dispatch mechanics | `repositories/sqlalchemy_worker.py`, `WorkerNode`, legacy loop | Split | Keep profile/capability/operator policy; claim capacity, leases, stale reclaim, and dispatch quarantine are deletion candidates when Temporal replaces them. |
-| LangGraph durable graph/checkpoints | `orchestrator/graph.py`, legacy callers | Fallback-only deletion candidate | Temporal implements every operator interaction family and sequential route. |
-| Domain nodes, Worker contract, sandbox, validation, memory | `orchestrator/nodes/`, `workers/`, `sandbox/`, `memory/` | Keep custom | Product logic invoked by both runtimes. |
-| Postgres task projections | `db/`, `repositories/` | Keep custom | Dashboard/API read product state, not Temporal history. |
+| Area | Current location | Disposition |
+| --- | --- | --- |
+| Task submission | `orchestrator/execution_submission_service.py` | Always persist `temporal` and enqueue a durable start command. |
+| Temporal lifecycle | `orchestrator/temporal/` | Sole production lifecycle owner. |
+| Task queue claims and leases | SQLAlchemy columns and migrations only | Live methods and writes removed; columns retained for PR 4B compatibility. |
+| WorkerNode registry | `repositories/sqlalchemy_worker.py` | Keep registration, profiles/capabilities, heartbeat/offline health, failure quarantine, success, and operator policy. |
+| WorkerNode task-load accounting | Schema fields only | Reservation, release, reconciliation, and task matching removed; fields deferred to PR 4B. |
+| Orchestration domain callables | `orchestrator/graph.py`, `orchestrator/nodes/` | Keep plain routing, approval, memory, worker, verification, review, delivery, and persistence callables used by Temporal activities. |
+| Lifecycle compiler/checkpoints | None | LangGraph compilation, edges, interrupts, and checkpoint support removed. |
+| Postgres product projections | `db/`, `repositories/` | Keep task/run/timeline/API/dashboard evidence separate from Temporal history. |
 
-## Required parity before drain
+## WorkerNode method audit
 
-1. [x] Worker-initiated `request_higher_permission` has a persisted Temporal
-   interaction, approval/rejection signal, and safe retry/reprovision path.
-2. [x] Provider cleanup during cancellation of a running activity is covered.
-3. [x] Retryable multi-writer timeline events have stable identities.
-4. [x] Supported sequential legacy routes have been compared explicitly with
-   Temporal. Parallel DAG execution remains M25 scope, not a drain prerequisite.
+Kept:
 
-## Evidence gate
+- registration and process identity
+- worker type, profile, and capability metadata
+- heartbeat, offline recovery, and stale-health sweep
+- provider/infrastructure failure accounting and quarantine
+- successful-run health reset
+- operator-policy and supported-worker/profile lookup
 
-The M25.3 [Temporal evidence-gate ledger](m25_3_observation_ledger.md)
-supersedes the earlier time-based drain period. Before deleting the runtime
-selector, record all 14 operational scenarios, coverage for every required task
-class, passing unit/integration/pre-commit/dashboard suites, a tagged
-last-known-good legacy-capable image, and operator sign-off. Legacy remains an
-explicit fallback only until that gate is approved.
+Removed:
 
-## Deletion order
+- task-claim load reservation and release
+- load reconciliation after task lease expiry/cancellation
+- task-to-worker matching used by the retired scheduler
 
-1. Freeze legacy queue/lease and LangGraph lifecycle feature work.
-2. Complete the evidence gate and obtain operator sign-off.
-3. Disable legacy in production-like Compose while retaining a bounded local
-   recovery window.
-4. Remove polling, claims, lease heartbeats, and stale reclaim together.
-5. Remove LangGraph durable graph/checkpoint execution once no task can select it.
-6. Reassess `WorkerNode` fields individually; retain capability/profile policy.
+Temporal execution-capacity permits, activity heartbeats, DAG-node fencing, and
+outbox command claims are separate mechanisms and remain in service.
 
-## M25 consequence
+## PR 4B follow-up
 
-M25 uses Temporal for bounded read-only DAG fan-out. M24.9.5 is closed for
-pre-M25 purposes; the legacy fallback remains available until the M25.3
-evidence gate is approved, not because of an interaction-parity blocker.
+PR 4B owns the database migration for task `lease_owner`,
+`lease_expires_at`, and `next_attempt_at`, plus any now-unused WorkerNode load
+fields. Before migration, take a restorable database snapshot and verify
+upgrade, downgrade, re-upgrade, image rollback, and database restore ordering
+on a disposable database.
+
+The following task fields remain product policy/evidence and are not migration
+candidates: `attempt_count`, `max_attempts`, `priority`, and `queue_lane`.

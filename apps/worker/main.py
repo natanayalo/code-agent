@@ -1,12 +1,10 @@
-"""Dedicated queue worker runtime for production-like deployment."""
+"""Dedicated Temporal worker runtime for production-like deployment."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
-from typing import Final
-from uuid import uuid4
 
 from sqlalchemy.orm import sessionmaker
 
@@ -17,42 +15,20 @@ from apps.runtime import (
     RUN_WORKER_ENV_VAR,
     initialize_persisted_cutover,
     should_run_worker,
-    uses_temporal_execution,
-    validate_runtime_configuration,
+    validate_cutover_configuration,
 )
-from apps.runtime import (
-    coerce_positive_int_env as _coerce_positive_int,
-)
-from orchestrator.execution import TaskQueueWorker
+from orchestrator.temporal.worker import start_temporal_worker
 
 logger = logging.getLogger(__name__)
 
-WORKER_ID_ENV_VAR: Final[str] = "CODE_AGENT_QUEUE_WORKER_ID"
-POLL_INTERVAL_ENV_VAR: Final[str] = "CODE_AGENT_QUEUE_POLL_INTERVAL_SECONDS"
-LEASE_SECONDS_ENV_VAR: Final[str] = "CODE_AGENT_QUEUE_LEASE_SECONDS"
-CAPACITY_ENV_VAR: Final[str] = "CODE_AGENT_QUEUE_CAPACITY"
-
-
-def _coerce_positive_float(value: str | None, *, default: float) -> float:
-    if value is None:
-        return default
-    stripped = value.strip()
-    if not stripped:
-        return default
-    try:
-        parsed = float(stripped)
-    except ValueError:
-        return default
-    return parsed if parsed > 0 else default
-
 
 async def run_worker_forever() -> None:
-    """Build task service from env and start polling forever."""
+    """Build the task service and run the Temporal worker forever."""
     if not should_run_worker():
         raise RuntimeError(
             f"Worker runtime is disabled for this process. Set {RUN_WORKER_ENV_VAR}=1 to enable it."
         )
-    validate_runtime_configuration()
+    validate_cutover_configuration()
 
     configure_tracing_from_env(service_name="code-agent-worker")
 
@@ -67,38 +43,12 @@ async def run_worker_forever() -> None:
         if isinstance(getattr(service, "session_factory", None), sessionmaker):
             initialize_persisted_cutover(service.session_factory)
 
-        worker_id = os.environ.get(WORKER_ID_ENV_VAR, "").strip() or f"worker-{uuid4().hex[:8]}"
-        poll_interval = _coerce_positive_float(
-            os.environ.get(POLL_INTERVAL_ENV_VAR),
-            default=2.0,
+        temporal_address = os.environ.get("TEMPORAL_ADDRESS", "localhost:7233")
+        await start_temporal_worker(
+            temporal_address=temporal_address,
+            task_queue="task-execution-queue",
+            task_service=service,
         )
-        lease_seconds = _coerce_positive_int(
-            os.environ.get(LEASE_SECONDS_ENV_VAR),
-            default=60,
-        )
-        capacity = _coerce_positive_int(
-            os.environ.get(CAPACITY_ENV_VAR),
-            default=1,
-        )
-
-        if uses_temporal_execution():
-            from orchestrator.temporal.worker import start_temporal_worker
-
-            temporal_address = os.environ.get("TEMPORAL_ADDRESS", "localhost:7233")
-            await start_temporal_worker(
-                temporal_address=temporal_address,
-                task_queue="task-execution-queue",
-                task_service=service,
-            )
-        else:
-            queue_worker = TaskQueueWorker(
-                service=service,
-                worker_id=worker_id,
-                poll_interval_seconds=poll_interval,
-                lease_seconds=lease_seconds,
-                capacity=capacity,
-            )
-            await queue_worker.run_forever()
     finally:
         await asyncio.gather(
             outbound_http_clients.telegram.aclose(),
@@ -108,7 +58,7 @@ async def run_worker_forever() -> None:
 
 
 def main() -> None:
-    """CLI entrypoint for the queue worker runtime."""
+    """CLI entrypoint for the Temporal worker runtime."""
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
     asyncio.run(run_worker_forever())
 

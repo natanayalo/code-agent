@@ -2,11 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
-
 import orchestrator.graph as graph_module
-from db.enums import ExecutionPlanNodeStatus
-from db.models import Task
 from orchestrator import OrchestratorState
 from orchestrator.execution import TaskExecutionService
 from orchestrator.execution_types import TaskSubmission
@@ -73,106 +69,3 @@ def test_persisted_decomposition_skips_malformed_nodes(session_factory, monkeypa
         assert valid_node.aggregation_role == "context"
         assert valid_node.execution_mode == "read_only"
         assert valid_node.parallel_safe is True
-
-
-def _assert_persisted_attempts(
-    service: TaskExecutionService, task_id: str, *, trace_id: str | None = None
-) -> None:
-    """Assert resumed nodes retain one durable attempt record each."""
-    persisted_snapshot = service.get_task(task_id)
-    assert persisted_snapshot is not None
-    nodes = {node.node_id: node for node in persisted_snapshot.execution_plan.nodes}
-    assert [attempt.attempt_number for attempt in nodes["2"].attempts] == [1]
-    assert nodes["2"].attempts[0].status == "completed"
-    assert nodes["2"].attempts[0].effective_input_digest
-    assert nodes["2"].attempts[0].task_trace_id == trace_id
-    assert [attempt.attempt_number for attempt in nodes["3"].attempts] == [1]
-
-
-def _set_task_trace_context(session_factory, task_id: str) -> str:
-    """Persist a stable parent trace for node-attempt propagation coverage."""
-    trace_id = "0123456789abcdef0123456789abcdef"
-    with session_scope(session_factory) as session:
-        task = session.get(Task, task_id)
-        assert task is not None
-        task.trace_context = {"traceparent": f"00-{trace_id}-0123456789abcdef-01"}
-    return trace_id
-
-
-def test_queue_reload_resumes_only_non_completed_decomposed_nodes(session_factory) -> None:
-    worker = RecordingWorker()
-    service = TaskExecutionService(session_factory=session_factory, worker=worker)
-    snapshot, _persisted = service.create_task(
-        TaskSubmission(task_text="Implement a multi-file change and verify it")
-    )
-
-    trace_id = _set_task_trace_context(session_factory, snapshot.task_id)
-    with session_scope(session_factory) as session:
-        plan_repo = ExecutionPlanRepository(session)
-        plan = plan_repo.create(task_id=snapshot.task_id)
-        plan_repo.add_node(
-            plan_id=plan.id,
-            node_id="1",
-            goal="Inspect",
-            task_spec={"goal": "Inspect"},
-            node_kind="inspect",
-            status=ExecutionPlanNodeStatus.COMPLETED,
-        )
-        plan_repo.add_node(
-            plan_id=plan.id,
-            node_id="2",
-            goal="Implement",
-            depends_on=["1"],
-            task_spec={"goal": "Implement"},
-            node_kind="implement",
-            status=ExecutionPlanNodeStatus.FAILED,
-        )
-        plan_repo.add_node(
-            plan_id=plan.id,
-            node_id="3",
-            goal="Verify",
-            depends_on=["2"],
-            task_spec={"goal": "Verify"},
-            node_kind="verify",
-            status=ExecutionPlanNodeStatus.SKIPPED,
-        )
-        plan_repo.update_node(
-            plan_id=plan.id,
-            node_id="1",
-            result_summary="Inspection completed.",
-            changed_files=["README.md"],
-        )
-        plan_repo.update_node(
-            plan_id=plan.id,
-            node_id="2",
-            result_summary="Implementation failed previously.",
-            failure_kind="worker_failure",
-        )
-        plan_repo.update_node(
-            plan_id=plan.id,
-            node_id="3",
-            result_summary="Verification was skipped.",
-            failure_kind="incomplete_delivery",
-        )
-
-    loaded = service._load_submission_for_task(task_id=snapshot.task_id)
-
-    assert loaded is not None
-    submission, persisted = loaded
-    assert persisted.decomposed_plan is not None
-    assert [node["node_id"] for node in persisted.decomposed_plan["nodes"]] == ["1", "2", "3"]
-    assert [outcome["node_id"] for outcome in persisted.node_outcomes] == ["1", "2", "3"]
-
-    state = asyncio.run(service._run_orchestrator(submission, persisted))
-
-    assert state.result is not None
-    assert state.result.status == "success"
-    dag_requests = [
-        request for request in worker.requests if "Current DAG node" in request.task_text
-    ]
-    assert len(dag_requests) == 2
-    assert "Current DAG node (2)" in dag_requests[0].task_text
-    assert "Current DAG node (3)" in dag_requests[1].task_text
-    assert all("Current DAG node (1)" not in request.task_text for request in dag_requests)
-
-    _assert_persisted_attempts(service, snapshot.task_id, trace_id=trace_id)

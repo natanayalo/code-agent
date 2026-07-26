@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import socket
 from collections.abc import Iterator
 from dataclasses import replace
@@ -22,6 +21,7 @@ from repositories import (
     create_session_factory,
     session_scope,
 )
+from tests.integration.task_endpoints_support import _run_one_temporal_task
 from workers import Worker, WorkerProfile, WorkerRequest, WorkerResult
 
 
@@ -45,14 +45,6 @@ class RecordingProgressNotifier:
 
     async def notify(self, *, submission, event) -> None:
         self.events.append((submission, event))
-
-
-def _run_one_queued_task(client: TestClient) -> None:
-    """Claim one queued task and execute it through the worker service."""
-    service = client.app.state.task_service
-    claim = service.claim_next_task(worker_id="test-worker", lease_seconds=60)
-    assert claim is not None
-    asyncio.run(service.run_queued_task(task_id=claim.task_id, worker_id="test-worker"))
 
 
 @pytest.fixture
@@ -130,7 +122,7 @@ def test_webhook_sets_channel_from_source(client: TestClient, session_factory) -
     task_id = response.json()["task_id"]
 
     worker = client.app.state.test_worker
-    _run_one_queued_task(client)
+    _run_one_temporal_task(client)
     get_resp = client.get(f"/tasks/{task_id}")
     assert get_resp.status_code == 200
 
@@ -187,7 +179,7 @@ def test_webhook_namespaces_external_user_id(client: TestClient) -> None:
 
     assert response.status_code == 202
     worker = client.app.state.test_worker
-    _run_one_queued_task(client)
+    _run_one_temporal_task(client)
     client.get(f"/tasks/{response.json()['task_id']}")
     # WorkerRequest carries the raw task; channel/user id live on the DB session.
     # The real guard is that the submission pipeline accepted the namespaced value
@@ -222,7 +214,7 @@ def test_webhook_full_payload_creates_and_completes_task(
     assert response.status_code == 202
     task_id = response.json()["task_id"]
 
-    _run_one_queued_task(client)
+    _run_one_temporal_task(client)
     get_response = client.get(f"/tasks/{task_id}")
     assert get_response.status_code == 200
     assert get_response.json()["status"] == "completed"
@@ -307,7 +299,7 @@ def test_webhook_accepts_worker_profile_override_for_explicit_legacy_opt_in(
         assert response.status_code == 202
         task_id = response.json()["task_id"]
 
-        _run_one_queued_task(profiled_client)
+        _run_one_temporal_task(profiled_client)
         snapshot = profiled_client.get(f"/tasks/{task_id}")
         assert snapshot.status_code == 200
         payload = snapshot.json()
@@ -395,7 +387,7 @@ def test_webhook_uses_default_repo_url_when_omitted(client: TestClient) -> None:
     )
     assert response.status_code == 202
 
-    _run_one_queued_task(client)
+    _run_one_temporal_task(client)
     worker = client.app.state.test_worker
     assert len(worker.requests) == 1
     assert worker.requests[0].repo_url == "https://github.com/natanayalo/code-agent.git"
@@ -419,7 +411,7 @@ def test_webhook_delivery_id_is_idempotent(client: TestClient) -> None:
     assert second.json()["task_id"] == first.json()["task_id"]
 
     worker = client.app.state.test_worker
-    _run_one_queued_task(client)
+    _run_one_temporal_task(client)
     assert len(worker.requests) == 1
 
 
@@ -439,7 +431,7 @@ def test_webhook_progress_notifications_include_callback_url_submission(
     )
 
     assert response.status_code == 202
-    _run_one_queued_task(client)
+    _run_one_temporal_task(client)
     notifier = client.app.state.test_notifier
     assert [event.phase for _, event in notifier.events] == ["started", "running", "completed"]
     assert all(

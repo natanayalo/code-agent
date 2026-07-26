@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
-import asyncio
 import subprocess
 from pathlib import Path
 
 import pytest
 from sqlalchemy import select
+from temporalio.testing import WorkflowEnvironment
+from temporalio.worker import UnsandboxedWorkflowRunner
+from temporalio.worker import Worker as TemporalWorker
 
-from db.models import Base, Task, WorkerRun
+from db.models import Base, Task, TaskTimelineEvent, WorkerRun
 from orchestrator.execution import TaskExecutionService, TaskSubmission
+from orchestrator.temporal.activities import TaskExecutionActivities
+from orchestrator.temporal.command_dispatcher import TemporalCommandDispatcher
+from orchestrator.temporal.workflows import TaskExecutionWorkflow
 from repositories import create_engine_from_url, create_session_factory, session_scope
 from sandbox import DockerShellCommandResult, DockerShellSession
 from workers import CodexCliWorker
@@ -139,29 +144,46 @@ async def test_vertical_slice_e2e_happy_path(session_factory, tmp_path: Path, mo
 
     submission = TaskSubmission(task_text=task_text, repo_url=repo_url, branch="master")
 
-    # Create the task first
-    snapshot, persisted = service.create_task(submission)
-    task_id = snapshot.task_id
+    async with await WorkflowEnvironment.start_time_skipping() as environment:
+        snapshot, _ = service.create_task(submission)
+        task_id = snapshot.task_id
+        assert snapshot.orchestration_runtime == "temporal"
 
-    assert task_id is not None
+        activities = TaskExecutionActivities(service=service)
+        temporal_worker = TemporalWorker(
+            environment.client,
+            task_queue="task-execution-queue",
+            workflows=[TaskExecutionWorkflow],
+            workflow_runner=UnsandboxedWorkflowRunner(),
+            activities=[
+                activities.classify_and_plan,
+                activities.decompose_task,
+                activities.select_next_node,
+                activities.select_next_node_v2,
+                activities.merge_node_wave,
+                activities.fail_node_permission_escalation,
+                activities.load_memory,
+                activities.provision_workspace,
+                activities.run_worker,
+                activities.run_decomposed_node,
+                activities.request_permission_escalation,
+                activities.resolve_permission_escalation,
+                activities.record_workflow_failure,
+                activities.verify_result,
+                activities.deliver_result,
+                activities.persist_memory,
+            ],
+        )
+        async with temporal_worker:
+            dispatcher = TemporalCommandDispatcher(
+                client=environment.client,
+                session_factory=session_factory,
+            )
+            await dispatcher.dispatch_pending()
+            handle = environment.client.get_workflow_handle(f"task-{task_id}")
+            workflow_result = await handle.result()
 
-    # Submit the task for background execution
-    await service.submit_task(submission, persisted)
-
-    # 3. Wait for the task to complete
-    MAX_WAIT = 30
-    elapsed = 0
-    while elapsed < MAX_WAIT:
-        with session_scope(session_factory) as session:
-            stmt = select(Task).where(Task.id == task_id)
-            result = session.execute(stmt)
-            task = result.scalar_one_or_none()
-
-            if task and task.status in ("completed", "failed", "error"):
-                break
-
-        await asyncio.sleep(1)
-        elapsed += 1
+        assert workflow_result["status"] == "completed"
 
     # 4. Verify the outcome
     with session_scope(session_factory) as session:
@@ -171,6 +193,7 @@ async def test_vertical_slice_e2e_happy_path(session_factory, tmp_path: Path, mo
 
         assert task is not None
         assert task.status == "completed"
+        assert task.orchestration_runtime.value == "temporal"
 
         # Verify WorkerRun persistence
         stmt_run = select(WorkerRun).where(WorkerRun.task_id == task_id)
@@ -183,3 +206,19 @@ async def test_vertical_slice_e2e_happy_path(session_factory, tmp_path: Path, mo
         assert len(run.commands_run) == 1
         assert run.files_changed_count == 1
         assert "hello.txt" in run.files_changed
+
+        timeline = (
+            session.execute(
+                select(TaskTimelineEvent)
+                .where(TaskTimelineEvent.task_id == task_id)
+                .order_by(TaskTimelineEvent.sequence_number)
+            )
+            .scalars()
+            .all()
+        )
+        assert timeline
+        first_sequence = timeline[0].sequence_number
+        assert [event.sequence_number for event in timeline] == list(
+            range(first_sequence, first_sequence + len(timeline))
+        )
+        assert timeline[-1].event_type.value == "task_completed"

@@ -235,12 +235,6 @@ def shutdown_callback_dns_executor() -> None:
         executor.shutdown(wait=False, cancel_futures=True)
 
 
-def _heartbeat_interval_seconds(*, lease_seconds: int) -> float:
-    """Choose a lease heartbeat cadence that scales with lease duration."""
-    bounded_lease = max(1, lease_seconds)
-    return max(1.0, min(10.0, bounded_lease / 3.0))
-
-
 def _resolve_callback_hostname(
     hostname: str,
     *,

@@ -55,7 +55,6 @@ def test_record_interaction_response_clarification_requeues_without_approval_sid
 ) -> None:
     """Clarification answers should resume the task without mutating approval state."""
     service, session_factory = _make_task_service()
-    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
     snapshot, _ = service.create_task(execution_module.TaskSubmission(task_text="debug this"))
 
     clarification = next(
@@ -105,7 +104,6 @@ def test_record_interaction_response_clarification_requeues_without_approval_sid
 def test_record_interaction_response_rejects_normal_permission(monkeypatch) -> None:
     """Generic permission rejection must project failure before signaling Temporal."""
     service, session_factory = _make_task_service()
-    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
     task_snapshot, _ = service.create_task(
         execution_module.TaskSubmission(
             task_text="Reject elevated permission",
@@ -142,7 +140,6 @@ def test_record_interaction_response_rejects_normal_permission(monkeypatch) -> N
         task = TaskRepository(session).get(task_snapshot.task_id)
         assert task is not None
         assert task.status is TaskStatus.FAILED
-        assert task.next_attempt_at is None
         assert task.constraints["approval"]["status"] == "rejected"
         assert task.last_error == "Manual approval rejected via interaction response."
         timeline = TaskTimelineRepository(session).list_by_task(task_snapshot.task_id)
@@ -185,7 +182,6 @@ def test_record_interaction_response_ignores_missing_observation_dependency(
 def test_permission_escalation_response_signals_dedicated_temporal_handler(monkeypatch) -> None:
     """Worker escalation responses must not be confused with task approval."""
     service, session_factory = _make_task_service()
-    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
     snapshot, _ = service.create_task(execution_module.TaskSubmission(task_text="debug this"))
     with session_scope(session_factory) as session:
         interaction = HumanInteraction(

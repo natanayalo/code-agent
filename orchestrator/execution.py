@@ -7,31 +7,21 @@ import logging
 import os
 import time
 from collections.abc import Callable, Mapping
-from contextlib import AbstractAsyncContextManager
 from pathlib import Path
 from typing import Any
 
 from anyio import to_thread
-from langgraph.checkpoint.base import BaseCheckpointSaver
 from sqlalchemy.orm import Session, sessionmaker
 
-from apps.observability import (
-    bind_current_trace_context,
-)
-from apps.observability import (
-    with_restored_trace_context as _with_restored_trace_context,
-)
-from apps.runtime import execution_runtime
+from apps.observability import bind_current_trace_context
 from db.enums import TaskStatus
 from db.models import Task as _Task
 from orchestrator import (
-    execution_heartbeat_service,
     execution_improvement_proposal_service,
     execution_interaction_service,
     execution_outcome_service,
     execution_proposal_service,
     execution_retention_service,
-    execution_runtime_service,
     execution_snapshot_service,
     execution_submission_service,
     execution_worker_service,
@@ -40,34 +30,22 @@ from orchestrator import (
     execution_policy as _execution_policy_module,
 )
 from orchestrator.brain import OrchestratorBrain
-from orchestrator.checkpoints import create_async_sqlite_checkpointer
 from orchestrator.execution_policy import (
     _apply_execution_budget_policy,
     _deep_merge,
-    _heartbeat_interval_seconds,
     _sanitize_submission_constraints,
     _validate_callback_url,
     shutdown_callback_dns_executor,
     validate_callback_url,
 )
-from orchestrator.execution_queue import TaskQueueWorker
 from orchestrator.execution_serialization import (
     _approval_constraints_payload,
     _artifact_type_for_persistence,
-    _completion_progress_phase,
     _enum_value,
-    _extract_graph_payload,
     _get_trace_id_from_context,
-    _interrupt_payload_from_object,
-    _interrupt_summary,
-    _normalize_orchestrator_graph_output,
-    _requires_manual_follow_up,
     _review_result_artifact_entry,
     _serialize_review_result,
     _serialize_verification_report,
-    _summarize_graph_span_input,
-    _summarize_graph_span_output,
-    _terminal_follow_up_status,
     _to_json_compatible,
     _workspace_id_from_artifacts,
 )
@@ -100,7 +78,6 @@ from orchestrator.execution_types import (
     SessionWorkingContextSnapshot,
     SubmissionSession,
     TaskApprovalDecision,
-    TaskClaim,
     TaskReplayRequest,
     TaskReplayResult,
     TaskSnapshot,
@@ -111,7 +88,6 @@ from orchestrator.execution_types import (
     WorkerRunSnapshot,
     _PersistedTaskContext,
 )
-from orchestrator.graph import build_orchestrator_graph
 from orchestrator.improvement_suggestions import ImprovementSuggestionScorer
 from sandbox import WorkspaceManager
 from workers import Worker, WorkerProfile
@@ -123,7 +99,6 @@ class TemporalUnavailableError(RuntimeError):
     """Raised when Temporal cannot accept a new task submission."""
 
 
-with_restored_trace_context = _with_restored_trace_context
 socket = _execution_policy_module.socket
 _task_status_from_result = _execution_policy_module._task_status_from_result
 _worker_run_status_from_result = _execution_policy_module._worker_run_status_from_result
@@ -149,7 +124,6 @@ class TaskExecutionService:
         default_task_max_attempts: int = 3,
         workspace_root: str | Path | None = None,
         retention_seconds: int | None = 7 * 24 * 60 * 60,
-        checkpoint_path: str | Path | None = None,
         decomposed_fanout_enabled: bool = False,
         enforce_temporal_availability: bool = False,
     ) -> None:
@@ -170,38 +144,13 @@ class TaskExecutionService:
             WorkspaceManager(self.workspace_root) if self.workspace_root else None
         )
         self.retention_seconds = None if retention_seconds is None else max(0, retention_seconds)
-        self.checkpoint_path = checkpoint_path
         # Read once at service construction; Temporal workflows replay the
         # decision returned by selection rather than consulting process state.
         self.decomposed_fanout_enabled = decomposed_fanout_enabled
         self.enforce_temporal_availability = enforce_temporal_availability
-        self._checkpointer: BaseCheckpointSaver | None = None
-        self._checkpointer_cm: AbstractAsyncContextManager[BaseCheckpointSaver] | None = None
-        self._graph: Any | None = None
-
-    @property
-    def graph(self) -> Any:
-        """Lazy-loaded orchestrator graph, compiled with the current checkpointer."""
-        if self._graph is None:
-            self._graph = build_orchestrator_graph(
-                worker=self.worker,
-                workspace_manager=self.workspace_manager,
-                worker_profiles=self.worker_profiles,
-                enable_worker_profiles=self.enable_worker_profiles,
-                enable_independent_verifier=self.enable_independent_verifier,
-                orchestrator_brain=self.orchestrator_brain,
-                session_factory=self.session_factory,
-                checkpointer=self._checkpointer,
-            )
-        return self._graph
 
     async def __aenter__(self) -> TaskExecutionService:
-        """Initialize shared resources (like checkpointers) if configured."""
-        if self.checkpoint_path and not self._checkpointer:
-            self._checkpointer_cm = create_async_sqlite_checkpointer(self.checkpoint_path)
-            self._checkpointer = await self._checkpointer_cm.__aenter__()
-            # Invalidate graph to force recompile with checkpointer
-            self._graph = None
+        """Enter the service lifecycle."""
         return self
 
     async def __aexit__(
@@ -210,13 +159,8 @@ class TaskExecutionService:
         exc_val: BaseException | None,
         exc_tb: Any,
     ) -> None:
-        """Close shared resources."""
-        if self._checkpointer_cm:
-            await self._checkpointer_cm.__aexit__(exc_type, exc_val, exc_tb)
-            self._checkpointer = None
-            self._checkpointer_cm = None
-            # Invalidate graph to revert to memory-only
-            self._graph = None
+        """Exit the service lifecycle."""
+        return None
 
     _workspace_path_for_run = execution_retention_service._workspace_path_for_run
     _delete_retained_workspace_path = execution_retention_service._delete_retained_workspace_path
@@ -294,8 +238,6 @@ class TaskExecutionService:
 
     def ensure_temporal_available(self) -> None:
         """Fail new submissions unless the Temporal SDK completes its readiness RPC."""
-        if execution_runtime() != "temporal":
-            return
         temporal_address = os.environ.get("TEMPORAL_ADDRESS", "localhost:7233")
         last_error: Exception | None = None
         for attempt in range(3):
@@ -315,13 +257,6 @@ class TaskExecutionService:
     _normalize_and_validate_submission = (
         execution_submission_service._normalize_and_validate_submission
     )
-    submit_task = execution_runtime_service.submit_task
-    run_queued_task = execution_runtime_service.run_queued_task
-    _update_span_status_from_state = execution_runtime_service._update_span_status_from_state
-    _record_execution_span_error = execution_runtime_service._record_execution_span_error
-    _heartbeat_loop = execution_heartbeat_service._heartbeat_loop
-    _heartbeat_task_and_worker = execution_heartbeat_service._heartbeat_task_and_worker
-    claim_next_task = execution_snapshot_service.claim_next_task
     is_execution_busy = execution_snapshot_service.is_execution_busy
     get_task = execution_snapshot_service.get_task
     list_tasks = execution_snapshot_service.list_tasks
@@ -382,16 +317,7 @@ class TaskExecutionService:
     _persist_submission = execution_submission_service._persist_submission
     _link_delivery_to_task = execution_submission_service._link_delivery_to_task
     _task_summary = staticmethod(execution_snapshot_service._task_summary)
-    _emit_progress = execution_runtime_service._emit_progress
-    _run_orchestrator = execution_runtime_service._run_orchestrator
     _load_submission_for_task = execution_submission_service._load_submission_for_task
-    _mark_task_in_progress = execution_submission_service._mark_task_in_progress
-    _mark_task_failed = execution_submission_service._mark_task_failed
-    _release_task_success = execution_submission_service._release_task_success
-    _release_task_failure = execution_submission_service._release_task_failure
-    _release_task_terminal_failure = execution_submission_service._release_task_terminal_failure
-    _record_task_attempt_error = execution_submission_service._record_task_attempt_error
-    _heartbeat_task_lease = execution_submission_service._heartbeat_task_lease
     register_worker_node = execution_worker_service.register_worker_node
     ensure_worker_node = execution_worker_service.ensure_worker_node
     heartbeat_worker_node = execution_worker_service.heartbeat_worker_node
@@ -451,9 +377,7 @@ __all__ = [
     "SessionWorkingContextSnapshot",
     "SubmissionSession",
     "TaskApprovalDecision",
-    "TaskClaim",
     "TaskExecutionService",
-    "TaskQueueWorker",
     "TaskReplayRequest",
     "TaskReplayResult",
     "TaskSnapshot",
@@ -467,26 +391,16 @@ __all__ = [
     "_approval_constraints_payload",
     "_artifact_type_for_persistence",
     "_clear_tracing_config_cache",
-    "_completion_progress_phase",
     "_deep_merge",
     "_enum_value",
-    "_extract_graph_payload",
     "_get_phoenix_url",
     "_get_project_id",
     "_get_trace_id_from_context",
     "_get_tracing_config",
-    "_heartbeat_interval_seconds",
-    "_interrupt_payload_from_object",
-    "_interrupt_summary",
-    "_normalize_orchestrator_graph_output",
-    "_requires_manual_follow_up",
     "_review_result_artifact_entry",
     "_sanitize_submission_constraints",
     "_serialize_review_result",
     "_serialize_verification_report",
-    "_summarize_graph_span_input",
-    "_summarize_graph_span_output",
-    "_terminal_follow_up_status",
     "_to_json_compatible",
     "_validate_callback_url",
     "_workspace_id_from_artifacts",

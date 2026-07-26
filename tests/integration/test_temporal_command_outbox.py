@@ -74,7 +74,6 @@ class _BlockingStartClient(_CommandClient):
 
 def test_temporal_start_command_survives_submission_until_dispatch(monkeypatch) -> None:
     """A task committed before worker recovery is started exactly once by reconciliation."""
-    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
     engine = create_engine_from_url(
         "sqlite+pysqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -97,7 +96,6 @@ def test_temporal_start_command_survives_submission_until_dispatch(monkeypatch) 
 
 def test_temporal_signal_and_cancel_commands_are_delivered(monkeypatch) -> None:
     """Interaction signals and cancellation follow the durable start command."""
-    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
     engine = create_engine_from_url(
         "sqlite+pysqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -148,7 +146,6 @@ def test_temporal_signal_and_cancel_commands_are_delivered(monkeypatch) -> None:
 
 def test_cancel_supersedes_an_undelivered_temporal_start(monkeypatch) -> None:
     """Cancellation before dispatch resolves both commands without creating a workflow."""
-    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
     engine = create_engine_from_url(
         "sqlite+pysqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -185,7 +182,6 @@ def test_cancel_supersedes_an_undelivered_temporal_start(monkeypatch) -> None:
 
 def test_cancellation_keeps_a_start_held_by_another_dispatcher_deliverable(monkeypatch) -> None:
     """Cancellation remains queued when another dispatcher already owns the start."""
-    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
     engine = create_engine_from_url(
         "sqlite+pysqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -225,7 +221,6 @@ def test_cancellation_keeps_a_start_held_by_another_dispatcher_deliverable(monke
 
 def test_cancellation_during_start_rpc_preserves_follow_up_cancel(monkeypatch) -> None:
     """An in-flight start is acknowledged before its pending cancellation is delivered."""
-    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
     engine = create_engine_from_url(
         "sqlite+pysqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -269,7 +264,6 @@ def test_cancellation_during_start_rpc_preserves_follow_up_cancel(monkeypatch) -
 
 def test_concurrent_enqueues_receive_distinct_task_local_sequences(monkeypatch, tmp_path) -> None:
     """Concurrent operator commands cannot collide on a task-local sequence number."""
-    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
     engine = create_engine_from_url(
         f"sqlite+pysqlite:///{tmp_path / 'temporal-command-sequences.db'}",
         connect_args={"check_same_thread": False, "timeout": 10},
@@ -306,7 +300,6 @@ def test_concurrent_enqueues_receive_distinct_task_local_sequences(monkeypatch, 
 
 def test_temporal_command_delivery_failure_remains_pending_for_retry(monkeypatch) -> None:
     """A transport failure records an attempt without discarding the command."""
-    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
     engine = create_engine_from_url(
         "sqlite+pysqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -354,7 +347,6 @@ def test_unknown_temporal_command_type_is_rejected() -> None:
 
 def test_two_dispatchers_claim_only_one_logical_signal(monkeypatch) -> None:
     """A second dispatcher cannot overtake an earlier command held by the first."""
-    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
     engine = create_engine_from_url(
         "sqlite+pysqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -409,7 +401,6 @@ def test_two_dispatchers_claim_only_one_logical_signal(monkeypatch) -> None:
 
 def test_workflow_not_found_signal_is_retried_after_start(monkeypatch) -> None:
     """A transient absent workflow cannot permanently discard an interaction signal."""
-    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
     engine = create_engine_from_url(
         "sqlite+pysqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -452,7 +443,6 @@ def test_workflow_not_found_signal_is_retried_after_start(monkeypatch) -> None:
 
 def test_start_and_signal_stay_ordered_across_batch_boundaries(monkeypatch) -> None:
     """A signal at batch N+1 cannot pass a start at the end of batch N."""
-    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
     engine = create_engine_from_url(
         "sqlite+pysqlite:///:memory:",
         connect_args={"check_same_thread": False},

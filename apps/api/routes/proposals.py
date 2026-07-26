@@ -47,7 +47,7 @@ def accept_proposal(
     proposal_id: UUID,
     task_service: TaskExecutionService = Depends(get_task_service),
 ) -> TaskSnapshot:
-    """Accept a proposal and promote it to a queued execution task."""
+    """Accept a proposal and promote it to a Temporal execution task."""
     result_status, task_snapshot, detail = task_service.accept_proposal(str(proposal_id))
     if result_status == "not_found":
         raise HTTPException(

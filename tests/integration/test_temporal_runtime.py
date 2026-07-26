@@ -148,7 +148,6 @@ def test_temporal_snapshot_reconciles_operator_approval(session_factory):
 @pytest.mark.anyio
 async def test_temporal_activity_failure_projects_terminal_task(session_factory, monkeypatch):
     """An exhausted workflow activity must not leave the product task pending."""
-    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "legacy")
     service = TaskExecutionService(
         session_factory=session_factory,
         worker=CodexCliWorker(runtime_adapter=_ScriptedAdapter([])),
@@ -317,8 +316,6 @@ async def test_temporal_runtime_happy_path(session_factory, tmp_path: Path, monk
 
     submission = TaskSubmission(task_text=task_text, repo_url=repo_url, branch="master")
 
-    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
-
     # Start local Temporal test server
     async with await WorkflowEnvironment.start_time_skipping() as env:
         # Create task context
@@ -433,7 +430,6 @@ async def test_temporal_runtime_hitl_approval(session_factory, tmp_path: Path, m
         repo_url=f"file://{repo_path.resolve()}",
         branch="master",
     )
-    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
 
     async with await WorkflowEnvironment.start_time_skipping() as env:
         snapshot, _ = service.create_task(submission)
@@ -523,7 +519,6 @@ async def test_temporal_runtime_clarification_interaction_resumes_workflow(
         return {"task_spec": task_spec}
 
     monkeypatch.setattr("orchestrator.temporal.activities.check_approval", require_clarification)
-    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
     worker = CodexCliWorker(
         runtime_adapter=_ScriptedAdapter([CliRuntimeStep(kind="final", final_output="Done.")]),
         session_factory=lambda container, **kwargs: _GitMockingSession(container, **kwargs),
@@ -612,7 +607,6 @@ async def _exercise_permission_escalation_workflow_with_docker(
     """A worker escalation should persist, signal, reprovision, retry, and finish."""
     monkeypatch.setattr("sandbox.workspace.default_workspace_root", lambda: tmp_path)
 
-    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
     service = TaskExecutionService(
         session_factory=session_factory,
         worker=CodexCliWorker(runtime_adapter=_ScriptedAdapter([])),
@@ -750,7 +744,6 @@ async def test_permission_escalation_activities_persist_and_apply_grant(
     session_factory, monkeypatch
 ):
     """Escalation activities create one interaction and reset durable state on grant."""
-    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "legacy")
     service = TaskExecutionService(
         session_factory=session_factory,
         worker=CodexCliWorker(runtime_adapter=_ScriptedAdapter([])),
@@ -844,7 +837,6 @@ async def test_cancelling_pending_permission_escalation_removes_resumable_state(
     session_factory, monkeypatch
 ):
     """Operator cancellation must win over a pending worker escalation."""
-    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "legacy")
     service = TaskExecutionService(
         session_factory=session_factory,
         worker=CodexCliWorker(runtime_adapter=_ScriptedAdapter([])),
@@ -934,7 +926,6 @@ async def test_temporal_runtime_cancellation_projects_terminal_state(
         "orchestrator.temporal.activities.check_approval",
         lambda state_input: {"approval": ApprovalCheckpoint(required=True, status="pending")},
     )
-    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
     service = TaskExecutionService(
         session_factory=session_factory,
         worker=CodexCliWorker(runtime_adapter=_ScriptedAdapter([])),
@@ -1063,7 +1054,6 @@ async def test_temporal_runtime_idempotency_and_retry(session_factory, tmp_path:
         repo_url=f"file://{repo_path.resolve()}",
         branch="master",
     )
-    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
 
     async with await WorkflowEnvironment.start_time_skipping() as env:
         snapshot, _ = service.create_task(submission)
