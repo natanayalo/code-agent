@@ -365,6 +365,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Changed
 
+- Build(deps-dev): bump js-yaml from 4.2.0 to 4.3.0 in /dashboard ([#338](https://github.com/natanayalo/code-agent/pull/338))
+
 - Build(deps-dev): bump postcss from 8.5.15 to 8.5.23 in /dashboard ([#337](https://github.com/natanayalo/code-agent/pull/337))
 
 - Build(deps): bump openai from 2.45.0 to 2.48.0 ([#336](https://github.com/natanayalo/code-agent/pull/336))
