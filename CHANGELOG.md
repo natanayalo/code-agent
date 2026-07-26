@@ -5,6 +5,12 @@ This file is generated from merged pull requests with
 completed-task ledger; keep completed work here instead.
 ## Merged PR History
 
+### Fixed
+
+- Fix: heartbeat Temporal verification activity ([#339](https://github.com/natanayalo/code-agent/pull/339))
+
+## m25.3-temporal-cutover-20260726T213001Z - 2026-07-26
+
 ### Added
 
 - Feat: cut over task submissions to Temporal ([#323](https://github.com/natanayalo/code-agent/pull/323))
