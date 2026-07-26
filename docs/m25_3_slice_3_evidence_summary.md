@@ -1,25 +1,26 @@
 # M25.3 Slice 3 — Evidence Gate Closeout
 
-**Status:** local rehearsal complete by operator acceptance on 2026-07-22;
-production evidence gate pending.
+**Status:** local rehearsal accepted on 2026-07-22; immutable release evidence
+gate accepted on 2026-07-27.
 
 This is the durable reviewer and next-slice handoff for the local Compose
-rehearsal. It summarizes what was verified; it is not the immutable,
-deployment-specific release ledger described in
-[m25_3_observation_ledger.md](m25_3_observation_ledger.md).
+rehearsal and release gate. The release-specific ledger is attached to the
+immutable `m25.3-temporal-cutover-20260726T213001Z` GitHub release and retained
+as [sanitized release evidence](m25_3_slice_3b_release_evidence.md).
 
 ## Scope and outcome
 
 Slice 3A exercised the Temporal-only cutover evidence gate locally. The
 rehearsal covered the 14 operational scenarios, the required task classes,
-automated suites, worker recovery, and workflow-history replay. The operator
-accepted the local rehearsal evidence and authorized Slice 4 planning. Slice
-3B remains open until deployment-specific immutable release evidence is
-recorded and approved.
+automated suites, worker recovery, and workflow-history replay.
 
-The detailed, mutable local rehearsal log is intentionally kept outside the
-repository. It contains no release authority and must not be substituted for a
-production evidence artifact.
+Slice 3B treated local Compose as the sole release environment. Commit
+`251b9aa` was deployed with the preserved `2026-07-26T21:30:01Z` cutover
+timestamp. Task `9a9b49ec-a95a-45ad-8063-ef73b43ae05c` ran a bounded fan-out,
+then the worker was restarted while `verify_result` was running. Temporal
+recorded a heartbeat timeout, retried the activity as attempt 2, and completed
+the workflow; Postgres projected the task and worker run as successful. The
+operator accepted this evidence and authorized Slice 4 implementation.
 
 ## Implementation fixes included
 
@@ -30,6 +31,10 @@ production evidence artifact.
 - `6593441` filters native-provider runtime files from changed-file audits.
 - `ab2edd4` adds regression coverage for bounded workspace prompt guidance and
   restores the Python coverage gate.
+- `891eb28` adds recurring heartbeats to the long-running Temporal verification
+  activity and configures a 20-second heartbeat timeout.
+- `251b9aa` proves recurring verification heartbeats while verification remains
+  active.
 
 ## Evidence summary
 
@@ -42,6 +47,9 @@ production evidence artifact.
 | Availability | With Temporal stopped, reads remained available and new submissions returned 503; submission recovered after Temporal returned. |
 | Replay | Older workflow history plus M25.1B fixture and existing M25.2 sequential/fan-out histories replayed without failure. |
 | Terminal failure | A deterministic verification failure projected a terminal failed task while preserving successful worker evidence. |
+| Slice 3B recovery | Fan-out task `9a9b49ec-a95a-45ad-8063-ef73b43ae05c` recovered from a worker restart during independent verification: Temporal attempt 2 followed a heartbeat timeout and both Temporal and Postgres completed. |
+| Slice 3B drain | Zero active tasks, zero active legacy tasks, zero active unknown tasks, and zero legacy submissions since cutover. |
+| Slice 3B rollback | Legacy-capable API, worker, migrate, and dashboard images retain tag `m25.3-legacy-lkg-20260727`. |
 
 The worker-originated escalation used a temporary local provider-denial harness
 to deterministically exercise the persistence, signal, and retry path; the
@@ -57,17 +65,19 @@ evidence, not a live-provider production incident.
 - `.venv/bin/pre-commit run --all-files`: passed.
 - `(cd dashboard && npm run test:coverage)`: 291 passed; 95.12% statement coverage.
 - `.venv/bin/python .agents/skills/e2e-qa/scripts/run_e2e_qa.py`: passed.
+- PR #339 focused verification: 16 unit tests and 14 Temporal integration tests
+  passed; CI pytest, pre-commit, frozen eval, and CodeQL checks passed.
 
 ## Slice 4 handoff
 
 Slice 4 remains separately scoped: delete legacy dispatch/lifecycle code first,
-then remove legacy schema fields in a second migration PR. Before any production
-legacy deletion, the release deployment must retain:
+then remove legacy schema fields in a second migration PR. The release gate now
+retains:
 
 - a versioned legacy-capable rollback artifact;
 - an immutable deployment-specific copy of the evidence ledger with the actual
   `TEMPORAL_ONLY_CUTOVER_AT` value and drain snapshot; and
-- the corresponding production operator approval.
+- the corresponding operator approval.
 
 See [m25_3_temporal_cutover_verification.md](m25_3_temporal_cutover_verification.md)
 for the operational procedure and

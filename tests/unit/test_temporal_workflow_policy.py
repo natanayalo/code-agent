@@ -28,6 +28,17 @@ def test_worker_activity_policy_has_bounded_retry_and_heartbeat() -> None:
     assert retry_policy.initial_interval == timedelta(seconds=5)
 
 
+def test_verification_activity_policy_has_bounded_retry_and_heartbeat() -> None:
+    """Independent verification must recover promptly after a worker restart."""
+    options = activity_options("verify_result")
+
+    assert options["start_to_close_timeout"] == timedelta(minutes=15)
+    assert options["heartbeat_timeout"] == timedelta(seconds=20)
+    assert "task_queue" not in options
+    retry_policy = options["retry_policy"]
+    assert retry_policy.maximum_attempts == 3
+
+
 def test_projection_failure_policy_is_bounded_and_does_not_use_a_worker_queue() -> None:
     """Terminal failure projection is retried on the orchestration queue only."""
     options = activity_options("record_workflow_failure")
