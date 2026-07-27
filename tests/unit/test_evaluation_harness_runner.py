@@ -16,11 +16,17 @@ from evaluation import (
     evaluate_suite,
     load_frozen_suite,
 )
+from evaluation.domain_pipeline import DomainEvaluationPipeline
 from evaluation.harness import (
     FrozenTaskCase,
 )
 from evaluation.orchestrator_runner import _extract_reliability_metrics
-from orchestrator.state import OrchestratorState, TaskTimelineEventState
+from orchestrator.state import (
+    ApprovalCheckpoint,
+    OrchestratorState,
+    TaskSpec,
+    TaskTimelineEventState,
+)
 
 
 def _make_fake_evaluation(
@@ -344,6 +350,28 @@ def test_orchestrator_runner_handles_approval_gate_as_failure() -> None:
 
     assert outcome.status == "failure"
     assert "paused for operator approval" in outcome.summary.lower()
+
+
+def test_domain_evaluation_pipeline_uses_one_precedence_for_overlapping_gates() -> None:
+    state = OrchestratorState(
+        task={"task_text": "Perform an ambiguous high-risk operation"},
+        task_spec=TaskSpec(
+            goal="Clarify and approve the high-risk operation",
+            requires_clarification=True,
+        ),
+        approval=ApprovalCheckpoint(
+            required=True,
+            status="pending",
+            reason="High-risk action requires approval.",
+        ),
+    )
+
+    result = DomainEvaluationPipeline._operator_gate_result(state)
+
+    assert result is not None
+    assert result.summary == (
+        "Evaluation paused for operator approval. High-risk action requires approval."
+    )
 
 
 # ---------------------------------------------------------------------------

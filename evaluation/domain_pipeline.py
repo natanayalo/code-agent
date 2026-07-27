@@ -104,20 +104,16 @@ class DomainEvaluationPipeline:
         clarification_required = bool(state.task_spec and state.task_spec.requires_clarification)
         if not (policy_errors or clarification_required or state.approval.required):
             return None
-        reason = (
-            policy_errors[0]
-            if policy_errors
-            else "Task requires clarification before evaluation can continue."
-            if clarification_required
-            else state.approval.reason or "Task requires approval."
-        )
-        interaction_kind = (
-            "approval"
-            if state.approval.required
-            else "clarification"
-            if clarification_required
-            else "input"
-        )
+        if policy_errors:
+            interaction_kind, reason = "input", policy_errors[0]
+        elif state.approval.required:
+            interaction_kind = "approval"
+            reason = state.approval.reason or "Task requires approval."
+        elif clarification_required:
+            interaction_kind = "clarification"
+            reason = "Task requires clarification before evaluation can continue."
+        else:  # pragma: no cover - guarded by the early return above
+            interaction_kind, reason = "input", "Task requires operator input."
         return WorkerResult(
             status="failure",
             failure_kind="interaction",
