@@ -5,6 +5,11 @@ This file is generated from merged pull requests with
 completed-task ledger; keep completed work here instead.
 ## Merged PR History
 
+### Changed
+
+- Refactor: retire legacy task execution runtime ([#340](https://github.com/natanayalo/code-agent/pull/340))
+
+
 ### Fixed
 
 - Fix: heartbeat Temporal verification activity ([#339](https://github.com/natanayalo/code-agent/pull/339))
