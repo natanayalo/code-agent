@@ -267,13 +267,6 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, index=True)
     max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
-    next_attempt_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, index=True
-    )
-    lease_owner: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    lease_expires_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, index=True
-    )
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     queue_lane: Mapped[str] = mapped_column(String(50), nullable=False, default="primary")
@@ -536,13 +529,11 @@ class WorkerRun(UUIDPrimaryKeyMixin, Base):
 
 
 class WorkerNode(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """A queue worker process that can claim and execute persisted tasks."""
+    """A Temporal worker process tracked for health and routing policy."""
 
     __tablename__ = "worker_nodes"
     __table_args__ = (
         CheckConstraint("capacity > 0", name="worker_capacity_positive"),
-        CheckConstraint("current_load >= 0", name="worker_load_nonnegative"),
-        CheckConstraint("current_load <= capacity", name="worker_load_within_capacity"),
         CheckConstraint("consecutive_failures >= 0", name="worker_failures_nonnegative"),
     )
 
@@ -564,7 +555,6 @@ class WorkerNode(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         index=True,
     )
     capacity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    current_load: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     consecutive_failures: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     quarantine_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 

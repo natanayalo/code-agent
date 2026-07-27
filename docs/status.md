@@ -6,17 +6,13 @@ Phase 4: selective autonomy after reliability.
 
 Active focus:
 
-- M25.3 Temporal-only cutover and legacy retirement.
-  - Slice 3A and Slice 3B are complete by operator acceptance. The sole local
-    Compose release environment retained the immutable cutover timestamp,
-    deployed commit `251b9aa`, recovered a fan-out task after a worker restart
-    during independent verification, reconciled Temporal and Postgres terminal
-    state, and recorded clean drain plus rollback evidence in the immutable
-    `m25.3-temporal-cutover-20260726T213001Z` release. See the
-    [Slice 3 closeout](m25_3_slice_3_evidence_summary.md).
-  - Slice 4A is complete (PR #340 retired the Postgres task scheduler,
-    LangGraph lifecycle, and runtime selector).
-  - Slice 4B is next for snapshot-backed schema cleanup.
+- Temporal activity idempotency and interaction event fixes.
+- M25.3 Temporal-only cutover and legacy retirement is complete:
+  - Slice 4A retired the Postgres task scheduler, LangGraph lifecycle, and
+    runtime selector in PR #340.
+  - Slice 4B removed the task lease schema and WorkerNode load accounting after
+    a snapshot-backed PostgreSQL rollback rehearsal. See the
+    [Slice 4B evidence](m25_3_slice_4b_schema_evidence.md).
 
 ## Phase 3 Reliability Baseline
 - **Baseline cases**: 25 baseline cases run, 25 passed according to the frozen evaluation report.
@@ -74,18 +70,15 @@ Active focus:
 
 ## Next Slices Only
 
-1. M25.3 Slice 4B: snapshot-backed schema cleanup
-   - remove the retained task lease columns after verifying migration and restore procedures
-2. Temporal activity idempotency and interaction event fixes
+1. Temporal activity idempotency and interaction event fixes
    - use a dedicated timeline event type for non-permission interaction
      resolution instead of reusing `TASK_SPEC_AND_ROUTE_GENERATED`
    - make `resolve_permission_escalation` rejection idempotent by returning
      early when the snapshot is already deleted and the task is terminal
    - add SIGTERM signal handler to worker entrypoint for graceful container
      shutdown
-3. M26: review comment repair
+2. M26: review comment repair
    - extend the PR repair loop from CI failures to actionable review feedback
-   - may begin during the M25.3 evidence gate
 
 ## Current Backlog
 

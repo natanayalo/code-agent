@@ -50,7 +50,6 @@ class WorkerNodeRepository:
                 capabilities=capabilities or {},
                 last_heartbeat_at=now,
                 capacity=bounded_capacity,
-                current_load=0,
                 consecutive_failures=0,
             )
             self.session.add(node)
@@ -64,7 +63,6 @@ class WorkerNodeRepository:
         node.capabilities = capabilities or {}
         node.last_heartbeat_at = now
         node.capacity = bounded_capacity
-        node.current_load = 0
         if not was_quarantined:
             node.status = WorkerNodeStatus.ACTIVE
             node.quarantine_reason = None
@@ -83,7 +81,7 @@ class WorkerNodeRepository:
         supported_profiles: list[str] | None = None,
         capabilities: dict[str, Any] | None = None,
     ) -> WorkerNode:
-        """Create a missing worker without resetting an existing node's load."""
+        """Create a missing worker without refreshing an existing node."""
         node = self.get_by_worker_id(worker_id)
         if node is not None:
             return node
@@ -149,7 +147,7 @@ class WorkerNodeRepository:
                 WorkerNode.status.in_([WorkerNodeStatus.ACTIVE, WorkerNodeStatus.DRAINING]),
                 WorkerNode.last_heartbeat_at < cutoff,
             )
-            .values(status=WorkerNodeStatus.OFFLINE, current_load=0)
+            .values(status=WorkerNodeStatus.OFFLINE)
             .execution_options(synchronize_session="fetch")
         )
         updated_rows = int(getattr(updated, "rowcount", 0) or 0)
