@@ -134,6 +134,21 @@ def test_temporal_commands_store_a_task_local_delivery_sequence() -> None:
     assert "superseded_at" in commands.c
 
 
+def test_model_metadata_excludes_only_legacy_scheduler_fields() -> None:
+    """Temporal-owned retry and capacity leases must survive task lease cleanup."""
+    tasks = Base.metadata.tables["tasks"]
+    worker_nodes = Base.metadata.tables["worker_nodes"]
+    temporal_commands = Base.metadata.tables["temporal_commands"]
+    capacity_permits = Base.metadata.tables["execution_capacity_permits"]
+
+    assert {"lease_owner", "lease_expires_at", "next_attempt_at"}.isdisjoint(tasks.c)
+    assert {"attempt_count", "max_attempts", "priority", "queue_lane"} <= set(tasks.c.keys())
+    assert "current_load" not in worker_nodes.c
+    assert "capacity" in worker_nodes.c
+    assert "next_attempt_at" in temporal_commands.c
+    assert {"lease_owner", "lease_expires_at"} <= set(capacity_permits.c.keys())
+
+
 def test_model_metadata_enforces_memory_observation_constraints() -> None:
     """Metadata-created DBs should match migration constraints for observations."""
     engine = create_engine("sqlite:///:memory:")

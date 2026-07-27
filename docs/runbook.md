@@ -168,7 +168,8 @@ Checks:
 - verify worker process is running with `CODE_AGENT_RUN_WORKER=1`
 - verify `CODE_AGENT_ENABLE_TASK_SERVICE=1`
 - verify worker and API share the same database
-- inspect lease fields (`lease_owner`, `lease_expires_at`) for stuck claims
+- inspect the Temporal workflow state and worker-node heartbeat/status
+- inspect pending Temporal command outbox rows if the workflow never started
 
 Useful command:
 
@@ -237,6 +238,22 @@ docker compose up -d
 - inspect Temporal UI plus the task timeline and worker-run artifacts
 - inspect pending Temporal command outbox rows if a workflow never started
 - avoid direct DB mutation unless absolutely necessary
+
+## Schema rollback after M25.3 Slice 4B
+
+An Alembic downgrade recreates the retired lease columns but cannot reconstruct
+their dropped values. Use the pre-4B database snapshot for a legacy-image
+rollback:
+
+1. stop API and worker services so the application database is quiescent
+2. restore the pre-4B snapshot and verify Alembic revision `20260720_0046`
+3. deploy `m25.3-legacy-lkg-20260727` API, worker, migrate, and dashboard images
+   with their matching configuration
+4. start services, verify readiness, and reconcile task/run row counts before
+   accepting submissions
+
+The exact image digests, snapshot checksum, and rehearsal results are recorded
+in [the Slice 4B evidence](m25_3_slice_4b_schema_evidence.md).
 
 ## Re-run work safely
 

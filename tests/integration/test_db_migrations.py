@@ -143,8 +143,6 @@ EXPECTED_CHECK_CONSTRAINTS = {
             "quarantined",
         },
         "ck_worker_nodes_worker_capacity_positive": {"capacity > 0"},
-        "ck_worker_nodes_worker_load_nonnegative": {"current_load >= 0"},
-        "ck_worker_nodes_worker_load_within_capacity": {"current_load <= capacity"},
         "ck_worker_nodes_worker_failures_nonnegative": {"consecutive_failures >= 0"},
     },
     "artifacts": {
@@ -223,6 +221,9 @@ def _assert_upgrade_columns(inspector) -> None:
         "route_reason",
         "orchestration_runtime",
     } <= _column_names(inspector, "tasks")
+    assert {"lease_owner", "lease_expires_at", "next_attempt_at"}.isdisjoint(
+        _column_names(inspector, "tasks")
+    )
     assert {
         "session_id",
         "requested_permission",
@@ -243,10 +244,10 @@ def _assert_upgrade_columns(inspector) -> None:
         "capabilities",
         "last_heartbeat_at",
         "capacity",
-        "current_load",
         "consecutive_failures",
         "quarantine_reason",
     } <= _column_names(inspector, "worker_nodes")
+    assert "current_load" not in _column_names(inspector, "worker_nodes")
     assert {
         "task_spec",
         "node_kind",
@@ -485,6 +486,123 @@ def test_orchestration_runtime_migration_backfills_only_temporal_evidence(tmp_pa
     assert "orchestration_runtime" not in _column_names(inspector, "worker_runs")
 
 
+def _seed_legacy_lease_cleanup_rows(engine) -> None:
+    now = "2026-07-28T00:00:00+00:00"
+    with engine.begin() as connection:
+        _seed_downgrade_users_and_sessions(connection, now)
+        connection.execute(
+            text(
+                "INSERT INTO tasks "
+                "(id, session_id, task_text, status, priority, attempt_count, max_attempts, "
+                "queue_lane, next_attempt_at, lease_owner, lease_expires_at) "
+                "VALUES ('legacy-task', 's1', 'cleanup', 'pending', 7, 2, 5, 'scout', "
+                ":next_attempt_at, 'legacy-worker', :lease_expires_at)"
+            ),
+            {
+                "next_attempt_at": "2026-07-28T00:01:00+00:00",
+                "lease_expires_at": "2026-07-28T00:02:00+00:00",
+            },
+        )
+        connection.execute(
+            text(
+                "INSERT INTO worker_nodes "
+                "(id, worker_id, worker_type, status, supported_profiles, capabilities, "
+                "last_heartbeat_at, capacity, current_load, consecutive_failures, "
+                "created_at, updated_at) "
+                "VALUES ('node-legacy', 'worker-legacy', 'codex', 'active', '[]', '{}', "
+                ":now, 4, 3, 0, :now, :now)"
+            ),
+            {"now": now},
+        )
+
+
+def _assert_legacy_lease_cleanup_upgrade(engine) -> None:
+    inspector = inspect(engine)
+    assert {"lease_owner", "lease_expires_at", "next_attempt_at"}.isdisjoint(
+        _column_names(inspector, "tasks")
+    )
+    assert "current_load" not in _column_names(inspector, "worker_nodes")
+    assert {index["name"] for index in inspector.get_indexes("tasks")}.isdisjoint(
+        {"ix_tasks_next_attempt_at", "ix_tasks_lease_expires_at"}
+    )
+
+    with engine.begin() as connection:
+        task_row = connection.execute(
+            text(
+                "SELECT attempt_count, max_attempts, priority, queue_lane "
+                "FROM tasks WHERE id = 'legacy-task'"
+            )
+        ).one()
+        worker_row = connection.execute(
+            text("SELECT capacity, status FROM worker_nodes WHERE id = 'node-legacy'")
+        ).one()
+        connection.execute(
+            text(
+                "INSERT INTO tasks (id, session_id, task_text, status, priority) "
+                "VALUES ('new-task', 's1', 'write path', 'pending', 0)"
+            )
+        )
+    assert task_row == (2, 5, 7, "scout")
+    assert worker_row == (4, "active")
+
+
+def _assert_legacy_lease_cleanup_downgrade(engine) -> None:
+    inspector = inspect(engine)
+    assert {"lease_owner", "lease_expires_at", "next_attempt_at"} <= _column_names(
+        inspector, "tasks"
+    )
+    assert "current_load" in _column_names(inspector, "worker_nodes")
+    assert {index["name"] for index in inspector.get_indexes("tasks")} >= {
+        "ix_tasks_next_attempt_at",
+        "ix_tasks_lease_expires_at",
+    }
+    worker_constraints = {
+        constraint["name"] for constraint in inspector.get_check_constraints("worker_nodes")
+    }
+    assert {
+        "ck_worker_nodes_worker_load_nonnegative",
+        "ck_worker_nodes_worker_load_within_capacity",
+    } <= worker_constraints
+
+    with engine.connect() as connection:
+        restored_task_fields = connection.execute(
+            text(
+                "SELECT next_attempt_at, lease_owner, lease_expires_at "
+                "FROM tasks WHERE id = 'legacy-task'"
+            )
+        ).one()
+        restored_load = connection.execute(
+            text("SELECT current_load FROM worker_nodes WHERE id = 'node-legacy'")
+        ).scalar_one()
+    assert restored_task_fields == (None, None, None)
+    assert restored_load == 0
+
+
+def test_legacy_lease_schema_cleanup_round_trips(tmp_path: Path) -> None:
+    """The cleanup preserves product fields while downgrade restores only schema shape."""
+    database_path = tmp_path / "legacy_lease_cleanup.db"
+    config = Config(str(Path("alembic.ini").resolve()))
+    config.set_main_option("script_location", str(Path("db/migrations").resolve()))
+    config.set_main_option("sqlalchemy.url", f"sqlite:///{database_path}")
+    command.upgrade(config, "20260720_0046")
+
+    engine = create_engine(f"sqlite:///{database_path}")
+    _seed_legacy_lease_cleanup_rows(engine)
+
+    command.upgrade(config, "head")
+    _assert_legacy_lease_cleanup_upgrade(engine)
+
+    command.downgrade(config, "20260720_0046")
+    _assert_legacy_lease_cleanup_downgrade(engine)
+
+    command.upgrade(config, "head")
+    inspector = inspect(engine)
+    assert {"lease_owner", "lease_expires_at", "next_attempt_at"}.isdisjoint(
+        _column_names(inspector, "tasks")
+    )
+    assert "current_load" not in _column_names(inspector, "worker_nodes")
+
+
 def test_personal_memory_scope_migration_deduplicates_and_removes_user_id(
     tmp_path: Path,
 ) -> None:
@@ -623,13 +741,11 @@ def _seed_downgrade_tasks(connection, now: str) -> None:
             "INSERT INTO tasks "
             "(id, session_id, repo_url, branch, callback_url, task_text, worker_override, "
             "constraints, task_spec, budget, secrets, secrets_encrypted, status, "
-            "attempt_count, max_attempts, next_attempt_at, lease_owner, lease_expires_at, "
-            "last_error, "
-            "priority, chosen_worker, route_reason, created_at, updated_at) "
+            "attempt_count, max_attempts, last_error, priority, chosen_worker, route_reason, "
+            "created_at, updated_at) "
             "VALUES (:id, :session_id, :repo_url, :branch, :callback_url, :task_text, "
             ":worker_override, :constraints, :task_spec, :budget, :secrets, "
-            ":secrets_encrypted, :status, :attempt_count, :max_attempts, "
-            ":next_attempt_at, :lease_owner, :lease_expires_at, :last_error, "
+            ":secrets_encrypted, :status, :attempt_count, :max_attempts, :last_error, "
             ":priority, :chosen_worker, :route_reason, "
             ":created_at, :updated_at)"
         ),
@@ -649,9 +765,6 @@ def _seed_downgrade_tasks(connection, now: str) -> None:
             "status": "completed",
             "attempt_count": 0,
             "max_attempts": 3,
-            "next_attempt_at": None,
-            "lease_owner": None,
-            "lease_expires_at": None,
             "last_error": None,
             "priority": 0,
             "chosen_worker": "codex",
@@ -722,13 +835,12 @@ def _seed_antigravity_migration_task(connection, now: str) -> None:
             "INSERT INTO tasks "
             "(id, session_id, repo_url, branch, callback_url, task_text, worker_override, "
             "constraints, task_spec, budget, secrets, secrets_encrypted, status, "
-            "attempt_count, max_attempts, next_attempt_at, lease_owner, lease_expires_at, "
-            "last_error, priority, chosen_worker, chosen_profile, route_reason, "
+            "attempt_count, max_attempts, last_error, priority, chosen_worker, "
+            "chosen_profile, route_reason, "
             "created_at, updated_at) "
             "VALUES (:id, :session_id, :repo_url, :branch, :callback_url, :task_text, "
             ":worker_override, :constraints, :task_spec, :budget, :secrets, "
-            ":secrets_encrypted, :status, :attempt_count, :max_attempts, "
-            ":next_attempt_at, :lease_owner, :lease_expires_at, :last_error, "
+            ":secrets_encrypted, :status, :attempt_count, :max_attempts, :last_error, "
             ":priority, :chosen_worker, :chosen_profile, :route_reason, "
             ":created_at, :updated_at)"
         ),
@@ -748,9 +860,6 @@ def _seed_antigravity_migration_task(connection, now: str) -> None:
             "status": "completed",
             "attempt_count": 0,
             "max_attempts": 3,
-            "next_attempt_at": None,
-            "lease_owner": None,
-            "lease_expires_at": None,
             "last_error": None,
             "priority": 0,
             "chosen_worker": "gemini",

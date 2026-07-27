@@ -40,7 +40,6 @@ def test_worker_node_registration_preserves_quarantine_and_refreshes_metadata(
         )
 
         assert refreshed.status is WorkerNodeStatus.QUARANTINED
-        assert refreshed.current_load == 0
         assert refreshed.capacity == 4
         assert refreshed.process_identity == "host:2"
         assert refreshed.quarantine_reason is not None

@@ -132,13 +132,13 @@ Progress:
     `251b9aa`; the worker-restart fan-out recovery proof, image digests, clean
     drain, rollback tags, and operator approval are recorded in the immutable
     `m25.3-temporal-cutover-20260726T213001Z` release
-- [ ] Slice 4: legacy deletion and schema cleanup (two PRs)
+- [x] Slice 4: legacy deletion and schema cleanup (two PRs)
   - [x] PR 4A — remove legacy dispatch, LangGraph durable lifecycle, and runtime
     selector/configuration after a reference inventory and method-level
     WorkerNode audit; retain historical runtime evidence and schema compatibility
-  - PR 4B — remove `lease_owner`, `lease_expires_at`, and `next_attempt_at`
-    through a schema migration after PR 4A; the PRs may merge on the same day
-    only after the schema rollback procedure is verified
+  - [x] PR 4B — remove task `lease_owner`, `lease_expires_at`, and
+    `next_attempt_at` plus retired WorkerNode `current_load` through a schema
+    migration after snapshot-backed rollback verification
   - pre-implementation reference inventory of all legacy symbols classified as
     legacy-only, shared product policy, test fixture, or migration compatibility
   - method-level WorkerNode audit: keep profile/capability/health/operator policy,
@@ -147,6 +147,8 @@ Progress:
   - before PR 4B, take a restorable database snapshot and verify the migration's
     upgrade, downgrade, and re-upgrade on a disposable database; record the
     exact tagged image plus database restore sequence
+  - completed against a restored snapshot of the sole local Compose database;
+    see [Slice 4B evidence](m25_3_slice_4b_schema_evidence.md)
   - if PR 4B must be rolled back, stop the application, restore the pre-PR-4B
     database snapshot, deploy the tagged legacy-capable image and matching
     configuration, then verify the restored schema revision before resuming
