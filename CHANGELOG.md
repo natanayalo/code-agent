@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Changed
 
+- Refactor(db): remove legacy lease schema ([#341](https://github.com/natanayalo/code-agent/pull/341))
+
 - Refactor: retire legacy task execution runtime ([#340](https://github.com/natanayalo/code-agent/pull/340))
 
 
