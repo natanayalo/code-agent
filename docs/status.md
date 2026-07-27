@@ -14,8 +14,9 @@ Active focus:
     state, and recorded clean drain plus rollback evidence in the immutable
     `m25.3-temporal-cutover-20260726T213001Z` release. See the
     [Slice 3 closeout](m25_3_slice_3_evidence_summary.md).
-  - Slice 4A retires the Postgres task scheduler, LangGraph lifecycle, and
-    runtime selector. PR 4B is next and owns the snapshot-backed schema cleanup.
+  - Slice 4A is complete (PR #340 retired the Postgres task scheduler,
+    LangGraph lifecycle, and runtime selector).
+  - Slice 4B is next for snapshot-backed schema cleanup.
 
 ## Phase 3 Reliability Baseline
 - **Baseline cases**: 25 baseline cases run, 25 passed according to the frozen evaluation report.
