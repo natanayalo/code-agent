@@ -16,14 +16,20 @@ from evaluation import (
     evaluate_suite,
     load_frozen_suite,
 )
+from evaluation.domain_pipeline import DomainEvaluationPipeline
 from evaluation.harness import (
     FrozenTaskCase,
 )
 from evaluation.orchestrator_runner import _extract_reliability_metrics
-from orchestrator.state import TaskTimelineEventState
+from orchestrator.state import (
+    ApprovalCheckpoint,
+    OrchestratorState,
+    TaskSpec,
+    TaskTimelineEventState,
+)
 
 
-def _make_fake_graph(
+def _make_fake_evaluation(
     expected_thread_id: str,
     repair_handoff: bool,
     review_outcome: str,
@@ -31,10 +37,16 @@ def _make_fake_graph(
     suppressed: list[dict[str, object]],
     review_summary: str = "reviewed",
 ) -> object:
-    class _FakeGraph:
-        async def ainvoke(self, _inputs: object, config: dict[str, object]) -> dict[str, object]:
-            assert config["configurable"] == {"thread_id": expected_thread_id}
-            return {
+    expected_case_id = expected_thread_id.removeprefix("frozen-eval-")
+
+    async def run(inputs: dict[str, object]) -> OrchestratorState:
+        task = inputs["task"]
+        assert isinstance(task, dict)
+        constraints = task["constraints"]
+        assert isinstance(constraints, dict)
+        assert constraints["evaluation_case_id"] == expected_case_id
+        return OrchestratorState.model_validate(
+            {
                 "task": {"task_text": "Do a thing"},
                 "dispatch": {"worker_type": "codex"},
                 "verification": {"status": "passed", "items": []},
@@ -56,11 +68,12 @@ def _make_fake_graph(
                     "suppressed_findings": suppressed,
                 },
             }
+        )
 
-    return _FakeGraph()
+    return run
 
 
-def test_orchestrator_runner_executes_case_through_graph_path() -> None:
+def test_orchestrator_runner_executes_case_through_domain_pipeline() -> None:
     suite = load_frozen_suite()
     case = suite.cases[0]
     runner = OrchestratorReplayRunner(
@@ -104,7 +117,7 @@ def test_orchestrator_runner_propagates_review_outcome_fields() -> None:
         worker_override="codex",
     )
 
-    runner._graph = _make_fake_graph(
+    runner._run_evaluation = _make_fake_evaluation(
         expected_thread_id="frozen-eval-reviewed-case",
         repair_handoff=True,
         review_outcome="findings",
@@ -159,7 +172,7 @@ def test_orchestrator_runner_review_metrics_precision_reflects_suppressed_findin
         worker_override="codex",
     )
 
-    runner._graph = _make_fake_graph(
+    runner._run_evaluation = _make_fake_evaluation(
         expected_thread_id="frozen-eval-review-metrics-case",
         repair_handoff=False,
         review_outcome="findings",
@@ -224,7 +237,7 @@ def test_orchestrator_runner_deduplicates_overlapping_suppressed_findings() -> N
         worker_override="codex",
     )
 
-    runner._graph = _make_fake_graph(
+    runner._run_evaluation = _make_fake_evaluation(
         expected_thread_id="frozen-eval-overlap-case",
         repair_handoff=False,
         review_outcome="findings",
@@ -319,7 +332,7 @@ def test_orchestrator_runner_preserves_error_status() -> None:
     assert "worker crashed" in outcome.summary
 
 
-def test_orchestrator_runner_handles_approval_interrupt_as_failure() -> None:
+def test_orchestrator_runner_handles_approval_gate_as_failure() -> None:
     case = FrozenTaskCase(
         case_id="destructive-case",
         repo_fixture="fixtures/empty",
@@ -336,7 +349,29 @@ def test_orchestrator_runner_handles_approval_interrupt_as_failure() -> None:
     outcome = asyncio.run(runner.run_case(case))
 
     assert outcome.status == "failure"
-    assert "interrupted awaiting approval" in outcome.summary.lower()
+    assert "paused for operator approval" in outcome.summary.lower()
+
+
+def test_domain_evaluation_pipeline_uses_one_precedence_for_overlapping_gates() -> None:
+    state = OrchestratorState(
+        task={"task_text": "Perform an ambiguous high-risk operation"},
+        task_spec=TaskSpec(
+            goal="Clarify and approve the high-risk operation",
+            requires_clarification=True,
+        ),
+        approval=ApprovalCheckpoint(
+            required=True,
+            status="pending",
+            reason="High-risk action requires approval.",
+        ),
+    )
+
+    result = DomainEvaluationPipeline._operator_gate_result(state)
+
+    assert result is not None
+    assert result.summary == (
+        "Evaluation paused for operator approval. High-risk action requires approval."
+    )
 
 
 # ---------------------------------------------------------------------------

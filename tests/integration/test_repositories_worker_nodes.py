@@ -8,7 +8,9 @@ from db.enums import WorkerNodeStatus
 from repositories import WorkerNodeRepository, session_scope
 
 
-def test_worker_node_registration_resets_load_but_preserves_quarantine(session_factory) -> None:
+def test_worker_node_registration_preserves_quarantine_and_refreshes_metadata(
+    session_factory,
+) -> None:
     """Re-registering a quarantined worker should not silently re-enable it."""
     now = datetime.now(UTC)
     with session_scope(session_factory) as session:
@@ -23,10 +25,6 @@ def test_worker_node_registration_resets_load_but_preserves_quarantine(session_f
             capabilities={"worker_types": ["codex"], "lanes": ["primary"]},
         )
         assert node.status is WorkerNodeStatus.ACTIVE
-        assert repo.reserve_load(worker_id="worker-a") is True
-        assert repo.reserve_load(worker_id="worker-a") is True
-        assert repo.reserve_load(worker_id="worker-a") is False
-
         repo.record_failure(worker_id="worker-a", failure_kind="provider_auth", threshold=1)
         assert node.status is WorkerNodeStatus.QUARANTINED
         assert node.quarantine_reason is not None
@@ -107,26 +105,6 @@ def test_worker_node_sweep_marks_stale_active_workers_offline_without_clearing_q
         assert swept == 1
         assert active.status is WorkerNodeStatus.OFFLINE
         assert quarantined.status is WorkerNodeStatus.QUARANTINED
-
-
-def test_worker_node_release_load_never_goes_negative(session_factory) -> None:
-    """Load release should be idempotent enough for cancelled/lost lease paths."""
-    now = datetime.now(UTC)
-    with session_scope(session_factory) as session:
-        repo = WorkerNodeRepository(session)
-        node = repo.register_worker(
-            worker_id="worker-release",
-            worker_type="codex",
-            now=now,
-            capacity=1,
-        )
-
-        assert repo.reserve_load(worker_id="worker-release") is True
-        assert node.current_load == 1
-        assert repo.release_load(worker_id="worker-release") is True
-        assert node.current_load == 0
-        assert repo.release_load(worker_id="worker-release") is True
-        assert node.current_load == 0
 
 
 def test_worker_node_heartbeat_recovers_offline_workers(session_factory) -> None:

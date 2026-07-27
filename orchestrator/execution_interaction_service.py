@@ -131,10 +131,8 @@ def _persist_resolved_interaction(
         }
 
     task.constraints = constraints
-    task.next_attempt_at = utc_now()
     task.status = TaskStatus.PENDING
     if is_normal_permission and not approved:
-        task.next_attempt_at = None
         task.status = TaskStatus.FAILED
         task.last_error = "Manual approval rejected via interaction response."
     event_type = (
@@ -294,7 +292,6 @@ def _handle_approval_rejection(
     decided_at: Any,
 ) -> None:
     task.status = TaskStatus.FAILED
-    task.next_attempt_at = None
     task.last_error = "Manual approval rejected via API decision endpoint."
     worker_type = task.chosen_worker or task.worker_override or WorkerType.CODEX
     worker_run_repo.create_for_task(
@@ -360,7 +357,6 @@ def apply_task_approval_decision(
         if approved:
             constraints["requires_approval"] = False
             task.status = TaskStatus.PENDING
-            task.next_attempt_at = decided_at
             task.last_error = None
         else:
             _handle_approval_rejection(task, worker_run_repo, decided_at)
@@ -378,8 +374,6 @@ def apply_task_approval_decision(
                 interaction.updated_at = decided_at
 
         task.constraints = constraints
-        task.lease_owner = None
-        task.lease_expires_at = None
         if task.orchestration_runtime == OrchestrationRuntime.TEMPORAL:
             _enqueue_approval_signal(session, task_id, approved)
         session.flush()

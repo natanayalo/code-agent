@@ -93,35 +93,6 @@ def test_deliverable_evidence_and_meaningful_deliverable_helpers() -> None:
     assert _has_meaningful_deliverable(state) is True
 
 
-def test_await_clarification_returns_resolved_without_interrupt() -> None:
-    state = OrchestratorState.model_validate(
-        {
-            "task": {
-                "task_id": "task-1",
-                "task_text": "Need clarification",
-                "constraints": {
-                    "interactions": {
-                        "resolved-hash": {
-                            "status": "resolved",
-                            "interaction_type": "clarification",
-                            "data": {"resume_token": "clarification-task-1"},
-                        },
-                        "noise": "not-a-map",
-                    }
-                },
-            },
-            "task_spec": {
-                "goal": "g",
-                "requires_clarification": True,
-                "clarification_questions": ["new question wording"],
-            },
-        }
-    )
-    result = await_clarification(state)
-    assert result["current_step"] == "await_clarification"
-    assert "clarification already resolved" in result["progress_updates"][-1]
-
-
 def test_compute_route_override_available():
     """T-072: manual override is honoured when the worker is available."""
     state = OrchestratorState.model_validate(

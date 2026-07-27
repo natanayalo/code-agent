@@ -22,8 +22,8 @@ Responsibilities:
 - session + task creation and persistence
 - generated TaskSpec contract for task goal/risk/type/delivery policy
 - optional LLM orchestrator brain for TaskSpec enrichment and route recommendation
-- queueing and lease-based claiming
-- orchestration graph execution
+- transactional Temporal command outbox and workflow startup
+- Temporal workflow lifecycle execution
 - worker routing policy and manual override handling
 - approval checkpoints and operator decisions
 - replay/retry lifecycle control
@@ -164,10 +164,11 @@ This lane remains controlled, inspectable, and human-in-the-loop for high-risk o
 ```mermaid
 flowchart TD
     U[Operator via Telegram or HTTP] --> API[FastAPI Ingress]
-    API --> DB[(Postgres<br/>Task Queue)]
-
-    DB --> W[Worker Process]
-    W --> ORCH[TaskExecutionService + Orchestrator Graph]
+    API --> DB[(Postgres<br/>Product State + Command Outbox)]
+    DB --> DISP[Temporal Command Dispatcher]
+    DISP --> TEMP[Temporal Workflow]
+    TEMP --> W[Temporal Worker Activities]
+    W --> ORCH[Shared Orchestration Domain Callables]
     ORCH --> MEM[Memory + Session State]
     ORCH --> ROUTE[Worker Routing]
 
@@ -184,14 +185,14 @@ flowchart TD
     ORCH --> DB
 ```
 
-## Queue + Lease Model
+## Temporal Execution Model
 
-- API writes tasks as pending records.
-- Worker process polls queue (`CODE_AGENT_QUEUE_POLL_INTERVAL_SECONDS`, default `2`).
-- Worker registers capacity (`CODE_AGENT_QUEUE_CAPACITY`, default `1`) and atomically claims tasks with lease ownership and expiry (`CODE_AGENT_QUEUE_LEASE_SECONDS`, default `60`).
-- Heartbeats extend lease while the run is active.
-- On success/failure, lease is cleared and status transitions persist.
-- Failed attempts are retried up to configured max attempts before terminal failure.
+- API commits each task with `orchestration_runtime=temporal` and a durable start command.
+- The worker-owned dispatcher delivers pending commands idempotently to Temporal.
+- Temporal history owns lifecycle durability, retries, pauses, signals, and cancellation.
+- Activities project product state, worker runs, timelines, and artifacts into Postgres.
+- Temporal outbox claims, DAG-node fencing, execution-capacity permits, and activity
+  heartbeats remain separate from the retired task-level queue leases.
 
 ## Safety Boundaries
 

@@ -56,50 +56,35 @@ Codex and Antigravity native execution workers are now native-only.
 - Deterministic scoring remains the fallback when model scoring is unavailable, invalid,
   or timed out. Proposal metadata records the scoring mode, provider, rationale, and fallback reason.
 
-## 3) Queue + Lease Behavior
+## 3) Temporal Execution Behavior
 
-### Legacy runtime status
+Temporal is the only task execution runtime. Every submission persists
+`orchestration_runtime=temporal` and a transactional start command. The worker
+process starts Temporal workflows and activities; it cannot select or fall back
+to Postgres task polling.
 
-The Postgres queue/lease worker and LangGraph lifecycle are **fallback-only**.
-New production-like local tasks use Temporal by default. Set
-`CODE_AGENT_EXECUTION_RUNTIME=legacy` only for an explicit incident fallback or
-local recovery investigation; do not add features to that path.
+Set `TEMPORAL_ONLY_CUTOVER_AT` to the accepted cutover timestamp. Historical
+legacy/unknown rows remain visible in runtime-drain metrics. If Temporal is
+unavailable, new submissions return HTTP 503 while inspection and interaction
+endpoints remain available.
 
-Set `TEMPORAL_ONLY_CUTOVER_AT` once, as an ISO-8601 UTC timestamp, when the
-production cutover starts. The metrics page uses it to show legacy submissions
-since cutover. If Temporal is unavailable, new submissions return HTTP 503;
-inspection and interaction endpoints remain available.
+Execution lifecycle:
 
-Do not remove the fallback until the M25.3 evidence gate is met and recorded
-in the [Temporal evidence-gate ledger](m25_3_observation_ledger.md): all 14
-operational scenarios must pass (with integration-test evidence allowed only
-for scenarios 9 through 12), all 10 task classes must be covered, the required
-automated suites must be green, a last-known-good legacy-capable image must be
-tagged, the runtime-drain snapshot must show zero active legacy/unknown tasks
-and zero post-cutover legacy submissions, and an operator must sign off.
-Continue to use
-`CODE_AGENT_EXECUTION_RUNTIME=legacy` only as an explicit incident fallback or
-local recovery investigation; never make it an automatic fallback.
+1. API persists a pending task and durable Temporal start command atomically.
+2. The worker-owned dispatcher idempotently starts `TaskExecutionWorkflow`.
+3. Temporal coordinates approvals, clarification, permission escalation,
+   retries, cancellation, and activity recovery.
+4. Activities persist worker runs, task projections, timelines, and artifacts.
+5. Terminal delivery reconciles the Temporal result with Postgres product state.
 
-Queue lifecycle:
-
-1. API persists a pending task.
-2. Worker polls for claimable tasks.
-3. Claim sets `lease_owner` and `lease_expires_at`.
-4. Heartbeat extends lease during execution.
-5. Completion/failure clears lease and persists outcome.
-6. Failure may requeue until `max_attempts` is reached.
-
-Relevant environment controls:
-
-- `CODE_AGENT_QUEUE_POLL_INTERVAL_SECONDS` (default `2`)
-- `CODE_AGENT_QUEUE_LEASE_SECONDS` (default `60`)
-- `CODE_AGENT_QUEUE_CAPACITY` (default `1`)
-- `CODE_AGENT_QUEUE_MAX_ATTEMPTS` (default `3`)
+`CODE_AGENT_QUEUE_MAX_ATTEMPTS` remains temporarily as the product-level
+logical-attempt policy name. Poll interval, task lease, worker ID/capacity, and
+checkpoint settings have been removed.
 
 ## 3.1) Tracing and Observability (Phoenix OSS)
 
-`code-agent` can emit OpenTelemetry/OpenInference traces for LangGraph/orchestrator runs.
+`code-agent` can emit OpenTelemetry/OpenInference traces for Temporal activities
+and orchestration domain callables.
 
 Manual operations:
 
@@ -246,10 +231,11 @@ docker compose down
 docker compose up -d
 ```
 
-## Worker stuck / lease drift recovery
+## Worker or workflow recovery
 
-- restart worker process first
-- allow expired leases to become claimable again
+- restart the worker process first; Temporal resumes or retries recorded work
+- inspect Temporal UI plus the task timeline and worker-run artifacts
+- inspect pending Temporal command outbox rows if a workflow never started
 - avoid direct DB mutation unless absolutely necessary
 
 ## Re-run work safely

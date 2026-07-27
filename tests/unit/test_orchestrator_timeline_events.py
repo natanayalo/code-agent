@@ -10,15 +10,13 @@ from db.enums import TimelineEventType
 from orchestrator.graph import (
     build_choose_worker_node,
     check_approval,
-    classify_task,
     dispatch_job,
     generate_task_spec,
-    ingest_task,
     load_memory,
-    plan_task,
     summarize_result,
     verify_result,
 )
+from orchestrator.nodes.ingestion import classify_task, ingest_task, plan_task
 from orchestrator.nodes.utils import _timeline_events
 from orchestrator.state import OrchestratorState, TaskTimelineEventState
 

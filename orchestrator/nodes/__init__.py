@@ -1,1 +1,1 @@
-"""Orchestrator LangGraph node implementations."""
+"""Reusable orchestrator domain-node implementations."""

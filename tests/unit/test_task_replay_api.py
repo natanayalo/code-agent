@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Iterator
 from typing import Any
 
@@ -35,20 +34,6 @@ class _StaticWorker(Worker):
             files_changed=[],
             artifacts=[],
         )
-
-
-@pytest.fixture(autouse=True)
-def _use_legacy_runtime_for_replay_tests(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Replay endpoint tests exercise the legacy queue worker explicitly."""
-    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "legacy")
-
-
-def _run_one_queued_task(client: TestClient) -> None:
-    """Claim one queued task and execute it through the worker service."""
-    service = client.app.state.task_service
-    claim = service.claim_next_task(worker_id="test-worker", lease_seconds=60)
-    assert claim is not None
-    asyncio.run(service.run_queued_task(task_id=claim.task_id, worker_id="test-worker"))
 
 
 @pytest.fixture
@@ -84,12 +69,13 @@ def client(session_factory) -> Iterator[TestClient]:
 
 def _create_and_complete_task(
     client: TestClient,
+    session_factory,
     *,
     task_text: str = "Fix the bug",
     repo_key: str | None = "example-repo",
     branch: str | None = "main",
 ) -> str:
-    """Submit a task, run it, and return the task_id."""
+    """Submit a task, persist its prerequisite terminal state, and return its ID."""
     response = client.post(
         "/tasks",
         json={
@@ -100,7 +86,8 @@ def _create_and_complete_task(
     )
     assert response.status_code == 202
     task_id = response.json()["task_id"]
-    _run_one_queued_task(client)
+    with session_scope(session_factory) as session:
+        TaskRepository(session).update_status(task_id=task_id, status=TaskStatus.COMPLETED)
     return task_id
 
 
@@ -109,7 +96,7 @@ def test_replay_returns_201_with_new_task_snapshot(
     session_factory,
 ) -> None:
     """POST /tasks/{id}/replay should create a new task and return 201."""
-    source_id = _create_and_complete_task(client)
+    source_id = _create_and_complete_task(client, session_factory)
 
     replay_response = client.post(f"/tasks/{source_id}/replay")
 
@@ -127,7 +114,7 @@ def test_replay_with_worker_override(
     session_factory,
 ) -> None:
     """Replay with worker_override should apply the override to the new task."""
-    source_id = _create_and_complete_task(client)
+    source_id = _create_and_complete_task(client, session_factory)
 
     replay_response = client.post(
         f"/tasks/{source_id}/replay",
@@ -185,7 +172,7 @@ def test_replay_with_worker_profile_override(
         profiled_client.headers["X-Webhook-Token"] = (
             "a" * 32  # gitleaks:allow
         )
-        source_id = _create_and_complete_task(profiled_client)
+        source_id = _create_and_complete_task(profiled_client, session_factory)
 
         replay_response = profiled_client.post(
             f"/tasks/{source_id}/replay",
@@ -232,7 +219,7 @@ def test_replay_rejects_unknown_worker_profile_override(
         profiled_client.headers["X-Webhook-Token"] = (
             "a" * 32  # gitleaks:allow
         )
-        source_id = _create_and_complete_task(profiled_client)
+        source_id = _create_and_complete_task(profiled_client, session_factory)
 
         replay_response = profiled_client.post(
             f"/tasks/{source_id}/replay",
@@ -243,9 +230,9 @@ def test_replay_rejects_unknown_worker_profile_override(
         assert "unknown profile" in replay_response.json()["detail"].lower()
 
 
-def test_replay_with_empty_body(client: TestClient) -> None:
+def test_replay_with_empty_body(client: TestClient, session_factory) -> None:
     """Replay with an empty JSON body should replay with original parameters."""
-    source_id = _create_and_complete_task(client)
+    source_id = _create_and_complete_task(client, session_factory)
 
     replay_response = client.post(f"/tasks/{source_id}/replay", json={})
 
@@ -278,7 +265,7 @@ def test_replay_failed_task_creates_new_task(
     session_factory,
 ) -> None:
     """Failed tasks should be replayable through the API."""
-    source_id = _create_and_complete_task(client)
+    source_id = _create_and_complete_task(client, session_factory)
     # Force-fail the task via direct DB access
     with session_scope(session_factory) as session:
         TaskRepository(session).update_status(task_id=source_id, status=TaskStatus.FAILED)
@@ -295,7 +282,7 @@ def test_replay_tags_provenance_in_new_task(
     session_factory,
 ) -> None:
     """The replayed task should carry replayed_from provenance in constraints."""
-    source_id = _create_and_complete_task(client)
+    source_id = _create_and_complete_task(client, session_factory)
 
     replay_response = client.post(f"/tasks/{source_id}/replay")
     assert replay_response.status_code == 201

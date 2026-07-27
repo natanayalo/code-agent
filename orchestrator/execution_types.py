@@ -571,15 +571,6 @@ class CreateTaskOutcome:
     duplicate: bool = False
 
 
-@dataclass(frozen=True)
-class TaskClaim:
-    """A claimed task ready for worker execution."""
-
-    task_id: str
-    attempt_count: int
-    max_attempts: int
-
-
 ProgressPhase = Literal["started", "running", "completed", "failed", "awaiting_approval"]
 
 

@@ -97,35 +97,32 @@ def _create_retained_worker_run(worker_run_repo, task_id, session_id, workspace_
     )
 
 
-def test_create_task_pins_selected_orchestration_runtime(monkeypatch) -> None:
-    """Runtime selection is persisted once instead of being re-evaluated during execution."""
+def test_create_task_always_persists_temporal_runtime(monkeypatch) -> None:
+    """Retired selector values cannot change the runtime stored for new tasks."""
     session_factory = _setup_persistence_test_db()
     service = execution_module.TaskExecutionService(
         session_factory=session_factory,
         worker=_StaticWorker(),
     )
-    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
+    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "legacy")
 
     task_snapshot, _ = service.create_task(
         execution_module.TaskSubmission(task_text="Pin Temporal runtime")
     )
 
-    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "legacy")
     reloaded_snapshot = service.get_task(task_snapshot.task_id)
     assert task_snapshot.orchestration_runtime == "temporal"
     assert reloaded_snapshot is not None
     assert reloaded_snapshot.orchestration_runtime == "temporal"
 
 
-def test_temporal_task_creation_persists_a_start_command_with_the_task(monkeypatch) -> None:
+def test_temporal_task_creation_persists_a_start_command_with_the_task() -> None:
     """A crash after commit leaves durable work for the worker dispatcher to reconcile."""
     session_factory = _setup_persistence_test_db()
     service = execution_module.TaskExecutionService(
         session_factory=session_factory,
         worker=_StaticWorker(),
     )
-    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
-
     snapshot, _ = service.create_task(execution_module.TaskSubmission(task_text="Start durably"))
 
     from db.models import TemporalCommand
@@ -153,7 +150,6 @@ def test_temporal_availability_retries_then_allows_a_recovered_submission(monkey
             raise ConnectionError("Temporal unavailable")
         return object()
 
-    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
     from temporalio.client import Client
 
     monkeypatch.setattr(Client, "connect", connect)
@@ -179,7 +175,6 @@ def test_temporal_submission_succeeds_after_recovery_without_service_restart(mon
             raise ConnectionError("Temporal unavailable")
         return object()
 
-    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "temporal")
     from temporalio.client import Client
 
     monkeypatch.setattr(Client, "connect", connect)

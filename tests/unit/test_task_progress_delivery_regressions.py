@@ -8,6 +8,7 @@ from sqlalchemy.pool import StaticPool
 
 from db.base import Base
 from orchestrator import execution as execution_module
+from orchestrator.temporal.activities import TaskExecutionActivities
 from repositories import (
     InboundDeliveryRepository,
     TaskRepository,
@@ -132,30 +133,22 @@ def test_task_summary_prefers_latest_run_summary_and_otherwise_returns_none() ->
     )
 
 
-def test_emit_progress_returns_quietly_without_notifier() -> None:
+def test_temporal_progress_returns_quietly_without_notifier() -> None:
     """Progress emission should no-op cleanly when no notifier is configured."""
     import asyncio
 
     service, _ = _make_task_service()
 
     asyncio.run(
-        service._emit_progress(
-            _submission(task_text="No notifier"),
-            execution_module._PersistedTaskContext(
-                user_id="user-1",
-                session_id="session-1",
-                channel="telegram",
-                external_thread_id="thread-1",
-                task_id="task-1",
-                attempt_count=1,
-            ),
+        TaskExecutionActivities(service)._notify_progress(
+            "missing-task",
             phase="running",
             summary="still working",
         )
     )
 
 
-def test_emit_progress_passes_structured_event_to_notifier() -> None:
+def test_temporal_progress_passes_structured_event_to_notifier() -> None:
     """Progress emission should hand a structured event to the configured notifier."""
     import asyncio
 
@@ -177,18 +170,11 @@ def test_emit_progress_passes_structured_event_to_notifier() -> None:
     notifier = _RecordingNotifier()
     service.progress_notifier = notifier
     submission = _submission(task_text="Notify operator")
+    snapshot, _ = service.create_task(submission)
 
     asyncio.run(
-        service._emit_progress(
-            submission,
-            execution_module._PersistedTaskContext(
-                user_id="user-1",
-                session_id="session-1",
-                channel="telegram",
-                external_thread_id="thread-42",
-                task_id="task-42",
-                attempt_count=2,
-            ),
+        TaskExecutionActivities(service)._notify_progress(
+            snapshot.task_id,
             phase="running",
             summary="worker is executing",
         )
@@ -198,8 +184,8 @@ def test_emit_progress_passes_structured_event_to_notifier() -> None:
     recorded_submission, event = notifier.calls[0]
     assert recorded_submission.task_text == "Notify operator"
     assert event.phase == "running"
-    assert event.task_id == "task-42"
-    assert event.session_id == "session-1"
+    assert event.task_id == snapshot.task_id
+    assert event.session_id == snapshot.session_id
     assert event.channel == "telegram"
-    assert event.external_thread_id == "thread-42"
+    assert event.external_thread_id == "telegram:chat:100"
     assert event.summary == "worker is executing"

@@ -2,7 +2,9 @@
 
 ## Automated evidence
 
-- Runtime defaults, explicit legacy fallback, timestamp parsing, worker retry exhaustion, submission outage, recovery, and dashboard metrics are covered by the focused unit and integration suites.
+- Unconditional Temporal submission/startup, timestamp parsing, worker retry
+  exhaustion, submission outage, recovery, and historical runtime metrics are
+  covered by the focused unit and integration suites.
 - The existing Temporal integration suite covers workflow lifecycle, interaction signals, cancellation, sequential DAGs, bounded fan-out, and replay compatibility.
 - The Slice 2 implementation and automated verification are complete. Compose
   scenario results below must be recorded against the deployment that begins
@@ -24,7 +26,8 @@ in the [Temporal evidence-gate ledger](m25_3_observation_ledger.md).
 7. Run the two-node read-only fan-out task.
 8. Replay an older Temporal workflow history after deployment.
 9. Run the full Python suite and pre-commit.
-10. Configure mismatched API/worker runtime values and confirm the mismatch is visible.
+10. Set the retired runtime-selector variable and confirm both API submission and
+    worker startup still use Temporal.
 11. With Temporal unavailable, confirm `/tasks` rejects while task inspection stays available.
 12. Restore Temporal and confirm a new submission succeeds without API restart.
 13. Restart the worker and reconcile Temporal and Postgres terminal state.
@@ -32,7 +35,8 @@ in the [Temporal evidence-gate ledger](m25_3_observation_ledger.md).
 
 ## Cutover procedure
 
-1. Deploy with `CODE_AGENT_EXECUTION_RUNTIME=temporal` and set immutable `TEMPORAL_ONLY_CUTOVER_AT` to the UTC deployment timestamp.
+1. Deploy the Temporal-only image and set immutable `TEMPORAL_ONLY_CUTOVER_AT`
+   to the UTC deployment timestamp.
 2. Run `scripts/up.sh`; it always starts `temporal` and `temporal-ui` with the API, worker, and dashboard.
 3. Copy the [Temporal evidence-gate ledger](m25_3_observation_ledger.md)
    to an immutable, release-specific evidence record. Complete and attach the

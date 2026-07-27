@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from repositories import TaskRepository, session_scope
-from tests.integration.task_endpoints_support import _run_one_queued_task
+from tests.integration.task_endpoints_support import _run_one_temporal_task
 
 
 def test_task_replay_endpoint_creates_replayable_task_with_provenance(
@@ -29,7 +29,7 @@ def test_task_replay_endpoint_creates_replayable_task_with_provenance(
     assert response.status_code == 202
     source_task_id = response.json()["task_id"]
 
-    _run_one_queued_task(client)
+    _run_one_temporal_task(client)
 
     replay_response = client.post(
         f"/tasks/{source_task_id}/replay",
@@ -58,7 +58,7 @@ def test_task_replay_endpoint_creates_replayable_task_with_provenance(
         assert replayed_task.constraints["assumptions"] == ["second pass"]
         assert replayed_task.budget["max_iterations"] == 6
 
-    _run_one_queued_task(client)
+    _run_one_temporal_task(client)
 
     completed = client.get(f"/tasks/{replay_task_id}")
     assert completed.status_code == 200

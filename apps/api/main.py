@@ -36,7 +36,7 @@ from apps.runtime import (  # noqa: E402
     RUN_API_ENV_VAR,
     initialize_persisted_cutover,
     should_run_api,
-    validate_runtime_configuration,
+    validate_cutover_configuration,
 )
 from orchestrator.execution import (  # noqa: E402
     TaskExecutionService,
@@ -88,7 +88,7 @@ def _build_lifespan(
             raise RuntimeError(
                 f"API runtime is disabled for this process. Set {RUN_API_ENV_VAR}=1 to enable it."
             )
-        validate_runtime_configuration()
+        validate_cutover_configuration()
 
         configure_tracing_from_env(service_name="code-agent-api")
         bootstrap_phoenix_project_id()

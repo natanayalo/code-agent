@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Iterator
 from dataclasses import replace
 
@@ -21,6 +20,7 @@ from repositories import (
     create_session_factory,
     session_scope,
 )
+from tests.integration.task_endpoints_support import _run_one_temporal_task
 from workers import Worker, WorkerRequest, WorkerResult
 
 
@@ -44,14 +44,6 @@ class RecordingProgressNotifier:
 
     async def notify(self, *, submission, event) -> None:
         self.events.append(event)
-
-
-def _run_one_queued_task(client: TestClient) -> None:
-    """Claim one queued task and execute it through the worker service."""
-    service = client.app.state.task_service
-    claim = service.claim_next_task(worker_id="test-worker", lease_seconds=60)
-    assert claim is not None
-    asyncio.run(service.run_queued_task(task_id=claim.task_id, worker_id="test-worker"))
 
 
 @pytest.fixture
@@ -133,7 +125,7 @@ def test_telegram_text_message_creates_task(client: TestClient) -> None:
 def test_telegram_task_text_propagated_to_worker(client: TestClient) -> None:
     """The message text should arrive at the worker unchanged."""
     client.post("/telegram/webhook", json=_text_update("Create a README"))
-    _run_one_queued_task(client)
+    _run_one_temporal_task(client)
 
     worker = client.app.state.test_worker
     assert len(worker.requests) == 1
@@ -154,7 +146,7 @@ def test_telegram_uses_configured_default_repo_key(client: TestClient) -> None:
     response = client.post("/telegram/webhook", json=_text_update("Create a README"))
     assert response.status_code == 200
 
-    _run_one_queued_task(client)
+    _run_one_temporal_task(client)
     worker = client.app.state.test_worker
     assert len(worker.requests) == 1
     assert worker.requests[0].repo_url == "https://github.com/natanayalo/code-agent.git"
@@ -183,7 +175,7 @@ def test_telegram_task_persisted(client: TestClient, session_factory) -> None:
     response = client.post("/telegram/webhook", json=_text_update("fix the tests"))
     task_id = response.json()["task_id"]
 
-    _run_one_queued_task(client)
+    _run_one_temporal_task(client)
     get_resp = client.get(f"/tasks/{task_id}")
     assert get_resp.status_code == 200
     assert get_resp.json()["status"] == "completed"
@@ -205,7 +197,7 @@ def test_telegram_duplicate_update_is_idempotent(client: TestClient) -> None:
     assert second.json()["detail"] == "duplicate_delivery"
 
     worker = client.app.state.test_worker
-    _run_one_queued_task(client)
+    _run_one_temporal_task(client)
     assert len(worker.requests) == 1
 
 
@@ -214,7 +206,7 @@ def test_telegram_progress_notifications_cover_start_running_done(client: TestCl
     response = client.post("/telegram/webhook", json=_text_update("ship it", update_id=88))
 
     assert response.status_code == 200
-    _run_one_queued_task(client)
+    _run_one_temporal_task(client)
     notifier = client.app.state.test_notifier
     assert [event.phase for event in notifier.events] == ["started", "running", "completed"]
     assert all(event.channel == "telegram" for event in notifier.events)
@@ -413,7 +405,7 @@ def test_telegram_webhook_accepts_matching_secret_header_when_configured(
             },
             json=_text_update("Run the linter"),
         )
-        _run_one_queued_task(client)
+        _run_one_temporal_task(client)
 
     assert response.status_code == 200
     assert response.json()["task_id"] is not None

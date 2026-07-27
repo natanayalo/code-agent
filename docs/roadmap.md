@@ -133,9 +133,9 @@ Progress:
     drain, rollback tags, and operator approval are recorded in the immutable
     `m25.3-temporal-cutover-20260726T213001Z` release
 - [ ] Slice 4: legacy deletion and schema cleanup (two PRs)
-  - PR 4A — remove legacy dispatch, LangGraph durable lifecycle, and runtime
+  - [x] PR 4A — remove legacy dispatch, LangGraph durable lifecycle, and runtime
     selector/configuration after a reference inventory and method-level
-    WorkerNode audit
+    WorkerNode audit; retain historical runtime evidence and schema compatibility
   - PR 4B — remove `lease_owner`, `lease_expires_at`, and `next_attempt_at`
     through a schema migration after PR 4A; the PRs may merge on the same day
     only after the schema rollback procedure is verified

@@ -16,16 +16,6 @@ from repositories import create_engine_from_url, create_session_factory
 from tests.integration.task_endpoints_support import DEFAULT_SHARED_SECRET, _default_worker
 
 
-@pytest.fixture(autouse=True)
-def _use_legacy_runtime_for_queue_oriented_tests(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep pre-cutover queue fixtures explicit about their fallback runtime.
-
-    Temporal-focused scenarios opt in within the individual test before creating
-    a task, matching the production selector contract.
-    """
-    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "legacy")
-
-
 @pytest.fixture
 def session_factory():
     """Create a SQLite-backed session factory for repository integration tests."""
@@ -39,15 +29,13 @@ def session_factory():
 
 
 @pytest.fixture
-def client(session_factory, tmp_path) -> Iterator[TestClient]:
+def client(session_factory) -> Iterator[TestClient]:
     """Provide a test client with the execution-path task service configured."""
     worker = _default_worker()
-    checkpoint_file = tmp_path / "test_checkpoints.sqlite"
     app = create_app(
         task_service=TaskExecutionService(
             session_factory=session_factory,
             worker=worker,
-            checkpoint_path=str(checkpoint_file),
         ),
         auth_config=ApiAuthConfig(shared_secret=DEFAULT_SHARED_SECRET),
     )

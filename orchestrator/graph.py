@@ -1,4 +1,4 @@
-"""LangGraph workflow skeleton for the orchestrator happy path."""
+"""Reusable orchestration domain functions invoked by Temporal activities."""
 
 from __future__ import annotations
 
@@ -10,10 +10,6 @@ import re
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Final, Literal, cast
 
-from langchain_core.runnables import RunnableLambda
-from langgraph.checkpoint.base import BaseCheckpointSaver
-from langgraph.graph import END, START, StateGraph
-from langgraph.types import interrupt
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
@@ -53,17 +49,6 @@ from orchestrator.node_execution import (
     NodeExecutionService,
     logical_activity_key,
 )
-from orchestrator.nodes.delivery import build_deliver_result_node
-from orchestrator.nodes.ingestion import (
-    classify_task,
-    ingest_task,
-    load_repo_profile_node,
-    plan_task,
-)
-from orchestrator.nodes.provisioning import (
-    build_init_environment_node,
-    build_provision_workspace_node,
-)
 from orchestrator.nodes.utils import (
     CODEX_WORKER,
     GEMINI_WORKER,
@@ -75,10 +60,7 @@ from orchestrator.nodes.utils import (
     _task_complexity_reason,
     _timeline_event,
 )
-from orchestrator.nodes.verification import (
-    VERIFIER_REPAIR_REQUEST_CONSTRAINT,
-    build_verify_result_node,
-)
+from orchestrator.nodes.verification import VERIFIER_REPAIR_REQUEST_CONSTRAINT
 from orchestrator.nodes.verification import (
     verify_result as verify_result,
 )
@@ -119,8 +101,6 @@ from repositories.sqlalchemy import (
     SessionStateRepository,
 )
 from repositories.sqlalchemy_plan import ExecutionPlanRepository
-from sandbox import WorkspaceManager
-from tools import coerce_permission_level
 from tools.numeric import coerce_positive_int_like
 from workers import ArtifactReference, Worker, WorkerProfile, WorkerRequest, WorkerResult
 from workers.constants import (
@@ -131,30 +111,6 @@ from workers.constants import (
 logger = logging.getLogger(__name__)
 
 # [Moved to orchestrator/nodes/utils.py]
-
-ORCHESTRATOR_NODE_SEQUENCE = (
-    "ingest_task",
-    "classify_task",
-    "plan_task",
-    "load_repo_profile",
-    "generate_task_spec",
-    "generate_task_spec_and_route",
-    "decompose_task",
-    "await_clarification",
-    "load_memory",
-    "await_permission",
-    "check_approval",
-    "await_approval",
-    "provision_workspace",
-    "init_environment",
-    "dispatch_job",
-    "await_result",
-    "verify_result",
-    "review_result",
-    "deliver_result",
-    "summarize_result",
-    "persist_memory",
-)
 
 _COMPLEX_TASK_PATTERN = re.compile(
     rf"(?<![\w-])(?:{'|'.join(re.escape(marker) for marker in COMPLEX_TASK_MARKERS)})(?![\w-])"
@@ -504,37 +460,6 @@ def _build_approval_checkpoint(state: OrchestratorState) -> ApprovalCheckpoint:
         reason=reason,
         resume_token=f"approval-{task_identifier}",
     )
-
-
-def _route_after_check_approval(state_input: OrchestratorState) -> str:
-    """Route either to the approval interrupt or straight to dispatch."""
-    state = _ensure_state(state_input)
-    return "await_approval" if state.approval.required else "provision_workspace"
-
-
-def _coerce_approval_decision(resume_value: Any) -> bool:
-    """Normalize LangGraph resume payloads into a boolean approval decision."""
-    if isinstance(resume_value, bool):
-        return resume_value
-
-    if isinstance(resume_value, dict):
-        val = resume_value.get("approved")
-        if isinstance(val, bool):
-            return val
-        if isinstance(val, str):
-            return val.lower() in ("true", "yes", "y", "1", "approve", "approved")
-        return False
-
-    if isinstance(resume_value, str):
-        return resume_value.lower() in ("true", "yes", "y", "1", "approve", "approved")
-
-    return False
-
-
-def _route_after_await_approval(state_input: OrchestratorState) -> str:
-    """Continue to dispatch only when the destructive action was approved."""
-    state = _ensure_state(state_input)
-    return "provision_workspace" if state.approval.status == "approved" else "summarize_result"
 
 
 def _normalize_repair_task_text(value: object) -> str | None:
@@ -1889,36 +1814,6 @@ def _apply_unified_brain_suggestion(
     return task_spec, route, task_spec_brain_report, route_brain_report
 
 
-def _route_after_generate_task_spec(state_input: OrchestratorState) -> str:
-    """Route either to load_memory or summarize_result for early gate conditions."""
-    state = _ensure_state(state_input)
-    policy_errors = [e for e in state.errors if e.startswith("task_spec_policy:")]
-    if policy_errors:
-        return "summarize_result"
-    if state.task_spec is not None and state.task_spec.requires_clarification:
-        # Preserve legacy flow: unresolved clarification gates halt with a summarized
-        # response. If the exact clarification interaction was already resolved,
-        # continue execution on subsequent attempts.
-        questions = state.task_spec.clarification_questions or []
-        summary = "Task requires clarification before execution can continue."
-        data = {
-            "source": "task_spec",
-            "resume_token": f"clarification-{state.task.task_id}",
-            "questions": questions,
-        }
-        if _is_interaction_requirement_resolved(
-            state,
-            interaction_type="clarification",
-            summary=summary,
-            data=data,
-        ):
-            set_current_span_attribute("code_agent.clarification_resolved", True)
-            return "load_memory"
-        set_current_span_attribute("code_agent.clarification_resolved", False)
-        return "await_clarification"
-    return "load_memory"
-
-
 def decompose_task(state_input: OrchestratorState) -> dict[str, Any]:
     """Build a validated node DAG while preserving monolithic fallback behavior."""
     state = _ensure_state(state_input)
@@ -2007,56 +1902,6 @@ def build_decompose_task_node(
         return response
 
     return node
-
-
-def await_clarification(state_input: OrchestratorState) -> dict[str, Any]:
-    """Pause the graph to request clarification from the operator."""
-    state = _ensure_state(state_input)
-    if state.task_spec is None or not state.task_spec.requires_clarification:
-        return {"current_step": "await_clarification"}
-
-    questions = state.task_spec.clarification_questions or []
-    summary = "Task requires clarification before execution can continue."
-    data = {
-        "source": "task_spec",
-        "resume_token": f"clarification-{state.task.task_id}",
-        "questions": questions,
-    }
-
-    # Check if we already have a resolved interaction for this exact requirement.
-    if _is_interaction_requirement_resolved(
-        state,
-        interaction_type="clarification",
-        summary=summary,
-        data=data,
-    ):
-        set_current_span_attribute("code_agent.clarification_resolved", True)
-        return {
-            "current_step": "await_clarification",
-            "progress_updates": _progress_update(state, "clarification already resolved"),
-        }
-
-    # Otherwise, interrupt for operator input.
-    interactions = state.task.constraints.get("interactions") or {}
-    clarification_round = 0
-    for interaction in interactions.values():
-        if not isinstance(interaction, Mapping):
-            continue
-        if interaction.get("interaction_type") == "clarification":
-            clarification_round += 1
-    set_current_span_attribute("code_agent.clarification_round", clarification_round + 1)
-    set_current_span_attribute("code_agent.clarification_resolved", False)
-    task_text = state.normalized_task_text or state.task.task_text
-    interrupt(
-        {
-            "type": "clarification",
-            "summary": summary,
-            "questions": questions,
-            "resume_token": f"clarification-{state.task.task_id or 'pending'}",
-            "task_text": task_text,
-        }
-    )
-    return {"current_step": "await_clarification"}
 
 
 def load_memory(state_input: OrchestratorState) -> dict[str, Any]:
@@ -3333,77 +3178,6 @@ def check_approval(state_input: OrchestratorState) -> dict[str, Any]:
     }
 
 
-def await_approval(state_input: OrchestratorState) -> dict[str, Any]:
-    """Pause the graph until a destructive action is approved or rejected."""
-    state = _ensure_state(state_input)
-    approval = state.approval
-    if not approval.required:
-        return {
-            "current_step": "await_approval",
-            "approval": approval.model_dump(),
-        }
-
-    # If we are resuming after a crash or a new attempt, the approval might already
-    # be in the constraints (set by the API decision endpoint).
-    if _is_already_approved(state):
-        updated_approval = approval.model_copy(update={"status": "approved"})
-        return {
-            "current_step": "await_approval",
-            "approval": updated_approval.model_dump(),
-            "progress_updates": _progress_update(state, "approval granted (resumed from state)"),
-        }
-
-    task_text = state.normalized_task_text or state.task.task_text
-    approved = _coerce_approval_decision(
-        interrupt(
-            {
-                "approval_type": approval.approval_type,
-                "reason": approval.reason,
-                "resume_token": approval.resume_token,
-                "task_text": task_text,
-                "chosen_worker": state.route.chosen_worker,
-            }
-        )
-    )
-
-    updated_approval = approval.model_copy(
-        update={"status": "approved" if approved else "rejected"},
-    )
-    progress_message = "approval granted" if approved else "approval rejected"
-    response: dict[str, Any] = {
-        "current_step": "await_approval",
-        "approval": updated_approval.model_dump(),
-        "progress_updates": _progress_update(state, progress_message),
-    }
-    if not approved:
-        response["result"] = WorkerResult(
-            status="failure",
-            summary="Task halted because the requested destructive action was not approved.",
-            failure_kind="permission_denied",
-            commands_run=[],
-            files_changed=[],
-            test_results=[],
-            artifacts=[],
-            next_action_hint="await_manual_follow_up",
-        ).model_dump()
-        response.update(
-            _timeline_event(
-                state,
-                TimelineEventType.APPROVAL_REJECTED,
-                message="Task expansion rejected.",
-            )
-        )
-    else:
-        response.update(
-            _timeline_event(
-                state,
-                TimelineEventType.APPROVAL_GRANTED,
-                message="Task expansion approved.",
-            )
-        )
-    return response
-
-
 def _build_unavailable_route_result(
     state: OrchestratorState,
     worker_type: str | None,
@@ -3541,32 +3315,6 @@ def build_await_result_node(
     return await_result
 
 
-def _route_after_await_result(state_input: OrchestratorState) -> str:
-    """Route from await_result either to verify_result, permission escalation, or research phase."""
-    state = _ensure_state(state_input)
-    if state.result is not None and state.result.next_action_hint == "request_higher_permission":
-        return "await_permission_escalation"
-
-    is_deep_scout = str(state.task.constraints.get("scout_mode") or "").strip() == "deep"
-    if (
-        is_deep_scout
-        and (state.scout_phase == "repo" or not state.scout_phase)
-        and state.result is not None
-        and state.result.status == "success"
-    ):
-        has_file_changes = len(state.result.files_changed or []) > 0
-        has_failed_tests = any(
-            test.status in ("failed", "error") for test in (state.result.test_results or [])
-        )
-        has_failed_commands = any(cmd.exit_code != 0 for cmd in (state.result.commands_run or []))
-        if has_file_changes or has_failed_tests or has_failed_commands:
-            return "verify_result"
-
-        return "transition_to_research_phase"
-
-    return "verify_result"
-
-
 def transition_to_research_phase(state_input: OrchestratorState) -> dict[str, Any]:
     """Transition state from repo phase to research phase for deep scout."""
     state = _ensure_state(state_input)
@@ -3582,238 +3330,6 @@ def transition_to_research_phase(state_input: OrchestratorState) -> dict[str, An
         "scout_phase": "research",
         "result": None,
     }
-
-
-def await_permission(state_input: OrchestratorState) -> dict[str, Any]:
-    """Pause the graph to request high-risk permission from the operator."""
-    state = _ensure_state(state_input)
-    if state.task_spec is None or not state.task_spec.requires_permission:
-        return {"current_step": "await_permission"}
-
-    # Trusted pre-approval (API/orchestrator) also satisfies this gate.
-    if _is_already_approved(state):
-        return {"current_step": "await_permission"}
-
-    # Avoid double-gating destructive tasks: the dedicated approval checkpoint
-    # persists pending state and powers API approval/resume semantics.
-    task_text = state.normalized_task_text or state.task.task_text
-    if state.task.constraints.get("requires_approval") is True or is_destructive_task(
-        task_text, state.task.constraints
-    ):
-        return {"current_step": "await_permission"}
-
-    reason = (
-        state.task_spec.permission_reason
-        or "Task requires explicit permission before execution can continue."
-    )
-    summary = reason
-    data = {
-        "source": "task_spec",
-        "resume_token": f"permission-{state.task.task_id or 'pending'}",
-        "reason": reason,
-        "risk_level": state.task_spec.risk_level,
-    }
-
-    # Check if we already have a resolved interaction for this exact requirement.
-    if _is_interaction_requirement_resolved(
-        state,
-        interaction_type="permission",
-        summary=summary,
-        data=data,
-    ):
-        return {
-            "current_step": "await_permission",
-            "progress_updates": _progress_update(state, "permission already resolved"),
-        }
-
-    # Otherwise, interrupt for operator input.
-    interrupt(
-        {
-            "type": "permission",
-            "summary": summary,
-            "reason": reason,
-            "risk_level": state.task_spec.risk_level,
-            "resume_token": f"permission-{state.task.task_id or 'pending'}",
-            "task_text": task_text,
-        }
-    )
-    return {"current_step": "await_permission"}
-
-
-def _handle_permission_escalation_validation_error(
-    state: OrchestratorState,
-    requested_permission: str | None,
-    requested_permission_level: Any,
-) -> dict[str, Any] | None:
-    if not requested_permission:
-        logger.error(
-            "Worker requested higher permission but 'requested_permission' is missing.",
-            extra={"session_id": state.session.session_id if state.session else None},
-        )
-        if state.result is None:
-            return None
-        failed_result = state.result.model_copy(
-            update={
-                "status": "error",
-                "summary": "Worker requested higher permission but did not specify which one.",
-                "next_action_hint": "inspect_worker_configuration",
-            }
-        )
-        return {
-            "current_step": "await_permission_escalation",
-            "result": failed_result.model_dump(),
-            "progress_updates": _progress_update(
-                state, "permission request failed: missing permission name"
-            ),
-            **_timeline_event(
-                state,
-                TimelineEventType.WORKER_ERROR,
-                message="Worker requested higher permission but did not specify which one.",
-            ),
-        }
-    if requested_permission_level is None:
-        logger.error(
-            "Worker requested an unknown permission level.",
-            extra={
-                "session_id": state.session.session_id if state.session else None,
-                "requested_permission": requested_permission,
-            },
-        )
-        if state.result is None:
-            return None
-        failed_result = state.result.model_copy(
-            update={
-                "status": "error",
-                "summary": (
-                    f"Worker requested an unknown permission level '{requested_permission}'."
-                ),
-                "requested_permission": None,
-                "next_action_hint": "inspect_worker_configuration",
-            }
-        )
-        return {
-            "current_step": "await_permission_escalation",
-            "result": failed_result.model_dump(),
-            "progress_updates": _progress_update(
-                state,
-                f"permission request failed: invalid permission '{requested_permission}'",
-            ),
-            **_timeline_event(
-                state,
-                TimelineEventType.WORKER_ERROR,
-                message=f"Worker requested an unknown permission level '{requested_permission}'.",
-                payload={"requested_permission": requested_permission},
-            ),
-        }
-    return None
-
-
-def await_permission_escalation(state_input: OrchestratorState) -> dict[str, Any]:
-    """Pause the graph to request higher tool permissions from the caller."""
-    state = _ensure_state(state_input)
-    if not state.result or state.result.next_action_hint != "request_higher_permission":
-        return {"current_step": "await_permission_escalation"}
-
-    task_text = state.normalized_task_text or state.task.task_text
-    requested_permission = state.result.requested_permission
-    requested_permission_level = coerce_permission_level(requested_permission)
-    validation_error = _handle_permission_escalation_validation_error(
-        state, requested_permission, requested_permission_level
-    )
-    if validation_error is not None:
-        return validation_error
-
-    requested_permission_name = (
-        requested_permission_level.value if requested_permission_level else "unknown"
-    )
-    reason = (
-        state.result.summary or f"Worker requested higher permission: {requested_permission_name}"
-    )
-
-    approved = _coerce_approval_decision(
-        interrupt(
-            {
-                "approval_type": "permission_escalation",
-                "reason": reason,
-                "resume_token": f"permission-{state.task.task_id or 'pending'}",
-                "task_text": task_text,
-                "chosen_worker": state.route.chosen_worker,
-                "requested_permission": requested_permission_name,
-            }
-        )
-    )
-
-    if approved:
-        new_constraints = dict(state.task.constraints)
-        new_constraints["granted_permission"] = requested_permission_name
-        updated_task = state.task.model_copy(update={"constraints": new_constraints})
-
-        return {
-            "current_step": "await_permission_escalation",
-            "task": updated_task.model_dump(),
-            "result": None,
-            "progress_updates": _progress_update(
-                state, f"permission '{requested_permission_name}' granted"
-            ),
-            **_timeline_event(
-                state,
-                TimelineEventType.APPROVAL_GRANTED,
-                message=f"Permission '{requested_permission_name}' granted.",
-                payload={"granted_permission": requested_permission_name},
-            ),
-        }
-    else:
-        failed_result = state.result.model_copy(
-            update={
-                "summary": (
-                    "Permission escalation to "
-                    f"'{requested_permission_name}' was rejected. Run halted."
-                ),
-                "failure_kind": "permission_denied",
-                "next_action_hint": "await_manual_follow_up",
-            }
-        )
-        return {
-            "current_step": "await_permission_escalation",
-            "result": failed_result.model_dump(),
-            "progress_updates": _progress_update(
-                state, f"permission '{requested_permission_name}' rejected"
-            ),
-            **_timeline_event(
-                state,
-                TimelineEventType.APPROVAL_REJECTED,
-                message=f"Permission '{requested_permission_name}' rejected.",
-                payload={"requested_permission": requested_permission_name},
-            ),
-        }
-
-
-def _route_after_await_permission_escalation(state_input: OrchestratorState) -> str:
-    """Route back to dispatch if approved, else verify failure through verification."""
-    state = _ensure_state(state_input)
-    if state.result is None:
-        return "provision_workspace"
-    return "verify_result"
-
-
-def _route_after_review_result(state_input: OrchestratorState) -> str:
-    """Route to a bounded repair handoff when independent review requested it."""
-    state = _ensure_state(state_input)
-    if state.repair_handoff_requested:
-        return "provision_workspace"
-    return "deliver_result"
-
-
-# Moved to orchestrator/nodes/verification.py and utils.py
-
-
-def _route_after_init_environment(
-    state: OrchestratorState,
-) -> Literal["dispatch_job", "summarize_result"]:
-    """Route after environment initialization, failing fast if setup errored."""
-    if state.result is not None and state.result.status != "success":
-        return "summarize_result"
-    return "dispatch_job"
 
 
 def _map_worker_memory_to_persist(
@@ -4242,7 +3758,7 @@ def build_persist_memory_node(
 def build_review_result_node(
     worker: Worker | None = None,
 ) -> Callable[[OrchestratorState], Awaitable[dict[str, Any]]]:
-    """Create the review-result node around the workers wired into the graph."""
+    """Create the review-result domain callable around the configured workers."""
     available_workers = _available_workers(worker)
 
     async def review_result_node(state_input: OrchestratorState) -> dict[str, Any]:
@@ -4250,252 +3766,3 @@ def build_review_result_node(
         return await review_result(state, worker_factory=available_workers)
 
     return review_result_node
-
-
-def _add_orchestrator_nodes(
-    builder: Any,
-    available_workers: frozenset[str],
-    active_profiles: dict[str, WorkerProfile] | None,
-    orchestrator_brain: OrchestratorBrain | None,
-    workspace_manager: WorkspaceManager | None,
-    shell_worker: Worker | None,
-    profile_names: frozenset[str],
-    enable_independent_verifier: bool,
-    worker: Worker | None,
-    session_factory: Callable[[], Session] | None,
-) -> None:
-    for name, func in [
-        ("ingest_task", ingest_task),
-        ("classify_task", classify_task),
-        ("plan_task", plan_task),
-        ("load_repo_profile", load_repo_profile_node),
-        ("decompose_task", build_decompose_task_node(session_factory)),
-        ("await_clarification", await_clarification),
-        ("await_permission", await_permission),
-        ("check_approval", check_approval),
-        ("await_approval", await_approval),
-        ("dispatch_job", dispatch_job),
-        ("await_permission_escalation", await_permission_escalation),
-        ("summarize_result", summarize_result),
-    ]:
-        builder.add_node(name, RunnableLambda(func))
-
-    builder.add_node(
-        "load_memory",
-        RunnableLambda(build_load_memory_node(session_factory))
-        if session_factory
-        else RunnableLambda(load_memory),
-    )
-    builder.add_node(
-        "persist_memory",
-        RunnableLambda(build_persist_memory_node(session_factory))
-        if session_factory
-        else RunnableLambda(persist_memory),
-    )
-
-    _add_orchestrator_complex_nodes(
-        builder,
-        available_workers,
-        active_profiles,
-        orchestrator_brain,
-        workspace_manager,
-        shell_worker,
-        profile_names,
-        enable_independent_verifier,
-        worker,
-        session_factory,
-    )
-
-
-def _add_orchestrator_complex_nodes(
-    builder: Any,
-    available_workers: frozenset[str],
-    active_profiles: dict[str, WorkerProfile] | None,
-    orchestrator_brain: OrchestratorBrain | None,
-    workspace_manager: WorkspaceManager | None,
-    shell_worker: Worker | None,
-    profile_names: frozenset[str],
-    enable_independent_verifier: bool,
-    worker: Worker | None,
-    session_factory: Callable[[], Session] | None,
-) -> None:
-    builder.add_node(
-        "generate_task_spec_and_route",
-        RunnableLambda(
-            build_generate_task_spec_and_route_node(
-                available_workers,
-                available_profiles=active_profiles,
-                orchestrator_brain=orchestrator_brain,
-            )
-        ),
-    )
-    builder.add_node(
-        "provision_workspace",
-        RunnableLambda(build_provision_workspace_node(workspace_manager=workspace_manager))
-        if workspace_manager
-        else RunnableLambda(lambda state: {"current_step": "provision_workspace", "result": None}),
-    )
-    builder.add_node(
-        "init_environment",
-        RunnableLambda(
-            build_init_environment_node(
-                workspace_manager=workspace_manager,
-                shell_worker=shell_worker,
-            )
-        )
-        if workspace_manager
-        else RunnableLambda(lambda state: {"current_step": "init_environment", "result": None}),
-    )
-    builder.add_node(
-        "await_result",
-        RunnableLambda(
-            build_await_result_node(
-                worker,
-                available_profile_names=profile_names,
-                session_factory=session_factory,
-            )
-        ),
-    )
-    builder.add_node(
-        "verify_result",
-        RunnableLambda(
-            build_verify_result_node(
-                enable_independent_verifier=enable_independent_verifier,
-                worker=worker,
-                orchestrator_brain=orchestrator_brain,
-            )
-        ),
-    )
-    builder.add_node(
-        "review_result",
-        RunnableLambda(build_review_result_node(worker)),
-    )
-    builder.add_node(
-        "deliver_result",
-        RunnableLambda(build_deliver_result_node(worker)),
-    )
-    builder.add_node(
-        "transition_to_research_phase",
-        RunnableLambda(transition_to_research_phase),
-    )
-
-
-def _add_orchestrator_edges(builder: Any) -> None:
-    builder.add_edge(START, "ingest_task")
-    builder.add_edge("ingest_task", "classify_task")
-    builder.add_edge("classify_task", "plan_task")
-    builder.add_edge("plan_task", "load_repo_profile")
-    builder.add_edge("load_repo_profile", "generate_task_spec_and_route")
-    builder.add_edge("generate_task_spec_and_route", "decompose_task")
-    builder.add_conditional_edges(
-        "decompose_task",
-        _route_after_generate_task_spec,
-        {
-            "await_clarification": "await_clarification",
-            "load_memory": "load_memory",
-            "summarize_result": "summarize_result",
-        },
-    )
-    builder.add_edge("await_clarification", "load_memory")
-    builder.add_edge("load_memory", "await_permission")
-    builder.add_edge("await_permission", "check_approval")
-    builder.add_conditional_edges(
-        "check_approval",
-        _route_after_check_approval,
-        {
-            "await_approval": "await_approval",
-            "provision_workspace": "provision_workspace",
-        },
-    )
-    builder.add_conditional_edges(
-        "await_approval",
-        _route_after_await_approval,
-        {
-            "provision_workspace": "provision_workspace",
-            "summarize_result": "summarize_result",
-        },
-    )
-    builder.add_edge("provision_workspace", "init_environment")
-    builder.add_conditional_edges(
-        "init_environment",
-        _route_after_init_environment,
-        {
-            "dispatch_job": "dispatch_job",
-            "summarize_result": "summarize_result",
-        },
-    )
-    builder.add_edge("dispatch_job", "await_result")
-    builder.add_conditional_edges(
-        "await_result",
-        _route_after_await_result,
-        {
-            "await_permission_escalation": "await_permission_escalation",
-            "transition_to_research_phase": "transition_to_research_phase",
-            "verify_result": "verify_result",
-        },
-    )
-    builder.add_conditional_edges(
-        "await_permission_escalation",
-        _route_after_await_permission_escalation,
-        {
-            "provision_workspace": "provision_workspace",
-            "verify_result": "verify_result",
-        },
-    )
-    builder.add_edge("verify_result", "review_result")
-    builder.add_conditional_edges(
-        "review_result",
-        _route_after_review_result,
-        {
-            "provision_workspace": "provision_workspace",
-            "deliver_result": "deliver_result",
-        },
-    )
-    builder.add_edge("deliver_result", "summarize_result")
-    builder.add_edge("summarize_result", "persist_memory")
-    builder.add_edge("persist_memory", END)
-    builder.add_edge("transition_to_research_phase", "dispatch_job")
-
-
-def build_orchestrator_graph(
-    *,
-    worker: Worker | None = None,
-    workspace_manager: WorkspaceManager | None = None,
-    worker_profiles: Mapping[str, WorkerProfile] | None = None,
-    enable_worker_profiles: bool = False,
-    enable_independent_verifier: bool = False,
-    orchestrator_brain: OrchestratorBrain | None = None,
-    session_factory: Callable[[], Session] | None = None,
-    checkpointer: BaseCheckpointSaver | None = None,
-    interrupt_before: Literal["*"] | list[str] | None = None,
-    interrupt_after: Literal["*"] | list[str] | None = None,
-) -> Any:
-    """Build and compile the linear LangGraph happy-path skeleton."""
-    builder = StateGraph(OrchestratorState)
-    available_workers_dict = _available_workers(worker)
-    available_workers: frozenset[str] = frozenset(available_workers_dict.keys())
-    shell_worker = getattr(
-        worker, "get_shell_worker", lambda: available_workers_dict.get("shell")
-    )()
-    available_profiles = dict(worker_profiles or {})
-    active_profiles = available_profiles if enable_worker_profiles else None
-    profile_names = frozenset(available_profiles.keys()) if enable_worker_profiles else frozenset()
-
-    _add_orchestrator_nodes(
-        builder,
-        available_workers,
-        active_profiles,
-        orchestrator_brain,
-        workspace_manager,
-        shell_worker,
-        profile_names,
-        enable_independent_verifier,
-        worker,
-        session_factory,
-    )
-    _add_orchestrator_edges(builder)
-    return builder.compile(
-        checkpointer=checkpointer,
-        interrupt_before=interrupt_before,
-        interrupt_after=interrupt_after,
-    )

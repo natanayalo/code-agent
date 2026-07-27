@@ -11,7 +11,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from apps.observability import capture_trace_context
-from apps.runtime import execution_runtime
 from db.base import utc_now
 from db.enums import OrchestrationRuntime, TaskStatus, WorkerRunStatus
 from db.models import Session as ConversationSession
@@ -261,20 +260,18 @@ def _persist_submission(
             secrets_encrypted=self.is_secret_encryption_active(),
             status=status,
             max_attempts=max(1, max_attempts),
-            next_attempt_at=now,
             priority=submission.priority,
             queue_lane=queue_lane,
             repair_for_task_id=submission.repair_for_task_id,
-            orchestration_runtime=OrchestrationRuntime(execution_runtime()),
+            orchestration_runtime=OrchestrationRuntime.TEMPORAL,
         )
         interaction_repo.sync_task_spec_flags(task_id=task.id, task_spec=task_spec)
-        if task.orchestration_runtime is OrchestrationRuntime.TEMPORAL:
-            TemporalCommandRepository(session).enqueue(
-                task_id=task.id,
-                command_type="start",
-                command_key=f"task:{task.id}:start",
-                payload={},
-            )
+        TemporalCommandRepository(session).enqueue(
+            task_id=task.id,
+            command_type="start",
+            command_key=f"task:{task.id}:start",
+            payload={},
+        )
         session_repo.set_active_task(session_id=conversation_session.id, active_task_id=task.id)
         if delivery_key is not None:
             duplicate_task_id = self._link_delivery_to_task(
@@ -466,67 +463,6 @@ def _load_submission_for_task(
             ),
         )
         return submission, persisted
-
-
-def _mark_task_in_progress(self: Any, *, task_id: str) -> None:
-    with session_scope(self.session_factory) as session:
-        TaskRepository(session).update_status(task_id=task_id, status=TaskStatus.IN_PROGRESS)
-
-
-def _mark_task_failed(self: Any, *, task_id: str) -> None:
-    with session_scope(self.session_factory) as session:
-        TaskRepository(session).update_status(task_id=task_id, status=TaskStatus.FAILED)
-
-
-def _release_task_success(self: Any, *, task_id: str, worker_id: str) -> None:
-    with session_scope(self.session_factory) as session:
-        TaskRepository(session).release_success(task_id=task_id, worker_id=worker_id)
-
-
-def _release_task_failure(self: Any, *, task_id: str, worker_id: str) -> None:
-    with session_scope(self.session_factory) as session:
-        TaskRepository(session).release_failure(
-            task_id=task_id,
-            worker_id=worker_id,
-            now=utc_now(),
-            retry_backoff_seconds=15,
-        )
-
-
-def _release_task_terminal_failure(
-    self: Any,
-    *,
-    task_id: str,
-    worker_id: str,
-    status: TaskStatus = TaskStatus.FAILED,
-) -> None:
-    with session_scope(self.session_factory) as session:
-        TaskRepository(session).release_terminal_failure(
-            task_id=task_id,
-            worker_id=worker_id,
-            status=status,
-        )
-
-
-def _record_task_attempt_error(self: Any, *, task_id: str, error: str) -> None:
-    with session_scope(self.session_factory) as session:
-        TaskRepository(session).record_attempt_error(task_id=task_id, error_text=error)
-
-
-def _heartbeat_task_lease(
-    self: Any,
-    *,
-    task_id: str,
-    worker_id: str,
-    lease_seconds: int,
-) -> bool:
-    with session_scope(self.session_factory) as session:
-        return TaskRepository(session).heartbeat_lease(
-            task_id=task_id,
-            worker_id=worker_id,
-            now=utc_now(),
-            lease_seconds=lease_seconds,
-        )
 
 
 def _create_or_get_user(

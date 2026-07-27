@@ -39,26 +39,6 @@ def test_runtime_mode_defaults_and_overrides() -> None:
     assert runtime_module.should_run_worker({runtime_module.RUN_WORKER_ENV_VAR: "on"}) is True
 
 
-def test_execution_runtime_defaults_to_temporal_with_explicit_legacy_fallback() -> None:
-    """Temporal is the cutover default and legacy requires explicit selection."""
-    assert runtime_module.execution_runtime({}) == runtime_module.TEMPORAL_EXECUTION_RUNTIME
-    assert (
-        runtime_module.execution_runtime({"CODE_AGENT_EXECUTION_RUNTIME": "temporal"})
-        == runtime_module.TEMPORAL_EXECUTION_RUNTIME
-    )
-    assert (
-        runtime_module.execution_runtime(
-            {
-                "CODE_AGENT_EXECUTION_RUNTIME": "legacy",
-            }
-        )
-        == runtime_module.LEGACY_EXECUTION_RUNTIME
-    )
-    assert runtime_module.uses_temporal_execution({"CODE_AGENT_EXECUTION_RUNTIME": "temporal"})
-    with pytest.raises(ValueError, match="must be 'temporal' or 'legacy'"):
-        runtime_module.uses_temporal_execution({"CODE_AGENT_EXECUTION_RUNTIME": "unexpected"})
-
-
 def test_temporal_only_cutover_at_requires_an_aware_iso_timestamp() -> None:
     """Drain metrics must not invent a boundary from invalid deployment config."""
     assert runtime_module.temporal_only_cutover_at({}) is None
@@ -73,36 +53,6 @@ def test_temporal_only_cutover_at_requires_an_aware_iso_timestamp() -> None:
         ).isoformat()
         == "2026-07-18T12:00:00+00:00"
     )
-
-
-def test_runtime_coerce_positive_int_env_defaults_and_overrides() -> None:
-    """Shared env int parser should return defaults on invalid values."""
-    assert runtime_module.coerce_positive_int_env(None, default=5) == 5
-    assert runtime_module.coerce_positive_int_env("", default=5) == 5
-    assert runtime_module.coerce_positive_int_env("abc", default=5) == 5
-    assert runtime_module.coerce_positive_int_env("0", default=5) == 5
-    assert runtime_module.coerce_positive_int_env("-1", default=5) == 5
-    assert runtime_module.coerce_positive_int_env("9", default=5) == 9
-
-
-def test_worker_coerce_positive_float_defaults_on_invalid_values() -> None:
-    """Float parser should keep defaults for missing/invalid/non-positive values."""
-    assert worker_main._coerce_positive_float(None, default=2.0) == 2.0
-    assert worker_main._coerce_positive_float("", default=2.0) == 2.0
-    assert worker_main._coerce_positive_float("abc", default=2.0) == 2.0
-    assert worker_main._coerce_positive_float("0", default=2.0) == 2.0
-    assert worker_main._coerce_positive_float("-1", default=2.0) == 2.0
-    assert worker_main._coerce_positive_float("3.5", default=2.0) == 3.5
-
-
-def test_worker_coerce_positive_int_defaults_on_invalid_values() -> None:
-    """Int parser should keep defaults for missing/invalid/non-positive values."""
-    assert worker_main._coerce_positive_int(None, default=60) == 60
-    assert worker_main._coerce_positive_int("", default=60) == 60
-    assert worker_main._coerce_positive_int("abc", default=60) == 60
-    assert worker_main._coerce_positive_int("0", default=60) == 60
-    assert worker_main._coerce_positive_int("-2", default=60) == 60
-    assert worker_main._coerce_positive_int("90", default=60) == 90
 
 
 @pytest.mark.anyio
@@ -165,10 +115,10 @@ async def test_run_worker_forever_requires_bootstrapped_service_and_closes_clien
 
 
 @pytest.mark.anyio
-async def test_run_worker_forever_builds_queue_worker_from_env_and_runs(
+async def test_run_worker_forever_always_starts_temporal_and_ignores_legacy_selector(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Worker runtime should build queue worker with env overrides and run it."""
+    """A retired selector cannot make startup fall back to Postgres polling."""
     close_calls: list[str] = []
     outbound_clients = SimpleNamespace(
         telegram=_FakeAsyncClient("telegram", close_calls),
@@ -177,28 +127,8 @@ async def test_run_worker_forever_builds_queue_worker_from_env_and_runs(
     fake_service = object()
     worker_calls: list[dict[str, object]] = []
 
-    class _FakeQueueWorker:
-        def __init__(
-            self,
-            *,
-            service: object,
-            worker_id: str,
-            poll_interval_seconds: float,
-            lease_seconds: int,
-            capacity: int,
-        ) -> None:
-            worker_calls.append(
-                {
-                    "service": service,
-                    "worker_id": worker_id,
-                    "poll_interval_seconds": poll_interval_seconds,
-                    "lease_seconds": lease_seconds,
-                    "capacity": capacity,
-                }
-            )
-
-        async def run_forever(self) -> None:
-            worker_calls.append({"ran": True})
+    async def start_temporal_worker(**kwargs: object) -> None:
+        worker_calls.append(kwargs)
 
     monkeypatch.setattr(worker_main, "should_run_worker", lambda: True)
     monkeypatch.setattr(
@@ -211,29 +141,25 @@ async def test_run_worker_forever_builds_queue_worker_from_env_and_runs(
         "build_task_service_from_env",
         lambda **_: fake_service,
     )
-    monkeypatch.setattr(worker_main, "TaskQueueWorker", _FakeQueueWorker)
-    monkeypatch.setenv(worker_main.WORKER_ID_ENV_VAR, "worker-test")
-    monkeypatch.setenv(worker_main.POLL_INTERVAL_ENV_VAR, "4.5")
-    monkeypatch.setenv(worker_main.LEASE_SECONDS_ENV_VAR, "75")
-    monkeypatch.setenv(worker_main.CAPACITY_ENV_VAR, "3")
+    monkeypatch.setattr(worker_main, "start_temporal_worker", start_temporal_worker)
     monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "legacy")
+    monkeypatch.setenv("TEMPORAL_ADDRESS", "temporal:7233")
 
     await worker_main.run_worker_forever()
 
-    assert worker_calls[0] == {
-        "service": fake_service,
-        "worker_id": "worker-test",
-        "poll_interval_seconds": 4.5,
-        "lease_seconds": 75,
-        "capacity": 3,
-    }
-    assert worker_calls[1] == {"ran": True}
+    assert worker_calls == [
+        {
+            "temporal_address": "temporal:7233",
+            "task_queue": "task-execution-queue",
+            "task_service": fake_service,
+        }
+    ]
     assert set(close_calls) == {"telegram", "webhook"}
 
 
 @pytest.mark.anyio
 async def test_run_worker_forever_bootstraps_observability(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Worker runtime should invoke tracing bootstrap before queue startup."""
+    """Worker runtime should invoke tracing bootstrap before Temporal startup."""
     close_calls: list[str] = []
     tracing_calls: list[str] = []
     outbound_clients = SimpleNamespace(
@@ -241,32 +167,18 @@ async def test_run_worker_forever_bootstraps_observability(monkeypatch: pytest.M
         webhook=_FakeAsyncClient("webhook", close_calls),
     )
 
-    class _FakeQueueWorker:
-        def __init__(
-            self,
-            *,
-            service: object,
-            worker_id: str,
-            poll_interval_seconds: float,
-            lease_seconds: int,
-            capacity: int,
-        ) -> None:
-            self.service = service
-
-        async def run_forever(self) -> None:
-            return None
+    async def start_temporal_worker(**_kwargs: object) -> None:
+        return None
 
     monkeypatch.setattr(worker_main, "should_run_worker", lambda: True)
     monkeypatch.setattr(worker_main, "create_outbound_http_clients", lambda: outbound_clients)
     monkeypatch.setattr(worker_main, "build_task_service_from_env", lambda **_: object())
-    monkeypatch.setattr(worker_main, "TaskQueueWorker", _FakeQueueWorker)
+    monkeypatch.setattr(worker_main, "start_temporal_worker", start_temporal_worker)
     monkeypatch.setattr(
         worker_main,
         "configure_tracing_from_env",
         lambda *, service_name: tracing_calls.append(service_name),
     )
-    monkeypatch.setenv("CODE_AGENT_EXECUTION_RUNTIME", "legacy")
-
     await worker_main.run_worker_forever()
 
     assert tracing_calls == ["code-agent-worker"]

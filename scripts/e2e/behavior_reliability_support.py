@@ -9,7 +9,6 @@ import re
 import shutil
 import stat
 import subprocess
-import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -21,8 +20,7 @@ import httpx
 from sqlalchemy.pool import StaticPool
 
 from db.base import Base
-from orchestrator import OrchestratorState, build_orchestrator_graph
-from orchestrator.checkpoints import create_in_memory_checkpointer
+from evaluation.domain_pipeline import DomainEvaluationPipeline
 from repositories import (
     PersonalMemoryRepository,
     ProjectMemoryRepository,
@@ -352,10 +350,9 @@ class ContractRunner:
         self.session_factory = create_session_factory(engine)
         Base.metadata.create_all(bind=engine)
         self.worker = FakeBehaviorWorker()
-        self.graph = build_orchestrator_graph(
+        self.pipeline = DomainEvaluationPipeline(
             worker=WorkerFacade(codex_worker=self.worker, antigravity_worker=self.worker),
             session_factory=self.session_factory,
-            checkpointer=create_in_memory_checkpointer(),
         )
 
     def seed_personal(self, key: str, value: dict, **kwargs) -> None:
@@ -380,8 +377,7 @@ class ContractRunner:
         self, task_text: str, constraints: dict, simulated_result: WorkerResult | None
     ) -> dict[str, Any]:
         self.worker.simulated_result = simulated_result
-        thread_id = f"contract-{self.run_id}-{uuid.uuid4().hex[:8]}"
-        raw_state = await self.graph.ainvoke(
+        state = await self.pipeline.run(
             {
                 "task": {
                     "task_text": task_text,
@@ -391,12 +387,8 @@ class ContractRunner:
                     "constraints": constraints,
                     "budget": {"max_iterations": 1},
                 }
-            },
-            config={"configurable": {"thread_id": thread_id}},
+            }
         )
-        if "__interrupt__" in raw_state:
-            raw_state = {k: v for k, v in raw_state.items() if k != "__interrupt__"}
-        state = OrchestratorState.model_validate(raw_state)
         return {
             "state": state,
             "requests": list(self.worker.captured_requests),
