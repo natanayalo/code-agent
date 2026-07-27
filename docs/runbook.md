@@ -234,6 +234,8 @@ docker compose up -d
 
 ## Worker or workflow recovery
 
+- Normal container and pod termination sends `SIGTERM`; the worker cancels and
+  awaits its Temporal loops, then closes outbound HTTP clients before exiting.
 - restart the worker process first; Temporal resumes or retries recorded work
 - inspect Temporal UI plus the task timeline and worker-run artifacts
 - inspect pending Temporal command outbox rows if a workflow never started

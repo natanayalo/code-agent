@@ -96,6 +96,30 @@ logger = logging.getLogger(__name__)
 EXECUTION_CAPACITY_LEASE_SECONDS = 60
 
 
+def _permission_escalation_retry_is_complete(
+    task_id: str,
+    task: Any,
+    snapshot: Any,
+    approved: bool,
+) -> bool:
+    """Return whether a missing snapshot represents an already-terminal retry."""
+    if task is None:
+        raise RuntimeError(f"Task '{task_id}' is unavailable for permission escalation.")
+    if snapshot is not None:
+        return False
+    if task.status not in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):
+        raise RuntimeError(f"Task '{task_id}' is unavailable for permission escalation.")
+    logger.info(
+        "Permission escalation already resolved for terminal task",
+        extra={
+            "task_id": task_id,
+            "task_status": task.status.value,
+            "approved": approved,
+        },
+    )
+    return True
+
+
 def _source_file_changes(files_changed: list[str], logical_activity_key: str) -> list[str]:
     """Exclude only this node's legacy in-repository scratch paths.
 
@@ -1501,10 +1525,14 @@ class TaskExecutionActivities:
             with session_scope(self.service.session_factory) as session:
                 task = TaskRepository(session).get(task_id)
                 snapshot = TemporalTaskStateRepository(session).get(task_id=task_id)
-                if task is None or snapshot is None:
-                    raise RuntimeError(
-                        f"Task '{task_id}' is unavailable for permission escalation."
-                    )
+                if _permission_escalation_retry_is_complete(
+                    task_id,
+                    task,
+                    snapshot,
+                    approved,
+                ):
+                    return
+                assert task is not None and snapshot is not None
                 state = OrchestratorState.model_validate(snapshot.state)
                 requested = state.result.requested_permission if state.result else None
                 blocked = next(

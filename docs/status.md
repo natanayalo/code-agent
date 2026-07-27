@@ -6,7 +6,7 @@ Phase 4: selective autonomy after reliability.
 
 Active focus:
 
-- Temporal activity idempotency and interaction event fixes.
+- M26 review comment repair.
 - M25.3 Temporal-only cutover and legacy retirement is complete:
   - Slice 4A retired the Postgres task scheduler, LangGraph lifecycle, and
     runtime selector in PR #340.
@@ -53,31 +53,10 @@ Active focus:
 - Antigravity non-interactive runs use prompt-as-argv and permission/settings policy, so command logging and profile mapping need explicit redaction and tests
 - native-agent runs may initially have coarser command-level audit unless CLI event streams are captured and normalized
 - worker runtime internals still contain hotspot complexity despite recent decomposition progress
-- [high] resolving a non-permission interaction (clarification, review, merge)
-  writes `TASK_SPEC_AND_ROUTE_GENERATED` as a catch-all timeline event, causing
-  `classify_and_plan` to false-skip the entire ingestion/classification/routing
-  pipeline on the next activity run — tasks resuming after a clarification cycle
-  may proceed with uninitialized route and task spec metadata
-  (`execution_interaction_service.py:L138` / `temporal/activities.py:L437`)
-- [medium] `resolve_permission_escalation` deletes the Temporal state snapshot on
-  rejection; if Temporal retries the activity the snapshot is gone, causing an
-  unrecoverable `RuntimeError` retry loop until schedule-to-close timeout
-  (`temporal/activities.py:L1495`)
-- [medium] worker entrypoint uses bare `asyncio.run()` without a SIGTERM handler;
-  container stop/pod termination kills the process without unwinding the
-  `finally` block, leaking HTTP clients and interrupting Temporal activities
-  (`apps/worker/main.py:L60`)
 
 ## Next Slices Only
 
-1. Temporal activity idempotency and interaction event fixes
-   - use a dedicated timeline event type for non-permission interaction
-     resolution instead of reusing `TASK_SPEC_AND_ROUTE_GENERATED`
-   - make `resolve_permission_escalation` rejection idempotent by returning
-     early when the snapshot is already deleted and the task is terminal
-   - add SIGTERM signal handler to worker entrypoint for graceful container
-     shutdown
-2. M26: review comment repair
+1. M26: review comment repair
    - extend the PR repair loop from CI failures to actionable review feedback
 
 ## Current Backlog

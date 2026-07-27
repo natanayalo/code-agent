@@ -140,7 +140,7 @@ def _persist_resolved_interaction(
         if is_normal_permission and approved
         else TimelineEventType.APPROVAL_REJECTED
         if is_normal_permission
-        else TimelineEventType.TASK_SPEC_AND_ROUTE_GENERATED
+        else TimelineEventType.INTERACTION_RESOLVED
     )
     timeline_repo.create_next_for_attempt(
         task_id=task.id,

@@ -127,6 +127,7 @@ class TimelineEventType(StrEnum):
     TASK_PLANNED = "task_planned"
     TASK_SPEC_GENERATED = "task_spec_generated"
     TASK_SPEC_AND_ROUTE_GENERATED = "task_spec_and_route_generated"
+    INTERACTION_RESOLVED = "interaction_resolved"
     MEMORY_LOADED = "memory_loaded"
     MEMORY_PERSISTED = "memory_persisted"
     WORKER_SELECTED = "worker_selected"

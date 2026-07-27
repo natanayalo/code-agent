@@ -10,8 +10,21 @@ from temporalio.client import WorkflowFailureError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
-from db.enums import ExecutionPlanNodeStatus, TimelineEventType
-from db.models import Base, Task, TaskTimelineEvent, TemporalTaskState, WorkerRun
+from db.enums import (
+    ExecutionPlanNodeStatus,
+    HumanInteractionHitlMode,
+    HumanInteractionStatus,
+    HumanInteractionType,
+    TimelineEventType,
+)
+from db.models import (
+    Base,
+    HumanInteraction,
+    Task,
+    TaskTimelineEvent,
+    TemporalTaskState,
+    WorkerRun,
+)
 from orchestrator.execution import TaskExecutionService, TaskSubmission
 from orchestrator.execution_types import InteractionResponse
 from orchestrator.state import OrchestratorState, VerificationReport, VerificationReportItem
@@ -505,20 +518,11 @@ async def test_temporal_runtime_hitl_approval(session_factory, tmp_path: Path, m
 async def test_temporal_runtime_clarification_interaction_resumes_workflow(
     session_factory, tmp_path: Path, monkeypatch
 ):
-    """A persisted clarification response should resume the Temporal workflow."""
+    """A pre-classification clarification response must not skip routing."""
     monkeypatch.setattr("sandbox.workspace.default_workspace_root", lambda: tmp_path)
     if not _docker_available():
         pytest.skip("Docker daemon is unavailable")
 
-    def require_clarification(state_input):
-        task_spec = dict(state_input["task_spec"])
-        task_spec.update(
-            requires_clarification=True,
-            clarification_questions=["Which behavior should change?"],
-        )
-        return {"task_spec": task_spec}
-
-    monkeypatch.setattr("orchestrator.temporal.activities.check_approval", require_clarification)
     worker = CodexCliWorker(
         runtime_adapter=_ScriptedAdapter([CliRuntimeStep(kind="final", final_output="Done.")]),
         session_factory=lambda container, **kwargs: _GitMockingSession(container, **kwargs),
@@ -550,6 +554,23 @@ async def test_temporal_runtime_clarification_interaction_resumes_workflow(
 
     async with await WorkflowEnvironment.start_time_skipping() as env:
         snapshot, _ = service.create_task(submission)
+        with session_scope(session_factory) as session:
+            clarification = HumanInteraction(
+                task_id=snapshot.task_id,
+                interaction_type=HumanInteractionType.CLARIFICATION,
+                status=HumanInteractionStatus.PENDING,
+                hitl_mode=HumanInteractionHitlMode.REQUIRE_APPROVAL,
+                summary="Which behavior should change?",
+                data={"source": "test", "resume_token": f"clarification-{snapshot.task_id}"},
+            )
+            session.add(clarification)
+            session.flush()
+            clarification_id = clarification.id
+        service.record_interaction_response(
+            snapshot.task_id,
+            clarification_id,
+            InteractionResponse(response_data={"answer": "Update README only."}),
+        )
         activities = TaskExecutionActivities(service=service)
         temporal_worker = Worker(
             env.client,
@@ -576,21 +597,6 @@ async def test_temporal_runtime_clarification_interaction_resumes_workflow(
                 run_task = await _start_workflow_via_dispatcher(
                     dispatcher, env.client, snapshot.task_id
                 )
-                for _ in range(20):
-                    cards = service.list_pending_interactions()
-                    if cards:
-                        break
-                    await asyncio.sleep(0.1)
-                else:
-                    pytest.fail("Temporal workflow did not persist a clarification interaction.")
-
-                clarification = cards[0].interaction
-                assert clarification.interaction_type == "clarification"
-                service.record_interaction_response(
-                    snapshot.task_id,
-                    clarification.interaction_id,
-                    InteractionResponse(response_data={"answer": "Update README only."}),
-                )
                 await dispatcher.dispatch_pending()
                 await run_task
 
@@ -598,6 +604,14 @@ async def test_temporal_runtime_clarification_interaction_resumes_workflow(
         task = session.get(Task, snapshot.task_id)
         assert task is not None
         assert task.status == "completed"
+        assert task.chosen_worker is not None
+        assert task.task_spec is not None
+        timeline = TaskTimelineRepository(session).list_by_task(snapshot.task_id)
+        assert any(event.event_type is TimelineEventType.INTERACTION_RESOLVED for event in timeline)
+        assert any(
+            event.event_type is TimelineEventType.TASK_SPEC_AND_ROUTE_GENERATED
+            for event in timeline
+        )
 
 
 @pytest.mark.anyio
@@ -820,6 +834,9 @@ async def test_permission_escalation_rejection_projects_terminal_state(session_f
     await TaskExecutionActivities(service=service).resolve_permission_escalation(
         snapshot.task_id, False
     )
+    await TaskExecutionActivities(service=service).resolve_permission_escalation(
+        snapshot.task_id, False
+    )
 
     with session_scope(session_factory) as session:
         task = session.get(Task, snapshot.task_id)
@@ -830,6 +847,42 @@ async def test_permission_escalation_rejection_projects_terminal_state(session_f
         assert task.last_error == "Worker permission escalation rejected by operator."
         assert durable_state is None
         assert timeline[-1].event_type == TimelineEventType.APPROVAL_REJECTED
+        assert [event.event_type for event in timeline].count(
+            TimelineEventType.APPROVAL_REJECTED
+        ) == 1
+
+
+@pytest.mark.anyio
+async def test_permission_escalation_missing_snapshot_for_active_task_still_fails(
+    session_factory,
+):
+    """Missing resumable state is only idempotent after the task is terminal."""
+    service = TaskExecutionService(
+        session_factory=session_factory,
+        worker=CodexCliWorker(runtime_adapter=_ScriptedAdapter([])),
+    )
+    snapshot, _ = service.create_task(TaskSubmission(task_text="Implement bounded change"))
+
+    with pytest.raises(RuntimeError, match="unavailable for permission escalation"):
+        await TaskExecutionActivities(service=service).resolve_permission_escalation(
+            snapshot.task_id,
+            False,
+        )
+
+
+@pytest.mark.anyio
+async def test_permission_escalation_missing_task_still_fails(session_factory):
+    """A retry cannot be treated as complete when the task itself is absent."""
+    service = TaskExecutionService(
+        session_factory=session_factory,
+        worker=CodexCliWorker(runtime_adapter=_ScriptedAdapter([])),
+    )
+
+    with pytest.raises(RuntimeError, match="unavailable for permission escalation"):
+        await TaskExecutionActivities(service=service).resolve_permission_escalation(
+            "missing-task",
+            False,
+        )
 
 
 @pytest.mark.anyio
