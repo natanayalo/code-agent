@@ -12,6 +12,11 @@ completed-task ledger; keep completed work here instead.
 - Refactor: retire legacy task execution runtime ([#340](https://github.com/natanayalo/code-agent/pull/340))
 
 
+### Documentation
+
+- Docs: reset roadmap for Temporal stabilization ([#344](https://github.com/natanayalo/code-agent/pull/344))
+
+
 ### Fixed
 
 - Fix(dashboard): update react-router-dom and lockfile for Dependabot security advisories ([#343](https://github.com/natanayalo/code-agent/pull/343))
