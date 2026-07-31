@@ -14,6 +14,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Fixed
 
+- Fix(dashboard): update react-router-dom and lockfile for Dependabot security advisories ([#343](https://github.com/natanayalo/code-agent/pull/343))
+
 - Fix: harden Temporal interaction and worker shutdown ([#342](https://github.com/natanayalo/code-agent/pull/342))
 
 - Fix: heartbeat Temporal verification activity ([#339](https://github.com/natanayalo/code-agent/pull/339))
