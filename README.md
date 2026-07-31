@@ -21,6 +21,7 @@ The platform is built for one operator-first use case: reliable coding execution
 - replay and approval-decision task controls via API
 - dashboard knowledge-base management for personal/project skeptical memory entries
 - operational metrics and lifecycle progress callbacks
+- sequential decomposed-task execution and an opt-in two-node read-only fan-out pilot
 
 ## Product Boundaries
 
@@ -35,7 +36,7 @@ The platform is organized into clear layers:
 - sandbox/tool layer: isolated execution, command policy, artifact capture
 - memory layer: personal/project/session state with skeptical verification metadata
 - operator surfaces: API, Telegram updates, progress callbacks, metrics
-- future layer: bounded scout/reflection/autonomy workflows (roadmapped)
+- controlled proposal lane: bounded scout/reflection proposals with operator review
 
 Detailed architecture: [`docs/architecture.md`](docs/architecture.md)
 
@@ -44,6 +45,7 @@ Detailed architecture: [`docs/architecture.md`](docs/architecture.md)
 - runbook and troubleshooting: [`docs/runbook.md`](docs/runbook.md)
 - forward plan: [`docs/roadmap.md`](docs/roadmap.md)
 - current snapshot/status: [`docs/status.md`](docs/status.md)
+- Temporal cutover and rollback archive: [`docs/archive/temporal_cutover.md`](docs/archive/temporal_cutover.md)
 - shipped changes: [`CHANGELOG.md`](CHANGELOG.md)
 
 ## Repository Layout
@@ -73,7 +75,6 @@ Run the API only (local dev mode):
 export CODE_AGENT_RUN_API="1"
 export CODE_AGENT_RUN_WORKER="0"
 export CODE_AGENT_ENABLE_TASK_SERVICE="1"
-export CODE_AGENT_ORCHESTRATOR_BRAIN_ENABLED="0"  # optional TaskSpec enrichment hook
 export CODE_AGENT_API_SHARED_SECRET="<shared-secret>"
 export DATABASE_URL="postgresql+psycopg://code_agent:<password>@localhost:5432/code_agent"
 poetry run python -m uvicorn apps.api.main:app --reload
@@ -99,6 +100,10 @@ Verify service health:
 curl http://127.0.0.1:8000/health
 curl http://127.0.0.1:8000/ready
 ```
+
+`/health` and `/ready` currently report API-process availability. Task
+submission performs a separate Temporal availability check. M25.5 will make
+`/ready` a dependency-aware execution-readiness contract.
 
 ### Database Migrations
 
@@ -199,14 +204,16 @@ The dashboard uses HttpOnly cookies for session management. To enable it:
 
 ## Verification Commands
 
-Run the core checks from the repo virtualenv:
+The repository coverage target is 90%. During post-Temporal coverage recovery,
+Python CI temporarily enforces an 80% floor; M25.6 restores the 90% gate. Run
+the currently enforced checks from the repository virtualenv:
 
 ```bash
 poetry run pytest tests/unit --cov=apps --cov=db --cov=memory --cov=orchestrator --cov=repositories --cov=sandbox --cov=tools --cov=workers --cov-branch --cov-report=term-missing --cov-report=xml --cov-fail-under=80
 poetry run pytest tests/integration
 poetry run pre-commit run --all-files
 # Dashboard checks
-cd dashboard && npm run test:run
+cd dashboard && npm run test:coverage
 ```
 
 ## Changelog
@@ -240,10 +247,13 @@ no-op or formatting-only runs after the generated commit lands.
 
 ## Current Focus
 
-The next phase prioritizes:
+The current phase is Temporal stabilization and measured reliability:
 
-1. TaskSpec + human workflow foundation
-2. operator UX via a thin local dashboard/PWA
-3. stronger worker-mode/profile strategy and runtime leverage
+1. M25.4: Temporal core completion-loop parity
+2. M25.5: truthful readiness and operator recovery
+3. M25.6: a 20-task real-worker Temporal reliability baseline
+
+M26 review-comment repair and M27 reliability-based autonomy are reserved but
+deferred until the M25.6 evidence review.
 
 See [`docs/roadmap.md`](docs/roadmap.md) for full milestone plans and sequencing.

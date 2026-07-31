@@ -21,7 +21,7 @@ Responsibilities:
 - ingress and auth for API/webhook/Telegram
 - session + task creation and persistence
 - generated TaskSpec contract for task goal/risk/type/delivery policy
-- optional LLM orchestrator brain for TaskSpec enrichment and route recommendation
+- model-backed orchestrator brain with deterministic TaskSpec and routing fallbacks
 - transactional Temporal command outbox and workflow startup
 - Temporal workflow lifecycle execution
 - worker routing policy and manual override handling
@@ -54,7 +54,7 @@ Active worker/runtime implementations:
 - Antigravity CLI worker
 - OpenRouter-backed runtime worker (`workers/openrouter_cli_worker.py`)
 
-- `workers/base.py`
+All implementations conform to the shared contract in `workers/base.py`.
 
 ### Worker Routing Policy (Current)
 
@@ -75,6 +75,11 @@ Current default profile matrix:
 
 
 The selected worker/profile/runtime metadata is persisted on task and worker-run records and returned in task snapshots for operator and dashboard inspection.
+
+The performance-routing mechanism currently reads checked-in advisory metrics
+from `evaluation/routing_metrics.json`. Those values are not refreshed from
+live task outcomes. M25.6 measures real Temporal runs before any routing-policy
+change is considered.
 
 ## 3) Sandbox + Tool Layer
 
@@ -146,18 +151,23 @@ Current operator surfaces:
 - progress notifications (`started`, `running`, terminal)
 - health/readiness + operational metrics endpoints
 
-## 6) Future Reflection / Autonomy Layer
+`/health` and `/ready` currently report API-process availability. Submission
+checks Temporal availability independently. Dependency-aware readiness,
+outbox/worker freshness metrics, and a dashboard recovery view are planned for
+M25.5.
 
-Planned, not yet a full implemented subsystem.
+## 6) Controlled Proposal and Autonomy Lane
 
-Intended responsibilities:
+Implemented proposal capabilities:
 
-- bounded scout mode for proactive idea generation
-- structured friction and improvement proposal pipelines
-- operator-curated review queues for suggested changes
-- explicit maintenance-action requests (not privileged self-mutation)
+- bounded scout tasks for read-only idea generation
+- structured friction and reflection proposal capture
+- operator-curated proposal review and acceptance
 
-This lane remains controlled, inspectable, and human-in-the-loop for high-risk operations.
+Deep-scout repo-to-research chaining is deferred on the Temporal-only runtime.
+Reliability-based autonomy remains unimplemented and reserved for M27 after the
+real-worker reliability baseline. This lane remains controlled, inspectable,
+and human-in-the-loop for high-risk operations.
 
 ## Runtime Topology (Today)
 
@@ -193,6 +203,13 @@ flowchart TD
 - Activities project product state, worker runs, timelines, and artifacts into Postgres.
 - Temporal outbox claims, DAG-node fencing, execution-capacity permits, and activity
   heartbeats remain separate from the retired task-level queue leases.
+- Sequential DAG execution is supported. Bounded two-node read-only fan-out is
+  an explicit opt-in pilot and remains disabled by default.
+
+Verification and independent review can currently produce bounded repair
+instructions, but the workflow does not yet loop through another worker pass.
+M25.4 closes that core completion-loop gap. Deep-scout phase chaining is not a
+supported Temporal lifecycle path.
 
 ## Safety Boundaries
 
@@ -211,3 +228,4 @@ For day-to-day operation and troubleshooting, pair this document with:
 
 - runbook: `docs/runbook.md`
 - current operational status: `docs/status.md`
+- historical cutover and rollback record: `docs/archive/temporal_cutover.md`

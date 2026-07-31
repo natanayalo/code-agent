@@ -77,6 +77,15 @@ Execution lifecycle:
 4. Activities persist worker runs, task projections, timelines, and artifacts.
 5. Terminal delivery reconciles the Temporal result with Postgres product state.
 
+Current lifecycle boundaries:
+
+- sequential decomposed tasks are supported
+- bounded two-node read-only fan-out is disabled by default and requires
+  `CODE_AGENT_DECOMPOSED_FANOUT_ENABLED=true`
+- verifier and independent-review repair instructions are persisted, but the
+  Temporal repair continuation is not implemented until M25.4
+- deep-scout repo-to-research phase chaining is deferred
+
 `CODE_AGENT_QUEUE_MAX_ATTEMPTS` remains temporarily as the product-level
 logical-attempt policy name. Poll interval, task lease, worker ID/capacity, and
 checkpoint settings have been removed.
@@ -88,7 +97,7 @@ and orchestration domain callables.
 
 Manual operations:
 
-- [tracing_manual.md](tracing_manual.md)
+- [Tracing skill](../.agents/skills/tracing/SKILL.md)
 
 Enable tracing env vars:
 
@@ -121,7 +130,7 @@ Manual approval checkpoints are persisted in task constraints and surfaced throu
 
 Behavior:
 
-- `approved=true`: task returns to `pending` and can be reclaimed
+- `approved=true`: the decision is persisted and a Temporal resume signal is queued
 - `approved=false`: task becomes terminal `failed`
 
 ## 5) Operator Endpoints
@@ -140,10 +149,15 @@ Core API endpoints:
 - `POST /tasks/{task_id}/replay` replay terminal task with optional overrides
 - `GET /health`, `GET /ready`, `GET /metrics`
 
+`/health` and `/ready` currently report API-process availability. They do not
+yet prove Postgres, Temporal, dispatcher, or worker readiness. New submissions
+perform their own Temporal availability check and return 503 when it fails.
+Dependency-aware readiness is planned for M25.5.
+
 Ingress protection:
 
 - `/tasks` and `/webhook` require shared-secret auth (`CODE_AGENT_API_SHARED_SECRET`)
-- webhook operation manual: [webhook_manual.md](webhook_manual.md)
+- webhook operation workflow: [Webhooks skill](../.agents/skills/webhooks/SKILL.md)
 
 ## 6) Common Failure Debugging
 
@@ -168,7 +182,7 @@ Checks:
 - verify worker process is running with `CODE_AGENT_RUN_WORKER=1`
 - verify `CODE_AGENT_ENABLE_TASK_SERVICE=1`
 - verify worker and API share the same database
-- inspect the Temporal workflow state and worker-node heartbeat/status
+- inspect the Temporal workflow and worker-container status
 - inspect pending Temporal command outbox rows if the workflow never started
 
 Useful command:
@@ -254,8 +268,9 @@ rollback:
 4. start services, verify readiness, and reconcile task/run row counts before
    accepting submissions
 
-The exact image digests, snapshot checksum, and rehearsal results are recorded
-in [the Slice 4B evidence](m25_3_slice_4b_schema_evidence.md).
+The exact image digests, snapshot checksum, rehearsal results, and full restore
+procedure are recorded in the
+[Temporal cutover archive](archive/temporal_cutover.md).
 
 ## Re-run work safely
 
@@ -276,13 +291,13 @@ Use replay endpoint instead of manually cloning task rows:
 For full pipeline testing (API -> Orchestrator -> Sandbox Worker -> DB), use the automated QA runbook. Ensure your `.env` has test credentials and the stack is running.
 
 ```bash
-poetry run python .agents/skills/e2e-qa/scripts/run_e2e_qa.py
+.venv/bin/python .agents/skills/e2e-qa/scripts/run_e2e_qa.py
 ```
 
 To verify the delivery integration variant, use:
 
 ```bash
-poetry run python .agents/skills/e2e-qa/scripts/run_e2e_qa_delivery.py
+.venv/bin/python .agents/skills/e2e-qa/scripts/run_e2e_qa_delivery.py
 ```
 
 ## 10) Antigravity Migration Guide
@@ -307,5 +322,5 @@ After incidents:
 
 1. capture task/run IDs
 2. collect worker logs and artifacts
-3. classify failure (ingress, queue, worker runtime, sandbox, approval)
+3. classify failure (ingress, outbox/Temporal, worker runtime, sandbox, approval)
 4. replay only after root-cause hypothesis is documented
