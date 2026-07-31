@@ -82,9 +82,22 @@ Current lifecycle boundaries:
 - sequential decomposed tasks are supported
 - bounded two-node read-only fan-out is disabled by default and requires
   `CODE_AGENT_DECOMPOSED_FANOUT_ENABLED=true`
-- verifier and independent-review repair instructions are persisted, but the
-  Temporal repair continuation is not implemented until M25.4
+- verifier and independent-review repair requests run through a bounded
+  retained-workspace completion loop using the selected worker and normal
+  permission-escalation path
+- repair acceptance repeats verification and independent review; unavailable,
+  rejected, ineligible, or exhausted repair ends as `incomplete_delivery` with
+  `next_action_hint=await_manual_follow_up`
 - deep-scout repo-to-research phase chaining is deferred
+
+Completion-loop rollback boundary:
+
+- workflow histories created before M25.4 replay through the patch-false
+  single-pass sequence
+- histories that record `m25-4-temporal-completion-loop` require the patch-aware
+  workflow code until they close
+- a raw code revert is safe only before any patched history exists; afterward,
+  deploy a replay-compatible rollback that retains both patch branches
 
 `CODE_AGENT_QUEUE_MAX_ATTEMPTS` remains temporarily as the product-level
 logical-attempt policy name. Poll interval, task lease, worker ID/capacity, and

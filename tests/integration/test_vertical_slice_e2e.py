@@ -11,8 +11,11 @@ from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner
 from temporalio.worker import Worker as TemporalWorker
 
+from db.enums import TimelineEventType
 from db.models import Base, Task, TaskTimelineEvent, WorkerRun
 from orchestrator.execution import TaskExecutionService, TaskSubmission
+from orchestrator.nodes.verification_result import verify_result as evaluate_verification
+from orchestrator.state import OrchestratorState
 from orchestrator.temporal.activities import TaskExecutionActivities
 from orchestrator.temporal.command_dispatcher import TemporalCommandDispatcher
 from orchestrator.temporal.workflows import TaskExecutionWorkflow
@@ -222,3 +225,192 @@ async def test_vertical_slice_e2e_happy_path(session_factory, tmp_path: Path, mo
             range(first_sequence, first_sequence + len(timeline))
         )
         assert timeline[-1].event_type.value == "task_completed"
+
+
+@pytest.mark.anyio
+async def test_vertical_slice_e2e_repairs_in_retained_workspace(
+    session_factory, tmp_path: Path, monkeypatch
+):
+    """A verifier repair should reuse the Docker workspace and project once."""
+    monkeypatch.setattr("sandbox.workspace.default_workspace_root", lambda: tmp_path)
+    if not _docker_available():
+        pytest.skip("Docker daemon is unavailable")
+
+    workspace_root = tmp_path
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(
+                kind="tool_call",
+                tool_name="execute_bash",
+                tool_input="printf 'broken\\n' > main.py",
+                final_output=None,
+            ),
+            CliRuntimeStep(kind="final", final_output="Created the initial artifact."),
+            CliRuntimeStep(
+                kind="tool_call",
+                tool_name="execute_bash",
+                tool_input="printf 'fixed\\n' > main.py",
+                final_output=None,
+            ),
+            CliRuntimeStep(kind="final", final_output="Repaired the artifact."),
+        ]
+    )
+
+    class _RepairGitSession:
+        def __init__(self, container, *, secrets=None):
+            self._real = DockerShellSession(container, secrets=secrets)
+
+        def execute(self, command, **kwargs):
+            if "status --porcelain=v1 -z --untracked-files=all" in command:
+                return DockerShellCommandResult(
+                    command=command,
+                    output="?? main.py\0",
+                    exit_code=0,
+                    duration_seconds=0.1,
+                )
+            return self._real.execute(command, **kwargs)
+
+        def close(self):
+            self._real.close()
+
+    base_worker = CodexCliWorker(
+        runtime_adapter=adapter,
+        session_factory=lambda container, **kwargs: _RepairGitSession(container, **kwargs),
+        workspace_root=workspace_root,
+    )
+
+    class _RecordingWorker:
+        def __init__(self):
+            self.requests = []
+            self.results = []
+
+        async def run(self, request, *, system_prompt=None):
+            self.requests.append(request)
+            result = await base_worker.run(request, system_prompt=system_prompt)
+            self.results.append(result)
+            return result
+
+    worker = _RecordingWorker()
+    service = TaskExecutionService(
+        session_factory=session_factory,
+        worker=worker,
+        workspace_root=workspace_root,
+    )
+
+    repo_path = tmp_path / "repair_repo"
+    repo_path.mkdir()
+    (repo_path / "README.md").write_text("# Repair Repo", encoding="utf-8")
+    _run_git(["git", "init", "--initial-branch=master"], cwd=repo_path)
+    _run_git(["git", "add", "."], cwd=repo_path)
+    _run_git(
+        [
+            "git",
+            "-c",
+            "user.name=Codex",
+            "-c",
+            "user.email=codex@example.com",
+            "commit",
+            "-m",
+            "Initial commit",
+        ],
+        cwd=repo_path,
+    )
+
+    verification_calls = 0
+    submission = TaskSubmission(
+        task_text="Create a valid main.py artifact",
+        repo_url=f"file://{repo_path.resolve()}",
+        branch="master",
+        constraints={"skip_self_review": True},
+    )
+    async with await WorkflowEnvironment.start_time_skipping() as environment:
+        snapshot, _ = service.create_task(submission)
+        task_id = snapshot.task_id
+        activities = TaskExecutionActivities(service=service)
+        activities.decompose_task_node = lambda _state: {}
+
+        def deterministic_verifier(state_input):
+            nonlocal verification_calls
+            verification_calls += 1
+            outcome = (
+                ("failed", "main.py contains the broken first-pass artifact")
+                if verification_calls == 1
+                else ("passed", "main.py contains the repaired artifact")
+            )
+            return evaluate_verification(
+                OrchestratorState.model_validate(state_input),
+                deterministic_verifier_outcome=outcome,
+            )
+
+        activities.verify_result_node = deterministic_verifier
+        activities.review_result_node = lambda _state: {}
+        temporal_worker = TemporalWorker(
+            environment.client,
+            task_queue="task-execution-queue",
+            workflows=[TaskExecutionWorkflow],
+            workflow_runner=UnsandboxedWorkflowRunner(),
+            activities=[
+                activities.classify_and_plan,
+                activities.decompose_task,
+                activities.load_memory,
+                activities.provision_workspace,
+                activities.run_worker,
+                activities.request_permission_escalation,
+                activities.resolve_permission_escalation,
+                activities.record_workflow_failure,
+                activities.verify_result,
+                activities.deliver_result,
+                activities.persist_memory,
+            ],
+        )
+        async with temporal_worker:
+            dispatcher = TemporalCommandDispatcher(
+                client=environment.client,
+                session_factory=session_factory,
+            )
+            await dispatcher.dispatch_pending()
+            handle = environment.client.get_workflow_handle(f"task-{task_id}")
+            workflow_result = await handle.result()
+
+    assert workflow_result["status"] == "completed"
+    assert verification_calls == 2
+    assert len(worker.requests) == 2
+    assert len(worker.results) == 2
+    retained_workspace_id = worker.results[0].workspace_id
+    assert retained_workspace_id is not None
+    assert worker.requests[1].workspace_id == retained_workspace_id
+    assert worker.results[1].workspace_id == retained_workspace_id
+    assert "Apply targeted code fixes" in worker.requests[1].task_text
+    assert [command.command for command in worker.results[0].commands_run] == [
+        "printf 'broken\\n' > main.py"
+    ]
+    assert [command.command for command in worker.results[1].commands_run] == [
+        "printf 'fixed\\n' > main.py"
+    ]
+    assert (workspace_root / retained_workspace_id / "main.py").read_text(
+        encoding="utf-8"
+    ) == "fixed\n"
+
+    with session_scope(session_factory) as session:
+        runs = (
+            session.execute(select(WorkerRun).where(WorkerRun.task_id == task_id)).scalars().all()
+        )
+        timeline = (
+            session.execute(
+                select(TaskTimelineEvent)
+                .where(TaskTimelineEvent.task_id == task_id)
+                .order_by(TaskTimelineEvent.sequence_number)
+            )
+            .scalars()
+            .all()
+        )
+        event_types = [event.event_type for event in timeline]
+        assert len(runs) == 1
+        assert runs[0].workspace_id == retained_workspace_id
+        assert event_types.count(TimelineEventType.WORKER_COMPLETED) == 2
+        assert event_types.count(TimelineEventType.VERIFICATION_COMPLETED) == 2
+        assert event_types.count(TimelineEventType.TASK_COMPLETED) == 1
+        first_sequence = timeline[0].sequence_number
+        assert [event.sequence_number for event in timeline] == list(
+            range(first_sequence, first_sequence + len(timeline))
+        )

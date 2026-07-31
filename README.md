@@ -14,7 +14,7 @@ The platform is built for one operator-first use case: reliable coding execution
 - API authentication for task-ingress endpoints via shared secret
 - durable task/session/run persistence in Postgres
 - split API/Temporal worker runtime with durable command outbox submission
-- Temporal workflows with shared routing, approval, memory, verification, review, and timeline domain callables
+- Temporal workflows with shared routing, approval, memory, bounded completion-loop repair, verification, review, and timeline domain callables
 - CLI-driven worker adapters for Codex CLI, Antigravity CLI, and OpenRouter-backed runtime
 - persistent Docker sandbox workspaces with audit artifacts and retention
 - structured skeptical memory + compact session state persistence
@@ -249,9 +249,8 @@ no-op or formatting-only runs after the generated commit lands.
 
 The current phase is Temporal stabilization and measured reliability:
 
-1. M25.4: Temporal core completion-loop parity
-2. M25.5: truthful readiness and operator recovery
-3. M25.6: a 20-task real-worker Temporal reliability baseline
+1. M25.5: truthful readiness and operator recovery
+2. M25.6: a 20-task real-worker Temporal reliability baseline
 
 M26 review-comment repair and M27 reliability-based autonomy are reserved but
 deferred until the M25.6 evidence review.

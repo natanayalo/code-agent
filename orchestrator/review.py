@@ -17,6 +17,7 @@ from apps.observability import (
     set_span_input_output,
     start_optional_span,
 )
+from orchestrator.review_completion import manual_review_handoff_update
 from orchestrator.state import OrchestratorState, is_task_read_only
 from tools import ToolPermissionLevel
 from tools.numeric import coerce_non_negative_int_like, coerce_positive_int_like
@@ -402,8 +403,7 @@ def _repair_handoff_update(
     updated_constraints = dict(constraints)
     updated_constraints[REPAIR_REQUEST_CONSTRAINT] = repair_task_text
     updated_constraints[REPAIR_PASSES_USED_CONSTRAINT] = used_passes + 1
-    # Prevent builder-reviewer ping-pong once the repair budget is exhausted.
-    updated_constraints[SKIP_INDEPENDENT_REVIEW_CONSTRAINT] = used_passes + 1 >= max_passes
+    updated_constraints.pop(SKIP_INDEPENDENT_REVIEW_CONSTRAINT, None)
     updated_task = state.task.model_copy(update={"constraints": updated_constraints})
 
     return {
@@ -449,27 +449,10 @@ def _check_skip_review(state: OrchestratorState) -> dict[str, Any] | None:
             ],
         }
 
-    if (
-        constraints.get(REPAIR_REQUEST_CONSTRAINT) is not None
-        and constraints.get(SKIP_INDEPENDENT_REVIEW_CONSTRAINT) is True
-    ):
-        updated_task = state.task.model_copy(
-            update={
-                "constraints": _cleanup_repair_handoff_constraints(state.task.constraints),
-            }
-        )
-        return {
-            "current_step": "review_result",
-            "task": updated_task.model_dump(),
-            "review": None,
-            "progress_updates": [
-                *state.progress_updates,
-                "independent review skipped after repair",
-            ],
-        }
-
     # 1. Check if we should skip
-    if state.task.constraints.get(SKIP_INDEPENDENT_REVIEW_CONSTRAINT):
+    if state.task.constraints.get(SKIP_INDEPENDENT_REVIEW_CONSTRAINT) and not constraints.get(
+        REPAIR_REQUEST_CONSTRAINT
+    ):
         return {"current_step": "review_result"}
 
     # Only review successful runs (or warnings)
@@ -584,9 +567,21 @@ async def review_result(
             if repair_update is not None:
                 return repair_update
 
+            if parsed_review.findings:
+                return manual_review_handoff_update(state, parsed_review)
+
+            updated_task = state.task
+            constraints = state.task.constraints
+            if constraints.get(REPAIR_REQUEST_CONSTRAINT) is not None:
+                updated_task = state.task.model_copy(
+                    update={"constraints": _cleanup_repair_handoff_constraints(constraints)}
+                )
+
             return {
                 "current_step": "review_result",
+                "task": updated_task.model_dump(),
                 "review": parsed_review.model_dump(),
+                "repair_handoff_requested": False,
                 "progress_updates": [*state.progress_updates, "independent review completed"],
             }
 

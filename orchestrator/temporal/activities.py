@@ -70,6 +70,13 @@ from orchestrator.nodes.provisioning import (
 from orchestrator.nodes.utils import _available_workers
 from orchestrator.nodes.verification import build_verify_result_node
 from orchestrator.state import NodeOutcome, OrchestratorState
+from orchestrator.temporal.completion_loop import (
+    CompletionLoopDecision,
+    apply_repair_rejection,
+    apply_verification_decision,
+    decision_from_state,
+    verification_is_pending,
+)
 from orchestrator.temporal.node_wave import (
     DecomposeTaskResult,
     NodeSelectionResult,
@@ -118,6 +125,160 @@ def _permission_escalation_retry_is_complete(
         },
     )
     return True
+
+
+def _blocked_permission_outcome(state: OrchestratorState) -> NodeOutcome | None:
+    return next(
+        (
+            outcome
+            for outcome in state.node_outcomes
+            if outcome.status == "blocked"
+            and outcome.result.next_action_hint == "request_higher_permission"
+        ),
+        None,
+    )
+
+
+def _reject_permission_escalation(
+    session: Any,
+    task_id: str,
+    task: Task,
+    state: OrchestratorState,
+    blocked: NodeOutcome | None,
+    plan: Any,
+) -> None:
+    task.last_error = "Worker permission escalation rejected by operator."
+    TaskTimelineRepository(session).create_next_for_attempt(
+        task_id=task_id,
+        attempt_number=task.attempt_count,
+        event_type=TimelineEventType.APPROVAL_REJECTED,
+        event_key=f"permission-escalation:{task_id}:rejected",
+        message=task.last_error,
+    )
+    if blocked is not None and plan is not None:
+        ExecutionPlanRepository(session).update_node(
+            plan_id=plan.id,
+            node_id=blocked.node_id,
+            status=ExecutionPlanNodeStatus.FAILED,
+            failure_kind="permission_denied",
+        )
+    if state.completion_loop.phase == "repair_requested":
+        apply_repair_rejection(state)
+        task.constraints = state.task.constraints
+        task.status = TaskStatus.IN_PROGRESS
+        TemporalTaskStateRepository(session).upsert(
+            task_id=task_id, state=state.model_dump(mode="json")
+        )
+        return
+    task.status = TaskStatus.FAILED
+    TemporalTaskStateRepository(session).delete(task_id=task_id)
+
+
+def _approve_permission_escalation(
+    session: Any,
+    task_id: str,
+    task: Task,
+    state: OrchestratorState,
+    blocked: NodeOutcome | None,
+    plan: Any,
+) -> None:
+    requested = state.result.requested_permission if state.result else None
+    constraints = dict(task.constraints or {})
+    constraints["granted_permission"] = requested
+    constraints["permission_escalation_retry"] = True
+    task.constraints = constraints
+    task.status = TaskStatus.IN_PROGRESS
+    state.task = state.task.model_copy(update={"constraints": constraints})
+    if blocked is not None and plan is not None:
+        ExecutionPlanRepository(session).update_node(
+            plan_id=plan.id,
+            node_id=blocked.node_id,
+            status=ExecutionPlanNodeStatus.PENDING,
+            blocker_interaction_id=None,
+            retry_count=blocked.attempts,
+        )
+        # Keep the terminal parent key while the node is reset for a new logical attempt.
+        state.result = _aggregate_decomposed_results(state.node_outcomes)
+    else:
+        state.result = None
+    TemporalTaskStateRepository(session).upsert(
+        task_id=task_id, state=state.model_dump(mode="json")
+    )
+
+
+def _resolve_permission_escalation_state(
+    session_factory: Any,
+    task_id: str,
+    approved: bool,
+) -> None:
+    with session_scope(session_factory) as session:
+        task = TaskRepository(session).get(task_id)
+        snapshot = TemporalTaskStateRepository(session).get(task_id=task_id)
+        if _permission_escalation_retry_is_complete(task_id, task, snapshot, approved):
+            return
+        assert task is not None and snapshot is not None
+        state = OrchestratorState.model_validate(snapshot.state)
+        if (
+            not approved
+            and state.completion_loop.phase == "manual_follow_up"
+            and state.result is not None
+            and state.result.next_action_hint == "await_manual_follow_up"
+        ):
+            return
+        blocked = _blocked_permission_outcome(state)
+        plan = ExecutionPlanRepository(session).get_by_task_id(task_id)
+        if approved:
+            _approve_permission_escalation(session, task_id, task, state, blocked, plan)
+        else:
+            _reject_permission_escalation(session, task_id, task, state, blocked, plan)
+
+
+async def _send_activity_heartbeats(task_id: str) -> None:
+    try:
+        while True:
+            activity.heartbeat()
+            await asyncio.sleep(5)
+    except asyncio.CancelledError:
+        raise
+    except RuntimeError as exc:
+        logger.debug("Temporal heartbeat failed for task %s: %s", task_id, exc)
+        raise
+
+
+def _worker_state_for_execution(
+    state: OrchestratorState,
+    *,
+    repair_execution: bool,
+) -> dict[str, Any]:
+    state_dict = state.model_dump()
+    if repair_execution:
+        state_dict["verification"] = None
+        state_dict["review"] = None
+        state_dict["repair_handoff_requested"] = False
+    return state_dict
+
+
+def _finalize_worker_activity_state(
+    state_dict: dict[str, Any],
+    *,
+    repair_execution: bool,
+) -> tuple[OrchestratorState, bool]:
+    state = OrchestratorState.model_validate(state_dict)
+    constraints = state.task.constraints if isinstance(state.task.constraints, dict) else {}
+    constraints = dict(constraints)
+    constraints.pop("permission_escalation_retry", None)
+    state.task = state.task.model_copy(update={"constraints": constraints})
+    requires_permission = bool(
+        state.result and state.result.next_action_hint == "request_higher_permission"
+    )
+    if repair_execution and not requires_permission:
+        state.completion_loop = state.completion_loop.model_copy(
+            update={
+                "phase": "verification_pending",
+                "summary": "repair worker completed; re-verification is pending",
+            }
+        )
+    return state, requires_permission
 
 
 def _source_file_changes(files_changed: list[str], logical_activity_key: str) -> list[str]:
@@ -583,9 +744,11 @@ class TaskExecutionActivities:
             state.task.constraints if isinstance(state.task.constraints, dict) else {}
         )
         retrying_permission_escalation = bool(task_constraints.get("permission_escalation_retry"))
+        repair_requested = state.completion_loop.phase == "repair_requested"
         if (
             self._has_event(state, TimelineEventType.WORKSPACE_PROVISIONED)
             and not retrying_permission_escalation
+            and not repair_requested
         ):
             logger.info("provision_workspace already executed for task %s, skipping", task_id)
             return
@@ -616,6 +779,10 @@ class TaskExecutionActivities:
             state.task.constraints if isinstance(state.task.constraints, dict) else {}
         )
         retrying_permission_escalation = bool(task_constraints.get("permission_escalation_retry"))
+        repair_execution = state.completion_loop.phase == "repair_requested"
+        requires_permission = bool(
+            state.result and state.result.next_action_hint == "request_higher_permission"
+        )
         if (
             self._has_event(
                 state,
@@ -624,28 +791,21 @@ class TaskExecutionActivities:
                 TimelineEventType.WORKER_ERROR,
             )
             and not retrying_permission_escalation
+            and (not repair_execution or requires_permission)
         ):
             logger.info("run_worker already executed for task %s, skipping", task_id)
-            return {"requires_permission_escalation": False}
-
-        async def send_heartbeats() -> None:
-            try:
-                while True:
-                    activity.heartbeat()
-                    await asyncio.sleep(5)
-            except asyncio.CancelledError:
-                raise
-            except RuntimeError as exc:
-                logger.debug("Temporal heartbeat failed for task %s: %s", task_id, exc)
-                raise
+            return {"requires_permission_escalation": requires_permission}
 
         heartbeat_task = asyncio.create_task(
-            send_heartbeats(), name=f"temporal-worker-heartbeat-{task_id}"
+            _send_activity_heartbeats(task_id), name=f"temporal-worker-heartbeat-{task_id}"
         )
         worker_task: asyncio.Task[dict[str, Any]] | None = None
         try:
             started_at = utc_now()
-            state_dict = state.model_dump()
+            state_dict = _worker_state_for_execution(
+                state,
+                repair_execution=repair_execution,
+            )
             worker_task = asyncio.create_task(
                 self._run_node(self.await_result_node, state_dict),
                 name=f"temporal-worker-execution-{task_id}",
@@ -662,11 +822,10 @@ class TaskExecutionActivities:
             updates = await worker_task
             self._merge_updates(state_dict, updates)
 
-            state = OrchestratorState.model_validate(state_dict)
-            constraints = state.task.constraints if isinstance(state.task.constraints, dict) else {}
-            constraints = dict(constraints)
-            constraints.pop("permission_escalation_retry", None)
-            state.task = state.task.model_copy(update={"constraints": constraints})
+            state, requires_permission = _finalize_worker_activity_state(
+                state_dict,
+                repair_execution=repair_execution,
+            )
             finished_at = utc_now()
 
             await self.service._run_blocking(
@@ -677,11 +836,7 @@ class TaskExecutionActivities:
                 finished_at=finished_at,
             )
             state.timeline_persisted_count = len(state.timeline_events)
-            return {
-                "requires_permission_escalation": bool(
-                    state.result and state.result.next_action_hint == "request_higher_permission"
-                )
-            }
+            return {"requires_permission_escalation": requires_permission}
         finally:
             if worker_task is not None and not worker_task.done():
                 worker_task.cancel()
@@ -1520,75 +1675,12 @@ class TaskExecutionActivities:
     @_restore_task_trace_context
     async def resolve_permission_escalation(self, task_id: str, approved: bool) -> None:
         """Apply a signalled escalation decision to durable task state."""
-
-        def _resolve() -> None:
-            with session_scope(self.service.session_factory) as session:
-                task = TaskRepository(session).get(task_id)
-                snapshot = TemporalTaskStateRepository(session).get(task_id=task_id)
-                if _permission_escalation_retry_is_complete(
-                    task_id,
-                    task,
-                    snapshot,
-                    approved,
-                ):
-                    return
-                assert task is not None and snapshot is not None
-                state = OrchestratorState.model_validate(snapshot.state)
-                requested = state.result.requested_permission if state.result else None
-                blocked = next(
-                    (
-                        outcome
-                        for outcome in state.node_outcomes
-                        if outcome.status == "blocked"
-                        and outcome.result.next_action_hint == "request_higher_permission"
-                    ),
-                    None,
-                )
-                plan = ExecutionPlanRepository(session).get_by_task_id(task_id)
-                if not approved:
-                    task.status = TaskStatus.FAILED
-                    task.last_error = "Worker permission escalation rejected by operator."
-                    TaskTimelineRepository(session).create_next_for_attempt(
-                        task_id=task_id,
-                        attempt_number=task.attempt_count,
-                        event_type=TimelineEventType.APPROVAL_REJECTED,
-                        event_key=f"permission-escalation:{task_id}:rejected",
-                        message=task.last_error,
-                    )
-                    if blocked is not None and plan is not None:
-                        ExecutionPlanRepository(session).update_node(
-                            plan_id=plan.id,
-                            node_id=blocked.node_id,
-                            status=ExecutionPlanNodeStatus.FAILED,
-                            failure_kind="permission_denied",
-                        )
-                    TemporalTaskStateRepository(session).delete(task_id=task_id)
-                    return
-                constraints = dict(task.constraints or {})
-                constraints["granted_permission"] = requested
-                constraints["permission_escalation_retry"] = True
-                task.constraints = constraints
-                task.status = TaskStatus.IN_PROGRESS
-                state.task = state.task.model_copy(update={"constraints": constraints})
-                if blocked is not None and plan is not None:
-                    ExecutionPlanRepository(session).update_node(
-                        plan_id=plan.id,
-                        node_id=blocked.node_id,
-                        status=ExecutionPlanNodeStatus.PENDING,
-                        blocker_interaction_id=None,
-                        retry_count=blocked.attempts,
-                    )
-                    # Retain the terminal key in parent state while the node is
-                    # reset for its next logical attempt. Otherwise selection
-                    # would replay the old blocked payload before it can run.
-                    state.result = _aggregate_decomposed_results(state.node_outcomes)
-                else:
-                    state.result = None
-                TemporalTaskStateRepository(session).upsert(
-                    task_id=task_id, state=state.model_dump(mode="json")
-                )
-
-        await self.service._run_blocking(_resolve)
+        await self.service._run_blocking(
+            _resolve_permission_escalation_state,
+            self.service.session_factory,
+            task_id,
+            approved,
+        )
 
     @activity.defn(name="record_workflow_failure")
     @_restore_task_trace_context
@@ -1639,15 +1731,16 @@ class TaskExecutionActivities:
 
     @activity.defn(name="verify_result")
     @_restore_task_trace_context
-    async def verify_result(self, task_id: str) -> None:
+    async def verify_result(self, task_id: str) -> dict[str, Any]:
         state = await self.service._run_blocking(self._get_current_state, task_id)
-        if self._has_event(
+        has_prior_event = self._has_event(
             state,
             TimelineEventType.VERIFICATION_COMPLETED,
             TimelineEventType.VERIFICATION_SKIPPED,
-        ):
+        )
+        if not verification_is_pending(state, has_prior_event=has_prior_event):
             logger.info("verify_result already executed for task %s, skipping", task_id)
-            return
+            return decision_from_state(state).model_dump(mode="json")
 
         async def send_heartbeats() -> None:
             try:
@@ -1692,6 +1785,7 @@ class TaskExecutionActivities:
             await asyncio.gather(heartbeat_task, return_exceptions=True)
 
         finished_at = utc_now()
+        decision: CompletionLoopDecision = apply_verification_decision(state)
 
         await self.service._run_blocking(
             self._persist_intermediate_state,
@@ -1701,6 +1795,7 @@ class TaskExecutionActivities:
             finished_at=finished_at,
         )
         state.timeline_persisted_count = len(state.timeline_events)
+        return decision.model_dump(mode="json")
 
     @activity.defn(name="deliver_result")
     @_restore_task_trace_context

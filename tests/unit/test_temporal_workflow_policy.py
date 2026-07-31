@@ -5,6 +5,7 @@ from temporalio import workflow
 
 from orchestrator.temporal.policy import activity_options
 from orchestrator.temporal.workflows import (
+    COMPLETION_LOOP_PATCH_ID,
     MAX_PERMISSION_ESCALATIONS,
     TaskExecutionWorkflow,
 )
@@ -87,6 +88,250 @@ async def test_workflow_persists_memory_before_terminal_delivery(monkeypatch) ->
     await TaskExecutionWorkflow()._run_lifecycle("task-id")
 
     assert activity_names[-2:] == ["persist_memory", "deliver_result"]
+
+
+@pytest.mark.anyio
+async def test_completion_loop_runs_repair_before_reverification(monkeypatch) -> None:
+    """A durable repair decision must schedule one worker pass before re-verification."""
+    activity_names: list[str] = []
+    decisions = iter(
+        [
+            {
+                "continuation": "repair",
+                "repair_source": "verifier",
+                "repair_pass": 1,
+                "summary": "verification requested repair",
+            },
+            {
+                "continuation": "complete",
+                "repair_source": None,
+                "repair_pass": 1,
+                "summary": "verification accepted repair",
+            },
+        ]
+    )
+
+    async def execute_activity(name: str, *args, **kwargs):
+        activity_names.append(name)
+        if name == "classify_and_plan":
+            return {"execution_task_queue": "code-agent-codex"}
+        if name == "decompose_task":
+            return {"execution_shape": "monolithic"}
+        if name == "run_worker":
+            return {"requires_permission_escalation": False}
+        if name == "verify_result":
+            return next(decisions)
+        return {}
+
+    monkeypatch.setattr(
+        workflow,
+        "patched",
+        lambda patch_id: patch_id == COMPLETION_LOOP_PATCH_ID,
+    )
+    monkeypatch.setattr(workflow, "execute_activity", execute_activity)
+
+    result = await TaskExecutionWorkflow()._run_lifecycle("task-id")
+
+    assert result["status"] == "completed"
+    assert activity_names.count("run_worker") == 2
+    assert activity_names.count("verify_result") == 2
+    assert activity_names.count("provision_workspace") == 2
+    assert activity_names[-2:] == ["persist_memory", "deliver_result"]
+
+
+@pytest.mark.anyio
+async def test_completion_loop_delivers_manual_follow_up_without_another_worker(
+    monkeypatch,
+) -> None:
+    """An exhausted repair decision must deliver one actionable failed result."""
+    activity_names: list[str] = []
+
+    async def execute_activity(name: str, *args, **kwargs):
+        activity_names.append(name)
+        if name == "classify_and_plan":
+            return {}
+        if name == "decompose_task":
+            return {"execution_shape": "monolithic"}
+        if name == "run_worker":
+            return {"requires_permission_escalation": False}
+        if name == "verify_result":
+            return {
+                "continuation": "manual_follow_up",
+                "repair_source": "verifier",
+                "repair_pass": 1,
+                "summary": "repair budget exhausted; manual follow-up is required",
+            }
+        return {}
+
+    monkeypatch.setattr(
+        workflow,
+        "patched",
+        lambda patch_id: patch_id == COMPLETION_LOOP_PATCH_ID,
+    )
+    monkeypatch.setattr(workflow, "execute_activity", execute_activity)
+
+    result = await TaskExecutionWorkflow()._run_lifecycle("task-id")
+
+    assert result == {
+        "status": "failed",
+        "summary": "repair budget exhausted; manual follow-up is required",
+    }
+    assert activity_names.count("run_worker") == 1
+    assert activity_names.count("verify_result") == 1
+    assert activity_names[-2:] == ["persist_memory", "deliver_result"]
+
+
+@pytest.mark.anyio
+async def test_completion_loop_repair_uses_existing_permission_state_machine(monkeypatch) -> None:
+    """A repair pass must pause, apply a permission grant, and retry normally."""
+    workflow_instance = TaskExecutionWorkflow()
+    activity_names: list[str] = []
+    worker_results = iter(
+        [
+            {"requires_permission_escalation": False},
+            {"requires_permission_escalation": True},
+            {"requires_permission_escalation": False},
+        ]
+    )
+    decisions = iter(
+        [
+            {"continuation": "repair", "summary": "repair requested"},
+            {"continuation": "complete", "summary": "repair accepted"},
+        ]
+    )
+
+    async def execute_activity(name: str, *args, **kwargs):
+        activity_names.append(name)
+        if name == "classify_and_plan":
+            return {}
+        if name == "decompose_task":
+            return {"execution_shape": "monolithic"}
+        if name == "run_worker":
+            return next(worker_results)
+        if name == "verify_result":
+            return next(decisions)
+        return {}
+
+    async def wait_condition(_predicate) -> None:
+        workflow_instance.permission_escalation_decision = True
+
+    monkeypatch.setattr(
+        workflow,
+        "patched",
+        lambda patch_id: patch_id == COMPLETION_LOOP_PATCH_ID,
+    )
+    monkeypatch.setattr(workflow, "execute_activity", execute_activity)
+    monkeypatch.setattr(workflow, "wait_condition", wait_condition)
+
+    result = await workflow_instance._run_lifecycle("task-id")
+
+    assert result["status"] == "completed"
+    assert activity_names.count("run_worker") == 3
+    assert activity_names.count("request_permission_escalation") == 1
+    assert activity_names.count("resolve_permission_escalation") == 1
+    assert activity_names.count("provision_workspace") == 3
+
+
+@pytest.mark.anyio
+async def test_completion_loop_repair_permission_rejection_delivers_manual_handoff(
+    monkeypatch,
+) -> None:
+    """Rejected repair permission must still use the one terminal-delivery tail."""
+    workflow_instance = TaskExecutionWorkflow()
+    activity_names: list[str] = []
+    worker_results = iter(
+        [
+            {"requires_permission_escalation": False},
+            {"requires_permission_escalation": True},
+        ]
+    )
+
+    async def execute_activity(name: str, *args, **kwargs):
+        activity_names.append(name)
+        if name == "classify_and_plan":
+            return {}
+        if name == "decompose_task":
+            return {"execution_shape": "monolithic"}
+        if name == "run_worker":
+            return next(worker_results)
+        if name == "verify_result":
+            return {"continuation": "repair", "summary": "repair requested"}
+        return {}
+
+    async def wait_condition(_predicate) -> None:
+        workflow_instance.permission_escalation_decision = False
+
+    monkeypatch.setattr(
+        workflow,
+        "patched",
+        lambda patch_id: patch_id == COMPLETION_LOOP_PATCH_ID,
+    )
+    monkeypatch.setattr(workflow, "execute_activity", execute_activity)
+    monkeypatch.setattr(workflow, "wait_condition", wait_condition)
+
+    result = await workflow_instance._run_lifecycle("task-id")
+
+    assert result["status"] == "failed"
+    assert "manual follow-up" in result["summary"]
+    assert activity_names.count("resolve_permission_escalation") == 1
+    assert activity_names[-2:] == ["persist_memory", "deliver_result"]
+
+
+@pytest.mark.anyio
+async def test_completion_loop_rejects_unknown_continuation(monkeypatch) -> None:
+    """An invalid typed decision must fail deterministically and project the failure."""
+    activity_names: list[str] = []
+
+    async def execute_activity(name: str, *args, **kwargs):
+        activity_names.append(name)
+        if name == "classify_and_plan":
+            return {}
+        if name == "decompose_task":
+            return {"execution_shape": "monolithic"}
+        if name == "run_worker":
+            return {"requires_permission_escalation": False}
+        if name == "verify_result":
+            return {"continuation": "invalid", "summary": "bad contract"}
+        return {}
+
+    monkeypatch.setattr(
+        workflow,
+        "patched",
+        lambda patch_id: patch_id == COMPLETION_LOOP_PATCH_ID,
+    )
+    monkeypatch.setattr(workflow, "execute_activity", execute_activity)
+
+    result = await TaskExecutionWorkflow()._run_lifecycle("task-id")
+
+    assert result["status"] == "failed"
+    assert "unknown completion-loop continuation" in result["summary"]
+    assert activity_names[-1] == "record_workflow_failure"
+
+
+@pytest.mark.anyio
+async def test_completion_loop_propagates_non_rejection_worker_failure(monkeypatch) -> None:
+    """A non-rejection worker failure remains an immediate workflow failure."""
+    workflow_instance = TaskExecutionWorkflow()
+
+    async def execute_activity(name: str, *args, **kwargs):
+        if name == "verify_result":
+            return {"continuation": "repair", "summary": "repair requested"}
+        return {}
+
+    async def fail_worker(_task_id: str, _task_queue: str | None):
+        return {"status": "failed", "summary": "worker retry exhausted"}
+
+    monkeypatch.setattr(workflow, "execute_activity", execute_activity)
+    monkeypatch.setattr(
+        workflow_instance,
+        "_run_worker_with_permission_escalations",
+        fail_worker,
+    )
+
+    failure, decision = await workflow_instance._run_completion_loop("task-id", None)
+
+    assert failure == {"status": "failed", "summary": "worker retry exhausted"}
+    assert decision["continuation"] == "repair"
 
 
 @pytest.mark.anyio
