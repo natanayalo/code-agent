@@ -1,69 +1,89 @@
 # Status
 
-## Current Phase
+## Current phase
 
-Phase 4: selective autonomy after reliability.
+Phase 4A: Temporal stabilization and measured reliability.
 
-Active focus:
+Active focus: **M25.4 — Temporal Core Completion-Loop Parity**.
 
-- M26 review comment repair.
-- M25.3 Temporal-only cutover and legacy retirement is complete:
-  - Slice 4A retired the Postgres task scheduler, LangGraph lifecycle, and
-    runtime selector in PR #340.
-  - Slice 4B removed the task lease schema and WorkerNode load accounting after
-    a snapshot-backed PostgreSQL rollback rehearsal. See the
-    [Slice 4B evidence](m25_3_slice_4b_schema_evidence.md).
+The first implementation slice will make verifier and independent-review
+repair requests return a durable continuation decision to the Temporal
+workflow, then loop through worker execution and re-verification within the
+existing repair budget.
 
-## Phase 3 Reliability Baseline
-- **Baseline cases**: 25 baseline cases run, 25 passed according to the frozen evaluation report.
-- **Approval requests**: 1 case needing approval.
-- **Validation evidence**: 24 cases with validation evidence present.
-- **Manual log inspection**: 10 cases needing manual log inspection.
-- **Worker failures**: 9 cases with worker failure (expected failure cases).
+## Current capabilities
 
-## Current Capabilities
-- API + Telegram ingress for task intake
-- shared-secret API auth for protected ingress routes
-- durable Postgres persistence for users/sessions/tasks/runs/artifacts/memory
-- split API/worker runtime with transactional Temporal command dispatch
-- Temporal workflow lifecycle with shared routing, approval, memory, verifier,
-  review, and timeline domain callables
-- worker adapters for Codex CLI, Antigravity CLI, and OpenRouter-backed execution
-- sandboxed workspace/container execution with command artifact capture and retention controls
-- skeptical memory + compact session state persistence
-- orchestrator loads skeptical personal/project/session memory before worker dispatch and persists typed worker-produced memory after runs
-- operational controls: task replay, approval decision endpoint, progress callbacks, and metrics
-- generated TaskSpec contract for task goal/risk/type/delivery policy before worker routing
-- repo registry and validation profiles gate public repo selection, protected paths, and validation defaults
-- deterministic advisory repository memory profiles and skeptical memory retrieval/admission
-- task decomposition into sequential or parallel DAG execution with durable node activity persistence and replay-safe worker fan-out
-- PR-native delivery fields with GitHub branch/draft-PR delivery integration
-- full-text personal/project memory search with dashboard search results and memory-retrieval timeline visibility
-- deterministic memory retrieval evaluation to separate full-text regressions from known semantic gaps
-- reviewable memory proposal flow for curated corpus seeding, memory-admission service, and episodic observation layer
-- dashboard visibility for TaskSpec, interactions, timeline events, logs, artifacts, replay controls, traces, memory, and tool inventory
-- CI now measures Python coverage from `tests/unit` only and runs `tests/integration` as a separate pass
-- pre-commit Ruff checks repo Python files for non-top-level imports while preserving a few intentional lazy imports in guarded modules
-- shipped changes are tracked in [`CHANGELOG.md`](../CHANGELOG.md)
+- authenticated API, generic webhook, and Telegram task intake
+- durable Postgres persistence for users, sessions, tasks, worker runs,
+  interactions, timelines, artifacts, memory, and delivery metadata
+- transactional Temporal command outbox with idempotent start, signal, and
+  cancellation delivery
+- Temporal-owned task lifecycle, retry, timeout, signal wait, cancellation,
+  and activity recovery
+- TaskSpec generation, capability-aware worker routing, and manual overrides
+- Codex and Antigravity native-agent workers plus opt-in OpenRouter execution
+- isolated Docker workspaces with command, diff, test, and artifact evidence
+- skeptical personal/project memory, compact session state, admission review,
+  observation evidence, and full-text retrieval
+- clarification, approval, permission escalation, cancellation, and replay
+  controls through API and dashboard
+- sequential decomposed-task DAG execution and opt-in bounded two-node
+  read-only fan-out
+- deterministic and independent verification, independent review, and
+  workspace/branch/draft-PR delivery
+- dashboard visibility for tasks, TaskSpec, DAG attempts, interactions,
+  timelines, logs, artifacts, traces, memory, proposals, metrics, and tools
 
-## Open Risks
+Completed work remains in [`CHANGELOG.md`](../CHANGELOG.md). The historical
+Temporal migration and rollback record is in the
+[cutover archive](archive/temporal_cutover.md).
 
-- operator inspection/control still relies on API + logs more than dedicated UI
-- Codex/Antigravity now support native-agent defaults behind rollback flags, but deeper verifier/repair integration is still in progress
-- Antigravity non-interactive runs use prompt-as-argv and permission/settings policy, so command logging and profile mapping need explicit redaction and tests
-- native-agent runs may initially have coarser command-level audit unless CLI event streams are captured and normalized
-- worker runtime internals still contain hotspot complexity despite recent decomposition progress
+## Current evidence
 
-## Next Slices Only
+- The accepted M25.3 release covered the Temporal lifecycle, HITL, cancellation,
+  restart recovery, sequential DAGs, opt-in fan-out, outage recovery, history
+  replay, and terminal reconciliation.
+- The 25-case frozen evaluation remains a deterministic domain-logic regression
+  suite. It uses replayed worker outcomes and is not a real-provider Temporal
+  reliability baseline.
+- Performance routing currently consumes checked-in advisory metrics; it is not
+  refreshed from persisted live task outcomes.
+- Full-text memory retrieval passes the curated non-semantic regression cases
+  and retains known synonym gaps. Current evidence does not justify adding a
+  vector dependency.
 
-1. M26: review comment repair
-   - extend the PR repair loop from CI failures to actionable review feedback
+## Known limitations
 
-## Current Backlog
+- verifier and independent-review nodes can request bounded repair, but the
+  Temporal workflow does not yet execute that continuation
+- `/health` and `/ready` are currently process-level responses rather than
+  truthful dependency and execution-readiness signals
+- command-outbox lag, worker freshness, stuck waits, and terminal divergence
+  are not yet first-class operator signals
+- bounded fan-out remains an explicit read-only pilot and is disabled by
+  default
+- deep-scout repo-to-research chaining is deferred and is not part of the
+  supported Temporal completion loop
+- compact session state records the active goal and touched files but does not
+  yet extract structured decisions and risks from worker results
+- native-agent command audit and several orchestration/worker adapters remain
+  complexity hotspots
+- the repository target is 90% Python coverage, while CI temporarily enforces
+  an 80% floor until M25.6 restores the target
 
-- Phase 4: decomposed task DAG, selective fan-out, review repair, and reliability-based autonomy policy.
+## Next slices only
 
-## Completed Work
+1. M25.4: Temporal Core Completion-Loop Parity
+   - return an explicit continuation from verification/review activities
+   - execute bounded repair through the normal worker and permission paths
+   - re-verify, then finish or produce an actionable manual handoff
+   - prove repair, exhaustion, restart, idempotency, and replay behavior
+2. M25.5: Truthful Readiness and Operator Recovery
+3. M25.6: Real Temporal Reliability Baseline
 
-Completed work is tracked in [`CHANGELOG.md`](../CHANGELOG.md). Keep this file
-focused on the current phase, active risks, and upcoming priorities.
+## Deferred
+
+- M26 review-comment repair remains reserved until CI and Temporal repair
+  stability are supported by M25.6 evidence.
+- M27 reliability-based autonomy remains reserved until real-task metrics can
+  support reversible policy thresholds.

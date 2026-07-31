@@ -1,259 +1,205 @@
 # Roadmap
 
-## Planning Principles
+## Planning principles
 
 - prioritize reliability, safety, and inspectability over feature breadth
-- prefer runtime leverage (Codex/Antigravity/OpenRouter capabilities) over rebuilding equivalent platform logic
-- keep human-in-the-loop for trust-boundary and high-risk changes
+- prefer runtime leverage from Codex, Antigravity, and OpenRouter over
+  rebuilding provider-local cognition
+- keep trust-boundary and high-risk changes human-controlled
+- require measured real-worker evidence before increasing autonomy
 
-## Current Phase
+## Current phase
 
-Phase 4: selective autonomy after reliability.
+Phase 4A: Temporal stabilization and measured reliability.
 
 Priority sequence:
 
-1. M25.3: Temporal-Only Cutover and Legacy Retirement
-2. Milestone 26: Review Comment Repair
-3. Milestone 27: Reliability-Based Autonomy Policy
+1. M25.4: Temporal Core Completion-Loop Parity
+2. M25.5: Truthful Readiness and Operator Recovery
+3. M25.6: Real Temporal Reliability Baseline
 
-Completed foundation:
+M26 review-comment repair and M27 reliability-based autonomy remain reserved
+but explicitly deferred. Neither milestone resumes until the M25.6 evidence
+review concludes that its entry conditions are satisfied.
 
-1. Phase 4 early milestones: M22 (Eval-driven routing), M23 (Memory admission & retrieval), M24 (Decomposed Task DAG), M25 (Parallel worker fan-out)
-2. Phase 3: Personal reliability before broader autonomy (Milestones 20 through 21)
+## Product north star
 
-Past phases:
-
-1. Phase 2: bounded autonomy (Milestones 18 through 19.5)
-2. Phase 1: clarity and control (Milestones 15 through 17.5)
-
-## Phase 3 North Star
-
-Reduce babysitting for personal coding tasks before expanding broader autonomy.
+Reduce babysitting for personal coding tasks while keeping execution safe,
+inspectable, and reversible.
 
 Primary success metrics:
 
 - human interventions per completed task
 - repeated questions per task
 - tasks requiring manual log inspection
-- validation evidence rate
-- worker/provider failure rate
+- validation-evidence rate
+- worker and provider failure rate
 - success rate by worker profile
 - latency by orchestrator stage
-- time from task submission to terminal state or draft PR
-- CI/review rejection rate for generated PRs
+- time from submission to terminal state or draft PR
+- CI and review rejection rate for generated PRs
 
-Phase 3 keeps the product personal-use first. It explicitly does not optimize for:
+The project remains personal-use first. It does not currently optimize for
+multi-user SaaS, auto-merge, auto-deploy, broad multi-agent swarms, or
+autonomous privileged maintenance.
 
-- multi-user/team SaaS workflows, tenancy, billing, roles, or organization administration
-- auto-merge or auto-deploy
-- broad multi-agent swarms
-- new model/provider expansion before reliability improves
-- autonomous privileged maintenance
+## Completed foundation
 
-### M25.3 Temporal-Only Cutover and Legacy Retirement
+- M20–M21 established the personal reliability baseline, task controls,
+  TaskSpec contract, worker profiles, sandbox hardening, verification, review,
+  delivery, and operator dashboard.
+- M22 added an inspectable performance-routing policy. Its checked-in metrics
+  are advisory seed data, not a live feedback loop from current task outcomes.
+- M23 added skeptical personal/project memory, compact session state, full-text
+  retrieval, admission review, observation evidence, and deterministic
+  evaluation.
+- M24 added persisted task decomposition and sequential DAG execution.
+- M25 added durable node activities and opt-in bounded two-node read-only
+  fan-out.
+- M25.3 made Temporal the sole durable lifecycle runtime and retired the
+  Postgres polling scheduler, LangGraph lifecycle, runtime selector, and lease
+  schema. See the [Temporal cutover record](archive/temporal_cutover.md).
 
-Goal:
+## M25.4 — Temporal Core Completion-Loop Parity
 
-- retire the legacy Postgres-polling scheduler and LangGraph durable lifecycle,
-  making Temporal the sole durable execution orchestrator
+### Goal
 
-Boundary:
+Ensure every core verifier or independent-review repair decision has a durable
+Temporal continuation instead of ending after the first verification pass.
 
-- Temporal becomes the only durable execution scheduler and lifecycle engine
-- Postgres retains tasks, interactions, timelines, worker evidence, artifacts,
-  memory, delivery metadata, and dashboard queries
-- code-agent retains planning, decomposition, routing policy, worker/provider
-  behavior, sandbox policy, validation, review, and memory governance
-- no new Temporal feature development — this is legacy retirement and operational cutover
+### Scope
 
-Design decisions:
+- make verifier and review activities return an explicit continuation decision
+  to the workflow
+- on a bounded repair request, reprovision the retained workspace as needed,
+  rerun the selected worker with the persisted repair instructions, and repeat
+  verification
+- preserve existing repair budgets, permission escalation, cancellation,
+  activity idempotency, terminal projection, and history replay compatibility
+- end in an actionable manual-follow-up state when repair is rejected,
+  non-repairable, or exhausted
+- add Temporal integration and focused E2E coverage for successful repair,
+  exhausted repair, worker restart during repair, duplicate activity delivery,
+  and history replay
 
-- persist `orchestration_runtime` on both `Task` (authoritative for drain metrics)
-  and `WorkerRun` (execution evidence), using a portable constrained
-  `OrchestrationRuntime` enum with values `temporal` and `legacy`
-- runtime is pinned to the task at submission and immutable — no re-evaluation per run
-- historical backfill uses conservative classification: positively identified rows
-  get their runtime; ambiguous rows stay `NULL` (displayed as "unknown")
-- worker fail-fast: bounded connection retries, then exit non-zero
-- API graceful degradation: remains available for reads/dashboard/interactions,
-  returns 503 for new submissions when Temporal is unreachable, no automatic
-  fallback to legacy
-- flat evidence gate before legacy deletion: all 14 operational scenarios, all
-  10 task classes, required automated suites, last-known-good rollback image,
-  a runtime-drain snapshot with zero active legacy/unknown tasks and zero
-  post-cutover legacy submissions, and operator sign-off; scenarios 9 through
-  12 may cite passing integration tests instead of manual Compose execution
-- persisted cutover timestamp (`TEMPORAL_ONLY_CUTOVER_AT`) for drain queries
-  instead of rolling windows
-- legacy deletion and schema cleanup are two PRs: one code-deletion PR for
-  dispatch, LangGraph lifecycle, and configuration; one schema-migration PR
-- `graph.py` retains reusable domain nodes; only LangGraph lifecycle is removed
-- rollback via last-known-good image + configuration + schema compatibility
-  runbook, not git revert alone
+### Boundaries
 
-Progress:
+- bounded two-node read-only fan-out remains opt-in
+- deep-scout repo-to-research chaining is explicitly deferred
+- no new provider, deployment, or autonomy policy is introduced
 
-- [x] Slice 1: runtime observability
-  - add `OrchestrationRuntime` enum and `orchestration_runtime` to Task and WorkerRun
-  - conservative nullable backfill for historical rows
-  - centralize WorkerRun creation to propagate the runtime marker
-  - pin runtime to task at submission (immutable after creation)
-  - dashboard drain-gate widgets: tasks by runtime and active legacy count;
-    defer legacy submissions since cutover until Slice 2 persists the cutover timestamp
-  - deployment prerequisite: deploy with zero active tasks, or explicitly classify,
-    complete, or cancel every active unknown task before relying on the scheduler boundary
-  - fix status.md Active Focus, add M25.3 to roadmap
-- [x] Slice 2: production cutover
-  - default `execution_runtime()` to `temporal` when unconfigured
-  - remove `CODE_AGENT_USE_TEMPORAL` env var support
-  - worker fail-fast: bounded Temporal connection retries, then exit non-zero
-  - API graceful degradation: 503 for new submissions, reads stay available,
-    ongoing Temporal readiness check
-  - persist `TEMPORAL_ONLY_CUTOVER_AT` cutover timestamp
-  - document all 14 operational evidence scenarios in
-    `docs/m25_3_temporal_cutover_verification.md`; recording their Compose
-    results is the entry gate for Slice 3
-- [x] Slice 3A: local Compose rehearsal
-  - record all 14 operational scenarios; scenarios 9 through 12 may cite
-    passing integration-test evidence instead of manual Compose execution
-  - record full task-class coverage (simple read-only, mutable implementation,
-    sequential DAG, fan-out DAG, approval, clarification, permission
-    escalation, cancellation, provider retry or restart, terminal failure); a
-    single task may cover multiple classes
-  - record passing unit, integration, pre-commit, and dashboard coverage suites
-    and obtain local operator sign-off
-  - completed by operator acceptance after local Compose rehearsal
-- [x] Slice 3B: immutable release evidence gate
-  - capture a release-environment clean runtime-drain snapshot, cutover timestamp, and
-    immutable deployment-specific evidence ledger
-  - tag and retain a last-known-good legacy-capable rollback artifact
-  - obtain operator approval before legacy deletion and schema cleanup
-  - completed against the sole local Compose release environment at commit
-    `251b9aa`; the worker-restart fan-out recovery proof, image digests, clean
-    drain, rollback tags, and operator approval are recorded in the immutable
-    `m25.3-temporal-cutover-20260726T213001Z` release
-- [x] Slice 4: legacy deletion and schema cleanup (two PRs)
-  - [x] PR 4A — remove legacy dispatch, LangGraph durable lifecycle, and runtime
-    selector/configuration after a reference inventory and method-level
-    WorkerNode audit; retain historical runtime evidence and schema compatibility
-  - [x] PR 4B — remove task `lease_owner`, `lease_expires_at`, and
-    `next_attempt_at` plus retired WorkerNode `current_load` through a schema
-    migration after snapshot-backed rollback verification
-  - pre-implementation reference inventory of all legacy symbols classified as
-    legacy-only, shared product policy, test fixture, or migration compatibility
-  - method-level WorkerNode audit: keep profile/capability/health/operator policy,
-    remove only claim/lease/reclaim mechanics
-  - retain `attempt_count`, `max_attempts`, `priority`, and `queue_lane`
-  - before PR 4B, take a restorable database snapshot and verify the migration's
-    upgrade, downgrade, and re-upgrade on a disposable database; record the
-    exact tagged image plus database restore sequence
-  - completed against a restored snapshot of the sole local Compose database;
-    see [Slice 4B evidence](m25_3_slice_4b_schema_evidence.md)
-  - if PR 4B must be rolled back, stop the application, restore the pre-PR-4B
-    database snapshot, deploy the tagged legacy-capable image and matching
-    configuration, then verify the restored schema revision before resuming
+### Exit criteria
 
-Operational evidence scenarios (documented before Slice 3):
+- no core repair flag can be persisted without either executing the repair or
+  producing an explicit terminal/manual-follow-up state
+- verifier and independent-review repairs each complete successfully through a
+  Temporal integration test
+- repair exhaustion, cancellation, restart recovery, and replay leave one
+  consistent Postgres projection and timeline
+- the focused operator-flow E2E passes on the production-like Compose stack
 
-1. authenticated Compose execution (full task lifecycle)
-2. approval, clarification, and permission resume via Temporal signals
-3. cancellation while a provider worker is running
-4. worker restart during an Activity (Temporal retries/recovers)
-5. Temporal server/worker outage behavior (graceful degradation)
-6. sequential DAG execution
-7. two-node fan-out execution
-8. replay of older Temporal workflow histories
-9. full Python test suite and pre-commit pass
-10. API/worker configuration mismatch fails visibly (not silent fallback)
-11. Temporal unavailable while API remains inspectable (503 for submissions)
-12. Temporal recovers after API has rejected submissions (tasks resume)
-13. workflow and Postgres terminal states reconcile after worker restart
-14. existing M25.1/M25.2 workflow histories replay after deployment
+## M25.5 — Truthful Readiness and Operator Recovery
 
-Task field disposition after retirement:
+### Goal
 
-| Field              | Action | Reason                                     |
-| ------------------ | ------ | ------------------------------------------ |
-| `lease_owner`      | remove | legacy scheduler only                      |
-| `lease_expires_at` | remove | legacy scheduler only                      |
-| `next_attempt_at`  | remove | Temporal handles retry scheduling          |
-| `attempt_count`    | keep   | product-level logical attempt evidence     |
-| `max_attempts`     | keep   | product-level policy                       |
-| `priority`         | keep   | routing policy, useful without PG dispatch |
-| `queue_lane`       | keep   | routing policy for multi-queue scenarios   |
+Make every execution-blocking dependency and stuck-work condition visible
+without requiring initial log inspection.
 
-### M26 Review Comment Repair
+### Scope
 
-Goal:
+- retain `/health` as process liveness and make `/ready` report dependency
+  readiness for Postgres, Temporal, command dispatch, and fresh worker
+  availability
+- expose pending, retrying, and dead-letter command counts, oldest outbox age,
+  worker heartbeat, stuck interaction waits, and Temporal/Postgres terminal
+  divergence through machine-readable metrics
+- add a minimal dashboard status view with dependency state, degraded reasons,
+  and safe operator recovery guidance
+- keep reads and interactions available during Temporal degradation while new
+  submissions continue to fail visibly
+- verify database outage, Temporal outage and recovery, missing worker,
+  dispatcher backlog, stuck interaction, and terminal reconciliation behavior
 
-- extend the PR repair loop from CI failures to review-comment fixes
+### Exit criteria
 
-Scope:
+- `/ready` becomes non-ready for each execution-blocking dependency failure and
+  recovers without an API restart when the dependency returns
+- every monitored degraded state is visible through both API/metrics and the
+  dashboard
+- one current-branch smoke proves API → outbox → Temporal → worker → Postgres
+  completion
+- the runbook provides a safe recovery action for every surfaced state
 
-- ingest actionable GitHub PR review comments
-- create focused repair tasks linked to the original PR and comment thread
-- preserve existing no-auto-merge and no-deploy boundaries
+## M25.6 — Real Temporal Reliability Baseline
 
-Boundary:
+### Goal
 
-- start only after M20.6 CI repair is stable
+Measure real provider and Temporal behavior before resuming review automation
+or increasing autonomy.
 
-### M27 Reliability-Based Autonomy Policy
+### Evidence set
 
-Goal:
+Run 20 real-worker Temporal tasks:
 
-- let low-risk work move from blocking approval toward `proceed_with_flag` or `notify_only`
-  when measured outcomes support it
+- 4 read-only monolithic tasks
+- 4 mutation tasks, including verifier and independent-review repair
+- 3 sequential DAG tasks
+- 2 opt-in read-only fan-out tasks
+- 3 HITL tasks covering clarification, approval, and permission escalation
+- 2 recovery tasks covering cancellation and worker restart
+- 2 draft-PR delivery tasks
 
-Scope:
+### Scope
 
-- define risk/category thresholds using M20/M22 metrics
-- keep high-risk categories blocking
-- show autonomy policy decisions in task timelines and dashboard
+- publish a persisted-evidence report covering interventions, repeated
+  questions, manual-log inspection, validation evidence, provider failures,
+  profile success, stage latency, time to terminal state or PR, and CI/review
+  rejection
+- require terminal reconciliation for every task, validation evidence for
+  every completed mutation, and a typed failure plus next action for every
+  failure
+- keep performance-routing behavior unchanged; the report informs a later
+  routing decision but does not automatically update production routing
+- restore the Python CI coverage gate from the temporary 80% floor to the 90%
+  repository target
 
-Boundary:
+### Exit criteria
 
-- autonomy increases are reversible and scoped by repo/category
+- all 20 tasks have reviewable task, run, timeline, artifact, and Temporal
+  evidence
+- no task is silently stuck or terminally divergent
+- completed mutation tasks have validation evidence and every failure is typed
+  with an operator action
+- Python CI enforces the 90% coverage target again
+- the operator accepts a report that explicitly recommends whether M26 or M27
+  is ready to resume
 
-## Phase Sequencing Summary
+## Deferred milestones
 
-Phase 1:
+### M26 — Review Comment Repair
 
-1. Milestone 15
-2. Milestone A
-3. Milestone 16
-4. Milestone 17
+Reserved goal: extend the draft-PR repair loop from CI failures to actionable
+GitHub review comments.
 
-Phase 2:
+Entry condition: CI repair and the core Temporal repair loop are stable in the
+M25.6 real-worker evidence set. No auto-merge or deploy behavior is included.
 
-1. Milestone 18
-2. Milestone 19
-3. Milestone 19.5
+### M27 — Reliability-Based Autonomy Policy
 
-Phase 3:
+Reserved goal: allow selected low-risk work to move from blocking approval to
+`proceed_with_flag` or `notify_only` when measured outcomes justify it.
 
-1. M20.0 [x]
-2. Milestone 20 [x]
-3. Milestone 21 [x]
+Entry condition: M25.6 provides sufficient real-task samples, provenance, and
+reversible thresholds by repository and task category. High-risk categories
+remain blocking.
 
-Phase 4:
+## Open planning questions
 
-1. Milestone 22 [x]
-2. Milestone 23 [x]
-3. Milestone 24 [x]
-4. Milestone 25 (fan-out) [x]
-5. M25.3 (Temporal cutover and legacy retirement)
-6. Milestone 26
-7. Milestone 27
-
-## Open Planning Questions
-
-1. which public product sentence remains canonical after milestone A rollout?
-2. which runtime owns planning by default in production policy?
-3. should persisted runtime manifests start as artifact-index entries or move directly to a queryable JSON column?
-4. which low/medium-risk decision categories are safe to remember per repo?
-5. which worker runtimes can provide reliable cancellation evidence in v1?
-6. when should CI repair expand beyond GitHub draft PRs?
-7. what metric threshold is good enough to promote a category from blocking approval to proceed-with-flag?
-8. which memory misses justify adding semantic retrieval infrastructure?
-9. which task classes benefit enough from DAG/parallel execution to justify the added complexity?
+1. What minimum sample count by task class and worker profile is sufficient to
+   replace the advisory routing metrics with measured outcomes?
+2. Which M25.6 outcomes are strong enough to resume M26 without expanding its
+   scope beyond draft PRs?
+3. Which low-risk categories, if any, have enough evidence to begin an M27
+   policy experiment?
+4. When does the accepted memory corpus become large enough to justify an
+   FTS-versus-semantic retrieval comparison?
