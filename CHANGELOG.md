@@ -14,6 +14,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Fixed
 
+- Fix: harden Temporal interaction and worker shutdown ([#342](https://github.com/natanayalo/code-agent/pull/342))
+
 - Fix: heartbeat Temporal verification activity ([#339](https://github.com/natanayalo/code-agent/pull/339))
 
 ## m25.3-temporal-cutover-20260726T213001Z - 2026-07-26
