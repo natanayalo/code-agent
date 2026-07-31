@@ -178,6 +178,7 @@ EXPECTED_CHECK_CONSTRAINTS = {
             "task_planned",
             "task_spec_generated",
             "task_spec_and_route_generated",
+            "interaction_resolved",
             "memory_loaded",
             "memory_persisted",
             "worker_selected",
@@ -988,6 +989,76 @@ def test_memory_persisted_timeline_event_can_be_written_after_upgrade(tmp_path: 
             text("SELECT COUNT(*) FROM task_timeline_events WHERE event_type = 'memory_persisted'")
         ).scalar_one()
 
+    assert count == 1
+
+
+def test_interaction_resolved_timeline_event_migration_round_trips(tmp_path: Path) -> None:
+    """The new event is writable at head and removed safely during downgrade."""
+    database_path = tmp_path / "interaction_resolved_timeline.db"
+    config = Config(str(Path("alembic.ini").resolve()))
+    config.set_main_option("script_location", str(Path("db/migrations").resolve()))
+    config.set_main_option("sqlalchemy.url", f"sqlite:///{database_path}")
+    command.upgrade(config, "20260728_0047")
+
+    engine = create_engine(f"sqlite:///{database_path}")
+    now = "2026-07-28T00:00:00+00:00"
+    with engine.begin() as connection:
+        _seed_downgrade_users_and_sessions(connection, now)
+        _seed_downgrade_tasks(connection, now)
+        connection.execute(
+            text(
+                "INSERT INTO task_timeline_events "
+                "(id, task_id, attempt_number, sequence_number, event_type, payload, "
+                "message, created_at, updated_at) VALUES "
+                "('evt-existing', 't1', 0, 0, 'task_ingested', '{}', 'existing', :now, :now)"
+            ),
+            {"now": now},
+        )
+
+    command.upgrade(config, "head")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO task_timeline_events "
+                "(id, task_id, attempt_number, sequence_number, event_type, payload, "
+                "message, created_at, updated_at) VALUES "
+                "('evt-interaction', 't1', 0, 1, 'interaction_resolved', '{}', "
+                "'resolved', :now, :now)"
+            ),
+            {"now": now},
+        )
+
+    command.downgrade(config, "20260728_0047")
+    inspector = inspect(engine)
+    constraints = {
+        constraint["name"]: constraint["sqltext"]
+        for constraint in inspector.get_check_constraints("task_timeline_events")
+    }
+    assert "interaction_resolved" not in constraints["ck_task_timeline_events_event_type"]
+    with engine.connect() as connection:
+        event_types = connection.execute(
+            text("SELECT event_type FROM task_timeline_events ORDER BY sequence_number")
+        ).scalars()
+        assert list(event_types) == ["task_ingested"]
+
+    command.upgrade(config, "head")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO task_timeline_events "
+                "(id, task_id, attempt_number, sequence_number, event_type, payload, "
+                "message, created_at, updated_at) VALUES "
+                "('evt-interaction-reupgrade', 't1', 0, 1, 'interaction_resolved', '{}', "
+                "'resolved again', :now, :now)"
+            ),
+            {"now": now},
+        )
+        count = connection.execute(
+            text(
+                "SELECT COUNT(*) FROM task_timeline_events "
+                "WHERE event_type = 'interaction_resolved'"
+            )
+        ).scalar_one()
     assert count == 1
 
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import signal
 from types import SimpleNamespace
 
 import pytest
@@ -183,6 +185,64 @@ async def test_run_worker_forever_bootstraps_observability(monkeypatch: pytest.M
 
     assert tracing_calls == ["code-agent-worker"]
     assert set(close_calls) == {"telegram", "webhook"}
+
+
+@pytest.mark.anyio
+async def test_worker_sigterm_cancels_runtime_and_removes_handler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SIGTERM should unwind the runtime so its cleanup can complete."""
+    actual_loop = asyncio.get_running_loop()
+    registered_handlers: dict[signal.Signals, object] = {}
+    removed_signals: list[signal.Signals] = []
+    cleanup_complete = asyncio.Event()
+
+    class FakeLoop:
+        def add_signal_handler(self, sig, callback) -> None:
+            registered_handlers[sig] = callback
+            actual_loop.call_soon(callback)
+
+        def remove_signal_handler(self, sig) -> bool:
+            removed_signals.append(sig)
+            return True
+
+    async def run_until_cancelled() -> None:
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cleanup_complete.set()
+
+    monkeypatch.setattr(worker_main.asyncio, "get_running_loop", lambda: FakeLoop())
+    monkeypatch.setattr(worker_main, "run_worker_forever", run_until_cancelled)
+
+    await worker_main.run_worker_until_stopped()
+
+    assert signal.SIGTERM in registered_handlers
+    assert cleanup_complete.is_set()
+    assert removed_signals == [signal.SIGTERM]
+
+
+@pytest.mark.anyio
+async def test_worker_shutdown_coordinator_preserves_runtime_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Non-signal worker failures must still terminate the process visibly."""
+
+    class FakeLoop:
+        def add_signal_handler(self, _sig, _callback) -> None:
+            return None
+
+        def remove_signal_handler(self, _sig) -> bool:
+            return True
+
+    async def fail_startup() -> None:
+        raise RuntimeError("startup failed")
+
+    monkeypatch.setattr(worker_main.asyncio, "get_running_loop", lambda: FakeLoop())
+    monkeypatch.setattr(worker_main, "run_worker_forever", fail_startup)
+
+    with pytest.raises(RuntimeError, match="startup failed"):
+        await worker_main.run_worker_until_stopped()
 
 
 def test_worker_main_calls_async_entrypoint_with_configured_logging(

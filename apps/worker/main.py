@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import signal
 
 from sqlalchemy.orm import sessionmaker
 
@@ -57,10 +58,38 @@ async def run_worker_forever() -> None:
         )
 
 
+async def run_worker_until_stopped() -> None:
+    """Run the worker until completion or a graceful SIGTERM shutdown."""
+    loop = asyncio.get_running_loop()
+    shutdown_requested = asyncio.Event()
+    worker_task = asyncio.create_task(run_worker_forever())
+    shutdown_task = asyncio.create_task(shutdown_requested.wait())
+    signal_registered = False
+    try:
+        loop.add_signal_handler(signal.SIGTERM, shutdown_requested.set)
+        signal_registered = True
+        completed, _ = await asyncio.wait(
+            {worker_task, shutdown_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if shutdown_task in completed and worker_task not in completed:
+            logger.info("SIGTERM received; shutting down Temporal worker")
+            worker_task.cancel()
+            await asyncio.gather(worker_task, return_exceptions=True)
+            return
+        await worker_task
+    finally:
+        worker_task.cancel()
+        shutdown_task.cancel()
+        await asyncio.gather(worker_task, shutdown_task, return_exceptions=True)
+        if signal_registered:
+            loop.remove_signal_handler(signal.SIGTERM)
+
+
 def main() -> None:
     """CLI entrypoint for the Temporal worker runtime."""
     logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
-    asyncio.run(run_worker_forever())
+    asyncio.run(run_worker_until_stopped())
 
 
 if __name__ == "__main__":  # pragma: no cover

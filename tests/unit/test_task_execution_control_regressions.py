@@ -74,7 +74,8 @@ def test_record_interaction_response_clarification_requeues_without_approval_sid
     assert refreshed.status == TaskStatus.PENDING.value
     assert refreshed.pending_interaction_count == 0
     assert refreshed.pending_interactions == []
-    assert any(event.event_type == "task_spec_and_route_generated" for event in refreshed.timeline)
+    assert any(event.event_type == "interaction_resolved" for event in refreshed.timeline)
+    assert all(event.event_type != "task_spec_and_route_generated" for event in refreshed.timeline)
     with session_scope(session_factory) as session:
         task = TaskRepository(session).get(snapshot.task_id)
         interactions = HumanInteractionRepository(session).list_by_task(task_id=snapshot.task_id)
@@ -91,7 +92,7 @@ def test_record_interaction_response_clarification_requeues_without_approval_sid
             "repo": "code-agent",
             "symptom": "failing retry path",
         }
-        assert timeline[-1].event_type.value == "task_spec_and_route_generated"
+        assert timeline[-1].event_type is TimelineEventType.INTERACTION_RESOLVED
         signals = session.query(TemporalCommand).filter_by(command_type="signal").all()
         assert [(signal.task_id, signal.payload) for signal in signals] == [
             (
@@ -218,6 +219,8 @@ def test_permission_escalation_response_signals_dedicated_temporal_handler(monke
             "signal_name": "handle_permission_escalation",
             "signal_arg": False,
         }
+        timeline = TaskTimelineRepository(session).list_by_task(snapshot.task_id)
+        assert timeline[-1].event_type is TimelineEventType.INTERACTION_RESOLVED
 
 
 def test_record_interaction_response_logs_observation_capture_failures(

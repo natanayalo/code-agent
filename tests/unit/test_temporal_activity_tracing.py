@@ -4,6 +4,7 @@ from contextlib import contextmanager
 
 import pytest
 
+import orchestrator.temporal.activities as activities_module
 from orchestrator.state import OrchestratorState
 from orchestrator.temporal.activities import TaskExecutionActivities, _restore_task_trace_context
 
@@ -110,3 +111,99 @@ async def test_decompose_task_does_not_skip_generic_planning_event() -> None:
     result = await TaskExecutionActivities.decompose_task.__wrapped__(activity, "task-123")
 
     assert result["execution_shape"] == "decomposed"
+
+
+@pytest.mark.anyio
+async def test_classify_and_plan_does_not_skip_resolved_interaction(monkeypatch) -> None:
+    """An operator response is not evidence that classification already ran."""
+
+    class FakeService:
+        async def _run_blocking(self, func, *args, **kwargs):
+            return func(*args, **kwargs)
+
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_id": "task-123", "task_text": "debug this"},
+            "timeline_events": [
+                {
+                    "event_type": "interaction_resolved",
+                    "message": "Clarification resolved.",
+                }
+            ],
+        }
+    )
+    activity = object.__new__(TaskExecutionActivities)
+    activity.service = FakeService()
+    activity._get_current_state = lambda _task_id: state
+    activity._persist_intermediate_state = lambda **_kwargs: None
+    pipeline_calls: list[str] = []
+
+    def node(name: str):
+        async def execute(_state: dict[str, object]) -> dict[str, object]:
+            pipeline_calls.append(name)
+            return {}
+
+        return execute
+
+    monkeypatch.setattr(activities_module, "ingest_task", node("ingest"))
+    monkeypatch.setattr(activities_module, "classify_task", node("classify"))
+    monkeypatch.setattr(activities_module, "plan_task", node("plan"))
+    monkeypatch.setattr(activities_module, "load_repo_profile_node", node("repo_profile"))
+    monkeypatch.setattr(activities_module, "check_approval", node("approval"))
+    activity.generate_task_spec_and_route_node = node("task_spec_and_route")
+
+    async def ignore_progress(*_args, **_kwargs) -> None:
+        return None
+
+    activity._notify_progress = ignore_progress
+
+    await TaskExecutionActivities.classify_and_plan.__wrapped__(activity, "task-123")
+
+    assert pipeline_calls == [
+        "ingest",
+        "classify",
+        "plan",
+        "repo_profile",
+        "task_spec_and_route",
+        "approval",
+    ]
+
+
+@pytest.mark.anyio
+async def test_classify_and_plan_skips_genuine_generation_marker(monkeypatch) -> None:
+    """The real TaskSpec-and-route event remains the activity idempotency marker."""
+
+    class FakeService:
+        async def _run_blocking(self, func, *args, **kwargs):
+            return func(*args, **kwargs)
+
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_id": "task-123", "task_text": "debug this"},
+            "timeline_events": [
+                {
+                    "event_type": "task_spec_and_route_generated",
+                    "message": "TaskSpec and route generated.",
+                }
+            ],
+        }
+    )
+    activity = object.__new__(TaskExecutionActivities)
+    activity.service = FakeService()
+    activity._get_current_state = lambda _task_id: state
+
+    async def fail_if_called(_state: dict[str, object]) -> dict[str, object]:
+        raise AssertionError("classification pipeline should be skipped")
+
+    monkeypatch.setattr(activities_module, "ingest_task", fail_if_called)
+
+    result = await TaskExecutionActivities.classify_and_plan.__wrapped__(
+        activity,
+        "task-123",
+    )
+
+    assert result == {
+        "requires_clarification": False,
+        "requires_approval": False,
+        "execution_task_queue": "task-execution-queue",
+    }
