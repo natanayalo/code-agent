@@ -171,3 +171,16 @@ def test_api_and_worker_expose_tracing_env_overrides(compose_config: dict[str, A
         worker_env["CODE_AGENT_TRACING_OTLP_ENDPOINT"]
         == "${CODE_AGENT_TRACING_OTLP_ENDPOINT:-http://phoenix:6006/v1/traces}"
     )
+
+
+def test_api_and_worker_share_optional_deployment_identity_overrides(
+    compose_config: dict[str, Any],
+) -> None:
+    """Evidence runs must pass one pinned build and environment to both runtimes."""
+    api_env = compose_config["services"]["api"]["environment"]
+    worker_env = compose_config["services"]["worker"]["environment"]
+
+    assert api_env["BUILD_SHA"] == "${BUILD_SHA:-}"
+    assert worker_env["BUILD_SHA"] == "${BUILD_SHA:-}"
+    assert api_env["CODE_AGENT_ENV"] == "${CODE_AGENT_ENV:-local}"
+    assert worker_env["CODE_AGENT_ENV"] == "${CODE_AGENT_ENV:-local}"

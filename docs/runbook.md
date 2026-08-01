@@ -355,17 +355,23 @@ change routing, or write to Postgres. Submit and poll later real-worker cases
 through the existing authenticated E2E API workflow above, then capture each
 terminal task immediately so Temporal retention cannot remove its history.
 
-Before deploying the API and workers, set `BUILD_SHA` to the exact commit being
-evaluated. Use that same value when initializing the bundle; do not use the
-current checkout SHA unless it is the deployed build.
+Before deploying the API and workers, start from a clean worktree and set
+`BUILD_SHA` to the exact commit being evaluated. Set `CODE_AGENT_ENV` to the
+environment label that will be pinned in the bundle. Compose passes both values
+to the API and worker runtime manifests. Use the same values when initializing
+the bundle; do not use the current checkout SHA unless it is the deployed
+build.
 
 ```bash
 export BUILD_SHA="0123456789abcdef0123456789abcdef01234567"
+export CODE_AGENT_ENV="m25-6-local"
 export DATABASE_URL="postgresql+psycopg://..."
+
+scripts/up.sh
 
 .venv/bin/python scripts/e2e/run_temporal_reliability_eval.py init \
   --bundle-dir artifacts/m25-6/baseline-01 \
-  --environment staging \
+  --environment "$CODE_AGENT_ENV" \
   --operator "operator-name" \
   --database-url-env DATABASE_URL \
   --temporal-address temporal:7233 \
