@@ -18,14 +18,23 @@ _UNTRACKED_NATIVE_RUNTIME_PREFIXES = (
     ".agent_home/",
     ".code-agent/native-agent-runner/",
 )
+_UNTRACKED_NATIVE_RUNTIME_FILES = frozenset(
+    {
+        ".code-agent/native-events.jsonl",
+        ".code-agent/native-final-message.json",
+        ".code-agent/native-response.schema.json",
+    }
+)
 
 
 def _is_untracked_native_runtime_path(status: str, path: str) -> bool:
     """Return whether an untracked path is created by a native worker runtime."""
     if status != "??":
         return False
-    return path in {".agent_home", ".code-agent/native-agent-runner"} or path.startswith(
-        _UNTRACKED_NATIVE_RUNTIME_PREFIXES
+    return (
+        path in {".agent_home", ".code-agent/native-agent-runner"}
+        or path in _UNTRACKED_NATIVE_RUNTIME_FILES
+        or path.startswith(_UNTRACKED_NATIVE_RUNTIME_PREFIXES)
     )
 
 
