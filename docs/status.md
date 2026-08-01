@@ -6,9 +6,10 @@ Phase 4A: Temporal stabilization and measured reliability.
 
 Active focus: **M25.5 — Truthful Readiness and Operator Recovery**.
 
-The next implementation slice will make readiness dependency-aware and surface
-outbox lag, worker freshness, stuck waits, and terminal divergence with safe
-operator recovery guidance.
+The dependency-aware backend foundation now reports Postgres, Temporal,
+dispatcher, and worker readiness plus outbox lag, stuck waits, and terminal
+divergence. The next M25.5 slice will present these signals and safe recovery
+guidance in the dashboard and complete the outage/reconciliation operator smoke.
 
 ## Current capabilities
 
@@ -34,6 +35,8 @@ operator recovery guidance.
   workspaces with permission escalation, re-verification, and manual handoff
 - dashboard visibility for tasks, TaskSpec, DAG attempts, interactions,
   timelines, logs, artifacts, traces, memory, proposals, metrics, and tools
+- public dependency-aware `/ready` and authenticated outbox, worker freshness,
+  stuck-wait, and terminal-reconciliation metrics
 
 Completed work remains in [`CHANGELOG.md`](../CHANGELOG.md). The historical
 Temporal migration and rollback record is in the
@@ -48,6 +51,9 @@ Temporal migration and rollback record is in the
   verifier and independent-review repair, retained-workspace execution, repair
   restart/idempotency/cancellation handling, replay coverage, and one terminal
   manual-follow-up projection when repair cannot complete.
+- The M25.5 backend readiness slice proves structured dependency failure and
+  same-process recovery, worker-owned dispatcher heartbeats, stale outbox
+  gating, task-specific degraded signals, and Temporal-outage interaction access.
 - The 25-case frozen evaluation remains a deterministic domain-logic regression
   suite. It uses replayed worker outcomes and is not a real-provider Temporal
   reliability baseline.
@@ -59,10 +65,8 @@ Temporal migration and rollback record is in the
 
 ## Known limitations
 
-- `/health` and `/ready` are currently process-level responses rather than
-  truthful dependency and execution-readiness signals
-- command-outbox lag, worker freshness, stuck waits, and terminal divergence
-  are not yet first-class operator signals
+- the dashboard does not yet present dependency readiness, degraded reasons,
+  or the safe recovery guidance exposed by the backend and runbook
 - bounded fan-out remains an explicit read-only pilot and is disabled by
   default
 - deep-scout repo-to-research chaining is deferred and is not part of the
@@ -76,7 +80,7 @@ Temporal migration and rollback record is in the
 
 ## Next slices only
 
-1. M25.5: Truthful Readiness and Operator Recovery
+1. M25.5: Dashboard Status and Operator Recovery
 2. M25.6: Real Temporal Reliability Baseline
 
 ## Deferred

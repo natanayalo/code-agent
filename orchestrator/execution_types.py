@@ -19,6 +19,7 @@ from db.enums import (
 )
 from orchestrator.execution_context import _PersistedTaskContext
 from orchestrator.execution_policy import validate_callback_url
+from orchestrator.operational_health_types import ExecutionHealthMetrics
 from orchestrator.state import AggregationRole, NodeExecutionMode, TaskSpec
 from workers.base import normalize_worker_profile_name
 
@@ -552,6 +553,7 @@ class OperationalMetrics(ExecutionModel):
     legacy_submissions_since_cutover: int | None = None
     avg_duration_seconds: float
     success_rate: float
+    execution_health: ExecutionHealthMetrics
 
 
 @dataclass(frozen=True)

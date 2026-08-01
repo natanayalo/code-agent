@@ -5,7 +5,28 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from db.enums import WorkerNodeStatus
+from orchestrator.execution import TaskExecutionService
 from repositories import WorkerNodeRepository, session_scope
+from tests.integration.task_endpoints_support import _default_worker
+
+
+def test_execution_service_registers_temporal_dispatcher_capability(session_factory) -> None:
+    """The live worker heartbeat row proves both execution and command dispatch ownership."""
+    service = TaskExecutionService(session_factory=session_factory, worker=_default_worker())
+
+    status = service.register_worker_node(
+        worker_id="temporal-worker",
+        capacity=2,
+        process_identity="host:1",
+    )
+
+    assert status is WorkerNodeStatus.ACTIVE
+    with session_scope(session_factory) as session:
+        node = WorkerNodeRepository(session).get_by_worker_id("temporal-worker")
+        assert node is not None
+        assert node.capacity == 2
+        assert node.capabilities["runtime"] == "temporal"
+        assert node.capabilities["command_dispatcher"] is True
 
 
 def test_worker_node_registration_preserves_quarantine_and_refreshes_metadata(
