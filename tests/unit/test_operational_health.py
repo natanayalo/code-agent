@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
@@ -227,6 +228,27 @@ def test_temporal_probe_returns_unavailable_for_connection_failure(monkeypatch) 
     monkeypatch.setattr(operational_health.Client, "connect", connect)
 
     assert not operational_health.TemporalOperationalProbe(address="temporal:7233").is_available()
+
+
+@pytest.mark.anyio
+async def test_temporal_probe_runs_safely_from_an_active_event_loop(monkeypatch) -> None:
+    probe_loop_ids: list[int] = []
+
+    class ServiceClient:
+        async def check_health(self, **_kwargs) -> bool:
+            return True
+
+    async def connect(_address: str):
+        probe_loop_ids.append(id(asyncio.get_running_loop()))
+        return SimpleNamespace(service_client=ServiceClient())
+
+    monkeypatch.setattr(operational_health.Client, "connect", connect)
+    caller_loop_id = id(asyncio.get_running_loop())
+
+    available = operational_health.TemporalOperationalProbe(address="temporal:7233").is_available()
+
+    assert available
+    assert probe_loop_ids and probe_loop_ids[0] != caller_loop_id
 
 
 def test_submission_temporal_probe_retries_and_recovers(monkeypatch) -> None:

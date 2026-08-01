@@ -6,6 +6,8 @@ import os
 import socket
 from typing import Any
 
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 from temporalio.client import Client
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
@@ -51,10 +53,18 @@ async def _register_temporal_worker(task_service: Any, *, worker_id: str) -> Non
 async def _heartbeat_temporal_worker(task_service: Any, *, worker_id: str) -> None:
     while True:
         await asyncio.sleep(WORKER_HEARTBEAT_INTERVAL_SECONDS)
-        status = await task_service._run_blocking(
-            task_service.heartbeat_worker_node,
-            worker_id=worker_id,
-        )
+        try:
+            status = await task_service._run_blocking(
+                task_service.heartbeat_worker_node,
+                worker_id=worker_id,
+            )
+        except (DBAPIError, SQLAlchemyTimeoutError, OSError) as exc:
+            logger.warning(
+                "Temporal worker heartbeat failed; retrying",
+                extra={"worker_id": worker_id},
+                exc_info=exc,
+            )
+            continue
         _require_active_worker(status)
 
 

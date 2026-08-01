@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import signal
 from types import SimpleNamespace
 
@@ -104,6 +105,34 @@ async def test_temporal_worker_heartbeat_failure_stops_runtime(monkeypatch) -> N
         await temporal_worker._heartbeat_temporal_worker(Service(), worker_id="worker-id")
 
     assert calls == ["worker-id"]
+
+
+@pytest.mark.anyio
+async def test_temporal_worker_retries_transient_heartbeat_error(monkeypatch, caplog) -> None:
+    calls: list[str] = []
+    outcomes = iter((ConnectionError("database unavailable"), WorkerNodeStatus.OFFLINE))
+
+    class Service:
+        def heartbeat_worker_node(self, *, worker_id: str):
+            calls.append(worker_id)
+            outcome = next(outcomes)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+        async def _run_blocking(self, func, **kwargs):
+            return func(**kwargs)
+
+    async def skip_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(temporal_worker.asyncio, "sleep", skip_sleep)
+
+    with caplog.at_level(logging.WARNING), pytest.raises(RuntimeError, match="offline"):
+        await temporal_worker._heartbeat_temporal_worker(Service(), worker_id="worker-id")
+
+    assert calls == ["worker-id", "worker-id"]
+    assert "Temporal worker heartbeat failed; retrying" in caplog.text
 
 
 @pytest.mark.parametrize(

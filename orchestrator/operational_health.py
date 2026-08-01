@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 from collections.abc import Coroutine
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from typing import Any, Protocol, TypeVar
 
@@ -77,7 +78,17 @@ class TemporalOperationalProbe:
         self.timeout_seconds = timeout_seconds
 
     def _run(self, operation: Coroutine[Any, Any, _T]) -> _T:
-        return asyncio.run(asyncio.wait_for(operation, timeout=self.timeout_seconds))
+        bounded: Coroutine[Any, Any, _T] = asyncio.wait_for(operation, timeout=self.timeout_seconds)
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(bounded)
+
+        def run_bounded() -> _T:
+            return asyncio.run(bounded)
+
+        with ThreadPoolExecutor(max_workers=1, thread_name_prefix="temporal-probe") as executor:
+            return executor.submit(run_bounded).result()
 
     async def _connect(self) -> Client:
         client = await Client.connect(self.address)
