@@ -21,7 +21,9 @@ from evaluation.temporal_reliability_capture import (
     load_captures,
     load_suite,
     persist_capture,
+    persist_reused_capture,
     read_task_evidence,
+    suite_digest,
 )
 from evaluation.temporal_reliability_models import (
     BundleIdentity,
@@ -166,7 +168,7 @@ def _verify_capture_integrity(
             raise ValueError(f"raw Temporal history digest mismatch: {capture.case_id}")
         current_failures = evaluate_case_gates(
             case=capture.expected,
-            identity=manifest.identity,
+            identity=capture.source_identity or manifest.identity,
             database=capture.database,
             temporal=capture.temporal,
             annotations=capture.annotations,
@@ -194,6 +196,27 @@ def _handle_report(args: argparse.Namespace) -> int:
         markdown_output,
     )
     return 0 if report.status == "ready_for_operator_review" else 2
+
+
+def _handle_reuse(args: argparse.Namespace) -> int:
+    manifest, suite = load_bundle(args.bundle_dir)
+    source_manifest, source_suite = load_bundle(args.source_bundle_dir)
+    if suite_digest(suite) != suite_digest(source_suite):
+        raise ValueError("source suite differs from destination suite")
+    capture = persist_reused_capture(
+        bundle_dir=args.bundle_dir,
+        manifest=manifest,
+        suite=suite,
+        source_bundle_dir=args.source_bundle_dir,
+        source_manifest=source_manifest,
+        case_id=args.case_id,
+    )
+    LOGGER.info(
+        "reused case_id=%s source_build_sha=%s",
+        capture.case_id,
+        source_manifest.identity.build_sha,
+    )
+    return 0
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -224,6 +247,11 @@ def _parser() -> argparse.ArgumentParser:
     report.add_argument("--bundle-dir", type=Path, required=True)
     report.add_argument("--json-output", type=Path)
     report.add_argument("--markdown-output", type=Path)
+
+    reuse = subparsers.add_parser("reuse", help="import one valid capture from a prior bundle")
+    reuse.add_argument("--bundle-dir", type=Path, required=True)
+    reuse.add_argument("--source-bundle-dir", type=Path, required=True)
+    reuse.add_argument("--case-id", required=True)
     return parser
 
 
@@ -236,6 +264,8 @@ def main(argv: list[str] | None = None) -> int:
             return _handle_init(args)
         if args.command == "capture":
             return asyncio.run(_capture(args))
+        if args.command == "reuse":
+            return _handle_reuse(args)
         return _handle_report(args)
     except Exception as exc:  # pragma: no cover - top-level operator boundary
         LOGGER.error("%s failed: %s", args.command, exc)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -331,3 +332,48 @@ def load_captures(bundle_dir: Path, manifest: EvidenceBundleManifest) -> list[Ca
         )
         for case_id in sorted(manifest.capture_files)
     ]
+
+
+def persist_reused_capture(
+    *,
+    bundle_dir: Path,
+    manifest: EvidenceBundleManifest,
+    suite: ReliabilitySuite,
+    source_bundle_dir: Path,
+    source_manifest: EvidenceBundleManifest,
+    case_id: str,
+) -> CapturedCaseEvidence:
+    """Import one valid immutable capture while retaining its source deployment identity."""
+    if case_id in manifest.capture_files:
+        raise ValueError(f"case already captured: {case_id}")
+    source_path = source_manifest.capture_files.get(case_id)
+    if source_path is None:
+        raise ValueError(f"source bundle does not contain case: {case_id}")
+    source_capture = CapturedCaseEvidence.model_validate_json(
+        (source_bundle_dir / source_path).read_text(encoding="utf-8")
+    )
+    if source_capture.gate_failures:
+        raise ValueError(f"source capture is not valid: {case_id}")
+    destination_case = next((item for item in suite.cases if item.case_id == case_id), None)
+    if destination_case is None or source_capture.expected != destination_case:
+        raise ValueError(f"source capture contract differs from destination suite: {case_id}")
+    if source_capture.task_id in manifest.task_ids:
+        raise ValueError(f"task already captured: {source_capture.task_id}")
+    history_name = source_capture.temporal.raw_history_file
+    source_history = source_bundle_dir / HISTORIES_DIRECTORY / history_name
+    destination_history = bundle_dir / HISTORIES_DIRECTORY / history_name
+    if destination_history.exists():
+        raise ValueError(f"destination raw history already exists: {case_id}")
+    shutil.copyfile(source_history, destination_history)
+    destination_history.chmod(0o600)
+    capture = source_capture.model_copy(update={"source_identity": source_manifest.identity})
+    relative_path = f"{CASES_DIRECTORY}/{case_id}.json"
+    _write_model(bundle_dir / relative_path, capture, exclusive=True)
+    updated_manifest = manifest.model_copy(
+        update={
+            "capture_files": {**manifest.capture_files, case_id: relative_path},
+            "task_ids": [*manifest.task_ids, capture.task_id],
+        }
+    )
+    _write_model(bundle_dir / MANIFEST_FILE, updated_manifest)
+    return capture
