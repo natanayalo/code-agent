@@ -25,6 +25,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Documentation
 
+- Docs: prioritize post-baseline milestones ([#349](https://github.com/natanayalo/code-agent/pull/349))
+
 - Docs: reset roadmap for Temporal stabilization ([#344](https://github.com/natanayalo/code-agent/pull/344))
 
 
