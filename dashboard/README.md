@@ -1,6 +1,11 @@
 # Dashboard Operator UI
 
-The dashboard is a React-based PWA designed for monitoring and controlling the `code-agent` service. It provides a task status board, detailed task views, and will soon support approval workflows and task replay.
+The dashboard is a React-based PWA designed for monitoring and controlling the `code-agent` service. It provides task and session inspection, interaction and replay controls, operational metrics, dependency readiness, safe recovery guidance, memory management, and system capability views.
+
+The `/metrics` route combines public execution readiness with authenticated
+outbox, worker, interaction-wait, and terminal-reconciliation signals. HTTP 503
+from `/ready` is treated as structured degraded-state data so operators can see
+the reason and safe first action during an outage.
 
 ## Tech Stack
 

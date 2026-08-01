@@ -1070,6 +1070,74 @@ describe('api service', () => {
       warnSpy.mockRestore();
     });
 
+    it('getReadiness returns structured ready and not-ready payloads', async () => {
+      const readyPayload = {
+        status: 'ready',
+        checked_at: '2026-08-01T12:00:00Z',
+        components: {},
+        degraded_reasons: [],
+      };
+      const blockedPayload = {
+        ...readyPayload,
+        status: 'not_ready',
+        degraded_reasons: ['temporal_unavailable'],
+      };
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          headers: new Map([['content-type', 'application/json']]),
+          json: async () => readyPayload,
+        })
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 503,
+          statusText: 'Service Unavailable',
+          headers: new Map([['content-type', 'application/json']]),
+          json: async () => blockedPayload,
+        });
+
+      await expect(api.getReadiness()).resolves.toEqual(readyPayload);
+      await expect(api.getReadiness()).resolves.toEqual(blockedPayload);
+      expect(mockFetch.mock.calls[0][0]).toContain('/ready');
+    });
+
+    it('getReadiness rejects unexpected failures and malformed 503 payloads', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 500,
+          statusText: 'Internal Server Error',
+          headers: new Map([['content-type', 'application/json']]),
+          json: async () => ({ detail: 'Readiness failed' }),
+        })
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 503,
+          statusText: 'Service Unavailable',
+          headers: new Map([['content-type', 'text/plain']]),
+          json: async () => ({ status: 'not_ready' }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          headers: new Map([['content-type', 'application/json']]),
+          json: async () => ({
+            status: 'ready',
+            checked_at: '2026-08-01T12:00:00Z',
+            components: { postgres: null },
+            degraded_reasons: [],
+          }),
+        });
+
+      await expect(api.getReadiness()).rejects.toThrow('Readiness failed');
+      await expect(api.getReadiness()).rejects.toThrow('Expected JSON response');
+      await expect(api.getReadiness()).rejects.toThrow('expected contract');
+      expect(warnSpy).toHaveBeenCalledTimes(3);
+      warnSpy.mockRestore();
+    });
+
     it('getSystemTools returns array and falls back to [] for non-array payloads', async () => {
       const toolsPayload = [{ name: 'shell', description: 'Shell tool' }];
       mockFetch.mockResolvedValueOnce({
