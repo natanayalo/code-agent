@@ -5,6 +5,11 @@ This file is generated from merged pull requests with
 completed-task ledger; keep completed work here instead.
 ## Merged PR History
 
+### Added
+
+- Feat: add temporal repair completion loop ([#345](https://github.com/natanayalo/code-agent/pull/345))
+
+
 ### Changed
 
 - Refactor(db): remove legacy lease schema ([#341](https://github.com/natanayalo/code-agent/pull/341))
