@@ -107,6 +107,19 @@ def test_worker_waits_for_a_healthy_temporal_service(
     ]
     assert worker_service["depends_on"]["temporal"]["condition"] == "service_healthy"
     assert worker_service["restart"] == "on-failure"
+    assert worker_service["environment"]["CODE_AGENT_TEMPORAL_WORKER_ID"] == (
+        "${CODE_AGENT_TEMPORAL_WORKER_ID:-}"
+    )
+
+
+def test_startup_script_waits_for_liveness_then_execution_readiness() -> None:
+    """Production-like startup must consume the public readiness contract."""
+    script = Path("scripts/up.sh").read_text(encoding="utf-8")
+
+    health_position = script.index("http://127.0.0.1:8000/health")
+    readiness_position = script.index("http://127.0.0.1:8000/ready")
+    assert health_position < readiness_position
+    assert "Waiting for execution readiness (/ready)" in script
 
 
 def test_compose_exposes_no_legacy_runtime_selector_or_task_queue_controls(

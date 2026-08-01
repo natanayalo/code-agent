@@ -1000,6 +1000,7 @@ def get_operational_metrics(self: Any, window_hours: int | None = 24) -> Operati
             ],
             avg_duration_seconds=run_metrics["avg_duration_seconds"],
             success_rate=run_metrics["success_rate"],
+            execution_health=self.get_execution_health(),
         )
 
 

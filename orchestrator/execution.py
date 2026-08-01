@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import os
-import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -25,6 +22,7 @@ from orchestrator import (
     execution_snapshot_service,
     execution_submission_service,
     execution_worker_service,
+    operational_health,
 )
 from orchestrator import (
     execution_policy as _execution_policy_module,
@@ -89,6 +87,8 @@ from orchestrator.execution_types import (
     _PersistedTaskContext,
 )
 from orchestrator.improvement_suggestions import ImprovementSuggestionScorer
+from orchestrator.operational_health import TemporalOperationalProbeProtocol
+from orchestrator.operational_health_types import ExecutionHealthMetrics, ReadinessSnapshot
 from sandbox import WorkspaceManager
 from workers import Worker, WorkerProfile
 
@@ -126,6 +126,7 @@ class TaskExecutionService:
         retention_seconds: int | None = 7 * 24 * 60 * 60,
         decomposed_fanout_enabled: bool = False,
         enforce_temporal_availability: bool = False,
+        temporal_operational_probe: TemporalOperationalProbeProtocol | None = None,
     ) -> None:
         self.session_factory = session_factory
         self.worker = worker
@@ -148,6 +149,7 @@ class TaskExecutionService:
         # decision returned by selection rather than consulting process state.
         self.decomposed_fanout_enabled = decomposed_fanout_enabled
         self.enforce_temporal_availability = enforce_temporal_availability
+        self.temporal_operational_probe = temporal_operational_probe
 
     async def __aenter__(self) -> TaskExecutionService:
         """Enter the service lifecycle."""
@@ -238,21 +240,7 @@ class TaskExecutionService:
 
     def ensure_temporal_available(self) -> None:
         """Fail new submissions unless the Temporal SDK completes its readiness RPC."""
-        temporal_address = os.environ.get("TEMPORAL_ADDRESS", "localhost:7233")
-        last_error: Exception | None = None
-        for attempt in range(3):
-            try:
-                from temporalio.client import Client
-
-                asyncio.run(Client.connect(temporal_address))
-                return
-            except Exception as exc:
-                last_error = exc
-                if attempt < 2:
-                    time.sleep(0.1 * (2**attempt))
-        raise TemporalUnavailableError(
-            f"Temporal is unavailable at {temporal_address}; new tasks are temporarily disabled."
-        ) from last_error
+        operational_health.ensure_temporal_available(self)
 
     _normalize_and_validate_submission = (
         execution_submission_service._normalize_and_validate_submission
@@ -312,6 +300,8 @@ class TaskExecutionService:
     apply_task_approval_decision = execution_interaction_service.apply_task_approval_decision
     cancel_task = execution_interaction_service.cancel_task
     get_operational_metrics = execution_snapshot_service.get_operational_metrics
+    get_execution_health = operational_health.get_execution_health
+    get_readiness = operational_health.get_readiness
     is_secret_encryption_active = execution_snapshot_service.is_secret_encryption_active
     replay_task = execution_submission_service.replay_task
     _persist_submission = execution_submission_service._persist_submission
@@ -360,6 +350,7 @@ __all__ = [
     "ArtifactSnapshot",
     "CreateTaskOutcome",
     "DeliveryKey",
+    "ExecutionHealthMetrics",
     "ExecutionModel",
     "HumanInteractionSnapshot",
     "InteractionInboxCard",
@@ -372,6 +363,7 @@ __all__ = [
     "ProgressPhase",
     "ProjectMemorySnapshot",
     "ProjectMemoryUpsertRequest",
+    "ReadinessSnapshot",
     "ProposalSnapshot",
     "SessionSnapshot",
     "SessionWorkingContextSnapshot",

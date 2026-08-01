@@ -10,6 +10,7 @@ import pytest
 
 from apps import runtime as runtime_module
 from apps.worker import main as worker_main
+from db.enums import WorkerNodeStatus
 from orchestrator.temporal import worker as temporal_worker
 
 
@@ -39,6 +40,79 @@ def test_runtime_mode_defaults_and_overrides() -> None:
     assert runtime_module.should_run_worker({}) is False
     assert runtime_module.should_run_api({runtime_module.RUN_API_ENV_VAR: "false"}) is False
     assert runtime_module.should_run_worker({runtime_module.RUN_WORKER_ENV_VAR: "on"}) is True
+
+
+def test_temporal_worker_identity_uses_stable_host_default(monkeypatch) -> None:
+    """Container restarts should refresh one registry row unless explicitly overridden."""
+    monkeypatch.delenv(temporal_worker.TEMPORAL_WORKER_ID_ENV_VAR, raising=False)
+    monkeypatch.setattr(temporal_worker.socket, "gethostname", lambda: "worker-host")
+    monkeypatch.setattr(temporal_worker.os, "getpid", lambda: 42)
+
+    worker_id, process_identity = temporal_worker._temporal_worker_identity()
+
+    assert worker_id == "worker-host"
+    assert process_identity == "worker-host:42"
+
+
+@pytest.mark.anyio
+async def test_temporal_worker_registers_active_heartbeat_owner(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    class Service:
+        def register_worker_node(self, **kwargs):
+            calls.append(kwargs)
+            return WorkerNodeStatus.ACTIVE
+
+        async def _run_blocking(self, func, **kwargs):
+            return func(**kwargs)
+
+    monkeypatch.setattr(
+        temporal_worker,
+        "_temporal_worker_identity",
+        lambda: ("worker-id", "worker-host:42"),
+    )
+
+    await temporal_worker._register_temporal_worker(Service(), worker_id="worker-id")
+
+    assert calls == [
+        {
+            "worker_id": "worker-id",
+            "capacity": 2,
+            "process_identity": "worker-host:42",
+        }
+    ]
+
+
+@pytest.mark.anyio
+async def test_temporal_worker_heartbeat_failure_stops_runtime(monkeypatch) -> None:
+    calls: list[str] = []
+
+    class Service:
+        def heartbeat_worker_node(self, *, worker_id: str):
+            calls.append(worker_id)
+            return None
+
+        async def _run_blocking(self, func, **kwargs):
+            return func(**kwargs)
+
+    async def skip_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(temporal_worker.asyncio, "sleep", skip_sleep)
+
+    with pytest.raises(RuntimeError, match="registry status is missing"):
+        await temporal_worker._heartbeat_temporal_worker(Service(), worker_id="worker-id")
+
+    assert calls == ["worker-id"]
+
+
+@pytest.mark.parametrize(
+    "registry_status",
+    [WorkerNodeStatus.DRAINING, WorkerNodeStatus.OFFLINE, WorkerNodeStatus.QUARANTINED],
+)
+def test_temporal_worker_refuses_non_active_registry_status(registry_status) -> None:
+    with pytest.raises(RuntimeError, match=registry_status.value):
+        temporal_worker._require_active_worker(registry_status)
 
 
 def test_temporal_only_cutover_at_requires_an_aware_iso_timestamp() -> None:
@@ -85,6 +159,103 @@ async def test_temporal_worker_fails_after_bounded_connection_retries(monkeypatc
         await temporal_worker.start_temporal_worker("temporal:7233", "queue", object())
 
     assert attempts == ["temporal:7233"] * 3
+
+
+@pytest.mark.anyio
+async def test_temporal_worker_groups_all_runtime_components(monkeypatch) -> None:
+    """A component exit unwinds heartbeat, dispatch, and both Temporal worker loops."""
+    calls: list[str] = []
+    client = object()
+
+    async def connect(address: str) -> object:
+        calls.append(f"connect:{address}")
+        return client
+
+    async def register(_service: object, *, worker_id: str) -> None:
+        calls.append(f"register:{worker_id}")
+
+    async def heartbeat(_service: object, *, worker_id: str) -> None:
+        calls.append(f"heartbeat:{worker_id}")
+
+    class RuntimeWorker:
+        def __init__(self, label: str) -> None:
+            self.label = label
+
+        async def run(self) -> None:
+            calls.append(self.label)
+
+    class Dispatcher:
+        def __init__(self, *, client: object, session_factory: object) -> None:
+            assert client is not None
+            assert session_factory == "sessions"
+
+        async def run_forever(self) -> None:
+            calls.append("dispatcher")
+
+    monkeypatch.setattr(temporal_worker.Client, "connect", connect)
+    monkeypatch.setattr(temporal_worker, "_register_temporal_worker", register)
+    monkeypatch.setattr(temporal_worker, "_heartbeat_temporal_worker", heartbeat)
+    monkeypatch.setattr(
+        temporal_worker,
+        "_temporal_worker_identity",
+        lambda: ("worker-id", "host:1"),
+    )
+    monkeypatch.setattr(
+        temporal_worker,
+        "_build_temporal_workers",
+        lambda **_kwargs: (RuntimeWorker("workflow"), RuntimeWorker("execution")),
+    )
+    monkeypatch.setattr(temporal_worker, "TemporalCommandDispatcher", Dispatcher)
+
+    await temporal_worker.start_temporal_worker(
+        "temporal:7233",
+        "task-queue",
+        SimpleNamespace(session_factory="sessions"),
+    )
+
+    assert calls == [
+        "connect:temporal:7233",
+        "register:worker-id",
+        "heartbeat:worker-id",
+        "dispatcher",
+        "workflow",
+        "execution",
+    ]
+
+
+def test_temporal_worker_builds_workflow_and_bounded_execution_workers(monkeypatch) -> None:
+    """Both Temporal queues share activities while execution concurrency stays bounded."""
+    created: list[dict[str, object]] = []
+
+    class Activities:
+        def __getattr__(self, name: str) -> str:
+            return name
+
+    def build_worker(client: object, **kwargs: object) -> SimpleNamespace:
+        created.append({"client": client, **kwargs})
+        return SimpleNamespace(config=kwargs)
+
+    monkeypatch.setattr(
+        temporal_worker,
+        "TaskExecutionActivities",
+        lambda *, service: Activities(),
+    )
+    monkeypatch.setattr(temporal_worker, "Worker", build_worker)
+    monkeypatch.setattr(temporal_worker, "UnsandboxedWorkflowRunner", lambda: "runner")
+
+    workflow, execution = temporal_worker._build_temporal_workers(
+        client=object(),
+        task_queue="workflow-queue",
+        task_service=object(),
+    )
+
+    assert workflow.config["task_queue"] == "workflow-queue"
+    assert workflow.config["workflow_runner"] == "runner"
+    assert len(workflow.config["activities"]) == 16
+    assert execution.config["task_queue"] == temporal_worker.CODEX_EXECUTION_TASK_QUEUE
+    assert execution.config["activities"] == ["run_worker", "run_decomposed_node"]
+    assert execution.config["max_concurrent_activities"] == 2
+    assert len(created) == 2
 
 
 @pytest.mark.anyio

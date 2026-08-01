@@ -137,8 +137,22 @@ if [ "$temporal_health" != "healthy" ] || [ "${worker_status%%:*}" != "running" 
   docker compose --env-file "$ENV_FILE" ps >&2
   exit 1
 fi
+
+echo "[run-production-like] Waiting for execution readiness (/ready)"
+for _ in $(seq 1 90); do
+  if curl -fsS http://127.0.0.1:8000/ready >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+if ! curl -fsS http://127.0.0.1:8000/ready >/dev/null 2>&1; then
+  echo "[run-production-like][error] API execution readiness did not recover." >&2
+  curl -sS http://127.0.0.1:8000/ready >&2 || true
+  docker compose --env-file "$ENV_FILE" ps >&2
+  exit 1
+fi
 echo "[run-production-like] API is healthy at http://127.0.0.1:8000"
-echo "[run-production-like] Temporal and worker are ready"
+echo "[run-production-like] Postgres, Temporal, dispatcher, and worker are ready"
 echo "[run-production-like] Dashboard is available at http://localhost:3000"
 echo "[run-production-like] Services running:"
 docker compose --env-file "$ENV_FILE" ps

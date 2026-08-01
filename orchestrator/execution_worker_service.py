@@ -109,6 +109,8 @@ def _worker_node_registration_payload(
         "worker_types": worker_types,
         "lanes": ["primary", "scout"],
         "capability_tags": capability_tags,
+        "runtime": "temporal",
+        "command_dispatcher": True,
     }
     return {
         "worker_type": primary_worker_type,

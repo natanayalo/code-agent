@@ -21,6 +21,8 @@ The platform is built for one operator-first use case: reliable coding execution
 - replay and approval-decision task controls via API
 - dashboard knowledge-base management for personal/project skeptical memory entries
 - operational metrics and lifecycle progress callbacks
+- dependency-aware execution readiness plus outbox, worker, interaction-wait,
+  and terminal-reconciliation signals
 - sequential decomposed-task execution and an opt-in two-node read-only fan-out pilot
 
 ## Product Boundaries
@@ -101,9 +103,12 @@ curl http://127.0.0.1:8000/health
 curl http://127.0.0.1:8000/ready
 ```
 
-`/health` and `/ready` currently report API-process availability. Task
-submission performs a separate Temporal availability check. M25.5 will make
-`/ready` a dependency-aware execution-readiness contract.
+`/health` reports API-process liveness. `/ready` reports execution readiness
+for Postgres, Temporal, a fresh worker-owned command dispatcher, fresh worker
+capacity, and deliverable outbox lag. It returns HTTP 503 with stable reason
+codes while any global execution blocker is degraded. Authenticated `/metrics`
+adds task-specific outbox, interaction-wait, and terminal-reconciliation
+signals without turning those individual anomalies into global downtime.
 
 ### Database Migrations
 
@@ -249,7 +254,8 @@ no-op or formatting-only runs after the generated commit lands.
 
 The current phase is Temporal stabilization and measured reliability:
 
-1. M25.5: truthful readiness and operator recovery
+1. M25.5: finish the dashboard status and operator-recovery view on top of the
+   dependency-aware backend signals
 2. M25.6: a 20-task real-worker Temporal reliability baseline
 
 M26 review-comment repair and M27 reliability-based autonomy are reserved but

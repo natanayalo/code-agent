@@ -151,10 +151,12 @@ Current operator surfaces:
 - progress notifications (`started`, `running`, terminal)
 - health/readiness + operational metrics endpoints
 
-`/health` and `/ready` currently report API-process availability. Submission
-checks Temporal availability independently. Dependency-aware readiness,
-outbox/worker freshness metrics, and a dashboard recovery view are planned for
-M25.5.
+`/health` reports API-process liveness. `/ready` reports Postgres, Temporal,
+worker-owned dispatch, worker freshness, and deliverable outbox readiness;
+submission also checks Temporal independently. Authenticated metrics expose
+outbox retries/dead letters, stuck interaction waits, and Temporal/Postgres
+terminal reconciliation. The M25.5 dashboard recovery view remains the next
+operator-facing slice.
 
 ## 6) Controlled Proposal and Autonomy Lane
 

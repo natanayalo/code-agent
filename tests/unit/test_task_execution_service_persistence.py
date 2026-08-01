@@ -74,6 +74,22 @@ def _setup_persistence_test_db():
     return create_session_factory(engine)
 
 
+class _MutableTemporalProbe:
+    def __init__(self, *, available=False, outcomes=None):
+        self.available = available
+        self.outcomes = iter(outcomes) if outcomes is not None else None
+        self.calls = 0
+
+    def is_available(self):
+        self.calls += 1
+        if self.outcomes is not None:
+            return next(self.outcomes)
+        return self.available
+
+    def list_task_workflow_statuses(self):
+        return {}
+
+
 def _create_retained_worker_run(worker_run_repo, task_id, session_id, workspace_path):
     return worker_run_repo.create(
         task_id=task_id,
@@ -138,52 +154,35 @@ def test_temporal_task_creation_persists_a_start_command_with_the_task() -> None
 def test_temporal_availability_retries_then_allows_a_recovered_submission(monkeypatch) -> None:
     """A transient outage should not require restarting the API process."""
     session_factory = _setup_persistence_test_db()
+    probe = _MutableTemporalProbe(outcomes=(False, True))
     service = execution_module.TaskExecutionService(
         session_factory=session_factory,
         worker=_StaticWorker(),
+        temporal_operational_probe=probe,
     )
-    attempts: list[str] = []
-
-    async def connect(address: str):
-        attempts.append(address)
-        if len(attempts) == 1:
-            raise ConnectionError("Temporal unavailable")
-        return object()
-
-    from temporalio.client import Client
-
-    monkeypatch.setattr(Client, "connect", connect)
-    monkeypatch.setattr(execution_module.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr("time.sleep", lambda _seconds: None)
 
     service.ensure_temporal_available()
 
-    assert attempts == ["localhost:7233", "localhost:7233"]
+    assert probe.calls == 2
 
 
 def test_temporal_submission_succeeds_after_recovery_without_service_restart(monkeypatch) -> None:
     """A recovered Temporal connection should let the same service persist a new start command."""
     session_factory = _setup_persistence_test_db()
+    probe = _MutableTemporalProbe()
     service = execution_module.TaskExecutionService(
         session_factory=session_factory,
         worker=_StaticWorker(),
         enforce_temporal_availability=True,
+        temporal_operational_probe=probe,
     )
-    availability = {"ready": False}
-
-    async def connect(_address: str) -> object:
-        if not availability["ready"]:
-            raise ConnectionError("Temporal unavailable")
-        return object()
-
-    from temporalio.client import Client
-
-    monkeypatch.setattr(Client, "connect", connect)
-    monkeypatch.setattr(execution_module.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr("time.sleep", lambda _seconds: None)
 
     with pytest.raises(execution_module.TemporalUnavailableError):
         service.create_task(execution_module.TaskSubmission(task_text="Unavailable submission"))
 
-    availability["ready"] = True
+    probe.available = True
     snapshot, _ = service.create_task(
         execution_module.TaskSubmission(task_text="Recovered submission")
     )

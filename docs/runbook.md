@@ -162,10 +162,41 @@ Core API endpoints:
 - `POST /tasks/{task_id}/replay` replay terminal task with optional overrides
 - `GET /health`, `GET /ready`, `GET /metrics`
 
-`/health` and `/ready` currently report API-process availability. They do not
-yet prove Postgres, Temporal, dispatcher, or worker readiness. New submissions
-perform their own Temporal availability check and return 503 when it fails.
-Dependency-aware readiness is planned for M25.5.
+`/health` is process liveness and remains HTTP 200 while the API can answer.
+`/ready` is public execution readiness and returns HTTP 503 when Postgres,
+Temporal, the worker-owned dispatcher, fresh worker capacity, or deliverable
+outbox progress is unavailable. Its response contains stable reason codes and
+safe timestamps, not raw connection errors. Postgres and Temporal probes each
+use a two-second operation budget. New submissions retain their own
+Temporal availability check and return 503 when Temporal is unavailable;
+durable reads and interaction responses remain available.
+
+Authenticated `/metrics` includes an `execution_health` object with command
+outbox counts and age, worker/dispatcher freshness, stuck interaction waits,
+and Temporal/Postgres terminal reconciliation. Dead letters, stuck waits, and
+per-task divergence are degraded operator signals but do not make the entire
+API non-ready.
+
+Useful commands:
+
+```bash
+curl -i http://127.0.0.1:8000/ready
+curl -H "X-Webhook-Token: $CODE_AGENT_API_SHARED_SECRET" \
+  http://127.0.0.1:8000/metrics
+```
+
+Safe recovery guidance:
+
+| Reason or signal | Safe first action |
+| --- | --- |
+| `postgres_unavailable` | Restore Postgres connectivity, then wait for `/ready` to recover without restarting the API. |
+| `temporal_unavailable` | Restore Temporal and verify its cluster health; submissions remain disabled until the next successful probe. |
+| `worker_unavailable` or `dispatcher_unavailable` | Inspect and restart the worker process; do not start worker execution directly on the host. |
+| `dispatcher_backlog_stale` | Inspect worker logs and outbox error metrics, then restart the worker if dispatch is not progressing; do not delete outbox rows. |
+| `command_dead_letters_present` | Inspect the affected task and command error, correct the non-retryable cause, and use supported replay/operator controls instead of editing rows. |
+| `interaction_wait_stuck` | Answer, reject, or cancel the affected interaction through the dashboard or API. |
+| `terminal_state_divergence` | Compare the task timeline with Temporal workflow state, restore the worker if needed, and avoid direct terminal-state updates. |
+| `terminal_reconciliation_unknown` | Restore Temporal visibility before treating the divergence count as zero. |
 
 Ingress protection:
 
@@ -186,6 +217,7 @@ Useful command:
 
 ```bash
 curl http://127.0.0.1:8000/health
+curl -i http://127.0.0.1:8000/ready
 ```
 
 ## Worker idle with queued tasks
@@ -197,6 +229,7 @@ Checks:
 - verify worker and API share the same database
 - inspect the Temporal workflow and worker-container status
 - inspect pending Temporal command outbox rows if the workflow never started
+- inspect `/ready` and authenticated `/metrics` before opening raw logs
 
 Useful command:
 
