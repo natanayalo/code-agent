@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: add dependency-aware execution readiness ([#346](https://github.com/natanayalo/code-agent/pull/346))
+
 - Feat: add temporal repair completion loop ([#345](https://github.com/natanayalo/code-agent/pull/345))
 
 
