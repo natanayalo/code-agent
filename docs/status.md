@@ -6,10 +6,11 @@ Phase 4A: Temporal stabilization and measured reliability.
 
 Active focus: **M25.6 — Real Temporal Reliability Baseline**.
 
-M25.5 now reports dependency readiness and stuck-work signals through the API
-and dashboard, pairs every degraded reason with safe recovery guidance, and has
-current-branch real-worker lifecycle evidence. M25.6 will use those surfaces to
-collect the 20-task measured reliability baseline.
+M25.6 now has a frozen 20-case, 10-Codex/10-Antigravity evidence matrix plus
+incremental immutable capture and sanitized reporting. The foundation did not
+run provider tasks. The active slice is to deploy one pinned build, execute and
+capture the real-worker matrix, restore the 90% Python coverage gate, and
+publish the reviewed baseline report.
 
 ## Current capabilities
 
@@ -38,6 +39,9 @@ collect the 20-task measured reliability baseline.
   dependency readiness, degraded reasons, and safe recovery guidance
 - public dependency-aware `/ready` and authenticated outbox, worker freshness,
   stuck-wait, and terminal-reconciliation metrics
+- an incremental M25.6 evidence collector that pins deployment identity,
+  captures Postgres and Temporal proof, rejects duplicate cases, and emits a
+  sanitized aggregate without changing routing automatically
 
 Completed work remains in [`CHANGELOG.md`](../CHANGELOG.md). The historical
 Temporal migration and rollback record is in the
@@ -56,6 +60,9 @@ Temporal migration and rollback record is in the
   recovery, worker-owned dispatcher heartbeats, stale outbox gating,
   task-specific degraded signals, dashboard recovery guidance, responsive
   operator rendering, and a current-branch real-worker Temporal lifecycle.
+- The M25.6 evidence foundation freezes the required task/profile allocation
+  and proof gates, but it intentionally contains no paid-provider baseline
+  results. Infrastructure readiness must not be reported as task reliability.
 - The 25-case frozen evaluation remains a deterministic domain-logic regression
   suite. It uses replayed worker outcomes and is not a real-provider Temporal
   reliability baseline.
@@ -81,6 +88,10 @@ Temporal migration and rollback record is in the
 ## Next slices only
 
 1. M25.6: Real Temporal Reliability Baseline
+   - deploy one exact build and initialize the evidence bundle
+   - execute and capture all 20 real-worker cases
+   - restore Python CI coverage to 90%
+   - publish the sanitized report and operator milestone recommendation
 
 ## Deferred
 
