@@ -4,12 +4,12 @@
 
 Phase 4A: Temporal stabilization and measured reliability.
 
-Active focus: **M25.5 — Truthful Readiness and Operator Recovery**.
+Active focus: **M25.6 — Real Temporal Reliability Baseline**.
 
-The dependency-aware backend foundation now reports Postgres, Temporal,
-dispatcher, and worker readiness plus outbox lag, stuck waits, and terminal
-divergence. The next M25.5 slice will present these signals and safe recovery
-guidance in the dashboard and complete the outage/reconciliation operator smoke.
+M25.5 now reports dependency readiness and stuck-work signals through the API
+and dashboard, pairs every degraded reason with safe recovery guidance, and has
+current-branch real-worker lifecycle evidence. M25.6 will use those surfaces to
+collect the 20-task measured reliability baseline.
 
 ## Current capabilities
 
@@ -34,7 +34,8 @@ guidance in the dashboard and complete the outage/reconciliation operator smoke.
 - durable, bounded verifier and independent-review repair loops on retained
   workspaces with permission escalation, re-verification, and manual handoff
 - dashboard visibility for tasks, TaskSpec, DAG attempts, interactions,
-  timelines, logs, artifacts, traces, memory, proposals, metrics, and tools
+  timelines, logs, artifacts, traces, memory, proposals, metrics, tools,
+  dependency readiness, degraded reasons, and safe recovery guidance
 - public dependency-aware `/ready` and authenticated outbox, worker freshness,
   stuck-wait, and terminal-reconciliation metrics
 
@@ -51,9 +52,10 @@ Temporal migration and rollback record is in the
   verifier and independent-review repair, retained-workspace execution, repair
   restart/idempotency/cancellation handling, replay coverage, and one terminal
   manual-follow-up projection when repair cannot complete.
-- The M25.5 backend readiness slice proves structured dependency failure and
-  same-process recovery, worker-owned dispatcher heartbeats, stale outbox
-  gating, task-specific degraded signals, and Temporal-outage interaction access.
+- The accepted M25.5 slice proves structured dependency failure and same-process
+  recovery, worker-owned dispatcher heartbeats, stale outbox gating,
+  task-specific degraded signals, dashboard recovery guidance, responsive
+  operator rendering, and a current-branch real-worker Temporal lifecycle.
 - The 25-case frozen evaluation remains a deterministic domain-logic regression
   suite. It uses replayed worker outcomes and is not a real-provider Temporal
   reliability baseline.
@@ -65,8 +67,6 @@ Temporal migration and rollback record is in the
 
 ## Known limitations
 
-- the dashboard does not yet present dependency readiness, degraded reasons,
-  or the safe recovery guidance exposed by the backend and runbook
 - bounded fan-out remains an explicit read-only pilot and is disabled by
   default
 - deep-scout repo-to-research chaining is deferred and is not part of the
@@ -80,8 +80,7 @@ Temporal migration and rollback record is in the
 
 ## Next slices only
 
-1. M25.5: Dashboard Status and Operator Recovery
-2. M25.6: Real Temporal Reliability Baseline
+1. M25.6: Real Temporal Reliability Baseline
 
 ## Deferred
 

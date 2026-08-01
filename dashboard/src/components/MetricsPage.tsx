@@ -4,6 +4,7 @@ import { api } from '../services/api';
 import { DashboardLayout } from './layout/DashboardLayout';
 import { Activity, Clock, Database, Cpu, GitBranch, TrendingUp } from 'lucide-react';
 import { formatLabel } from '../utils/formatters';
+import { ExecutionHealthPanel } from './ExecutionHealthPanel';
 
 const METRICS_REFETCH_INTERVAL_MS = 60000;
 const SUCCESS_RATE_HEALTHY_THRESHOLD = 0.8;
@@ -13,11 +14,24 @@ export function MetricsPage() {
   const {
     data: metrics,
     isLoading,
+    isFetching,
     error,
     refetch
   } = useQuery({
     queryKey: ['metrics'],
     queryFn: () => api.getMetrics(),
+    refetchInterval: METRICS_REFETCH_INTERVAL_MS,
+  });
+
+  const {
+    data: readiness,
+    isLoading: readinessLoading,
+    isFetching: readinessFetching,
+    error: readinessError,
+    refetch: refetchReadiness,
+  } = useQuery({
+    queryKey: ['execution-readiness'],
+    queryFn: () => api.getReadiness(),
     refetchInterval: METRICS_REFETCH_INTERVAL_MS,
   });
 
@@ -33,26 +47,33 @@ export function MetricsPage() {
       .sort(([workerA, countA], [workerB, countB]) => (countB - countA) || workerA.localeCompare(workerB));
   }, [metrics]);
 
-  if (error) {
-    return (
-      <DashboardLayout>
-        <div className="error-container">
-          <h2>Error loading metrics</h2>
-          <p>{(error as Error).message}</p>
-          <button onClick={() => refetch()} className="btn-primary">Retry</button>
-        </div>
-      </DashboardLayout>
-    );
-  }
-
   return (
     <DashboardLayout>
       <div className="page-header">
         <h1>Operational Metrics</h1>
-        <p className="page-subtitle">Service health and execution performance (last 24h)</p>
+        <p className="page-subtitle">Execution readiness, recovery guidance, and performance (last 24h)</p>
       </div>
 
-      {isLoading || !metrics ? (
+      <ExecutionHealthPanel
+        readiness={readiness}
+        executionHealth={metrics?.execution_health}
+        readinessLoading={readinessLoading}
+        executionHealthLoading={isLoading}
+        readinessError={readinessError}
+        executionHealthError={error}
+        refreshing={isFetching || readinessFetching}
+        onRefresh={() => {
+          void Promise.all([refetch(), refetchReadiness()]);
+        }}
+      />
+
+      {error && !metrics ? (
+        <div className="error-container metrics-performance-error">
+          <h2>Error loading performance metrics</h2>
+          <p>{(error as Error).message}</p>
+          <button onClick={() => void refetch()} className="btn-primary">Retry metrics</button>
+        </div>
+      ) : isLoading || !metrics ? (
         <div className="loading-container">
           <div className="spinner"></div>
           <p>Loading metrics...</p>

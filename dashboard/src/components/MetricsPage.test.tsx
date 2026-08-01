@@ -10,8 +10,21 @@ import { api } from '../services/api';
 vi.mock('../services/api', () => ({
   api: {
     getMetrics: vi.fn(),
+    getReadiness: vi.fn(),
   },
 }));
+
+const healthyReadiness = {
+  status: 'ready' as const,
+  checked_at: '2026-08-01T12:00:00Z',
+  components: {
+    postgres: { status: 'ready' as const, reasons: [], last_observed_at: null },
+    temporal: { status: 'ready' as const, reasons: [], last_observed_at: null },
+    worker: { status: 'ready' as const, reasons: [], last_observed_at: '2026-08-01T11:59:58Z' },
+    dispatcher: { status: 'ready' as const, reasons: [], last_observed_at: '2026-08-01T11:59:58Z' },
+  },
+  degraded_reasons: [],
+};
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -25,6 +38,7 @@ describe('MetricsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     queryClient.clear();
+    vi.mocked(api.getReadiness).mockResolvedValue(healthyReadiness);
   });
 
   it('renders loading state', () => {
@@ -70,6 +84,7 @@ describe('MetricsPage', () => {
     );
 
     expect(await screen.findByRole('heading', { name: /Operational Metrics/i })).toBeInTheDocument();
+    expect(await screen.findByText('Execution ready')).toBeInTheDocument();
     expect(await screen.findByText('100')).toBeInTheDocument(); // Total tasks
     expect(screen.getByText('80.0%')).toBeInTheDocument(); // Success rate
     expect(screen.getByText('45.5s')).toBeInTheDocument(); // Avg duration
@@ -163,7 +178,7 @@ describe('MetricsPage', () => {
     );
 
     expect(await screen.findByRole('heading', { name: 'Runtime Drain — all time' })).toBeInTheDocument();
-    expect(screen.getByText('Temporal').nextElementSibling).toHaveTextContent('0');
+    expect(screen.getByText('Temporal', { selector: '.runtime-drain-metric span' }).nextElementSibling).toHaveTextContent('0');
     expect(screen.getByText('Active unknown').nextElementSibling).toHaveTextContent('0');
   });
 
@@ -240,8 +255,9 @@ describe('MetricsPage', () => {
       </QueryClientProvider>
     );
 
-    expect(await screen.findByText(/Error loading metrics/i)).toBeInTheDocument();
-    expect(screen.getByText(/Failed to fetch/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Error loading performance metrics/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Failed to fetch/i)).toHaveLength(2);
+    expect(screen.getByText('Execution ready')).toBeInTheDocument();
   });
 
   it('retries fetching metrics when Retry button is clicked', async () => {
@@ -255,7 +271,7 @@ describe('MetricsPage', () => {
       </QueryClientProvider>
     );
 
-    expect(await screen.findByText(/Error loading metrics/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Error loading performance metrics/i)).toBeInTheDocument();
 
     vi.mocked(api.getMetrics).mockResolvedValueOnce({
       total_tasks: 5,
@@ -271,10 +287,80 @@ describe('MetricsPage', () => {
       success_rate: 1,
     });
 
-    const retryButton = screen.getByText('Retry');
+    const retryButton = screen.getByText('Retry metrics');
     fireEvent.click(retryButton);
 
     expect(api.getMetrics).toHaveBeenCalledTimes(2);
     expect(await screen.findByText('Operational Metrics')).toBeInTheDocument();
+  });
+
+  it('shows degraded readiness guidance while performance metrics remain available', async () => {
+    vi.mocked(api.getReadiness).mockResolvedValue({
+      ...healthyReadiness,
+      status: 'not_ready',
+      components: {
+        ...healthyReadiness.components,
+        temporal: {
+          status: 'not_ready',
+          reasons: ['temporal_unavailable'],
+          last_observed_at: null,
+        },
+      },
+      degraded_reasons: ['temporal_unavailable'],
+    });
+    vi.mocked(api.getMetrics).mockResolvedValue({
+      total_tasks: 1,
+      retried_tasks: 0,
+      retry_rate: 0,
+      status_counts: { completed: 1 },
+      worker_usage: { codex: 1 },
+      runtime_mode_usage: {},
+      legacy_tool_loop_usage: {},
+      orchestration_runtime_counts: { temporal: 1 },
+      active_legacy_task_count: 0,
+      active_unknown_task_count: 0,
+      avg_duration_seconds: 3,
+      success_rate: 1,
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter><MetricsPage /></MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText('Execution blocked')).toBeInTheDocument();
+    expect(screen.getByText('temporal_unavailable')).toBeInTheDocument();
+    expect(screen.getByText(/New submissions remain disabled/i)).toBeInTheDocument();
+    expect(screen.getByText('100.0%')).toBeInTheDocument();
+  });
+
+  it('refreshes readiness and metrics together', async () => {
+    vi.mocked(api.getMetrics).mockResolvedValue({
+      total_tasks: 0,
+      retried_tasks: 0,
+      retry_rate: 0,
+      status_counts: {},
+      worker_usage: {},
+      runtime_mode_usage: {},
+      legacy_tool_loop_usage: {},
+      orchestration_runtime_counts: {},
+      active_legacy_task_count: 0,
+      active_unknown_task_count: 0,
+      avg_duration_seconds: 0,
+      success_rate: 0,
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter><MetricsPage /></MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText('Execution ready')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh execution status' }));
+
+    expect(api.getMetrics).toHaveBeenCalledTimes(2);
+    expect(api.getReadiness).toHaveBeenCalledTimes(2);
   });
 });

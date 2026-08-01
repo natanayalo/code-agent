@@ -155,8 +155,8 @@ Current operator surfaces:
 worker-owned dispatch, worker freshness, and deliverable outbox readiness;
 submission also checks Temporal independently. Authenticated metrics expose
 outbox retries/dead letters, stuck interaction waits, and Temporal/Postgres
-terminal reconciliation. The M25.5 dashboard recovery view remains the next
-operator-facing slice.
+terminal reconciliation. The dashboard Metrics view presents these dependency
+states, degraded reasons, affected tasks, and safe first recovery actions.
 
 ## 6) Controlled Proposal and Autonomy Lane
 

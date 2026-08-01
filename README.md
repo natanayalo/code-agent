@@ -23,6 +23,8 @@ The platform is built for one operator-first use case: reliable coding execution
 - operational metrics and lifecycle progress callbacks
 - dependency-aware execution readiness plus outbox, worker, interaction-wait,
   and terminal-reconciliation signals
+- dashboard execution status with dependency state, degraded reasons, and safe
+  operator recovery guidance
 - sequential decomposed-task execution and an opt-in two-node read-only fan-out pilot
 
 ## Product Boundaries
@@ -254,9 +256,7 @@ no-op or formatting-only runs after the generated commit lands.
 
 The current phase is Temporal stabilization and measured reliability:
 
-1. M25.5: finish the dashboard status and operator-recovery view on top of the
-   dependency-aware backend signals
-2. M25.6: a 20-task real-worker Temporal reliability baseline
+1. M25.6: a 20-task real-worker Temporal reliability baseline
 
 M26 review-comment repair and M27 reliability-based autonomy are reserved but
 deferred until the M25.6 evidence review.

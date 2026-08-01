@@ -189,10 +189,12 @@ Safe recovery guidance:
 
 | Reason or signal | Safe first action |
 | --- | --- |
+| `task_service_unconfigured` | Verify API task-service configuration, including `CODE_AGENT_ENABLE_TASK_SERVICE`, then restart the API after correcting its startup settings. |
 | `postgres_unavailable` | Restore Postgres connectivity, then wait for `/ready` to recover without restarting the API. |
 | `temporal_unavailable` | Restore Temporal and verify its cluster health; submissions remain disabled until the next successful probe. |
 | `worker_unavailable` or `dispatcher_unavailable` | Inspect and restart the worker process; do not start worker execution directly on the host. |
 | `dispatcher_backlog_stale` | Inspect worker logs and outbox error metrics, then restart the worker if dispatch is not progressing; do not delete outbox rows. |
+| `command_retries_present` | Inspect retrying commands and worker logs; allow bounded retries to continue unless progress has stopped. |
 | `command_dead_letters_present` | Inspect the affected task and command error, correct the non-retryable cause, and use supported replay/operator controls instead of editing rows. |
 | `interaction_wait_stuck` | Answer, reject, or cancel the affected interaction through the dashboard or API. |
 | `terminal_state_divergence` | Compare the task timeline with Temporal workflow state, restore the worker if needed, and avoid direct terminal-state updates. |

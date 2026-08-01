@@ -7,7 +7,7 @@ import {
   InteractionInboxCard,
 } from '../types/task';
 import { SessionSnapshot } from '../types/session';
-import { OperationalMetrics } from '../types/metrics';
+import { OperationalMetrics, ReadinessSnapshot } from '../types/metrics';
 import {
   KnowledgeBaseStatsSnapshot,
   MemoryAdmissionDecisionSnapshot,
@@ -48,6 +48,37 @@ function coerceMemoryCount(value: unknown) {
   };
 }
 
+function isReadinessComponent(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const component = value as Record<string, unknown>;
+  return (
+    ['ready', 'not_ready', 'unknown'].includes(String(component.status)) &&
+    Array.isArray(component.reasons) &&
+    component.reasons.every((reason) => typeof reason === 'string') &&
+    (component.last_observed_at === null || typeof component.last_observed_at === 'string')
+  );
+}
+
+function parseReadinessSnapshot(value: unknown): ReadinessSnapshot {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Readiness response did not match the expected contract');
+  }
+  const candidate = value as Partial<ReadinessSnapshot>;
+  if (
+    !['ready', 'not_ready'].includes(candidate.status ?? '') ||
+    typeof candidate.checked_at !== 'string' ||
+    !candidate.components ||
+    typeof candidate.components !== 'object' ||
+    Array.isArray(candidate.components) ||
+    !Object.values(candidate.components).every(isReadinessComponent) ||
+    !Array.isArray(candidate.degraded_reasons) ||
+    !candidate.degraded_reasons.every((reason) => typeof reason === 'string')
+  ) {
+    throw new Error('Readiness response did not match the expected contract');
+  }
+  return candidate as ReadinessSnapshot;
+}
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
@@ -56,7 +87,11 @@ export class ApiError extends Error {
   }
 }
 
-async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
+async function fetchWithAuth(
+  endpoint: string,
+  options: RequestInit = {},
+  acceptedResponseStatuses: readonly number[] = [],
+) {
   const headers = {
     'Content-Type': 'application/json',
     ...options.headers,
@@ -71,7 +106,7 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
     credentials: 'include', // Enable HttpOnly cookies
   });
 
-  if (!response.ok) {
+  if (!response.ok && !acceptedResponseStatuses.includes(response.status)) {
     let errorMessage = `API Error: ${response.status} ${response.statusText}`;
     const contentType = response.headers.get('content-type') || '';
     try {
@@ -649,6 +684,15 @@ export const api = {
       return await fetchWithAuth(`/metrics?window_hours=${windowHours}`);
     } catch (error) {
       console.warn('Failed to fetch metrics from API', error);
+      throw error;
+    }
+  },
+
+  async getReadiness(): Promise<ReadinessSnapshot> {
+    try {
+      return parseReadinessSnapshot(await fetchWithAuth('/ready', {}, [503]));
+    } catch (error) {
+      console.warn('Failed to fetch execution readiness from API', error);
       throw error;
     }
   },

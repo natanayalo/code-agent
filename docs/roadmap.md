@@ -14,8 +14,7 @@ Phase 4A: Temporal stabilization and measured reliability.
 
 Priority sequence:
 
-1. M25.5: Truthful Readiness and Operator Recovery
-2. M25.6: Real Temporal Reliability Baseline
+1. M25.6: Real Temporal Reliability Baseline
 
 M26 review-comment repair and M27 reliability-based autonomy remain reserved
 but explicitly deferred. Neither milestone resumes until the M25.6 evidence
@@ -62,38 +61,9 @@ autonomous privileged maintenance.
   review repairs. Bounded repairs reuse the retained workspace and selected
   worker/permission path, repeat acceptance checks, and terminate in one
   actionable manual handoff when repair is unavailable or exhausted.
-
-## M25.5 — Truthful Readiness and Operator Recovery
-
-### Goal
-
-Make every execution-blocking dependency and stuck-work condition visible
-without requiring initial log inspection.
-
-### Scope
-
-- retain `/health` as process liveness and make `/ready` report dependency
-  readiness for Postgres, Temporal, command dispatch, and fresh worker
-  availability
-- expose pending, retrying, and dead-letter command counts, oldest outbox age,
-  worker heartbeat, stuck interaction waits, and Temporal/Postgres terminal
-  divergence through machine-readable metrics
-- add a minimal dashboard status view with dependency state, degraded reasons,
-  and safe operator recovery guidance
-- keep reads and interactions available during Temporal degradation while new
-  submissions continue to fail visibly
-- verify database outage, Temporal outage and recovery, missing worker,
-  dispatcher backlog, stuck interaction, and terminal reconciliation behavior
-
-### Exit criteria
-
-- `/ready` becomes non-ready for each execution-blocking dependency failure and
-  recovers without an API restart when the dependency returns
-- every monitored degraded state is visible through both API/metrics and the
-  dashboard
-- one current-branch smoke proves API → outbox → Temporal → worker → Postgres
-  completion
-- the runbook provides a safe recovery action for every surfaced state
+- M25.5 added dependency-aware readiness, stuck-work and terminal-reconciliation
+  metrics, responsive dashboard status and recovery guidance, and current-branch
+  real-worker lifecycle evidence.
 
 ## M25.6 — Real Temporal Reliability Baseline
 
