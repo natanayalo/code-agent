@@ -3222,6 +3222,7 @@ def build_await_result_node(
         state = _ensure_state(state_input)
         request = None
         node_outcomes: list[NodeOutcome] = []
+        repair_execution = state.completion_loop.phase == "repair_requested"
 
         with start_optional_span(
             tracer_name="orchestrator.graph",
@@ -3254,7 +3255,11 @@ def build_await_result_node(
                     progress_message = f"worker unavailable: {worker_type or 'unknown'}"
                     progress_updates = _progress_update(state, progress_message)
                 else:
-                    if state.decomposed_plan and state.decomposed_plan.status == "decomposed":
+                    if (
+                        state.decomposed_plan
+                        and state.decomposed_plan.status == "decomposed"
+                        and not repair_execution
+                    ):
                         result, node_outcomes, runtime_manifest = await _await_decomposed_nodes(
                             state,
                             bound_worker,
@@ -3288,10 +3293,20 @@ def build_await_result_node(
                 "progress_updates": progress_updates,
                 "dispatch": {
                     **state.dispatch.model_dump(),
+                    "workspace_id": state.dispatch.workspace_id or result.workspace_id,
                     "runtime_manifest": request.runtime_manifest if request is not None else None,
                 },
-                "node_outcomes": [outcome.model_dump() for outcome in node_outcomes],
-                "current_node_id": (node_outcomes[-1].node_id if node_outcomes else None),
+                "node_outcomes": [
+                    outcome.model_dump()
+                    for outcome in (state.node_outcomes if repair_execution else node_outcomes)
+                ],
+                "current_node_id": (
+                    state.current_node_id
+                    if repair_execution
+                    else node_outcomes[-1].node_id
+                    if node_outcomes
+                    else None
+                ),
                 **_timeline_event(
                     state,
                     (
@@ -3302,7 +3317,15 @@ def build_await_result_node(
                         else TimelineEventType.WORKER_ERROR
                     ),
                     message=result.summary or progress_message,
-                    payload={"status": result.status},
+                    payload={
+                        "status": result.status,
+                        "repair_pass": (
+                            state.completion_loop.repair_pass if repair_execution else None
+                        ),
+                        "repair_source": (
+                            state.completion_loop.repair_source if repair_execution else None
+                        ),
+                    },
                 ),
             }
             clear_ws = result.status == "error" or (

@@ -65,6 +65,14 @@ WorkflowStep = Literal[
     "summarize_result",
     "persist_memory",
 ]
+CompletionLoopPhase = Literal[
+    "initial",
+    "repair_requested",
+    "verification_pending",
+    "complete",
+    "manual_follow_up",
+]
+CompletionRepairSource = Literal["verifier", "independent_review"]
 
 
 class OrchestratorModel(BaseModel):
@@ -425,6 +433,15 @@ class ScoutPhaseResult(OrchestratorModel):
     result: WorkerResult
 
 
+class CompletionLoopState(OrchestratorModel):
+    """Durable controller state for bounded verification and review repair passes."""
+
+    phase: CompletionLoopPhase = "initial"
+    repair_pass: int = Field(default=0, ge=0)
+    repair_source: CompletionRepairSource | None = None
+    summary: str | None = None
+
+
 class OrchestratorState(OrchestratorModel):
     """Top-level state handed between orchestrator workflow nodes."""
 
@@ -452,6 +469,7 @@ class OrchestratorState(OrchestratorModel):
     timeline_events: Annotated[list[TaskTimelineEventState], add] = Field(default_factory=list)
     timeline_persisted_count: int = 0
     repair_handoff_requested: bool = False
+    completion_loop: CompletionLoopState = Field(default_factory=CompletionLoopState)
     errors: list[str] = Field(default_factory=list)
     attempt_count: int = Field(default=0, ge=0)
     session_state_update: SessionStateUpdate | None = None

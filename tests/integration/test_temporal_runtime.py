@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import subprocess
 from pathlib import Path
 
 import pytest
 from sqlalchemy import select
+from temporalio import activity
 from temporalio.client import WorkflowFailureError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
@@ -27,6 +29,7 @@ from db.models import (
 )
 from orchestrator.execution import TaskExecutionService, TaskSubmission
 from orchestrator.execution_types import InteractionResponse
+from orchestrator.nodes.verification_result import verify_result as evaluate_verification
 from orchestrator.state import OrchestratorState, VerificationReport, VerificationReportItem
 from orchestrator.temporal.activities import TaskExecutionActivities
 from orchestrator.temporal.command_dispatcher import TemporalCommandDispatcher
@@ -123,6 +126,73 @@ class _PermissionEscalationWorker:
                 next_action_hint="request_higher_permission",
             )
         return WorkerResult(status="success", summary="Completed after permission grant.")
+
+
+class _CompletionLoopWorker:
+    """Script execution and independent-review outcomes for completion-loop tests."""
+
+    def __init__(self, review_outcomes: list[dict] | None = None) -> None:
+        self.execution_requests = []
+        self.review_requests = []
+        self.review_outcomes = list(review_outcomes or [])
+
+    async def run(self, request, *, system_prompt=None) -> WorkerResult:
+        if request.task_text.startswith("Perform an independent review"):
+            self.review_requests.append(request)
+            payload = self.review_outcomes.pop(0)
+            return WorkerResult(status="success", summary=json.dumps(payload))
+        self.execution_requests.append(request)
+        return WorkerResult(
+            status="success",
+            summary=f"worker pass {len(self.execution_requests)} completed",
+            files_changed=["main.py"],
+            workspace_id=request.workspace_id or "retained-workspace",
+        )
+
+
+class _BlockingRepairWorker(_CompletionLoopWorker):
+    """Block one repair execution so cancellation and worker restart can be observed."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.repair_started = asyncio.Event()
+        self.repair_cancelled = asyncio.Event()
+        self._block_next_repair = True
+
+    async def run(self, request, *, system_prompt=None) -> WorkerResult:
+        if request.task_text.startswith("Perform an independent review"):
+            return await super().run(request, system_prompt=system_prompt)
+        self.execution_requests.append(request)
+        if len(self.execution_requests) == 2 and self._block_next_repair:
+            self.repair_started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self._block_next_repair = False
+                self.repair_cancelled.set()
+                raise
+        return WorkerResult(
+            status="success",
+            summary=f"worker pass {len(self.execution_requests)} completed",
+            files_changed=["main.py"],
+            workspace_id=request.workspace_id or "retained-workspace",
+        )
+
+
+def _completion_activity_functions(activities: TaskExecutionActivities) -> list:
+    return [
+        activities.classify_and_plan,
+        activities.decompose_task,
+        activities.load_memory,
+        activities.provision_workspace,
+        activities.run_worker,
+        activities.request_permission_escalation,
+        activities.resolve_permission_escalation,
+        activities.record_workflow_failure,
+        activities.verify_result,
+        activities.deliver_result,
+        activities.persist_memory,
+    ]
 
 
 def test_temporal_snapshot_reconciles_operator_approval(session_factory):
@@ -257,6 +327,323 @@ async def test_temporal_delivery_fails_task_after_failed_verification(session_fa
         assert task is not None
         assert task.status == "failed"
         assert durable_state is None
+
+
+async def _run_completion_loop_workflow(
+    *,
+    session_factory,
+    service: TaskExecutionService,
+    submission: TaskSubmission,
+    configure_activities,
+) -> tuple[str, dict]:
+    """Run one completion-loop workflow against the Temporal test server."""
+    async with await WorkflowEnvironment.start_time_skipping() as env:
+        snapshot, _ = service.create_task(submission)
+        activities = TaskExecutionActivities(service=service)
+        activities.decompose_task_node = lambda _state: {}
+        configure_activities(activities)
+        temporal_worker = Worker(
+            env.client,
+            task_queue="task-execution-queue",
+            workflows=[TaskExecutionWorkflow],
+            workflow_runner=UnsandboxedWorkflowRunner(),
+            activities=_completion_activity_functions(activities),
+        )
+        async with temporal_worker:
+            dispatcher = TemporalCommandDispatcher(
+                client=env.client,
+                session_factory=session_factory,
+            )
+            run_task = await _start_workflow_via_dispatcher(
+                dispatcher,
+                env.client,
+                snapshot.task_id,
+            )
+            workflow_result = await run_task
+    return snapshot.task_id, workflow_result
+
+
+@pytest.mark.anyio
+async def test_temporal_verifier_repair_completes_through_second_worker_pass(session_factory):
+    """A verifier repair request must rerun the selected worker and verify again."""
+    worker = _CompletionLoopWorker()
+    service = TaskExecutionService(session_factory=session_factory, worker=worker)
+    verification_calls = 0
+    verification_activity_attempts = 0
+
+    def configure(activities: TaskExecutionActivities) -> None:
+        async def verifier(state_input):
+            nonlocal verification_calls
+            verification_calls += 1
+            outcome = (
+                ("failed", "main.py still needs repair")
+                if verification_calls == 1
+                else ("passed", "main.py repair accepted")
+            )
+            return evaluate_verification(
+                OrchestratorState.model_validate(state_input),
+                deterministic_verifier_outcome=outcome,
+            )
+
+        activities.verify_result_node = verifier
+        activities.review_result_node = lambda _state: {}
+        original_verify_result = activities.verify_result
+
+        @activity.defn(name="verify_result")
+        async def crash_once_after_persist(task_id: str) -> dict:
+            nonlocal verification_activity_attempts
+            verification_activity_attempts += 1
+            decision = await original_verify_result(task_id)
+            if verification_activity_attempts == 1:
+                raise RuntimeError("simulated crash after verification persistence")
+            return decision
+
+        activities.verify_result = crash_once_after_persist
+
+    task_id, workflow_result = await _run_completion_loop_workflow(
+        session_factory=session_factory,
+        service=service,
+        submission=TaskSubmission(task_text="Implement main.py repair"),
+        configure_activities=configure,
+    )
+
+    assert workflow_result["status"] == "completed"
+    assert verification_calls == 2
+    assert verification_activity_attempts == 3
+    assert len(worker.execution_requests) == 2
+    assert "Apply targeted code fixes" in worker.execution_requests[1].task_text
+    with session_scope(session_factory) as session:
+        task = session.get(Task, task_id)
+        events = TaskTimelineRepository(session).list_by_task(task_id)
+        assert task is not None and task.status == "completed"
+        assert [event.event_type for event in events].count(TimelineEventType.WORKER_COMPLETED) == 2
+        assert [event.event_type for event in events].count(
+            TimelineEventType.VERIFICATION_COMPLETED
+        ) == 2
+        assert session.get(TemporalTaskState, task_id) is None
+
+
+@pytest.mark.anyio
+async def test_temporal_independent_review_repair_is_reviewed_again(session_factory):
+    """Independent-review repair must repeat review instead of skipping acceptance."""
+    finding = {
+        "title": "High severity bug",
+        "category": "logic",
+        "confidence": 0.95,
+        "file_path": "main.py",
+        "severity": "high",
+        "why_it_matters": "Behavior can break",
+    }
+    worker = _CompletionLoopWorker(
+        review_outcomes=[
+            {
+                "reviewer_kind": "independent_reviewer",
+                "summary": "repair required",
+                "confidence": 0.95,
+                "outcome": "findings",
+                "findings": [finding],
+            },
+            {
+                "reviewer_kind": "independent_reviewer",
+                "summary": "repair accepted",
+                "confidence": 0.95,
+                "outcome": "no_findings",
+                "findings": [],
+            },
+        ]
+    )
+    service = TaskExecutionService(session_factory=session_factory, worker=worker)
+
+    def configure(activities: TaskExecutionActivities) -> None:
+        activities.verify_result_node = lambda state_input: evaluate_verification(
+            OrchestratorState.model_validate(state_input),
+            deterministic_verifier_outcome=("passed", "deterministic checks passed"),
+        )
+
+    task_id, workflow_result = await _run_completion_loop_workflow(
+        session_factory=session_factory,
+        service=service,
+        submission=TaskSubmission(
+            task_text="Implement reviewed change",
+            constraints={"independent_review_enable_repair_handoff": True},
+        ),
+        configure_activities=configure,
+    )
+
+    assert workflow_result["status"] == "completed"
+    assert len(worker.execution_requests) == 2
+    assert len(worker.review_requests) == 2
+    assert "independent review findings" in worker.execution_requests[1].task_text
+    with session_scope(session_factory) as session:
+        task = session.get(Task, task_id)
+        assert task is not None and task.status == "completed"
+        assert session.get(TemporalTaskState, task_id) is None
+
+
+@pytest.mark.anyio
+async def test_temporal_repair_exhaustion_projects_manual_follow_up(session_factory):
+    """A failed repair pass must terminate with one actionable failed projection."""
+    worker = _CompletionLoopWorker()
+    service = TaskExecutionService(session_factory=session_factory, worker=worker)
+
+    def configure(activities: TaskExecutionActivities) -> None:
+        activities.verify_result_node = lambda state_input: evaluate_verification(
+            OrchestratorState.model_validate(state_input),
+            deterministic_verifier_outcome=("failed", "main.py remains invalid"),
+        )
+        activities.review_result_node = lambda _state: {}
+
+    task_id, workflow_result = await _run_completion_loop_workflow(
+        session_factory=session_factory,
+        service=service,
+        submission=TaskSubmission(
+            task_text="Implement main.py repair",
+            constraints={"independent_verifier_max_repair_passes": 1},
+        ),
+        configure_activities=configure,
+    )
+
+    assert workflow_result["status"] == "failed"
+    assert "manual follow-up is required" in workflow_result["summary"]
+    assert len(worker.execution_requests) == 2
+    with session_scope(session_factory) as session:
+        task = session.get(Task, task_id)
+        events = TaskTimelineRepository(session).list_by_task(task_id)
+        assert task is not None and task.status == "failed"
+        assert [event.event_type for event in events].count(TimelineEventType.TASK_FAILED) == 1
+        assert session.get(TemporalTaskState, task_id) is None
+
+
+@pytest.mark.anyio
+async def test_temporal_repair_recovers_after_worker_restart(session_factory):
+    """A repair Activity lost with its worker must retry without duplicate state."""
+    worker = _CompletionLoopWorker()
+    service = TaskExecutionService(session_factory=session_factory, worker=worker)
+    verification_calls = 0
+    restart_failures = 0
+
+    async with await WorkflowEnvironment.start_time_skipping() as env:
+        snapshot, _ = service.create_task(TaskSubmission(task_text="Implement restart repair"))
+        activities = TaskExecutionActivities(service=service)
+        activities.decompose_task_node = lambda _state: {}
+
+        async def verifier(state_input):
+            nonlocal verification_calls
+            verification_calls += 1
+            outcome = (
+                ("failed", "repair required")
+                if verification_calls == 1
+                else ("passed", "repair accepted")
+            )
+            return evaluate_verification(
+                OrchestratorState.model_validate(state_input),
+                deterministic_verifier_outcome=outcome,
+            )
+
+        activities.verify_result_node = verifier
+        activities.review_result_node = lambda _state: {}
+        original_run_worker = activities.run_worker
+
+        @activity.defn(name="run_worker")
+        async def restart_once_during_repair(task_id: str) -> dict:
+            nonlocal restart_failures
+            state = await service._run_blocking(activities._get_current_state, task_id)
+            if state.completion_loop.phase == "repair_requested" and restart_failures == 0:
+                restart_failures += 1
+                raise RuntimeError("simulated worker restart during repair")
+            return await original_run_worker(task_id)
+
+        activity_functions = [
+            restart_once_during_repair if fn == activities.run_worker else fn
+            for fn in _completion_activity_functions(activities)
+        ]
+        temporal_worker = Worker(
+            env.client,
+            task_queue="task-execution-queue",
+            workflows=[TaskExecutionWorkflow],
+            workflow_runner=UnsandboxedWorkflowRunner(),
+            activities=activity_functions,
+        )
+        async with temporal_worker:
+            dispatcher = TemporalCommandDispatcher(
+                client=env.client,
+                session_factory=session_factory,
+            )
+            run_task = await _start_workflow_via_dispatcher(
+                dispatcher,
+                env.client,
+                snapshot.task_id,
+            )
+            workflow_result = await run_task
+
+    assert workflow_result["status"] == "completed"
+    assert restart_failures == 1
+    assert len(worker.execution_requests) == 2
+    assert verification_calls == 2
+    with session_scope(session_factory) as session:
+        task = session.get(Task, snapshot.task_id)
+        events = TaskTimelineRepository(session).list_by_task(snapshot.task_id)
+        assert task is not None and task.status == "completed"
+        assert [event.event_type for event in events].count(TimelineEventType.WORKER_COMPLETED) == 2
+
+
+@pytest.mark.anyio
+async def test_temporal_cancellation_during_repair_projects_one_terminal_state(session_factory):
+    """Cancelling a blocked repair pass must stop the worker and persist one cancellation."""
+    worker = _BlockingRepairWorker()
+    service = TaskExecutionService(session_factory=session_factory, worker=worker)
+    verification_calls = 0
+
+    async with await WorkflowEnvironment.start_time_skipping() as env:
+        snapshot, _ = service.create_task(TaskSubmission(task_text="Cancel blocked repair"))
+        activities = TaskExecutionActivities(service=service)
+        activities.decompose_task_node = lambda _state: {}
+
+        async def verifier(state_input):
+            nonlocal verification_calls
+            verification_calls += 1
+            return evaluate_verification(
+                OrchestratorState.model_validate(state_input),
+                deterministic_verifier_outcome=("failed", "repair required"),
+            )
+
+        activities.verify_result_node = verifier
+        activities.review_result_node = lambda _state: {}
+        temporal_worker = Worker(
+            env.client,
+            task_queue="task-execution-queue",
+            workflows=[TaskExecutionWorkflow],
+            workflow_runner=UnsandboxedWorkflowRunner(),
+            activities=_completion_activity_functions(activities),
+        )
+        async with temporal_worker:
+            dispatcher = TemporalCommandDispatcher(
+                client=env.client,
+                session_factory=session_factory,
+            )
+            with env.auto_time_skipping_disabled():
+                run_task = await _start_workflow_via_dispatcher(
+                    dispatcher,
+                    env.client,
+                    snapshot.task_id,
+                )
+                await asyncio.wait_for(worker.repair_started.wait(), timeout=5)
+                cancelled = service.cancel_task(task_id=snapshot.task_id)
+                assert cancelled is not None and cancelled.status == "failed"
+                await dispatcher.dispatch_pending()
+                try:
+                    cancellation_result = await run_task
+                except WorkflowFailureError:
+                    cancellation_result = None
+                if cancellation_result is not None:
+                    assert cancellation_result["status"] == "failed"
+
+    with session_scope(session_factory) as session:
+        task = session.get(Task, snapshot.task_id)
+        events = TaskTimelineRepository(session).list_by_task(snapshot.task_id)
+        assert task is not None and task.status == "failed"
+        assert [event.event_type for event in events].count(TimelineEventType.TASK_CANCELLED) == 1
+        assert session.get(TemporalTaskState, snapshot.task_id) is None
 
 
 @pytest.fixture
@@ -847,6 +1234,62 @@ async def test_permission_escalation_rejection_projects_terminal_state(session_f
         assert task.last_error == "Worker permission escalation rejected by operator."
         assert durable_state is None
         assert timeline[-1].event_type == TimelineEventType.APPROVAL_REJECTED
+        assert [event.event_type for event in timeline].count(
+            TimelineEventType.APPROVAL_REJECTED
+        ) == 1
+
+
+@pytest.mark.anyio
+async def test_repair_permission_rejection_persists_manual_handoff_for_delivery(
+    session_factory,
+):
+    """Rejected repair permission must retain an idempotent deliverable snapshot."""
+    service = TaskExecutionService(
+        session_factory=session_factory,
+        worker=CodexCliWorker(runtime_adapter=_ScriptedAdapter([])),
+    )
+    snapshot, _ = service.create_task(TaskSubmission(task_text="Repair bounded change"))
+    state = OrchestratorState.model_validate(
+        {
+            "task": {
+                "task_id": snapshot.task_id,
+                "task_text": "Repair bounded change",
+                "constraints": {"independent_verifier_repair_request": "fix tests"},
+            },
+            "result": WorkerResult(
+                status="failure",
+                summary="Need workspace write permission.",
+                requested_permission="workspace_write",
+                next_action_hint="request_higher_permission",
+            ).model_dump(),
+            "completion_loop": {
+                "phase": "repair_requested",
+                "repair_pass": 1,
+                "repair_source": "verifier",
+            },
+        }
+    )
+    with session_scope(session_factory) as session:
+        TemporalTaskStateRepository(session).upsert(
+            task_id=snapshot.task_id, state=state.model_dump(mode="json")
+        )
+
+    activities = TaskExecutionActivities(service=service)
+    await activities.resolve_permission_escalation(snapshot.task_id, False)
+    await activities.resolve_permission_escalation(snapshot.task_id, False)
+
+    with session_scope(session_factory) as session:
+        task = session.get(Task, snapshot.task_id)
+        durable_state = TemporalTaskStateRepository(session).get(task_id=snapshot.task_id)
+        timeline = TaskTimelineRepository(session).list_by_task(snapshot.task_id)
+        assert task is not None and task.status == "in_progress"
+        assert durable_state is not None
+        handoff = OrchestratorState.model_validate(durable_state.state)
+        assert handoff.completion_loop.phase == "manual_follow_up"
+        assert handoff.result is not None
+        assert handoff.result.failure_kind == "incomplete_delivery"
+        assert handoff.result.next_action_hint == "await_manual_follow_up"
+        assert handoff.result.summary.count("Repair permission was rejected") == 1
         assert [event.event_type for event in timeline].count(
             TimelineEventType.APPROVAL_REJECTED
         ) == 1

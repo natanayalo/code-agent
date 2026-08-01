@@ -577,7 +577,7 @@ def _handle_repair_handoff(
             updated_result = result.model_copy(
                 update={
                     "status": "failure",
-                    "failure_kind": result.failure_kind or report.failure_kind or "unknown",
+                    "failure_kind": "incomplete_delivery",
                     "summary": _manual_verifier_handoff_summary(
                         result.summary,
                         used_passes=used_passes,
@@ -592,13 +592,13 @@ def _handle_repair_handoff(
     if (
         report.status == "failed"
         and not repair_handoff_requested
-        and result.status == "success"
+        and (result.status == "success" or repairable_worker_failure)
         and updated_result is None
     ):
         updated_result = result.model_copy(
             update={
                 "status": "failure",
-                "failure_kind": report.failure_kind or "unknown",
+                "failure_kind": "incomplete_delivery",
                 "summary": f"{report.summary}\n\n{result.summary or ''}".strip(),
                 "next_action_hint": "await_manual_follow_up",
             }

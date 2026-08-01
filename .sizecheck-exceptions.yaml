@@ -72,6 +72,7 @@ function_exceptions:
     test_persist_execution_outcome_creates_proposal_for_scout: Highly stateful logic for test_persist_execution_outcome_creates_proposal_for_scout; splitting requires unnatural parameter coupling.
   tests/integration/test_vertical_slice_e2e.py:
     test_vertical_slice_e2e_happy_path: Highly stateful logic for test_vertical_slice_e2e_happy_path; splitting requires unnatural parameter coupling.
+    test_vertical_slice_e2e_repairs_in_retained_workspace: Docker-backed setup and assertions cover one cohesive retained-workspace Temporal repair flow.
   workers/antigravity_cli_worker_native.py:
     prepare_antigravity_workspace_migration: Copies various files and configs sequentially to construct an isolated workspace; breaking it down would be artificial.
   workers/native_agent_runner.py:

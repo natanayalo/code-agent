@@ -10,6 +10,7 @@ from orchestrator.temporal.policy import activity_options
 MAX_PERMISSION_ESCALATIONS = 5
 NODE_WAVE_PATCH_ID = "m25-1b-temporal-node-wave"
 M25_2_FANOUT_PATCH_ID = "m25-2-bounded-selective-fanout"
+COMPLETION_LOOP_PATCH_ID = "m25-4-temporal-completion-loop"
 
 
 @workflow.defn
@@ -88,29 +89,97 @@ class TaskExecutionWorkflow:
         if escalation_failure is not None:
             return escalation_failure
 
-        # Step 8: Verify result
-        await workflow.execute_activity(
-            "verify_result",
-            task_id,
-            **activity_options("verify_result"),
-        )
+        # Step 8: New histories execute durable bounded repair continuations.
+        completion_decision: dict[str, Any] = {
+            "continuation": "complete",
+            "summary": "verification and review completed",
+        }
+        if workflow.patched(COMPLETION_LOOP_PATCH_ID):
+            completion_failure, completion_decision = await self._run_completion_loop(
+                task_id,
+                execution_task_queue,
+            )
+            if completion_failure is not None:
+                return completion_failure
+        else:
+            # Preserve the original single-pass command sequence for old histories.
+            await workflow.execute_activity(
+                "verify_result",
+                task_id,
+                **activity_options("verify_result"),
+            )
 
-        # Step 9: Persist memory before terminal delivery so the final worker
-        # result remains available in the Temporal snapshot.
+        return await self._persist_and_deliver(task_id, completion_decision)
+
+    async def _persist_and_deliver(
+        self,
+        task_id: str,
+        completion_decision: dict[str, Any],
+    ) -> dict:
+        """Persist the final snapshot and project exactly one terminal delivery."""
         await workflow.execute_activity(
             "persist_memory",
             task_id,
             **activity_options("persist_memory"),
         )
 
-        # Step 10: Deliver result and remove the completed snapshot.
         await workflow.execute_activity(
             "deliver_result",
             task_id,
             **activity_options("deliver_result"),
         )
 
+        if completion_decision.get("continuation") == "manual_follow_up":
+            return {
+                "status": "failed",
+                "summary": completion_decision.get("summary") or "Manual follow-up is required.",
+            }
         return {"status": "completed", "summary": "Task completed successfully via Temporal."}
+
+    async def _run_completion_loop(
+        self,
+        task_id: str,
+        execution_task_queue: str | None,
+    ) -> tuple[dict | None, dict[str, Any]]:
+        """Repeat worker execution only when verification returns a durable repair decision."""
+        while True:
+            raw_decision = await workflow.execute_activity(
+                "verify_result",
+                task_id,
+                **activity_options("verify_result"),
+            )
+            decision = raw_decision if isinstance(raw_decision, dict) else {}
+            continuation = decision.get("continuation", "complete")
+            if continuation in {"complete", "manual_follow_up"}:
+                return None, decision
+            if continuation != "repair":
+                failure = "Verification returned an unknown completion-loop continuation."
+                await workflow.execute_activity(
+                    "record_workflow_failure",
+                    args=[task_id, failure],
+                    **activity_options("record_workflow_failure"),
+                )
+                return {"status": "failed", "summary": failure}, decision
+
+            await workflow.execute_activity(
+                "provision_workspace",
+                task_id,
+                **activity_options("provision_workspace"),
+            )
+            escalation_failure = await self._run_worker_with_permission_escalations(
+                task_id,
+                execution_task_queue,
+            )
+            if escalation_failure is not None:
+                if escalation_failure.get("status") == "rejected":
+                    return None, {
+                        "continuation": "manual_follow_up",
+                        "summary": (
+                            "Repair permission was rejected by the operator; "
+                            "manual follow-up is required."
+                        ),
+                    }
+                return escalation_failure, decision
 
     async def _run_decomposed_node_waves(self, task_id: str) -> dict | None:
         """Coordinate exactly one durable node execution before every merge."""

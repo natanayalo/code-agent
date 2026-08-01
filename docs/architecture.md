@@ -206,10 +206,19 @@ flowchart TD
 - Sequential DAG execution is supported. Bounded two-node read-only fan-out is
   an explicit opt-in pilot and remains disabled by default.
 
-Verification and independent review can currently produce bounded repair
-instructions, but the workflow does not yet loop through another worker pass.
-M25.4 closes that core completion-loop gap. Deep-scout phase chaining is not a
-supported Temporal lifecycle path.
+Verification and independent review return a typed durable continuation:
+complete, bounded repair, or manual follow-up. Repair reuses the retained
+workspace and originally selected worker queue, traverses the existing
+permission-escalation path, clears stale acceptance results, and repeats
+verification and review. Decomposed-task repair remains one monolithic worker
+pass while preserving the original DAG evidence.
+
+The workflow sequence is guarded by the permanent
+`m25-4-temporal-completion-loop` Temporal patch marker. Pre-M25.4 histories
+replay through the original single-pass branch; new histories retain the
+repair-loop branch. The patch-aware workflow must remain deployed until all
+M25.4 histories have closed. Deep-scout phase chaining is not a supported
+Temporal lifecycle path.
 
 ## Safety Boundaries
 

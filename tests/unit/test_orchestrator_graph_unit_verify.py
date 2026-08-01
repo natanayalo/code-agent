@@ -122,6 +122,7 @@ def test_verify_result_skips_repair_for_non_repairable_worker_failure() -> None:
     assert res["verification"]["failure_kind"] == "worker_failure"
     assert "repair_handoff_requested" not in res
     assert "task" not in res
+    assert "result" not in res
     assert res["progress_updates"][-1] == "verification failed"
 
 
@@ -270,6 +271,30 @@ def test_verify_result_stops_after_bounded_repair_attempts() -> None:
     assert (
         "Verification is still failing after 1 bounded repair attempt" in res["result"]["summary"]
     )
+    assert res["result"]["failure_kind"] == "incomplete_delivery"
+    assert res["result"]["next_action_hint"] == "await_manual_follow_up"
+
+
+def test_verify_result_zero_repair_budget_requires_manual_follow_up() -> None:
+    state = OrchestratorState.model_validate(
+        {
+            "task": {
+                "task_text": "demo",
+                "constraints": {"independent_verifier_max_repair_passes": 0},
+            },
+            "result": {
+                "status": "success",
+                "summary": "Applied candidate.",
+                "files_changed": ["main.py"],
+                "test_results": [{"name": "test1", "status": "failed"}],
+            },
+        }
+    )
+
+    res = verify_result(state)
+
+    assert "repair_handoff_requested" not in res
+    assert res["result"]["failure_kind"] == "incomplete_delivery"
     assert res["result"]["next_action_hint"] == "await_manual_follow_up"
 
 

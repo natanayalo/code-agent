@@ -59,5 +59,41 @@ async def test_verify_result_heartbeats_while_verification_runs(monkeypatch) -> 
     assert len(heartbeats) >= 2
 
 
+@pytest.mark.anyio
+async def test_verify_result_replays_persisted_repair_decision_without_rerunning_nodes() -> None:
+    """A retry after persistence must return the recorded repair continuation."""
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_id": "task-id", "task_text": "Verify this task"},
+            "completion_loop": {
+                "phase": "repair_requested",
+                "repair_pass": 1,
+                "repair_source": "verifier",
+                "summary": "verifier requested repair pass 1",
+            },
+        }
+    )
+    activities = object.__new__(TaskExecutionActivities)
+    activities.service = SimpleNamespace(
+        _run_blocking=lambda func, *args, **kwargs: _run_blocking(func, *args, **kwargs)
+    )
+    activities._get_current_state = lambda _task_id: state
+    activities._has_event = lambda *_args: True
+
+    async def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("verification nodes should not run again")
+
+    activities._run_node = fail_if_called
+
+    decision = await TaskExecutionActivities.verify_result.__wrapped__(activities, "task-id")
+
+    assert decision == {
+        "continuation": "repair",
+        "repair_source": "verifier",
+        "repair_pass": 1,
+        "summary": "verifier requested repair pass 1",
+    }
+
+
 async def _run_blocking(func, *args, **kwargs):
     return func(*args, **kwargs)

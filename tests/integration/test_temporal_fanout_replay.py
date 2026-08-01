@@ -115,3 +115,73 @@ async def test_m25_1b_history_replays_without_changing_select_next_node_input() 
     ).replay_workflow(history)
 
     assert replay.replay_failure is None
+
+
+@pytest.mark.anyio
+async def test_m25_4_repair_history_replays_with_completion_loop_patch() -> None:
+    """A new repair-loop history must remain deterministic under the current workflow."""
+    verification_calls = 0
+    worker_calls = 0
+
+    @activity.defn(name="decompose_task")
+    async def decompose_monolithic(_task_id: str) -> dict:
+        return {"execution_shape": "monolithic", "execution_task_queue": None}
+
+    @activity.defn(name="run_worker")
+    async def run_worker(_task_id: str) -> dict:
+        nonlocal worker_calls
+        worker_calls += 1
+        return {"requires_permission_escalation": False}
+
+    @activity.defn(name="verify_result")
+    async def verify_with_repair(_task_id: str) -> dict:
+        nonlocal verification_calls
+        verification_calls += 1
+        if verification_calls == 1:
+            return {
+                "continuation": "repair",
+                "repair_source": "verifier",
+                "repair_pass": 1,
+                "summary": "verifier requested repair pass 1",
+            }
+        return {
+            "continuation": "complete",
+            "repair_source": "verifier",
+            "repair_pass": 1,
+            "summary": "repair accepted",
+        }
+
+    activities = [
+        _classify_and_plan,
+        decompose_monolithic,
+        _load_memory,
+        _provision_workspace,
+        run_worker,
+        verify_with_repair,
+        _persist_memory,
+        _deliver_result,
+    ]
+    async with await WorkflowEnvironment.start_time_skipping() as env:
+        async with Worker(
+            env.client,
+            task_queue="repair-replay-test",
+            workflows=[TaskExecutionWorkflow],
+            workflow_runner=UnsandboxedWorkflowRunner(),
+            activities=activities,
+        ):
+            handle = await env.client.start_workflow(
+                TaskExecutionWorkflow.run,
+                "task-id",
+                id="m25-4-repair-history",
+                task_queue="repair-replay-test",
+            )
+            assert (await handle.result())["status"] == "completed"
+            history = await handle.fetch_history()
+
+    assert worker_calls == 2
+    assert verification_calls == 2
+    replay = await Replayer(
+        workflows=[TaskExecutionWorkflow], workflow_runner=UnsandboxedWorkflowRunner()
+    ).replay_workflow(history)
+
+    assert replay.replay_failure is None

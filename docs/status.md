@@ -4,12 +4,11 @@
 
 Phase 4A: Temporal stabilization and measured reliability.
 
-Active focus: **M25.4 — Temporal Core Completion-Loop Parity**.
+Active focus: **M25.5 — Truthful Readiness and Operator Recovery**.
 
-The first implementation slice will make verifier and independent-review
-repair requests return a durable continuation decision to the Temporal
-workflow, then loop through worker execution and re-verification within the
-existing repair budget.
+The next implementation slice will make readiness dependency-aware and surface
+outbox lag, worker freshness, stuck waits, and terminal divergence with safe
+operator recovery guidance.
 
 ## Current capabilities
 
@@ -31,6 +30,8 @@ existing repair budget.
   read-only fan-out
 - deterministic and independent verification, independent review, and
   workspace/branch/draft-PR delivery
+- durable, bounded verifier and independent-review repair loops on retained
+  workspaces with permission escalation, re-verification, and manual handoff
 - dashboard visibility for tasks, TaskSpec, DAG attempts, interactions,
   timelines, logs, artifacts, traces, memory, proposals, metrics, and tools
 
@@ -43,6 +44,10 @@ Temporal migration and rollback record is in the
 - The accepted M25.3 release covered the Temporal lifecycle, HITL, cancellation,
   restart recovery, sequential DAGs, opt-in fan-out, outage recovery, history
   replay, and terminal reconciliation.
+- The accepted M25.4 release added patch-aware Temporal completion-loop parity:
+  verifier and independent-review repair, retained-workspace execution, repair
+  restart/idempotency/cancellation handling, replay coverage, and one terminal
+  manual-follow-up projection when repair cannot complete.
 - The 25-case frozen evaluation remains a deterministic domain-logic regression
   suite. It uses replayed worker outcomes and is not a real-provider Temporal
   reliability baseline.
@@ -54,8 +59,6 @@ Temporal migration and rollback record is in the
 
 ## Known limitations
 
-- verifier and independent-review nodes can request bounded repair, but the
-  Temporal workflow does not yet execute that continuation
 - `/health` and `/ready` are currently process-level responses rather than
   truthful dependency and execution-readiness signals
 - command-outbox lag, worker freshness, stuck waits, and terminal divergence
@@ -73,13 +76,8 @@ Temporal migration and rollback record is in the
 
 ## Next slices only
 
-1. M25.4: Temporal Core Completion-Loop Parity
-   - return an explicit continuation from verification/review activities
-   - execute bounded repair through the normal worker and permission paths
-   - re-verify, then finish or produce an actionable manual handoff
-   - prove repair, exhaustion, restart, idempotency, and replay behavior
-2. M25.5: Truthful Readiness and Operator Recovery
-3. M25.6: Real Temporal Reliability Baseline
+1. M25.5: Truthful Readiness and Operator Recovery
+2. M25.6: Real Temporal Reliability Baseline
 
 ## Deferred
 

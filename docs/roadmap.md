@@ -14,9 +14,8 @@ Phase 4A: Temporal stabilization and measured reliability.
 
 Priority sequence:
 
-1. M25.4: Temporal Core Completion-Loop Parity
-2. M25.5: Truthful Readiness and Operator Recovery
-3. M25.6: Real Temporal Reliability Baseline
+1. M25.5: Truthful Readiness and Operator Recovery
+2. M25.6: Real Temporal Reliability Baseline
 
 M26 review-comment repair and M27 reliability-based autonomy remain reserved
 but explicitly deferred. Neither milestone resumes until the M25.6 evidence
@@ -59,44 +58,10 @@ autonomous privileged maintenance.
 - M25.3 made Temporal the sole durable lifecycle runtime and retired the
   Postgres polling scheduler, LangGraph lifecycle, runtime selector, and lease
   schema. See the [Temporal cutover record](archive/temporal_cutover.md).
-
-## M25.4 — Temporal Core Completion-Loop Parity
-
-### Goal
-
-Ensure every core verifier or independent-review repair decision has a durable
-Temporal continuation instead of ending after the first verification pass.
-
-### Scope
-
-- make verifier and review activities return an explicit continuation decision
-  to the workflow
-- on a bounded repair request, reprovision the retained workspace as needed,
-  rerun the selected worker with the persisted repair instructions, and repeat
-  verification
-- preserve existing repair budgets, permission escalation, cancellation,
-  activity idempotency, terminal projection, and history replay compatibility
-- end in an actionable manual-follow-up state when repair is rejected,
-  non-repairable, or exhausted
-- add Temporal integration and focused E2E coverage for successful repair,
-  exhausted repair, worker restart during repair, duplicate activity delivery,
-  and history replay
-
-### Boundaries
-
-- bounded two-node read-only fan-out remains opt-in
-- deep-scout repo-to-research chaining is explicitly deferred
-- no new provider, deployment, or autonomy policy is introduced
-
-### Exit criteria
-
-- no core repair flag can be persisted without either executing the repair or
-  producing an explicit terminal/manual-follow-up state
-- verifier and independent-review repairs each complete successfully through a
-  Temporal integration test
-- repair exhaustion, cancellation, restart recovery, and replay leave one
-  consistent Postgres projection and timeline
-- the focused operator-flow E2E passes on the production-like Compose stack
+- M25.4 added patch-aware completion-loop parity for verifier and independent
+  review repairs. Bounded repairs reuse the retained workspace and selected
+  worker/permission path, repeat acceptance checks, and terminate in one
+  actionable manual handoff when repair is unavailable or exhausted.
 
 ## M25.5 — Truthful Readiness and Operator Recovery
 
