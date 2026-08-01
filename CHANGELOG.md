@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat(dashboard): add execution status and recovery guidance ([#347](https://github.com/natanayalo/code-agent/pull/347))
+
 - Feat: add dependency-aware execution readiness ([#346](https://github.com/natanayalo/code-agent/pull/346))
 
 - Feat: add temporal repair completion loop ([#345](https://github.com/natanayalo/code-agent/pull/345))
