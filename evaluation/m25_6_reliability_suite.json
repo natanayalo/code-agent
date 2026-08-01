@@ -1,0 +1,26 @@
+{
+  "suite_name": "m25.6-temporal-reliability-baseline",
+  "schema_version": 1,
+  "cases": [
+    {"case_id": "read-only-codex-01", "category": "read_only_monolithic", "expected_profile": "codex-native-executor-read-only", "expected_mode": "read_only", "required_proofs": []},
+    {"case_id": "read-only-codex-02", "category": "read_only_monolithic", "expected_profile": "codex-native-executor-read-only", "expected_mode": "read_only", "required_proofs": []},
+    {"case_id": "read-only-antigravity-01", "category": "read_only_monolithic", "expected_profile": "antigravity-native-executor-read-only", "expected_mode": "read_only", "required_proofs": []},
+    {"case_id": "read-only-antigravity-02", "category": "read_only_monolithic", "expected_profile": "antigravity-native-executor-read-only", "expected_mode": "read_only", "required_proofs": []},
+    {"case_id": "mutation-codex-01", "category": "mutation", "expected_profile": "codex-native-executor", "expected_mode": "mutation", "required_proofs": ["validation"]},
+    {"case_id": "mutation-verifier-repair", "category": "mutation", "expected_profile": "codex-native-executor", "expected_mode": "mutation", "required_proofs": ["validation", "verifier_repair"]},
+    {"case_id": "mutation-antigravity-01", "category": "mutation", "expected_profile": "antigravity-native-executor", "expected_mode": "mutation", "required_proofs": ["validation"]},
+    {"case_id": "mutation-independent-review-repair", "category": "mutation", "expected_profile": "antigravity-native-executor", "expected_mode": "mutation", "required_proofs": ["validation", "independent_review_repair"]},
+    {"case_id": "sequential-dag-codex-01", "category": "sequential_dag", "expected_profile": "codex-native-executor", "expected_mode": "mutation", "required_proofs": ["validation", "sequential_dag"]},
+    {"case_id": "sequential-dag-codex-02", "category": "sequential_dag", "expected_profile": "codex-native-executor", "expected_mode": "mutation", "required_proofs": ["validation", "sequential_dag"]},
+    {"case_id": "sequential-dag-antigravity-01", "category": "sequential_dag", "expected_profile": "antigravity-native-executor", "expected_mode": "mutation", "required_proofs": ["validation", "sequential_dag"]},
+    {"case_id": "fanout-codex-01", "category": "read_only_fanout", "expected_profile": "codex-native-executor-read-only", "expected_mode": "read_only", "required_proofs": ["sequential_dag", "fanout_overlap"]},
+    {"case_id": "fanout-antigravity-01", "category": "read_only_fanout", "expected_profile": "antigravity-native-executor-read-only", "expected_mode": "read_only", "required_proofs": ["sequential_dag", "fanout_overlap"]},
+    {"case_id": "hitl-approval", "category": "hitl", "expected_profile": "codex-native-executor", "expected_mode": "mutation", "required_proofs": ["validation", "approval"]},
+    {"case_id": "hitl-clarification", "category": "hitl", "expected_profile": "antigravity-native-executor", "expected_mode": "mutation", "required_proofs": ["validation", "clarification"]},
+    {"case_id": "hitl-permission-escalation", "category": "hitl", "expected_profile": "antigravity-native-executor", "expected_mode": "mutation", "required_proofs": ["validation", "permission_escalation"]},
+    {"case_id": "recovery-cancellation", "category": "recovery", "expected_profile": "codex-native-executor", "expected_mode": "mutation", "expected_terminal_status": "cancelled", "required_proofs": ["cancellation"]},
+    {"case_id": "recovery-worker-restart", "category": "recovery", "expected_profile": "antigravity-native-executor", "expected_mode": "mutation", "required_proofs": ["validation", "worker_restart"]},
+    {"case_id": "draft-pr-codex", "category": "draft_pr", "expected_profile": "codex-native-executor", "expected_mode": "mutation", "required_proofs": ["validation", "draft_pr"]},
+    {"case_id": "draft-pr-antigravity", "category": "draft_pr", "expected_profile": "antigravity-native-executor", "expected_mode": "mutation", "required_proofs": ["validation", "draft_pr"]}
+  ]
+}

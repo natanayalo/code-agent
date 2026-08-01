@@ -348,6 +348,69 @@ To verify the delivery integration variant, use:
 .venv/bin/python .agents/skills/e2e-qa/scripts/run_e2e_qa_delivery.py
 ```
 
+### M25.6 Temporal reliability evidence collection
+
+The M25.6 collector is incremental and does not submit tasks, invoke providers,
+change routing, or write to Postgres. Submit and poll later real-worker cases
+through the existing authenticated E2E API workflow above, then capture each
+terminal task immediately so Temporal retention cannot remove its history.
+
+Before deploying the API and workers, set `BUILD_SHA` to the exact commit being
+evaluated. Use that same value when initializing the bundle; do not use the
+current checkout SHA unless it is the deployed build.
+
+```bash
+export BUILD_SHA="0123456789abcdef0123456789abcdef01234567"
+export DATABASE_URL="postgresql+psycopg://..."
+
+.venv/bin/python scripts/e2e/run_temporal_reliability_eval.py init \
+  --bundle-dir artifacts/m25-6/baseline-01 \
+  --environment staging \
+  --operator "operator-name" \
+  --database-url-env DATABASE_URL \
+  --temporal-address temporal:7233 \
+  --temporal-namespace default
+```
+
+`init` freezes the checked-in 20-case suite and pins the build SHA,
+environment, operator, database environment-variable name, and Temporal
+endpoint. A bundle must contain tasks from one deployment and environment only.
+
+After a case reaches its expected terminal state, record the operator-only
+annotations and capture it before moving to the next deployment:
+
+```bash
+.venv/bin/python scripts/e2e/run_temporal_reliability_eval.py capture \
+  --bundle-dir artifacts/m25-6/baseline-01 \
+  --case-id mutation-codex-01 \
+  --task-id "task-id" \
+  --manual-log-inspection no \
+  --ci-rejection-count 0 \
+  --review-rejection-count 0
+```
+
+Use `--next-action` for failed tasks; failures without a typed, non-`unknown`
+failure kind and actionable next step fail the evidence gate. A capture is
+immutable, and the CLI refuses duplicate case IDs and task IDs. Failed gates
+are retained for diagnosis and return a nonzero exit code.
+
+Generate the aggregate only after captures are current:
+
+```bash
+.venv/bin/python scripts/e2e/run_temporal_reliability_eval.py report \
+  --bundle-dir artifacts/m25-6/baseline-01 \
+  --json-output artifacts/m25-6/baseline-01/report.json \
+  --markdown-output artifacts/m25-6/baseline-01/report.md
+```
+
+The `artifacts/` tree is gitignored and contains private task evidence and raw
+Temporal histories. The generated JSON and Markdown pass through a public-field
+allowlist that excludes task text, repository URLs, summaries, responses, logs,
+secrets, notes, artifact URIs, and task IDs. Commit a reviewed redacted report
+only after all 20 captures pass and the operator confirms it is safe. A
+`ready_for_operator_review` result is a technical evidence gate only; it never
+resumes M26/M27 or changes production routing automatically.
+
 ## 10) Antigravity Migration Guide
 
 When migrating existing workspaces and settings to Antigravity:
