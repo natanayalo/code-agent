@@ -433,6 +433,39 @@ def test_antigravity_worker_read_only_uses_strict_tool_permission(tmp_path: Path
     assert json.loads(settings_path.read_text(encoding="utf-8"))["toolPermission"] == "strict"
 
 
+def test_antigravity_worker_permission_grant_controls_tool_permission(tmp_path: Path) -> None:
+    worker, workspace = _make_worker(tmp_path, tool_permission="always-proceed")
+
+    for granted_permission, expected_tool_permission in (
+        ("read_only", "strict"),
+        ("workspace_write", "always-proceed"),
+    ):
+        worker._build_native_agent_run_request(
+            WorkerRequest(
+                repo_url="https://example.com/repo.git",
+                task_text="Apply a bounded change",
+                constraints={"granted_permission": granted_permission},
+                runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+            ),
+            workspace=workspace,
+            runtime_settings=CliRuntimeSettings(),
+            runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+            system_prompt_override="system prompt",
+        )
+
+        settings_path = (
+            workspace.workspace_path
+            / ".agent_home"
+            / ".gemini"
+            / "antigravity-cli"
+            / "settings.json"
+        )
+        assert (
+            json.loads(settings_path.read_text(encoding="utf-8"))["toolPermission"]
+            == expected_tool_permission
+        )
+
+
 def test_antigravity_worker_maps_auth_failure_to_provider_auth(tmp_path: Path) -> None:
     worker, _ = _make_worker(tmp_path)
     result = worker._build_worker_result_from_native_run(
@@ -475,6 +508,7 @@ def test_antigravity_worker_maps_permission_denial_to_permission_denied(tmp_path
 
     assert result.failure_kind == "permission_denied"
     assert result.next_action_hint == "request_higher_permission"
+    assert result.requested_permission == "workspace_write"
 
 
 def test_antigravity_workspace_migration_oauth_symlink_fallback(

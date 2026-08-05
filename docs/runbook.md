@@ -408,6 +408,12 @@ deterministic verification and is intentionally omitted from worker prompts.
 Do not put secrets in either field: task constraints and private evidence are
 still persisted for operator inspection.
 
+To exercise the Antigravity permission-escalation loop without changing the
+task's mutation mode, submit the initial task with
+`granted_permission=read_only`. The native worker uses strict tool permission,
+reports a `workspace_write` request when mutation is denied, and the approved
+Temporal retry receives the granted workspace-write boundary.
+
 Generate the aggregate only after captures are current:
 
 ```bash

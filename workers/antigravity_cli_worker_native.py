@@ -13,6 +13,7 @@ from uuid import uuid4
 
 from sandbox import WorkspaceHandle
 from sandbox.scratch import node_agent_home, node_run_root
+from tools import ToolPermissionLevel, granted_permission_from_constraints
 from workers.antigravity_cli_adapter import (
     AntigravityCliRuntimeAdapter,
     write_antigravity_settings,
@@ -47,7 +48,8 @@ def antigravity_tool_permission(
 ) -> str:
     """Map read-only requests to strict Antigravity tool permissions."""
     read_only_requested = request.read_only or bool(request.constraints.get("read_only"))
-    if read_only_requested:
+    granted_permission = granted_permission_from_constraints(request.constraints)
+    if read_only_requested or granted_permission == ToolPermissionLevel.READ_ONLY:
         return ANTIGRAVITY_READ_ONLY_TOOL_PERMISSION
     return adapter.tool_permission
 

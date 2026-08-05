@@ -12,9 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from apps.observability import (
-    set_span_status_from_outcome,
-)
+from apps.observability import set_span_status_from_outcome
 from db.enums import WorkerRuntimeMode
 from sandbox import (
     DockerSandboxContainer,
@@ -22,9 +20,7 @@ from sandbox import (
 )
 from sandbox.redact import SecretRedactor
 from sandbox.scratch import node_agent_home
-from tools import (
-    ToolPermissionLevel,
-)
+from tools import ToolPermissionLevel
 from workers.adapter_utils import build_failure_summary, format_native_run_summary
 from workers.antigravity_cli_adapter import AntigravityCliRuntimeAdapter
 from workers.antigravity_cli_worker_native import (
@@ -40,7 +36,7 @@ from workers.base import (
     WorkerRequest,
     WorkerResult,
 )
-from workers.cli_adapter_utils import build_worker_result
+from workers.cli_adapter_utils import build_worker_result, requested_permission_for_failure
 from workers.cli_runtime import (
     CliRuntimeExecutionResult,
     CliRuntimeSettings,
@@ -560,10 +556,12 @@ class GeminiCliWorkerNativeMixin:
             summary=format_native_run_summary(native_result),
             final_message=native_result.final_message,
         )
+        failure_kind = self._native_failure_kind(native_result)
         result = WorkerResult(
             status=native_result.status,
             summary=summary,
-            failure_kind=self._native_failure_kind(native_result),
+            failure_kind=failure_kind,
+            requested_permission=requested_permission_for_failure(failure_kind),
             budget_usage={
                 "runtime_mode": runtime_mode.value,
                 "native_agent": {
