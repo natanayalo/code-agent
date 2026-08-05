@@ -23,6 +23,7 @@ from workers.cli_runtime import CliRuntimeSettings
 from workers.native_agent_artifacts import DEFAULT_NATIVE_AGENT_ARTIFACTS_DIR
 
 ANTIGRAVITY_READ_ONLY_TOOL_PERMISSION = "strict"
+ANTIGRAVITY_MUTATION_REVIEW_TOOL_PERMISSION = "request-review"
 
 logger = logging.getLogger(__name__)
 
@@ -49,8 +50,10 @@ def antigravity_tool_permission(
     """Map read-only requests to strict Antigravity tool permissions."""
     read_only_requested = request.read_only or bool(request.constraints.get("read_only"))
     granted_permission = granted_permission_from_constraints(request.constraints)
-    if read_only_requested or granted_permission == ToolPermissionLevel.READ_ONLY:
+    if read_only_requested:
         return ANTIGRAVITY_READ_ONLY_TOOL_PERMISSION
+    if granted_permission == ToolPermissionLevel.READ_ONLY:
+        return ANTIGRAVITY_MUTATION_REVIEW_TOOL_PERMISSION
     return adapter.tool_permission
 
 

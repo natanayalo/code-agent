@@ -437,7 +437,7 @@ def test_antigravity_worker_permission_grant_controls_tool_permission(tmp_path: 
     worker, workspace = _make_worker(tmp_path, tool_permission="always-proceed")
 
     for granted_permission, expected_tool_permission in (
-        ("read_only", "strict"),
+        ("read_only", "request-review"),
         ("workspace_write", "always-proceed"),
     ):
         worker._build_native_agent_run_request(
