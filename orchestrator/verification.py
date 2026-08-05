@@ -401,7 +401,7 @@ def _build_independent_verifier_request(
     timeout_seconds: int,
 ) -> WorkerRequest:
     constraints = dict(state.task.constraints)
-    constraints["read_only"] = False
+    constraints["read_only"] = True
     if constraints.get("granted_permission") != ToolPermissionLevel.WORKSPACE_WRITE:
         constraints.pop("granted_permission", None)
 
@@ -414,7 +414,7 @@ def _build_independent_verifier_request(
         branch=state.task.branch,
         workspace_id=state.dispatch.workspace_id
         or (state.result.workspace_id if state.result else None),
-        read_only=False,
+        read_only=True,
         task_text=_build_verifier_task_text(state),
         memory_context=state.memory.model_dump(),
         task_spec=state.task_spec.model_dump(mode="json") if state.task_spec is not None else None,

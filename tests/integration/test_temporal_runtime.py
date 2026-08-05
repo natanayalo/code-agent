@@ -150,6 +150,40 @@ class _CompletionLoopWorker:
         )
 
 
+class _VerifierBoundaryWorker:
+    """Capture execution, verifier, and reviewer requests through the real activity."""
+
+    def __init__(self) -> None:
+        self.verifier_requests = []
+
+    async def run(self, request, *, system_prompt=None) -> WorkerResult:
+        if "Independently verify the previously completed task" in request.task_text:
+            self.verifier_requests.append(request)
+            return WorkerResult(
+                status="success",
+                summary=json.dumps({"status": "passed", "summary": "read-only verifier passed"}),
+            )
+        if request.task_text.startswith("Perform an independent review"):
+            return WorkerResult(
+                status="success",
+                summary=json.dumps(
+                    {
+                        "reviewer_kind": "independent_reviewer",
+                        "summary": "no findings",
+                        "confidence": 1.0,
+                        "outcome": "no_findings",
+                        "findings": [],
+                    }
+                ),
+            )
+        return WorkerResult(
+            status="success",
+            summary="initial worker completed",
+            files_changed=["main.py"],
+            workspace_id=request.workspace_id or "retained-workspace",
+        )
+
+
 class _BlockingRepairWorker(_CompletionLoopWorker):
     """Block one repair execution so cancellation and worker restart can be observed."""
 
@@ -361,6 +395,30 @@ async def _run_completion_loop_workflow(
             )
             workflow_result = await run_task
     return snapshot.task_id, workflow_result
+
+
+@pytest.mark.anyio
+async def test_temporal_independent_verifier_request_is_read_only(session_factory):
+    """The real verification activity must not grant mutation tools to its inspector."""
+    worker = _VerifierBoundaryWorker()
+    service = TaskExecutionService(
+        session_factory=session_factory,
+        worker=worker,
+        enable_independent_verifier=True,
+    )
+
+    _task_id, workflow_result = await _run_completion_loop_workflow(
+        session_factory=session_factory,
+        service=service,
+        submission=TaskSubmission(task_text="Implement main.py"),
+        configure_activities=lambda _activities: None,
+    )
+
+    assert workflow_result["status"] == "completed"
+    assert len(worker.verifier_requests) == 1
+    verifier_request = worker.verifier_requests[0]
+    assert verifier_request.read_only is True
+    assert verifier_request.constraints["read_only"] is True
 
 
 @pytest.mark.anyio
