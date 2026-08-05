@@ -57,7 +57,7 @@ def test_capture_delivery_metadata_uses_task_token_with_github_api() -> None:
         ]
     ).encode()
 
-    with patch("orchestrator.nodes.delivery.urlopen", return_value=response) as open_mock:
+    with patch("orchestrator.github_delivery.urlopen", return_value=response) as open_mock:
         metadata = _capture_delivery_metadata(state, "qa/evidence", "task-token")
 
     assert metadata == {
@@ -95,10 +95,10 @@ def test_capture_delivery_metadata_retries_github_visibility() -> None:
 
     with (
         patch(
-            "orchestrator.nodes.delivery.urlopen",
+            "orchestrator.github_delivery.urlopen",
             side_effect=[empty_response, visible_response],
         ) as open_mock,
-        patch("orchestrator.nodes.delivery.time.sleep") as sleep_mock,
+        patch("orchestrator.github_delivery.time.sleep") as sleep_mock,
     ):
         metadata = _capture_delivery_metadata(state, "qa/evidence", "task-token")
 
@@ -248,6 +248,104 @@ async def test_run_deliver_result_reconciles_existing_draft_pr(monkeypatch):
     assert res["result"].status == "success"
     assert res["result"].delivery_metadata == metadata
     assert "Existing draft PR reconciled." in res["result"].summary
+
+
+@pytest.mark.asyncio
+async def test_run_deliver_result_publishes_missing_draft_pr(monkeypatch):
+    monkeypatch.setenv("GH_TOKEN", "fake_token")
+    state = OrchestratorState.model_validate(
+        {
+            "task": {
+                "task_text": "demo",
+                "repo_url": "https://github.com/example/project.git",
+                "branch": "master",
+            },
+            "result": {"status": "success", "summary": "implementation complete"},
+            "task_spec": {
+                "delivery_mode": "draft_pr",
+                "delivery_branch": "qa/evidence",
+                "goal": "demo",
+                "pr_title": "Evidence PR",
+                "pr_body": "Do not merge.",
+            },
+            "dispatch": {"workspace_id": "ws-1", "worker_type": "antigravity"},
+        }
+    )
+    worker_mock = AsyncMock()
+    worker_mock.run.return_value = WorkerResult(status="success", summary="local commit ready")
+    missing_metadata = {"delivery_mode": "draft_pr", "branch_name": "qa/evidence"}
+    published_metadata = {
+        **missing_metadata,
+        "pr_url": "https://github.com/example/project/pull/8",
+        "pr_number": 8,
+        "head_sha": "def456",
+    }
+
+    with (
+        patch("orchestrator.nodes.delivery.start_optional_span"),
+        patch("orchestrator.nodes.delivery.set_span_input_output"),
+        patch(
+            "orchestrator.nodes.delivery._capture_delivery_metadata",
+            return_value=missing_metadata,
+        ),
+        patch(
+            "orchestrator.nodes.delivery.publish_draft_pr_from_workspace",
+            return_value=published_metadata,
+        ) as publish_mock,
+    ):
+        res = await _run_deliver_result(
+            state,
+            worker=WorkerFacade(antigravity_worker=worker_mock),
+        )
+
+    worker_mock.run.assert_awaited_once()
+    publish_mock.assert_called_once()
+    assert res["timeline_events"][0].event_type == TimelineEventType.DELIVERY_COMPLETED
+    assert res["result"].delivery_metadata == published_metadata
+
+
+@pytest.mark.asyncio
+async def test_run_deliver_result_fails_when_draft_pr_cannot_be_confirmed(monkeypatch):
+    monkeypatch.setenv("GH_TOKEN", "fake_token")
+    state = OrchestratorState.model_validate(
+        {
+            "task": {
+                "task_text": "demo",
+                "repo_url": "https://github.com/example/project.git",
+            },
+            "result": {"status": "success", "summary": "implementation complete"},
+            "task_spec": {
+                "delivery_mode": "draft_pr",
+                "delivery_branch": "qa/evidence",
+                "goal": "demo",
+            },
+            "dispatch": {"workspace_id": "ws-1", "worker_type": "antigravity"},
+        }
+    )
+    worker_mock = AsyncMock()
+    worker_mock.run.return_value = WorkerResult(status="success", summary="claimed success")
+    missing_metadata = {"delivery_mode": "draft_pr", "branch_name": "qa/evidence"}
+
+    with (
+        patch("orchestrator.nodes.delivery.start_optional_span"),
+        patch("orchestrator.nodes.delivery.set_span_input_output"),
+        patch(
+            "orchestrator.nodes.delivery._capture_delivery_metadata",
+            return_value=missing_metadata,
+        ),
+        patch(
+            "orchestrator.nodes.delivery.publish_draft_pr_from_workspace",
+            return_value=None,
+        ),
+    ):
+        res = await _run_deliver_result(
+            state,
+            worker=WorkerFacade(antigravity_worker=worker_mock),
+        )
+
+    assert res["timeline_events"][0].event_type == TimelineEventType.DELIVERY_FAILED
+    assert res["result"].status == "failure"
+    assert "did not confirm" in res["result"].summary
 
 
 @pytest.mark.asyncio

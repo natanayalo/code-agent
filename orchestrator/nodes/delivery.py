@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
-import time
 from collections.abc import Awaitable, Callable
 from typing import Any
-from urllib.parse import quote, urlencode
-from urllib.request import Request, urlopen
 
 from apps.observability import (
     NATIVE_AGENT_STDERR_ATTRIBUTE,
@@ -20,7 +16,10 @@ from apps.observability import (
     start_optional_span,
 )
 from db.enums import TimelineEventType, WorkerRunStatus
-from orchestrator.github_repo import github_repo_spec_from_url
+from orchestrator.github_delivery import (
+    capture_delivery_metadata,
+    publish_draft_pr_from_workspace,
+)
 from orchestrator.nodes.utils import (
     _available_workers,
     _ensure_state,
@@ -32,9 +31,6 @@ from orchestrator.state import OrchestratorState
 from workers.base import Worker, WorkerRequest, WorkerResult
 
 logger = logging.getLogger(__name__)
-
-GITHUB_PR_METADATA_ATTEMPTS = 3
-GITHUB_PR_METADATA_RETRY_SECONDS = 2
 
 
 def _is_valid_git_branch_name(name: str) -> bool:
@@ -192,6 +188,24 @@ def _delivery_pr_fields(state: OrchestratorState) -> tuple[str, str]:
     return pr_title, pr_body
 
 
+def _draft_pr_token_failure(
+    state: OrchestratorState, gh_token: str | None
+) -> dict[str, Any] | None:
+    assert state.task_spec is not None
+    if gh_token or state.task_spec.delivery_mode != "draft_pr":
+        return None
+    msg = (
+        "Delivery failed: GH_TOKEN or GITHUB_TOKEN not found in environment "
+        "(required for PR creation)."
+    )
+    logger.warning(msg)
+    return _delivery_failure_response(
+        state,
+        msg,
+        "delivery failed (missing github token)",
+    )
+
+
 def _build_delivery_worker_request(
     state: OrchestratorState,
     *,
@@ -249,62 +263,14 @@ def _capture_delivery_metadata(
     branch_name: str,
     gh_token: str | None,
 ) -> dict[str, Any] | None:
-    if not state.task_spec or not state.task.repo_url:
+    if not state.task_spec:
         return None
-
-    delivery_mode = state.task_spec.delivery_mode
-    metadata: dict[str, Any] = {
-        "delivery_mode": delivery_mode,
-        "branch_name": branch_name,
-    }
-
-    if delivery_mode != "draft_pr":
-        return metadata
-
-    if not gh_token:
-        return metadata
-
-    repo_spec = github_repo_spec_from_url(state.task.repo_url)
-    if repo_spec is None:
-        logger.debug("Failed to derive GitHub repo spec from repo_url for delivery metadata.")
-        return metadata
-
-    try:
-        owner, repository = repo_spec.split("/", 1)
-    except ValueError:
-        logger.debug("Failed to split GitHub repo spec for delivery metadata: %s", repo_spec)
-        return metadata
-    query = urlencode({"state": "open", "head": f"{owner}:{branch_name}"})
-    request_url = (
-        f"https://api.github.com/repos/{quote(owner, safe='')}/"
-        f"{quote(repository, safe='')}/pulls?{query}"
+    return capture_delivery_metadata(
+        repo_url=state.task.repo_url,
+        delivery_mode=state.task_spec.delivery_mode,
+        branch_name=branch_name,
+        token=gh_token,
     )
-    request = Request(
-        request_url,
-        headers={
-            "Accept": "application/vnd.github+json",
-            "Authorization": f"Bearer {gh_token}",
-            "User-Agent": "code-agent-delivery-metadata",
-            "X-GitHub-Api-Version": "2022-11-28",
-        },
-    )
-    for attempt in range(GITHUB_PR_METADATA_ATTEMPTS):
-        try:
-            with urlopen(request, timeout=30) as response:  # noqa: S310 - fixed GitHub API host
-                rows = json.load(response)
-            if isinstance(rows, list) and rows:
-                pull_request = rows[0]
-                head = pull_request.get("head") or {}
-                metadata["pr_url"] = pull_request.get("html_url")
-                metadata["pr_number"] = pull_request.get("number")
-                metadata["head_sha"] = head.get("sha")
-                return metadata
-        except (json.JSONDecodeError, OSError, TimeoutError, ValueError) as exc:
-            logger.debug("Failed to capture PR metadata via GitHub API: %s", exc)
-        if attempt + 1 < GITHUB_PR_METADATA_ATTEMPTS:
-            time.sleep(GITHUB_PR_METADATA_RETRY_SECONDS)
-
-    return metadata
 
 
 def _record_delivery_worker_output(result: WorkerResult) -> None:
@@ -414,6 +380,7 @@ async def _delivery_success_response(
     delivery_result: WorkerResult,
     branch_name: str,
     pr_title: str,
+    pr_body: str,
     gh_token: str | None,
 ) -> dict[str, Any]:
     import asyncio
@@ -422,6 +389,34 @@ async def _delivery_success_response(
     delivery_metadata = await asyncio.to_thread(
         _capture_delivery_metadata, state, branch_name, gh_token
     )
+    if (
+        state.task_spec
+        and state.task_spec.delivery_mode == "draft_pr"
+        and gh_token
+        and not (delivery_metadata or {}).get("pr_url")
+    ):
+        assert state.dispatch is not None
+        delivery_metadata = await asyncio.to_thread(
+            publish_draft_pr_from_workspace,
+            repo_url=state.task.repo_url,
+            workspace_id=state.dispatch.workspace_id or "",
+            branch_name=branch_name,
+            base_branch=state.task_spec.target_branch or state.task.branch or "master",
+            pr_title=pr_title,
+            pr_body=pr_body,
+            token=gh_token,
+        )
+    if (
+        state.task_spec
+        and state.task_spec.delivery_mode == "draft_pr"
+        and not (delivery_metadata or {}).get("pr_url")
+    ):
+        return _delivery_failure_response(
+            state,
+            "Delivery failed: GitHub did not confirm the requested draft PR.",
+            "delivery failed (draft PR not confirmed)",
+            payload={"branch": branch_name},
+        )
     if delivery_metadata:
         merged_result.delivery_metadata = delivery_metadata
     return _delivery_completed_response(
@@ -498,17 +493,9 @@ async def _run_deliver_result(
         _log_delivery_start(state)
 
         gh_token = _delivery_github_token(state)
-        if not gh_token and state.task_spec.delivery_mode == "draft_pr":
-            msg = (
-                "Delivery failed: GH_TOKEN or GITHUB_TOKEN not found in environment "
-                "(required for PR creation)."
-            )
-            logger.warning(msg)
-            return _delivery_failure_response(
-                state,
-                msg,
-                "delivery failed (missing github token)",
-            )
+        token_failure = _draft_pr_token_failure(state, gh_token)
+        if token_failure is not None:
+            return token_failure
 
         branch_name, failure_response = _validated_delivery_branch(state)
         if failure_response is not None or branch_name is None:
@@ -543,7 +530,14 @@ async def _run_deliver_result(
         if isinstance(result, dict):
             return result
 
-        return await _delivery_success_response(state, result, branch_name, pr_title, gh_token)
+        return await _delivery_success_response(
+            state,
+            result,
+            branch_name,
+            pr_title,
+            pr_body,
+            gh_token,
+        )
 
 
 def build_deliver_result_node(
