@@ -342,6 +342,9 @@ def persist_reused_capture(
     source_bundle_dir: Path,
     source_manifest: EvidenceBundleManifest,
     case_id: str,
+    temporal_override: TemporalHistoryEvidence | None = None,
+    gate_failures_override: list[str] | None = None,
+    annotations_override: OperatorAnnotations | None = None,
 ) -> CapturedCaseEvidence:
     """Import one valid immutable capture while retaining its source deployment identity."""
     if case_id in manifest.capture_files:
@@ -352,8 +355,23 @@ def persist_reused_capture(
     source_capture = CapturedCaseEvidence.model_validate_json(
         (source_bundle_dir / source_path).read_text(encoding="utf-8")
     )
-    if source_capture.gate_failures:
+    reanalyzed = temporal_override is not None or gate_failures_override is not None
+    if (temporal_override is None) != (gate_failures_override is None):
+        raise ValueError("Temporal and gate overrides must be provided together")
+    effective_failures = (
+        gate_failures_override
+        if gate_failures_override is not None
+        else source_capture.gate_failures
+    )
+    if effective_failures:
         raise ValueError(f"source capture is not valid: {case_id}")
+    if reanalyzed:
+        assert temporal_override is not None
+        if (
+            temporal_override.history_sha256 != source_capture.temporal.history_sha256
+            or temporal_override.raw_history_file != source_capture.temporal.raw_history_file
+        ):
+            raise ValueError(f"reanalyzed Temporal history differs from source evidence: {case_id}")
     destination_case = next((item for item in suite.cases if item.case_id == case_id), None)
     if destination_case is None or source_capture.expected != destination_case:
         raise ValueError(f"source capture contract differs from destination suite: {case_id}")
@@ -367,7 +385,12 @@ def persist_reused_capture(
     shutil.copyfile(source_history, destination_history)
     destination_history.chmod(0o600)
     capture = source_capture.model_copy(
-        update={"source_identity": source_capture.source_identity or source_manifest.identity}
+        update={
+            "source_identity": source_capture.source_identity or source_manifest.identity,
+            "temporal": temporal_override or source_capture.temporal,
+            "gate_failures": effective_failures,
+            "annotations": annotations_override or source_capture.annotations,
+        }
     )
     relative_path = f"{CASES_DIRECTORY}/{case_id}.json"
     _write_model(bundle_dir / relative_path, capture, exclusive=True)

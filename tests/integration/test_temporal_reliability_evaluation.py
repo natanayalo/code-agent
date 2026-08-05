@@ -429,6 +429,53 @@ def test_valid_capture_can_be_reused_with_source_identity_and_history(tmp_path: 
     assert cli.main(["report", "--bundle-dir", str(second_destination_dir)]) == 2
 
 
+def test_failed_capture_reuse_requires_matching_reanalysis(tmp_path: Path) -> None:
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    source_dir, source_manifest, source_captures = _capture_suite(source_root)
+    source_capture = source_captures[0]
+    source_path = source_dir / source_manifest.capture_files[source_capture.case_id]
+    failed_capture = source_capture.model_copy(
+        update={"gate_failures": ["proof.old_evaluator_failure"]}
+    )
+    source_path.write_text(failed_capture.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    suite = load_suite(SUITE_PATH)
+    destination_dir = tmp_path / "destination"
+    destination_manifest = initialize_bundle(
+        bundle_dir=destination_dir,
+        suite=suite,
+        identity=_identity().model_copy(update={"build_sha": "fedcba9876543210"}),
+    )
+
+    with pytest.raises(ValueError, match="source capture is not valid"):
+        persist_reused_capture(
+            bundle_dir=destination_dir,
+            manifest=destination_manifest,
+            suite=suite,
+            source_bundle_dir=source_dir,
+            source_manifest=source_manifest,
+            case_id=source_capture.case_id,
+        )
+
+    reanalyzed = persist_reused_capture(
+        bundle_dir=destination_dir,
+        manifest=destination_manifest,
+        suite=suite,
+        source_bundle_dir=source_dir,
+        source_manifest=source_manifest,
+        case_id=source_capture.case_id,
+        temporal_override=source_capture.temporal,
+        gate_failures_override=[],
+        annotations_override=source_capture.annotations.model_copy(
+            update={"notes": "reanalyzed immutable history"}
+        ),
+    )
+
+    assert reanalyzed.gate_failures == []
+    assert reanalyzed.temporal.history_sha256 == failed_capture.temporal.history_sha256
+    assert reanalyzed.annotations.notes == "reanalyzed immutable history"
+
+
 def test_bundle_rejects_unknown_case_and_modified_frozen_suite(tmp_path: Path) -> None:
     suite = load_suite(SUITE_PATH)
     bundle_dir = tmp_path / "private-bundle"

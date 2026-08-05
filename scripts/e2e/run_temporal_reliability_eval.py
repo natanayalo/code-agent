@@ -12,7 +12,13 @@ import os
 import sys
 from pathlib import Path
 
-from evaluation.temporal_history_evidence import canonical_json_bytes, fetch_temporal_history
+from temporalio.client import WorkflowHistory
+
+from evaluation.temporal_history_evidence import (
+    analyze_temporal_history,
+    canonical_json_bytes,
+    fetch_temporal_history,
+)
 from evaluation.temporal_reliability_capture import (
     HISTORIES_DIRECTORY,
     ensure_capture_available,
@@ -203,6 +209,55 @@ def _handle_reuse(args: argparse.Namespace) -> int:
     source_manifest, source_suite = load_bundle(args.source_bundle_dir)
     if suite_digest(suite) != suite_digest(source_suite):
         raise ValueError("source suite differs from destination suite")
+    temporal_override = None
+    gate_failures_override = None
+    annotations_override = None
+    if args.reanalyze_temporal_history:
+        source_capture = next(
+            (
+                item
+                for item in load_captures(args.source_bundle_dir, source_manifest)
+                if item.case_id == args.case_id
+            ),
+            None,
+        )
+        if source_capture is None:
+            raise ValueError(f"source bundle does not contain case: {args.case_id}")
+        raw_path = (
+            args.source_bundle_dir / HISTORIES_DIRECTORY / source_capture.temporal.raw_history_file
+        )
+        raw_history = json.loads(raw_path.read_text(encoding="utf-8"))
+        workflow_history = WorkflowHistory.from_json(
+            source_capture.temporal.workflow_id,
+            raw_history,
+        )
+        temporal_override = analyze_temporal_history(
+            workflow_id=source_capture.temporal.workflow_id,
+            run_id=source_capture.temporal.run_id,
+            workflow_status=source_capture.temporal.workflow_status,
+            events=workflow_history.events,
+            raw_history=raw_history,
+            raw_history_file=source_capture.temporal.raw_history_file,
+        )
+        gate_failures_override = evaluate_case_gates(
+            case=source_capture.expected,
+            identity=source_capture.source_identity or source_manifest.identity,
+            database=source_capture.database,
+            temporal=temporal_override,
+            annotations=source_capture.annotations,
+        )
+        if gate_failures_override:
+            raise ValueError(
+                "reanalyzed source capture is not valid: " + ", ".join(gate_failures_override)
+            )
+        note = "Reanalyzed immutable Temporal history; original failed capture was preserved."
+        annotations_override = source_capture.annotations.model_copy(
+            update={
+                "notes": "\n".join(
+                    item for item in [source_capture.annotations.notes, note] if item
+                )
+            }
+        )
     capture = persist_reused_capture(
         bundle_dir=args.bundle_dir,
         manifest=manifest,
@@ -210,11 +265,15 @@ def _handle_reuse(args: argparse.Namespace) -> int:
         source_bundle_dir=args.source_bundle_dir,
         source_manifest=source_manifest,
         case_id=args.case_id,
+        temporal_override=temporal_override,
+        gate_failures_override=gate_failures_override,
+        annotations_override=annotations_override,
     )
     LOGGER.info(
-        "reused case_id=%s source_build_sha=%s",
+        "reused case_id=%s source_build_sha=%s temporal_reanalyzed=%s",
         capture.case_id,
         source_manifest.identity.build_sha,
+        args.reanalyze_temporal_history,
     )
     return 0
 
@@ -252,6 +311,7 @@ def _parser() -> argparse.ArgumentParser:
     reuse.add_argument("--bundle-dir", type=Path, required=True)
     reuse.add_argument("--source-bundle-dir", type=Path, required=True)
     reuse.add_argument("--case-id", required=True)
+    reuse.add_argument("--reanalyze-temporal-history", action="store_true")
     return parser
 
 
