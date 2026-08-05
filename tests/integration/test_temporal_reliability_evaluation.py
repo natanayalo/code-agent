@@ -40,6 +40,7 @@ from evaluation.temporal_reliability_capture import (
     load_captures,
     load_suite,
     persist_capture,
+    persist_reused_capture,
     read_task_evidence,
 )
 from evaluation.temporal_reliability_models import (
@@ -371,6 +372,43 @@ def test_bundle_rejects_duplicate_case_and_task(tmp_path: Path) -> None:
             case_id=suite.cases[0].case_id,
             task_id=captures[0].task_id,
         )
+
+
+def test_valid_capture_can_be_reused_with_source_identity_and_history(tmp_path: Path) -> None:
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    source_dir, source_manifest, source_captures = _capture_suite(source_root)
+    suite = load_suite(SUITE_PATH)
+    destination_dir = tmp_path / "destination"
+    destination_identity = _identity().model_copy(update={"build_sha": "fedcba9876543210"})
+    destination_manifest = initialize_bundle(
+        bundle_dir=destination_dir,
+        suite=suite,
+        identity=destination_identity,
+    )
+    source_capture = source_captures[0]
+
+    reused = persist_reused_capture(
+        bundle_dir=destination_dir,
+        manifest=destination_manifest,
+        suite=suite,
+        source_bundle_dir=source_dir,
+        source_manifest=source_manifest,
+        case_id=source_capture.case_id,
+    )
+
+    assert reused.source_identity == source_manifest.identity
+    assert reused.gate_failures == []
+    history_path = destination_dir / HISTORIES_DIRECTORY / reused.temporal.raw_history_file
+    assert (
+        history_path.read_bytes()
+        == (
+            source_dir / HISTORIES_DIRECTORY / source_capture.temporal.raw_history_file
+        ).read_bytes()
+    )
+    refreshed_manifest, _ = load_bundle(destination_dir)
+    assert refreshed_manifest.capture_files[reused.case_id].endswith(f"/{reused.case_id}.json")
+    assert cli.main(["report", "--bundle-dir", str(destination_dir)]) == 2
 
 
 def test_bundle_rejects_unknown_case_and_modified_frozen_suite(tmp_path: Path) -> None:
