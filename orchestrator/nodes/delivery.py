@@ -432,6 +432,39 @@ async def _delivery_success_response(
     )
 
 
+async def _reconcile_existing_draft_pr(
+    state: OrchestratorState,
+    *,
+    branch_name: str,
+    pr_title: str,
+    gh_token: str | None,
+) -> dict[str, Any] | None:
+    if not state.task_spec or state.task_spec.delivery_mode != "draft_pr":
+        return None
+
+    import asyncio
+
+    delivery_metadata = await asyncio.to_thread(
+        _capture_delivery_metadata, state, branch_name, gh_token
+    )
+    if not delivery_metadata or not delivery_metadata.get("pr_url"):
+        return None
+
+    delivery_result = WorkerResult(
+        status="success",
+        summary="Existing draft PR reconciled.",
+        delivery_metadata=delivery_metadata,
+    )
+    merged_result = _merge_delivery_result(state.result, delivery_result)
+    merged_result.delivery_metadata = delivery_metadata
+    return _delivery_completed_response(
+        state,
+        branch_name=branch_name,
+        pr_title=pr_title,
+        merged_result=merged_result,
+    )
+
+
 async def _run_deliver_result(
     state_input: OrchestratorState,
     worker: Worker | None = None,
@@ -482,6 +515,15 @@ async def _run_deliver_result(
             return failure_response or {"current_step": "deliver_result"}
 
         pr_title, pr_body = _delivery_pr_fields(state)
+        existing_pr_response = await _reconcile_existing_draft_pr(
+            state,
+            branch_name=branch_name,
+            pr_title=pr_title,
+            gh_token=gh_token,
+        )
+        if existing_pr_response is not None:
+            return existing_pr_response
+
         prompt = _build_delivery_prompt(state, branch_name, pr_title, pr_body)
         request = _build_delivery_worker_request(
             state,

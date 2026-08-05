@@ -206,6 +206,51 @@ async def test_run_deliver_result_success(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_run_deliver_result_reconciles_existing_draft_pr(monkeypatch):
+    monkeypatch.setenv("GH_TOKEN", "fake_token")
+    state = OrchestratorState.model_validate(
+        {
+            "task": {
+                "task_text": "demo",
+                "repo_url": "https://github.com/example/project.git",
+            },
+            "result": {"status": "success", "summary": "implementation complete"},
+            "task_spec": {
+                "delivery_mode": "draft_pr",
+                "delivery_branch": "qa/evidence",
+                "goal": "demo",
+                "pr_title": "Evidence PR",
+            },
+            "dispatch": {"workspace_id": "ws-1", "worker_type": "antigravity"},
+        }
+    )
+    worker_mock = AsyncMock()
+    metadata = {
+        "delivery_mode": "draft_pr",
+        "branch_name": "qa/evidence",
+        "pr_url": "https://github.com/example/project/pull/7",
+        "pr_number": 7,
+        "head_sha": "abc123",
+    }
+
+    with (
+        patch("orchestrator.nodes.delivery.start_optional_span"),
+        patch("orchestrator.nodes.delivery.set_span_input_output"),
+        patch("orchestrator.nodes.delivery._capture_delivery_metadata", return_value=metadata),
+    ):
+        res = await _run_deliver_result(
+            state,
+            worker=WorkerFacade(antigravity_worker=worker_mock),
+        )
+
+    worker_mock.run.assert_not_awaited()
+    assert res["timeline_events"][0].event_type == TimelineEventType.DELIVERY_COMPLETED
+    assert res["result"].status == "success"
+    assert res["result"].delivery_metadata == metadata
+    assert "Existing draft PR reconciled." in res["result"].summary
+
+
+@pytest.mark.asyncio
 async def test_run_deliver_result_worker_runtime_error(monkeypatch):
     monkeypatch.setenv("GH_TOKEN", "fake_token")
     state = OrchestratorState.model_validate(
