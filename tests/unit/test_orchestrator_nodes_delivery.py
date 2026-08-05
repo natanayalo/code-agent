@@ -1,9 +1,14 @@
-from unittest.mock import AsyncMock, patch
+import json
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from db.enums import TimelineEventType
-from orchestrator.nodes.delivery import _build_delivery_prompt, _run_deliver_result
+from orchestrator.nodes.delivery import (
+    _build_delivery_prompt,
+    _capture_delivery_metadata,
+    _run_deliver_result,
+)
 from orchestrator.state import OrchestratorState
 from workers.base import WorkerResult
 from workers.facade import WorkerFacade
@@ -27,6 +32,79 @@ def test_build_delivery_prompt_branch():
     prompt = _build_delivery_prompt(state, "my-branch", "my-title", "my-body")
     assert "draft PR" not in prompt
     assert "Delivery mode: branch" in prompt
+
+
+def test_capture_delivery_metadata_uses_task_token_with_github_api() -> None:
+    state = OrchestratorState.model_validate(
+        {
+            "task": {
+                "task_text": "demo",
+                "repo_url": "https://github.com/example/project.git",
+            },
+            "task_spec": {"delivery_mode": "draft_pr", "goal": "demo"},
+        }
+    )
+    response = MagicMock()
+    response.__enter__.return_value = response
+    response.__exit__.return_value = None
+    response.read.return_value = json.dumps(
+        [
+            {
+                "html_url": "https://github.com/example/project/pull/7",
+                "number": 7,
+                "head": {"sha": "abc123", "ref": "qa/evidence"},
+            }
+        ]
+    ).encode()
+
+    with patch("orchestrator.nodes.delivery.urlopen", return_value=response) as open_mock:
+        metadata = _capture_delivery_metadata(state, "qa/evidence", "task-token")
+
+    assert metadata == {
+        "delivery_mode": "draft_pr",
+        "branch_name": "qa/evidence",
+        "pr_url": "https://github.com/example/project/pull/7",
+        "pr_number": 7,
+        "head_sha": "abc123",
+    }
+    request = open_mock.call_args.args[0]
+    assert request.get_header("Authorization") == "Bearer task-token"
+    assert "head=example%3Aqa%2Fevidence" in request.full_url
+
+
+def test_capture_delivery_metadata_retries_github_visibility() -> None:
+    state = OrchestratorState.model_validate(
+        {
+            "task": {
+                "task_text": "demo",
+                "repo_url": "https://github.com/example/project.git",
+            },
+            "task_spec": {"delivery_mode": "draft_pr", "goal": "demo"},
+        }
+    )
+    empty_response = MagicMock()
+    empty_response.__enter__.return_value = empty_response
+    empty_response.__exit__.return_value = None
+    empty_response.read.return_value = b"[]"
+    visible_response = MagicMock()
+    visible_response.__enter__.return_value = visible_response
+    visible_response.__exit__.return_value = None
+    visible_response.read.return_value = json.dumps(
+        [{"html_url": "https://example.test/pr/8", "number": 8, "head": {"sha": "def456"}}]
+    ).encode()
+
+    with (
+        patch(
+            "orchestrator.nodes.delivery.urlopen",
+            side_effect=[empty_response, visible_response],
+        ) as open_mock,
+        patch("orchestrator.nodes.delivery.time.sleep") as sleep_mock,
+    ):
+        metadata = _capture_delivery_metadata(state, "qa/evidence", "task-token")
+
+    assert metadata["pr_url"] == "https://example.test/pr/8"
+    assert open_mock.call_count == 2
+    sleep_mock.assert_called_once()
 
 
 @pytest.mark.asyncio

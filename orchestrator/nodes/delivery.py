@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 import logging
 import os
-import subprocess
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any
+from urllib.parse import quote, urlencode
+from urllib.request import Request, urlopen
 
 from apps.observability import (
     NATIVE_AGENT_STDERR_ATTRIBUTE,
@@ -30,6 +32,9 @@ from orchestrator.state import OrchestratorState
 from workers.base import Worker, WorkerRequest, WorkerResult
 
 logger = logging.getLogger(__name__)
+
+GITHUB_PR_METADATA_ATTEMPTS = 3
+GITHUB_PR_METADATA_RETRY_SECONDS = 2
 
 
 def _is_valid_git_branch_name(name: str) -> bool:
@@ -248,7 +253,7 @@ def _capture_delivery_metadata(
         return None
 
     delivery_mode = state.task_spec.delivery_mode
-    metadata = {
+    metadata: dict[str, Any] = {
         "delivery_mode": delivery_mode,
         "branch_name": branch_name,
     }
@@ -264,36 +269,40 @@ def _capture_delivery_metadata(
         logger.debug("Failed to derive GitHub repo spec from repo_url for delivery metadata.")
         return metadata
 
-    env = os.environ.copy()
-    env["GH_TOKEN"] = gh_token
-
-    cmd = [
-        "gh",
-        "pr",
-        "view",
-        branch_name,
-        "-R",
-        repo_spec,
-        "--json",
-        "url,number,headRefOid,headRefName",
-    ]
     try:
-        proc = subprocess.run(
-            cmd,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=30,
-            stdin=subprocess.DEVNULL,
-        )
-        data = json.loads(proc.stdout)
-
-        metadata["pr_url"] = data.get("url")
-        metadata["pr_number"] = data.get("number")
-        metadata["head_sha"] = data.get("headRefOid")
-    except (subprocess.SubprocessError, json.JSONDecodeError, OSError) as e:
-        logger.debug("Failed to capture PR metadata via gh cli: %s", e)
+        owner, repository = repo_spec.split("/", 1)
+    except ValueError:
+        logger.debug("Failed to split GitHub repo spec for delivery metadata: %s", repo_spec)
+        return metadata
+    query = urlencode({"state": "open", "head": f"{owner}:{branch_name}"})
+    request_url = (
+        f"https://api.github.com/repos/{quote(owner, safe='')}/"
+        f"{quote(repository, safe='')}/pulls?{query}"
+    )
+    request = Request(
+        request_url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {gh_token}",
+            "User-Agent": "code-agent-delivery-metadata",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+    )
+    for attempt in range(GITHUB_PR_METADATA_ATTEMPTS):
+        try:
+            with urlopen(request, timeout=30) as response:  # noqa: S310 - fixed GitHub API host
+                rows = json.load(response)
+            if isinstance(rows, list) and rows:
+                pull_request = rows[0]
+                head = pull_request.get("head") or {}
+                metadata["pr_url"] = pull_request.get("html_url")
+                metadata["pr_number"] = pull_request.get("number")
+                metadata["head_sha"] = head.get("sha")
+                return metadata
+        except (json.JSONDecodeError, OSError, TimeoutError, ValueError) as exc:
+            logger.debug("Failed to capture PR metadata via GitHub API: %s", exc)
+        if attempt + 1 < GITHUB_PR_METADATA_ATTEMPTS:
+            time.sleep(GITHUB_PR_METADATA_RETRY_SECONDS)
 
     return metadata
 
