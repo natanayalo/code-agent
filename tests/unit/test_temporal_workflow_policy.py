@@ -2,9 +2,11 @@ from datetime import timedelta
 
 import pytest
 from temporalio import workflow
+from temporalio.exceptions import CancelledError as TemporalCancelledError
 
 from orchestrator.temporal.policy import activity_options
 from orchestrator.temporal.workflows import (
+    CANCELLATION_TERMINAL_PATCH_ID,
     COMPLETION_LOOP_PATCH_ID,
     MAX_PERMISSION_ESCALATIONS,
     TaskExecutionWorkflow,
@@ -59,6 +61,32 @@ def test_unknown_activity_policy_is_rejected() -> None:
         assert str(exc) == "Unknown Temporal activity policy: unknown"
     else:  # pragma: no cover - assertion guard
         raise AssertionError("Unknown activity policy unexpectedly resolved.")
+
+
+@pytest.mark.anyio
+async def test_workflow_propagates_operator_cancellation(monkeypatch) -> None:
+    """New histories must terminate as cancelled without projecting a generic failure."""
+    activity_names: list[str] = []
+    workflow_instance = TaskExecutionWorkflow()
+
+    async def cancel_lifecycle(_task_id: str) -> dict:
+        raise TemporalCancelledError("operator cancellation")
+
+    async def execute_activity(name: str, *args, **kwargs):
+        activity_names.append(name)
+
+    monkeypatch.setattr(workflow_instance, "_run_lifecycle", cancel_lifecycle)
+    monkeypatch.setattr(
+        workflow,
+        "patched",
+        lambda patch_id: patch_id == CANCELLATION_TERMINAL_PATCH_ID,
+    )
+    monkeypatch.setattr(workflow, "execute_activity", execute_activity)
+
+    with pytest.raises(TemporalCancelledError):
+        await workflow_instance.run("task-id")
+
+    assert activity_names == []
 
 
 def test_node_execution_activity_can_use_profile_queue() -> None:

@@ -4,6 +4,7 @@ import asyncio
 from typing import Any
 
 from temporalio import workflow
+from temporalio.exceptions import CancelledError as TemporalCancelledError
 
 from orchestrator.temporal.policy import activity_options
 
@@ -11,6 +12,17 @@ MAX_PERMISSION_ESCALATIONS = 5
 NODE_WAVE_PATCH_ID = "m25-1b-temporal-node-wave"
 M25_2_FANOUT_PATCH_ID = "m25-2-bounded-selective-fanout"
 COMPLETION_LOOP_PATCH_ID = "m25-4-temporal-completion-loop"
+CANCELLATION_TERMINAL_PATCH_ID = "m25-6-cancelled-terminal-state"
+
+
+def _temporal_cancellation_cause(exc: Exception) -> TemporalCancelledError | None:
+    """Return a cancellation wrapped by an Activity failure, if present."""
+    cause: BaseException | None = exc
+    while cause is not None:
+        if isinstance(cause, TemporalCancelledError):
+            return cause
+        cause = getattr(cause, "cause", None) or cause.__cause__
+    return None
 
 
 @workflow.defn
@@ -23,9 +35,13 @@ class TaskExecutionWorkflow:
 
     @workflow.run
     async def run(self, task_id: str) -> dict:
+        cancellation_terminal_enabled = workflow.patched(CANCELLATION_TERMINAL_PATCH_ID)
         try:
             return await self._run_lifecycle(task_id)
         except Exception as exc:
+            cancellation = _temporal_cancellation_cause(exc)
+            if cancellation_terminal_enabled and cancellation is not None:
+                raise cancellation
             await workflow.execute_activity(
                 "record_workflow_failure",
                 args=[task_id, str(exc)],

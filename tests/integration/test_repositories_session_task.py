@@ -77,6 +77,32 @@ def test_session_and_task_repositories_support_crud(session_factory) -> None:
         assert len(task_repo.list_by_session(conversation_session.id)) == 1
 
 
+def test_task_repository_cancel_uses_cancelled_terminal_status(session_factory) -> None:
+    """Operator cancellation must remain distinct from task execution failure."""
+    with session_scope(session_factory) as session:
+        user = UserRepository(session).create(external_user_id="cancel:user")
+        conversation_session = SessionRepository(session).create(
+            user_id=user.id,
+            channel="http",
+            external_thread_id="cancel-thread",
+        )
+        task_repo = TaskRepository(session)
+        task = task_repo.create(
+            session_id=conversation_session.id,
+            task_text="Cancel active execution",
+            status=TaskStatus.IN_PROGRESS,
+        )
+
+        cancelled, changed = task_repo.cancel(task_id=task.id)
+        repeated, repeated_changed = task_repo.cancel(task_id=task.id)
+
+        assert changed is True
+        assert cancelled is not None and cancelled.status is TaskStatus.CANCELLED
+        assert cancelled.last_error == "Task cancelled by operator."
+        assert repeated is not None and repeated.status is TaskStatus.CANCELLED
+        assert repeated_changed is False
+
+
 def test_session_repositories_handle_missing_rows_and_session_state_merges(session_factory) -> None:
     """Session repositories should fail safely on missing rows and merge working context updates."""
     with session_scope(session_factory) as session:

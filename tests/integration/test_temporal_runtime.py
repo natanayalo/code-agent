@@ -46,7 +46,7 @@ from repositories import (
     session_scope,
 )
 from sandbox import DockerShellCommandResult, DockerShellSession
-from workers import CodexCliWorker, WorkerResult
+from workers import ArtifactReference, CodexCliWorker, WorkerResult
 from workers.cli_runtime import CliRuntimeAdapter, CliRuntimeStep
 
 
@@ -727,19 +727,15 @@ async def test_temporal_cancellation_during_repair_projects_one_terminal_state(s
                 )
                 await asyncio.wait_for(worker.repair_started.wait(), timeout=5)
                 cancelled = service.cancel_task(task_id=snapshot.task_id)
-                assert cancelled is not None and cancelled.status == "failed"
+                assert cancelled is not None and cancelled.status == "cancelled"
                 await dispatcher.dispatch_pending()
-                try:
-                    cancellation_result = await run_task
-                except WorkflowFailureError:
-                    cancellation_result = None
-                if cancellation_result is not None:
-                    assert cancellation_result["status"] == "failed"
+                with pytest.raises(WorkflowFailureError):
+                    await run_task
 
     with session_scope(session_factory) as session:
         task = session.get(Task, snapshot.task_id)
         events = TaskTimelineRepository(session).list_by_task(snapshot.task_id)
-        assert task is not None and task.status == "failed"
+        assert task is not None and task.status == "cancelled"
         assert [event.event_type for event in events].count(TimelineEventType.TASK_CANCELLED) == 1
         assert session.get(TemporalTaskState, snapshot.task_id) is None
 
@@ -1456,12 +1452,12 @@ async def test_cancelling_pending_permission_escalation_removes_resumable_state(
     cancelled = service.cancel_task(task_id=snapshot.task_id)
 
     assert cancelled is not None
-    assert cancelled.status == "failed"
+    assert cancelled.status == "cancelled"
     with session_scope(session_factory) as session:
         task = session.get(Task, snapshot.task_id)
         durable_state = TemporalTaskStateRepository(session).get(task_id=snapshot.task_id)
         assert task is not None
-        assert task.status == "failed"
+        assert task.status == "cancelled"
         assert durable_state is None
 
 
@@ -1492,7 +1488,20 @@ async def test_temporal_run_worker_cancellation_reaches_worker_cleanup(
             await asyncio.Event().wait()
         except asyncio.CancelledError:
             cleaned_up.set()
-            raise
+            return {
+                "result": WorkerResult(
+                    status="failure",
+                    summary="Worker stopped after operator cancellation.",
+                    failure_kind="timeout",
+                    artifacts=[
+                        ArtifactReference(
+                            name="workspace",
+                            uri=f"workspace://{snapshot.task_id}",
+                            artifact_type="workspace",
+                        )
+                    ],
+                ).model_dump(mode="json")
+            }
 
     monkeypatch.setattr("orchestrator.temporal.activities.activity.heartbeat", lambda: None)
     activities = TaskExecutionActivities(service=service)
@@ -1503,6 +1512,12 @@ async def test_temporal_run_worker_cancellation_reaches_worker_cleanup(
     with pytest.raises(asyncio.CancelledError):
         await activity_task
     assert cleaned_up.is_set()
+    with session_scope(session_factory) as session:
+        task = session.get(Task, snapshot.task_id)
+        worker_run = session.query(WorkerRun).filter_by(task_id=snapshot.task_id).one()
+        assert task is not None and task.status == "cancelled"
+        assert worker_run.status == "failure"
+        assert worker_run.artifact_index[0]["name"] == "workspace"
 
 
 @pytest.mark.anyio
@@ -1582,7 +1597,7 @@ async def test_temporal_runtime_cancellation_projects_terminal_state(
 
                 cancelled = service.cancel_task(task_id=snapshot.task_id)
                 assert cancelled is not None
-                assert cancelled.status == "failed"
+                assert cancelled.status == "cancelled"
                 await dispatcher.dispatch_pending()
                 with pytest.raises(WorkflowFailureError):
                     await run_task
@@ -1590,7 +1605,7 @@ async def test_temporal_runtime_cancellation_projects_terminal_state(
     with session_scope(session_factory) as session:
         task = session.get(Task, snapshot.task_id)
         assert task is not None
-        assert task.status == "failed"
+        assert task.status == "cancelled"
         events = (
             session.execute(
                 select(TaskTimelineEvent).where(TaskTimelineEvent.task_id == snapshot.task_id)

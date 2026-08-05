@@ -559,7 +559,11 @@ class TaskExecutionActivities:
 
             _update_task_route_and_spec(task, state, interaction_repo, plan_repo)
             _apply_approval_constraints(task, state, finished_at)
-            if task.status not in (TaskStatus.COMPLETED, TaskStatus.FAILED):
+            if task.status not in (
+                TaskStatus.COMPLETED,
+                TaskStatus.FAILED,
+                TaskStatus.CANCELLED,
+            ):
                 task.status = force_status or TaskStatus.IN_PROGRESS
             _persist_timeline_events(session, task_id, state)
             # Snapshot the cursor together with the events. The next activity
@@ -845,12 +849,66 @@ class TaskExecutionActivities:
             )
             state.timeline_persisted_count = len(state.timeline_events)
             return {"requires_permission_escalation": requires_permission}
+        except asyncio.CancelledError:
+            await self._persist_cancelled_worker_activity(
+                task_id=task_id,
+                state=state,
+                worker_task=worker_task,
+                repair_execution=repair_execution,
+                started_at=started_at,
+            )
+            raise
         finally:
             if worker_task is not None and not worker_task.done():
                 worker_task.cancel()
                 await asyncio.gather(worker_task, return_exceptions=True)
             heartbeat_task.cancel()
             await asyncio.gather(heartbeat_task, return_exceptions=True)
+
+    async def _persist_cancelled_worker_activity(
+        self,
+        *,
+        task_id: str,
+        state: OrchestratorState,
+        worker_task: asyncio.Task[dict[str, Any]] | None,
+        repair_execution: bool,
+        started_at: datetime,
+    ) -> None:
+        """Retain a cancelled worker's partial result before acknowledging cancellation."""
+        if worker_task is None:
+            return
+        if not worker_task.done():
+            worker_task.cancel()
+        settled = await asyncio.gather(worker_task, return_exceptions=True)
+        updates = settled[0]
+        if not isinstance(updates, dict):
+            logger.warning(
+                "Cancelled worker did not yield partial evidence",
+                extra={"task_id": task_id},
+            )
+            return
+
+        state_dict = _worker_state_for_execution(
+            state,
+            repair_execution=repair_execution,
+        )
+        self._merge_updates(state_dict, updates)
+        cancelled_state, _ = _finalize_worker_activity_state(
+            state_dict,
+            repair_execution=repair_execution,
+        )
+        # The operator cancellation is already the authoritative terminal timeline
+        # event. The worker update was produced from the pre-cancellation snapshot,
+        # so do not let its stale sequence collide with that durable event.
+        cancelled_state.timeline_persisted_count = len(cancelled_state.timeline_events)
+        await self.service._run_blocking(
+            self._persist_state,
+            task_id=task_id,
+            state=cancelled_state,
+            started_at=started_at,
+            finished_at=utc_now(),
+            force_status=TaskStatus.CANCELLED,
+        )
 
     @activity.defn(name="select_next_node")
     @_restore_task_trace_context
@@ -1700,7 +1758,11 @@ class TaskExecutionActivities:
         def _record_failure() -> None:
             with session_scope(self.service.session_factory) as session:
                 task = TaskRepository(session).get(task_id)
-                if task is None or task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
+                if task is None or task.status in (
+                    TaskStatus.COMPLETED,
+                    TaskStatus.FAILED,
+                    TaskStatus.CANCELLED,
+                ):
                     return
                 task.status = TaskStatus.FAILED
                 task.last_error = f"Temporal workflow failed: {failure}"
