@@ -303,6 +303,14 @@ def _source_file_changes(files_changed: list[str], logical_activity_key: str) ->
     return source_paths
 
 
+def _project_decomposed_runtime_manifest(state: OrchestratorState) -> None:
+    """Carry the effective node-wave deployment contract into parent persistence."""
+    request = _build_worker_request(state)
+    state.dispatch = state.dispatch.model_copy(
+        update={"runtime_manifest": request.runtime_manifest}
+    )
+
+
 def _restore_task_trace_context(func: Any) -> Any:
     """Restore the ingress trace context around a Temporal activity invocation."""
 
@@ -1456,6 +1464,7 @@ class TaskExecutionActivities:
                 return NodeWaveMergeResult(continuation="continue")
 
         result = await self.service._run_blocking(_merge)
+        _project_decomposed_runtime_manifest(state)
         await self.service._run_blocking(
             self._persist_intermediate_state,
             task_id=task_id,
@@ -1601,6 +1610,7 @@ class TaskExecutionActivities:
                     )
                     if continuation == "continue":
                         continuation = "retry_node"
+            _project_decomposed_runtime_manifest(state)
             TemporalTaskStateRepository(session).upsert(
                 task_id=task_id, state=state.model_dump(mode="json")
             )
