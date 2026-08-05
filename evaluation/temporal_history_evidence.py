@@ -68,6 +68,8 @@ def _normalize_status(status: object | None, events: list[HistoryEvent]) -> str:
     normalized = str(value).lower()
     for prefix in ("workflow_execution_status_", "workflowexecutionstatus."):
         normalized = normalized.removeprefix(prefix)
+    if normalized == "canceled":
+        return "cancelled"
     return normalized
 
 

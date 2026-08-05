@@ -46,7 +46,7 @@ from repositories import (
     session_scope,
 )
 from sandbox import DockerShellCommandResult, DockerShellSession
-from workers import ArtifactReference, CodexCliWorker, WorkerResult
+from workers import CodexCliWorker, WorkerResult
 from workers.cli_runtime import CliRuntimeAdapter, CliRuntimeStep
 
 
@@ -1472,7 +1472,16 @@ async def test_temporal_run_worker_cancellation_reaches_worker_cleanup(
     )
     snapshot, _ = service.create_task(TaskSubmission(task_text="Cancel worker activity"))
     state = OrchestratorState.model_validate(
-        {"task": {"task_id": snapshot.task_id, "task_text": "Cancel worker activity"}}
+        {
+            "task": {"task_id": snapshot.task_id, "task_text": "Cancel worker activity"},
+            "dispatch": {
+                "workspace_id": f"workspace-{snapshot.task_id}",
+                "runtime_manifest": {
+                    "sandbox": {"workspace_root": "/tmp/code-agent-workspaces"},
+                    "worker": {"workspace_id": f"workspace-{snapshot.task_id}"},
+                },
+            },
+        }
     )
     with session_scope(session_factory) as session:
         TemporalTaskStateRepository(session).upsert(
@@ -1493,13 +1502,6 @@ async def test_temporal_run_worker_cancellation_reaches_worker_cleanup(
                     status="failure",
                     summary="Worker stopped after operator cancellation.",
                     failure_kind="timeout",
-                    artifacts=[
-                        ArtifactReference(
-                            name="workspace",
-                            uri=f"workspace://{snapshot.task_id}",
-                            artifact_type="workspace",
-                        )
-                    ],
                 ).model_dump(mode="json")
             }
 

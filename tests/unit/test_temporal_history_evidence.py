@@ -119,6 +119,19 @@ def test_history_parser_records_failed_and_unfinished_activities() -> None:
     assert [activity.status for activity in evidence.activities] == ["failed", "started"]
 
 
+def test_history_parser_normalizes_temporal_canceled_spelling() -> None:
+    """Temporal SDK status names should match the product's cancelled vocabulary."""
+    evidence = analyze_temporal_history(
+        workflow_id="task-cancelled",
+        events=[],
+        raw_history={},
+        raw_history_file="raw.json",
+        workflow_status="WORKFLOW_EXECUTION_STATUS_CANCELED",
+    )
+
+    assert evidence.workflow_status == "cancelled"
+
+
 def test_history_parser_handles_missing_timestamps_and_running_history() -> None:
     scheduled = HistoryEvent(event_id=1)
     scheduled.activity_task_scheduled_event_attributes.activity_type.name = "run_worker"

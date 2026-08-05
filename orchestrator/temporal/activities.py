@@ -7,6 +7,7 @@ import json
 import logging
 from datetime import datetime
 from functools import wraps
+from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -96,7 +97,7 @@ from repositories import (
     session_scope,
 )
 from sandbox.scratch import scratch_namespace_component
-from workers import WorkerResult
+from workers import ArtifactReference, WorkerResult
 
 logger = logging.getLogger(__name__)
 
@@ -279,6 +280,39 @@ def _finalize_worker_activity_state(
             }
         )
     return state, requires_permission
+
+
+def _retain_cancelled_workspace_artifact(state: OrchestratorState) -> OrchestratorState:
+    """Use the pinned dispatch workspace when provider cancellation yields no artifact."""
+    result = state.result
+    if result is None or any(
+        artifact.name == "workspace" or artifact.artifact_type == "workspace"
+        for artifact in result.artifacts
+    ):
+        return state
+    manifest = state.dispatch.runtime_manifest or {}
+    sandbox_manifest = manifest.get("sandbox") or {}
+    worker_manifest = manifest.get("worker") or {}
+    workspace_root = sandbox_manifest.get("workspace_root")
+    workspace_id = state.dispatch.workspace_id or worker_manifest.get("workspace_id")
+    if not isinstance(workspace_root, str) or not isinstance(workspace_id, str):
+        return state
+    workspace_path = Path(workspace_root) / workspace_id
+    if not workspace_path.is_absolute():
+        return state
+    retained_result = result.model_copy(
+        update={
+            "artifacts": [
+                *result.artifacts,
+                ArtifactReference(
+                    name="workspace",
+                    uri=workspace_path.as_uri(),
+                    artifact_type="workspace",
+                ),
+            ]
+        }
+    )
+    return state.model_copy(update={"result": retained_result})
 
 
 def _source_file_changes(files_changed: list[str], logical_activity_key: str) -> list[str]:
@@ -897,6 +931,7 @@ class TaskExecutionActivities:
             state_dict,
             repair_execution=repair_execution,
         )
+        cancelled_state = _retain_cancelled_workspace_artifact(cancelled_state)
         # The operator cancellation is already the authoritative terminal timeline
         # event. The worker update was produced from the pre-cancellation snapshot,
         # so do not let its stale sequence collide with that durable event.
