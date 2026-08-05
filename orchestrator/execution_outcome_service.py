@@ -61,6 +61,12 @@ logger = logging.getLogger("orchestrator.execution")
 
 ScoutMode = Literal["repo", "research", "deep"]
 ALLOWED_SCOUT_MODES: Final[set[str]] = set(get_args(ScoutMode))
+_COMPLETION_CONTROL_CONSTRAINTS: Final[frozenset[str]] = frozenset(
+    {
+        "independent_review_repair_passes_used",
+        "independent_verifier_repair_passes_used",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -144,6 +150,21 @@ def _apply_approval_constraints(task: Any, state: OrchestratorState, finished_at
             ),
         )
         task.constraints = constraints
+
+
+def _apply_completion_control_constraints(task: Any, state: OrchestratorState) -> None:
+    """Project durable bounded-repair counters without persisting repair prompt text."""
+    state_constraints = state.task.constraints if isinstance(state.task.constraints, dict) else {}
+    updates = {
+        key: state_constraints[key]
+        for key in _COMPLETION_CONTROL_CONSTRAINTS
+        if key in state_constraints
+    }
+    if not updates:
+        return
+    constraints = dict(task.constraints or {})
+    constraints.update(updates)
+    task.constraints = constraints
 
 
 def _build_artifact_index(
@@ -531,6 +552,7 @@ def _update_task_route_and_spec(
     interaction_repo: HumanInteractionRepository,
     plan_repo: ExecutionPlanRepository,
 ) -> None:
+    _apply_completion_control_constraints(task, state)
     if state.route.chosen_worker is not None and state.route.route_reason is not None:
         task.chosen_worker = cast(WorkerType, state.route.chosen_worker)
         task.chosen_profile = state.route.chosen_profile

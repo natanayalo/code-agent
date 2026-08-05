@@ -420,6 +420,7 @@ async def test_temporal_verifier_repair_completes_through_second_worker_pass(ses
         assert [event.event_type for event in events].count(
             TimelineEventType.VERIFICATION_COMPLETED
         ) == 2
+        assert task.constraints["independent_verifier_repair_passes_used"] == 1
         assert session.get(TemporalTaskState, task_id) is None
 
 
@@ -477,6 +478,7 @@ async def test_temporal_independent_review_repair_is_reviewed_again(session_fact
     with session_scope(session_factory) as session:
         task = session.get(Task, task_id)
         assert task is not None and task.status == "completed"
+        assert task.constraints["independent_review_repair_passes_used"] == 1
         assert session.get(TemporalTaskState, task_id) is None
 
 
