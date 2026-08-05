@@ -308,6 +308,16 @@ def test_resolve_verification_commands_prefers_task_spec() -> None:
     assert cmds == ["task-cmd"]
 
 
+def test_resolve_verification_commands_appends_operator_post_worker_commands() -> None:
+    state = _state()
+    state.task_spec.verification_commands = ["visible-cmd"]
+    state.task.constraints["operator_post_worker_verification_commands"] = ["private-fixture-cmd"]
+
+    cmds = verification_module.resolve_verification_commands(state)
+
+    assert cmds == ["visible-cmd", "private-fixture-cmd"]
+
+
 def test_split_verification_commands_filters_placeholder_templates() -> None:
     placeholder = (
         "<project-specific smoke test command that exercises the task and confirms only "

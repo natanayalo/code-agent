@@ -36,6 +36,7 @@ _INDEPENDENT_VERIFIER_SUMMARY_MAX_CHARS = 300
 _VERIFICATION_PLACEHOLDER_PREVIEW_MAX = 3
 _DETERMINISTIC_OUTPUT_PREVIEW_MAX_CHARS = 500
 _DETERMINISTIC_SHADOW_GUARD_EXIT_CODE = 97
+_POST_WORKER_VERIFICATION_COMMANDS_CONSTRAINT = "operator_post_worker_verification_commands"
 _PYTHON_MODULE_SHADOW_GUARDS: Mapping[str, tuple[str, ...]] = {
     "pytest": ("pytest.py", "pytest"),
 }
@@ -139,12 +140,19 @@ def _normalize_verification_commands(raw: object) -> list[str]:
 
 
 def resolve_verification_commands(state: OrchestratorState) -> list[str]:
-    """Resolve verifier commands from task spec first, then constraints fallback."""
+    """Resolve worker-visible checks plus operator-only post-worker checks."""
     if state.task_spec is not None:
         commands = _normalize_verification_commands(state.task_spec.verification_commands)
-        if commands:
-            return commands
-    return _normalize_verification_commands(state.task.constraints.get("verification_commands"))
+    else:
+        commands = []
+    if not commands:
+        commands = _normalize_verification_commands(
+            state.task.constraints.get("verification_commands")
+        )
+    post_worker_commands = _normalize_verification_commands(
+        state.task.constraints.get(_POST_WORKER_VERIFICATION_COMMANDS_CONSTRAINT)
+    )
+    return [*commands, *post_worker_commands]
 
 
 def _is_placeholder_verification_command(command: str) -> bool:

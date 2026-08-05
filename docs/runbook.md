@@ -400,6 +400,14 @@ failure kind and actionable next step fail the evidence gate. A capture is
 immutable, and the CLI refuses duplicate case IDs and task IDs. Failed gates
 are retained for diagnosis and return a nonzero exit code.
 
+For a bounded repair fixture that must be introduced only after the coding
+worker finishes, put ordinary acceptance checks in `verification_commands` and
+the fixture setup command in the authenticated operator-only constraint
+`operator_post_worker_verification_commands`. The latter is appended only by
+deterministic verification and is intentionally omitted from worker prompts.
+Do not put secrets in either field: task constraints and private evidence are
+still persisted for operator inspection.
+
 Generate the aggregate only after captures are current:
 
 ```bash

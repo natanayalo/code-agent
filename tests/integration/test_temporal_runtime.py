@@ -35,6 +35,7 @@ from orchestrator.temporal.activities import TaskExecutionActivities
 from orchestrator.temporal.command_dispatcher import TemporalCommandDispatcher
 from orchestrator.temporal.queues import CODEX_EXECUTION_TASK_QUEUE
 from orchestrator.temporal.workflows import TaskExecutionWorkflow
+from orchestrator.verification import resolve_verification_commands
 from repositories import (
     ExecutionPlanRepository,
     TaskTimelineRepository,
@@ -419,6 +420,43 @@ async def test_temporal_independent_verifier_request_is_read_only(session_factor
     verifier_request = worker.verifier_requests[0]
     assert verifier_request.read_only is True
     assert verifier_request.constraints["read_only"] is True
+
+
+@pytest.mark.anyio
+async def test_temporal_resolves_operator_post_worker_verification_commands(session_factory):
+    """Private operator checks must arrive only at the post-worker verifier stage."""
+    worker = _CompletionLoopWorker()
+    service = TaskExecutionService(session_factory=session_factory, worker=worker)
+    resolved_commands: list[str] = []
+
+    def configure(activities: TaskExecutionActivities) -> None:
+        async def verifier(state_input):
+            state = OrchestratorState.model_validate(state_input)
+            resolved_commands.extend(resolve_verification_commands(state))
+            return evaluate_verification(
+                state,
+                deterministic_verifier_outcome=("passed", "operator checks passed"),
+            )
+
+        activities.verify_result_node = verifier
+        activities.review_result_node = lambda _state: {}
+
+    _task_id, workflow_result = await _run_completion_loop_workflow(
+        session_factory=session_factory,
+        service=service,
+        submission=TaskSubmission(
+            task_text="Implement main.py",
+            constraints={
+                "verification_commands": ["visible-check"],
+                "operator_post_worker_verification_commands": ["private-fixture-command"],
+            },
+        ),
+        configure_activities=configure,
+    )
+
+    assert workflow_result["status"] == "completed"
+    assert resolved_commands == ["visible-check", "private-fixture-command"]
+    assert worker.execution_requests[0].task_spec["verification_commands"] == ["visible-check"]
 
 
 @pytest.mark.anyio
