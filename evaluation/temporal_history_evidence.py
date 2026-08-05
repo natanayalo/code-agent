@@ -90,6 +90,31 @@ def _append_unfinished_activities(
             )
 
 
+def _has_fanout_overlap(
+    lifecycle: list[tuple[datetime, bool, int]],
+) -> bool:
+    """Compare activity timestamps because Temporal event IDs can lag wall time."""
+    started_at: dict[int, datetime] = {}
+    ended_at: dict[int, datetime] = {}
+    for at, is_start, scheduled_id in lifecycle:
+        if is_start:
+            started_at[scheduled_id] = min(at, started_at.get(scheduled_id, at))
+        else:
+            ended_at[scheduled_id] = max(at, ended_at.get(scheduled_id, at))
+    scheduled_ids = sorted(started_at)
+    for index, first_id in enumerate(scheduled_ids):
+        first_start = started_at[first_id]
+        first_end = ended_at.get(first_id)
+        for second_id in scheduled_ids[index + 1 :]:
+            second_start = started_at[second_id]
+            second_end = ended_at.get(second_id)
+            if (second_end is None or first_start < second_end) and (
+                first_end is None or second_start < first_end
+            ):
+                return True
+    return False
+
+
 def analyze_temporal_history(
     *,
     workflow_id: str,
@@ -106,8 +131,7 @@ def analyze_temporal_history(
     activities: list[TemporalActivityEvidence] = []
     retry_types: set[str] = set()
     signals: set[str] = set()
-    active_fanout: set[int] = set()
-    fanout_overlap = False
+    fanout_lifecycle: list[tuple[datetime, bool, int]] = []
 
     for event in event_list:
         if event.HasField("activity_task_scheduled_event_attributes"):
@@ -123,8 +147,9 @@ def analyze_temporal_history(
             if attempt > 1:
                 retry_types.add(activity_type)
             if activity_type == "run_decomposed_node":
-                active_fanout.add(scheduled_id)
-                fanout_overlap = fanout_overlap or len(active_fanout) >= 2
+                started_at = _event_time(event)
+                if started_at is not None:
+                    fanout_lifecycle.append((started_at, True, scheduled_id))
             continue
         if event.HasField("workflow_execution_signaled_event_attributes"):
             signals.add(event.workflow_execution_signaled_event_attributes.signal_name)
@@ -145,7 +170,9 @@ def analyze_temporal_history(
                     latency_seconds=_latency_seconds(scheduled_at, _event_time(event)),
                 )
             )
-            active_fanout.discard(scheduled_id)
+            terminal_at = _event_time(event)
+            if activity_type == "run_decomposed_node" and terminal_at is not None:
+                fanout_lifecycle.append((terminal_at, False, scheduled_id))
             break
 
     _append_unfinished_activities(activities, scheduled, attempts)
@@ -161,7 +188,7 @@ def analyze_temporal_history(
         activity_counts=dict(sorted(activity_counts.items())),
         retry_activity_types=sorted(retry_types),
         signal_names=sorted(signals),
-        fanout_overlap=fanout_overlap,
+        fanout_overlap=_has_fanout_overlap(fanout_lifecycle),
         raw_history_file=raw_history_file,
     )
 
