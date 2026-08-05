@@ -411,10 +411,10 @@ still persisted for operator inspection.
 To exercise the Antigravity permission-escalation loop without changing the
 task's mutation mode, submit the initial task with
 `granted_permission=read_only`. The native worker starts the mutation under
-Antigravity's `request-review` tool permission,
-reports a `workspace_write` request when mutation is denied, and the approved
-Temporal retry receives the granted workspace-write boundary. Native read-only
-tasks continue to use `strict` tool permission.
+an enforced adapter boundary, reports a `workspace_write` request without
+invoking the provider, and the approved Temporal retry runs the real provider
+inside the granted workspace-write boundary. Native read-only tasks continue
+to use `strict` tool permission.
 
 Generate the aggregate only after captures are current:
 

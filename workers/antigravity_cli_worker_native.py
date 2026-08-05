@@ -18,7 +18,7 @@ from workers.antigravity_cli_adapter import (
     AntigravityCliRuntimeAdapter,
     write_antigravity_settings,
 )
-from workers.base import WorkerRequest
+from workers.base import WorkerRequest, WorkerResult
 from workers.cli_runtime import CliRuntimeSettings
 from workers.native_agent_artifacts import DEFAULT_NATIVE_AGENT_ARTIFACTS_DIR
 
@@ -55,6 +55,26 @@ def antigravity_tool_permission(
     if granted_permission == ToolPermissionLevel.READ_ONLY:
         return ANTIGRAVITY_MUTATION_REVIEW_TOOL_PERMISSION
     return adapter.tool_permission
+
+
+def antigravity_permission_boundary_result(
+    adapter: object,
+    request: WorkerRequest,
+) -> WorkerResult | None:
+    """Stop restricted mutation requests before invoking the native provider."""
+    if not is_antigravity_native_adapter(adapter):
+        return None
+    if request.read_only or bool(request.constraints.get("read_only")):
+        return None
+    if granted_permission_from_constraints(request.constraints) != ToolPermissionLevel.READ_ONLY:
+        return None
+    return WorkerResult(
+        status="failure",
+        summary="Antigravity mutation requires workspace_write permission.",
+        failure_kind="permission_denied",
+        requested_permission=ToolPermissionLevel.WORKSPACE_WRITE.value,
+        next_action_hint="request_higher_permission",
+    )
 
 
 def _json_object_from_file(path: Path) -> dict[str, Any]:

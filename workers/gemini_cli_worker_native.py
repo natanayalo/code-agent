@@ -14,10 +14,7 @@ from typing import Any
 
 from apps.observability import set_span_status_from_outcome
 from db.enums import WorkerRuntimeMode
-from sandbox import (
-    DockerSandboxContainer,
-    WorkspaceHandle,
-)
+from sandbox import DockerSandboxContainer, WorkspaceHandle
 from sandbox.redact import SecretRedactor
 from sandbox.scratch import node_agent_home
 from tools import ToolPermissionLevel
@@ -25,6 +22,7 @@ from workers.adapter_utils import build_failure_summary, format_native_run_summa
 from workers.antigravity_cli_adapter import AntigravityCliRuntimeAdapter
 from workers.antigravity_cli_worker_native import (
     AntigravityCommandConfig,
+    antigravity_permission_boundary_result,
     antigravity_permission_denied,
     build_antigravity_native_command,
     is_antigravity_native_adapter,
@@ -522,6 +520,10 @@ class GeminiCliWorkerNativeMixin:
         cancel_token: Callable[[], bool] | None,
     ) -> WorkerResult:
         """Execute one native-agent Gemini run and map it into WorkerResult."""
+        if permission_result := antigravity_permission_boundary_result(
+            getattr(self, "runtime_adapter", None), request
+        ):
+            return permission_result
         if cancel_token and cancel_token():
             return WorkerResult(
                 status="error",

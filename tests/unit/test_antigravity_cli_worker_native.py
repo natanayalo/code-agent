@@ -466,6 +466,30 @@ def test_antigravity_worker_permission_grant_controls_tool_permission(tmp_path: 
         )
 
 
+def test_antigravity_worker_restricted_mutation_requests_workspace_write(tmp_path: Path) -> None:
+    worker, workspace = _make_worker(tmp_path)
+
+    result = worker._execute_native_runtime(
+        WorkerRequest(
+            repo_url="https://example.com/repo.git",
+            task_text="Apply a bounded change",
+            constraints={"granted_permission": "read_only"},
+            runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+        ),
+        workspace=workspace,
+        runtime_settings=CliRuntimeSettings(),
+        runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+        system_prompt_override="system prompt",
+        cancel_token=None,
+    )
+
+    assert result.status == "failure"
+    assert result.failure_kind == "permission_denied"
+    assert result.requested_permission == "workspace_write"
+    assert result.next_action_hint == "request_higher_permission"
+    assert not (workspace.workspace_path / ".code-agent" / "native-agent-runner").exists()
+
+
 def test_antigravity_worker_maps_auth_failure_to_provider_auth(tmp_path: Path) -> None:
     worker, _ = _make_worker(tmp_path)
     result = worker._build_worker_result_from_native_run(
