@@ -366,7 +366,9 @@ def persist_reused_capture(
         raise ValueError(f"destination raw history already exists: {case_id}")
     shutil.copyfile(source_history, destination_history)
     destination_history.chmod(0o600)
-    capture = source_capture.model_copy(update={"source_identity": source_manifest.identity})
+    capture = source_capture.model_copy(
+        update={"source_identity": source_capture.source_identity or source_manifest.identity}
+    )
     relative_path = f"{CASES_DIRECTORY}/{case_id}.json"
     _write_model(bundle_dir / relative_path, capture, exclusive=True)
     updated_manifest = manifest.model_copy(

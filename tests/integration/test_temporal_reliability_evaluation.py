@@ -410,6 +410,24 @@ def test_valid_capture_can_be_reused_with_source_identity_and_history(tmp_path: 
     assert refreshed_manifest.capture_files[reused.case_id].endswith(f"/{reused.case_id}.json")
     assert cli.main(["report", "--bundle-dir", str(destination_dir)]) == 2
 
+    second_destination_dir = tmp_path / "second-destination"
+    second_destination_manifest = initialize_bundle(
+        bundle_dir=second_destination_dir,
+        suite=suite,
+        identity=_identity().model_copy(update={"build_sha": "0123456789abcdef"}),
+    )
+    reused_again = persist_reused_capture(
+        bundle_dir=second_destination_dir,
+        manifest=second_destination_manifest,
+        suite=suite,
+        source_bundle_dir=destination_dir,
+        source_manifest=refreshed_manifest,
+        case_id=source_capture.case_id,
+    )
+
+    assert reused_again.source_identity == source_manifest.identity
+    assert cli.main(["report", "--bundle-dir", str(second_destination_dir)]) == 2
+
 
 def test_bundle_rejects_unknown_case_and_modified_frozen_suite(tmp_path: Path) -> None:
     suite = load_suite(SUITE_PATH)
