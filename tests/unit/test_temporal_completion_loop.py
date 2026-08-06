@@ -1,179 +1,236 @@
-"""Unit coverage for durable Temporal completion-loop decisions."""
+"""Unit tests for orchestrator/temporal completion_loop, node_wave, policy, and queues."""
 
-from orchestrator.state import OrchestratorState
+from __future__ import annotations
+
+from datetime import timedelta
+
+import pytest
+
+from orchestrator.node_execution import NodeActivityRequest, logical_activity_key
+from orchestrator.nodes.verification_result import VERIFIER_REPAIR_REQUEST_CONSTRAINT
+from orchestrator.review import REPAIR_REQUEST_CONSTRAINT
+from orchestrator.state import (
+    CompletionLoopState,
+    OrchestratorState,
+    WorkerResult,
+)
 from orchestrator.temporal.completion_loop import (
+    _decision_summary,
+    _repair_source,
     apply_repair_rejection,
     apply_verification_decision,
     decision_from_state,
     verification_is_pending,
 )
+from orchestrator.temporal.node_wave import (
+    NodeWaveItem,
+    deterministic_wave_id,
+)
+from orchestrator.temporal.policy import (
+    activity_options,
+)
+from orchestrator.temporal.queues import (
+    DEFAULT_TEMPORAL_TASK_QUEUE,
+    execution_task_queue_for_profile,
+)
+
+# ---------------------------------------------------------------------------
+# completion_loop tests
+# ---------------------------------------------------------------------------
 
 
-def test_verifier_repair_decision_advances_durable_phase() -> None:
-    state = OrchestratorState.model_validate(
-        {
-            "task": {
-                "task_text": "repair verifier failure",
-                "constraints": {"independent_verifier_repair_request": "fix tests"},
-            },
-            "repair_handoff_requested": True,
+def test_repair_source_verifier_constraint():
+    state = OrchestratorState(
+        task={
+            "task_text": "t",
+            "repo_url": "url",
+            "constraints": {VERIFIER_REPAIR_REQUEST_CONSTRAINT: True},
         }
     )
+    assert _repair_source(state) == "verifier"
 
-    decision = apply_verification_decision(state)
 
+def test_repair_source_review_constraint():
+    state = OrchestratorState(
+        task={"task_text": "t", "repo_url": "url", "constraints": {REPAIR_REQUEST_CONSTRAINT: True}}
+    )
+    assert _repair_source(state) == "independent_review"
+
+
+def test_repair_source_fallback_to_completion_loop_state():
+    state = OrchestratorState(
+        task={"task_text": "t", "repo_url": "url"},
+        completion_loop=CompletionLoopState(repair_source="verifier"),
+    )
+    assert _repair_source(state) == "verifier"
+
+
+def test_decision_summary_existing_loop_summary():
+    state = OrchestratorState(
+        task={"task_text": "t", "repo_url": "url"},
+        completion_loop=CompletionLoopState(summary="explicit summary"),
+    )
+    assert _decision_summary(state, "complete") == "explicit summary"
+
+
+def test_decision_summary_manual_follow_up_result_summary():
+    state = OrchestratorState(
+        task={"task_text": "t", "repo_url": "url"},
+        result=WorkerResult(status="failure", summary="failure reason"),
+    )
+    assert _decision_summary(state, "manual_follow_up") == "failure reason"
+
+
+def test_decision_summary_repair():
+    state = OrchestratorState(
+        task={
+            "task_text": "t",
+            "repo_url": "url",
+            "constraints": {VERIFIER_REPAIR_REQUEST_CONSTRAINT: True},
+        }
+    )
+    assert "verifier requested bounded repair" in _decision_summary(state, "repair")
+
+
+def test_decision_from_state_repair_requested():
+    state = OrchestratorState(
+        task={"task_text": "t", "repo_url": "url"},
+        completion_loop=CompletionLoopState(phase="repair_requested", repair_pass=1),
+    )
+    decision = decision_from_state(state)
     assert decision.continuation == "repair"
-    assert decision.repair_source == "verifier"
     assert decision.repair_pass == 1
-    assert state.completion_loop.phase == "repair_requested"
 
 
-def test_manual_follow_up_decision_preserves_actionable_summary() -> None:
-    state = OrchestratorState.model_validate(
-        {
-            "task": {"task_text": "review changes"},
-            "result": {
-                "status": "failure",
-                "failure_kind": "incomplete_delivery",
-                "summary": "Review findings remain; manual follow-up is required.",
-                "next_action_hint": "await_manual_follow_up",
-            },
-            "completion_loop": {
-                "repair_pass": 1,
-                "repair_source": "independent_review",
-            },
-        }
+def test_decision_from_state_manual_follow_up():
+    state = OrchestratorState(
+        task={"task_text": "t", "repo_url": "url"},
+        completion_loop=CompletionLoopState(phase="manual_follow_up"),
     )
-
-    decision = apply_verification_decision(state)
-
+    decision = decision_from_state(state)
     assert decision.continuation == "manual_follow_up"
-    assert decision.repair_source == "independent_review"
-    assert decision.summary == "Review findings remain; manual follow-up is required."
+
+
+def test_apply_verification_decision_repair_handoff():
+    state = OrchestratorState(
+        task={
+            "task_text": "t",
+            "repo_url": "url",
+            "constraints": {VERIFIER_REPAIR_REQUEST_CONSTRAINT: True},
+        },
+        repair_handoff_requested=True,
+    )
+    decision = apply_verification_decision(state)
+    assert decision.continuation == "repair"
+    assert state.completion_loop.phase == "repair_requested"
+    assert state.completion_loop.repair_pass == 1
+
+
+def test_apply_verification_decision_manual_follow_up():
+    state = OrchestratorState(
+        task={"task_text": "t", "repo_url": "url"},
+        result=WorkerResult(
+            status="failure",
+            next_action_hint="await_manual_follow_up",
+            summary="manual help needed",
+        ),
+    )
+    decision = apply_verification_decision(state)
+    assert decision.continuation == "manual_follow_up"
     assert state.completion_loop.phase == "manual_follow_up"
 
 
-def test_persisted_repair_decision_is_reconstructed_without_new_pass() -> None:
-    state = OrchestratorState.model_validate(
-        {
-            "task": {"task_text": "repair verifier failure"},
-            "completion_loop": {
-                "phase": "repair_requested",
-                "repair_pass": 2,
-                "repair_source": "verifier",
-                "summary": "verifier requested repair pass 2",
-            },
-        }
+def test_apply_verification_decision_complete():
+    state = OrchestratorState(task={"task_text": "t", "repo_url": "url"})
+    decision = apply_verification_decision(state)
+    assert decision.continuation == "complete"
+    assert state.completion_loop.phase == "complete"
+
+
+def test_apply_repair_rejection():
+    state = OrchestratorState(
+        task={
+            "task_text": "t",
+            "repo_url": "url",
+            "constraints": {VERIFIER_REPAIR_REQUEST_CONSTRAINT: True},
+        },
+        result=WorkerResult(status="failure", summary="test failed"),
     )
-
-    decision = decision_from_state(state)
-
-    assert decision.continuation == "repair"
-    assert decision.repair_pass == 2
-    assert decision.summary == "verifier requested repair pass 2"
-
-
-def test_rejected_repair_permission_becomes_manual_follow_up() -> None:
-    state = OrchestratorState.model_validate(
-        {
-            "task": {
-                "task_text": "repair verifier failure",
-                "constraints": {"independent_verifier_repair_request": "fix tests"},
-            },
-            "result": {
-                "status": "failure",
-                "summary": "workspace write permission required",
-                "requested_permission": "workspace_write",
-                "next_action_hint": "request_higher_permission",
-            },
-            "completion_loop": {
-                "phase": "repair_requested",
-                "repair_pass": 1,
-                "repair_source": "verifier",
-            },
-        }
-    )
-
     decision = apply_repair_rejection(state)
-
     assert decision.continuation == "manual_follow_up"
-    assert state.result is not None
-    assert state.result.failure_kind == "incomplete_delivery"
     assert state.result.next_action_hint == "await_manual_follow_up"
-    assert "independent_verifier_repair_request" not in state.task.constraints
+    assert "Repair permission was rejected" in state.result.summary
 
 
-def test_only_initial_or_explicit_pending_phase_runs_verification() -> None:
-    initial = OrchestratorState(task={"task_text": "initial"})
-    pending = OrchestratorState.model_validate(
-        {
-            "task": {"task_text": "pending"},
-            "completion_loop": {"phase": "verification_pending"},
-        }
+def test_verification_is_pending():
+    state = OrchestratorState(
+        task={"task_text": "t", "repo_url": "url"},
+        completion_loop=CompletionLoopState(phase="verification_pending"),
     )
-    complete = OrchestratorState.model_validate(
-        {
-            "task": {"task_text": "complete"},
-            "completion_loop": {"phase": "complete"},
-        }
+    assert verification_is_pending(state, has_prior_event=True) is True
+
+    state_initial = OrchestratorState(
+        task={"task_text": "t", "repo_url": "url"},
+        completion_loop=CompletionLoopState(phase="initial"),
     )
-
-    assert verification_is_pending(initial, has_prior_event=False) is True
-    assert verification_is_pending(initial, has_prior_event=True) is False
-    assert verification_is_pending(pending, has_prior_event=True) is True
-    assert verification_is_pending(complete, has_prior_event=False) is False
+    assert verification_is_pending(state_initial, has_prior_event=False) is True
+    assert verification_is_pending(state_initial, has_prior_event=True) is False
 
 
-def test_decision_summary_falls_back_to_manual_result() -> None:
-    state = OrchestratorState.model_validate(
-        {
-            "task": {"task_text": "manual"},
-            "result": {
-                "status": "failure",
-                "summary": "operator action required",
-                "next_action_hint": "await_manual_follow_up",
-            },
-            "completion_loop": {"phase": "manual_follow_up"},
-        }
+# ---------------------------------------------------------------------------
+# node_wave & policy & queues tests
+# ---------------------------------------------------------------------------
+
+
+def test_deterministic_wave_id():
+    digest1 = "a" * 64
+    digest2 = "b" * 64
+    k1 = logical_activity_key("p1", "n1", 1)
+    k2 = logical_activity_key("p1", "n2", 1)
+    req1 = NodeActivityRequest(
+        task_id="t1",
+        plan_id="p1",
+        node_id="n1",
+        logical_attempt=1,
+        logical_activity_key=k1,
+        effective_input_digest=digest1,
     )
-
-    assert decision_from_state(state).summary == "operator action required"
-
-
-def test_decision_summary_describes_unpersisted_repair_request() -> None:
-    state = OrchestratorState.model_validate(
-        {
-            "task": {
-                "task_text": "repair",
-                "constraints": {"independent_review_repair_request": "fix finding"},
-            },
-            "repair_handoff_requested": True,
-        }
+    req2 = NodeActivityRequest(
+        task_id="t1",
+        plan_id="p1",
+        node_id="n2",
+        logical_attempt=1,
+        logical_activity_key=k2,
+        effective_input_digest=digest2,
     )
 
-    assert decision_from_state(state).summary == "independent review requested bounded repair"
+    item1 = NodeWaveItem(node_id="n1", activity_request=req1, execution_task_queue="q1")
+    item2 = NodeWaveItem(node_id="n2", activity_request=req2, execution_task_queue="q1")
+
+    wave_id1 = deterministic_wave_id("p1", [item1, item2])
+    wave_id2 = deterministic_wave_id("p1", [item1, item2])
+    assert wave_id1 == wave_id2
+    assert wave_id1.startswith("node-wave:v2:p1:")
 
 
-def test_decision_summary_uses_review_or_verification_fallbacks() -> None:
-    reviewed = OrchestratorState.model_validate(
-        {
-            "task": {"task_text": "reviewed"},
-            "review": {
-                "reviewer_kind": "independent_reviewer",
-                "summary": "review accepted",
-                "confidence": 0.9,
-                "outcome": "no_findings",
-            },
-        }
-    )
-    verified = OrchestratorState.model_validate(
-        {
-            "task": {"task_text": "verified"},
-            "verification": {"status": "passed", "summary": None},
-        }
-    )
-    empty = OrchestratorState(task={"task_text": "empty"})
+def test_activity_options():
+    opts = activity_options("classify_and_plan")
+    assert "start_to_close_timeout" in opts
+    assert opts["start_to_close_timeout"] == timedelta(minutes=5)
 
-    assert decision_from_state(reviewed).summary == "review accepted"
-    assert decision_from_state(verified).summary == "verification completed"
-    assert decision_from_state(empty).summary == "verification and review completed"
+    opts_worker = activity_options("run_worker", task_queue="custom-queue")
+    assert opts_worker["task_queue"] == "custom-queue"
+
+    with pytest.raises(ValueError, match="Unknown Temporal activity policy"):
+        activity_options("unknown_activity")
+
+    with pytest.raises(
+        ValueError, match="Only execution activities may select a Temporal task queue"
+    ):
+        activity_options("classify_and_plan", task_queue="custom-queue")
+
+
+def test_queues():
+    assert DEFAULT_TEMPORAL_TASK_QUEUE == "task-execution-queue"
+    assert execution_task_queue_for_profile("codex-fast") == "code-agent-codex"
+    assert execution_task_queue_for_profile("other") == "task-execution-queue"

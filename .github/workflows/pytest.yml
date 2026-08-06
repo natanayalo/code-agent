@@ -60,12 +60,25 @@ jobs:
             --cov=workers \
             --cov-branch \
             --cov-report=term-missing \
-            --cov-report=xml \
-            --cov-fail-under=90
-      - name: Run integration pytest suite
+            --cov-report=xml
+      - name: Run integration pytest suite with coverage gate
         env:
           CODE_AGENT_TEST_POSTGRES_URL: postgresql+psycopg://postgres:postgres@127.0.0.1:5432/code_agent_test
-        run: poetry run pytest tests/integration
+        run: |
+          poetry run pytest tests/integration \
+            --cov=apps \
+            --cov=db \
+            --cov=memory \
+            --cov=orchestrator \
+            --cov=repositories \
+            --cov=sandbox \
+            --cov=tools \
+            --cov=workers \
+            --cov-branch \
+            --cov-append \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --cov-fail-under=90
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v7
         with:

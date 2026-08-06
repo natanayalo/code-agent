@@ -76,7 +76,7 @@ def test_pytest_workflow_runs_unit_coverage_and_integration_suite_on_push() -> N
     steps = _job_steps(workflow, "pytest")
     plugin_step = _step_by_name(steps, "Verify async pytest plugin availability")
     unit_step = _step_by_name(steps, "Run unit pytest with coverage gate")
-    integration_step = _step_by_name(steps, "Run integration pytest suite")
+    integration_step = _step_by_name(steps, "Run integration pytest suite with coverage gate")
     upload_step = _step_by_name(steps, "Upload coverage artifact")
 
     assert "push" in triggers
@@ -97,11 +97,12 @@ def test_pytest_workflow_runs_unit_coverage_and_integration_suite_on_push() -> N
         "--cov=workers",
         "--cov-branch",
         "--cov-report=xml",
-        "--cov-fail-under=90",
     ):
         assert expected_flag in unit_step["run"]
 
-    assert integration_step["run"] == "poetry run pytest tests/integration"
+    assert "tests/integration" in integration_step["run"]
+    assert "--cov-append" in integration_step["run"]
+    assert "--cov-fail-under=90" in integration_step["run"]
 
     assert upload_step["uses"] == "actions/upload-artifact@v7"
     assert upload_step["with"]["path"] == "coverage.xml"
