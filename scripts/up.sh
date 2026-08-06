@@ -39,6 +39,8 @@ export CODE_AGENT_ANTIGRAVITY_AUTH_DIR="${CODE_AGENT_ANTIGRAVITY_AUTH_DIR:-$HOME
 # default root visible while allowing an explicit deployment-specific override.
 export CODE_AGENT_WORKSPACE_ROOT="${CODE_AGENT_WORKSPACE_ROOT:-$HOME/code-agent-workspaces}"
 export CODE_AGENT_CODEX_SANDBOX="${CODE_AGENT_CODEX_SANDBOX:-workspace-write}"
+export BUILD_SHA="${BUILD_SHA:-$(git rev-parse HEAD 2>/dev/null || echo "")}"
+export CODE_AGENT_ENV="${CODE_AGENT_ENV:-local}"
 ALLOW_READ_ONLY_SANDBOX="${CODE_AGENT_ALLOW_READ_ONLY_SANDBOX:-0}"
 EXPECTED_HOME="$(eval echo "~$(id -un)")"
 if [ -z "$EXPECTED_HOME" ] || [ "$EXPECTED_HOME" = "~$(id -un)" ]; then
