@@ -345,14 +345,14 @@ def test_cancel_task_returns_not_found_for_unknown_task() -> None:
 def test_cancel_task_returns_snapshot_when_cancellation_succeeds() -> None:
     """Successful cancellations should return the terminal task snapshot to callers."""
     service = _FakeTaskService()
-    service.cancel_result = _task_snapshot(task_id="task-9", status="failed")
+    service.cancel_result = _task_snapshot(task_id="task-9", status="cancelled")
 
     with _task_client(service) as client:
         response = client.post("/tasks/task-9/cancel")
 
     assert response.status_code == 200
     assert response.json()["task_id"] == "task-9"
-    assert response.json()["status"] == "failed"
+    assert response.json()["status"] == "cancelled"
 
 
 def test_replay_task_returns_500_when_reloaded_snapshot_is_missing() -> None:

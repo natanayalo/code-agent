@@ -171,3 +171,34 @@ def test_api_and_worker_expose_tracing_env_overrides(compose_config: dict[str, A
         worker_env["CODE_AGENT_TRACING_OTLP_ENDPOINT"]
         == "${CODE_AGENT_TRACING_OTLP_ENDPOINT:-http://phoenix:6006/v1/traces}"
     )
+
+
+def test_api_and_worker_share_optional_deployment_identity_overrides(
+    compose_config: dict[str, Any],
+) -> None:
+    """Evidence runs must pass one pinned build and environment to both runtimes."""
+    api_env = compose_config["services"]["api"]["environment"]
+    worker_env = compose_config["services"]["worker"]["environment"]
+
+    assert api_env["BUILD_SHA"] == "${BUILD_SHA:-}"
+    assert worker_env["BUILD_SHA"] == "${BUILD_SHA:-}"
+    assert api_env["CODE_AGENT_ENV"] == "${CODE_AGENT_ENV:-local}"
+    assert worker_env["CODE_AGENT_ENV"] == "${CODE_AGENT_ENV:-local}"
+
+
+def test_api_and_worker_share_antigravity_profile_configuration(
+    compose_config: dict[str, Any],
+) -> None:
+    """API profile validation must expose every Antigravity profile the worker can run."""
+    api_env = compose_config["services"]["api"]["environment"]
+    worker_env = compose_config["services"]["worker"]["environment"]
+
+    for name in (
+        "CODE_AGENT_ANTIGRAVITY_CLI_BIN",
+        "CODE_AGENT_ANTIGRAVITY_MODEL",
+        "CODE_AGENT_ANTIGRAVITY_TIMEOUT_SECONDS",
+        "CODE_AGENT_ANTIGRAVITY_NATIVE_SANDBOX_ENABLED",
+        "CODE_AGENT_ANTIGRAVITY_TOOL_PERMISSION",
+        "CODE_AGENT_ANTIGRAVITY_ARTIFACT_REVIEW_POLICY",
+    ):
+        assert api_env[name] == worker_env[name]

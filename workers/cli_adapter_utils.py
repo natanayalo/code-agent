@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from db.enums import WorkerRuntimeMode
-from workers.base import WorkerRequest, WorkerResult
+from tools import ToolPermissionLevel
+from workers.base import FailureKind, WorkerRequest, WorkerResult
 from workers.failure_taxonomy import build_failure_summary, classify_failure_kind
 
 if TYPE_CHECKING:
@@ -37,6 +38,13 @@ def runtime_mode_not_supported_result(
         failure_kind="provider_error",
         next_action_hint="inspect_worker_configuration",
     )
+
+
+def requested_permission_for_failure(failure_kind: FailureKind | None) -> str | None:
+    """Map a permission denial to the next safe worker authority boundary."""
+    if failure_kind == "permission_denied":
+        return ToolPermissionLevel.WORKSPACE_WRITE.value
+    return None
 
 
 def build_worker_result(

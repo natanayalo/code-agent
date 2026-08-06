@@ -81,6 +81,22 @@ def test_build_system_prompt_omits_verbose_json_bloats(tmp_path) -> None:
     assert '"risk_level": "low"' in prompt
 
 
+def test_build_system_prompt_hides_operator_post_worker_commands(tmp_path) -> None:
+    """Operator-only checks must not reveal private fixtures to the coding worker."""
+    (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")
+    request = WorkerRequest(
+        task_text="Implement feature",
+        repo_url="https://example.com/repo.git",
+        task_spec={"verification_commands": ["visible-check"]},
+        constraints={"operator_post_worker_verification_commands": ["private-fixture-command"]},
+    )
+
+    prompt = build_system_prompt(request, tmp_path)
+
+    assert "visible-check" in prompt
+    assert "private-fixture-command" not in prompt
+
+
 def test_build_system_prompt_redacts_private_tagged_sections(tmp_path) -> None:
     """Worker prompts should never include user-marked private blocks."""
     (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")

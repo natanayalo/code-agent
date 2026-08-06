@@ -76,6 +76,27 @@ def test_history_parser_detects_latency_retry_signal_and_fanout_overlap() -> Non
     )
 
 
+def test_history_parser_uses_timestamps_when_fanout_events_arrive_out_of_order() -> None:
+    start = datetime(2026, 8, 1, tzinfo=UTC)
+    events = [
+        _scheduled(1, start, "run_decomposed_node"),
+        _scheduled(2, start, "run_decomposed_node"),
+        _started(3, start + timedelta(seconds=1), 1),
+        _completed(4, start + timedelta(seconds=4), 1),
+        _started(5, start + timedelta(seconds=2), 2),
+        _completed(6, start + timedelta(seconds=5), 2),
+    ]
+
+    evidence = analyze_temporal_history(
+        workflow_id="task-out-of-order",
+        events=events,
+        raw_history={},
+        raw_history_file="raw.json",
+    )
+
+    assert evidence.fanout_overlap is True
+
+
 def test_history_parser_records_failed_and_unfinished_activities() -> None:
     start = datetime(2026, 8, 1, tzinfo=UTC)
     failed = _event(3, start + timedelta(seconds=2))
@@ -96,6 +117,19 @@ def test_history_parser_records_failed_and_unfinished_activities() -> None:
     assert evidence.workflow_status == "failed"
     assert evidence.retry_activity_types == []
     assert [activity.status for activity in evidence.activities] == ["failed", "started"]
+
+
+def test_history_parser_normalizes_temporal_canceled_spelling() -> None:
+    """Temporal SDK status names should match the product's cancelled vocabulary."""
+    evidence = analyze_temporal_history(
+        workflow_id="task-cancelled",
+        events=[],
+        raw_history={},
+        raw_history_file="raw.json",
+        workflow_status="WORKFLOW_EXECUTION_STATUS_CANCELED",
+    )
+
+    assert evidence.workflow_status == "cancelled"
 
 
 def test_history_parser_handles_missing_timestamps_and_running_history() -> None:

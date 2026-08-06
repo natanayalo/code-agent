@@ -13,15 +13,17 @@ from uuid import uuid4
 
 from sandbox import WorkspaceHandle
 from sandbox.scratch import node_agent_home, node_run_root
+from tools import ToolPermissionLevel, granted_permission_from_constraints
 from workers.antigravity_cli_adapter import (
     AntigravityCliRuntimeAdapter,
     write_antigravity_settings,
 )
-from workers.base import WorkerRequest
+from workers.base import WorkerRequest, WorkerResult
 from workers.cli_runtime import CliRuntimeSettings
 from workers.native_agent_artifacts import DEFAULT_NATIVE_AGENT_ARTIFACTS_DIR
 
 ANTIGRAVITY_READ_ONLY_TOOL_PERMISSION = "strict"
+ANTIGRAVITY_MUTATION_REVIEW_TOOL_PERMISSION = "request-review"
 
 logger = logging.getLogger(__name__)
 
@@ -47,9 +49,32 @@ def antigravity_tool_permission(
 ) -> str:
     """Map read-only requests to strict Antigravity tool permissions."""
     read_only_requested = request.read_only or bool(request.constraints.get("read_only"))
+    granted_permission = granted_permission_from_constraints(request.constraints)
     if read_only_requested:
         return ANTIGRAVITY_READ_ONLY_TOOL_PERMISSION
+    if granted_permission == ToolPermissionLevel.READ_ONLY:
+        return ANTIGRAVITY_MUTATION_REVIEW_TOOL_PERMISSION
     return adapter.tool_permission
+
+
+def antigravity_permission_boundary_result(
+    adapter: object,
+    request: WorkerRequest,
+) -> WorkerResult | None:
+    """Stop restricted mutation requests before invoking the native provider."""
+    if not is_antigravity_native_adapter(adapter):
+        return None
+    if request.read_only or bool(request.constraints.get("read_only")):
+        return None
+    if granted_permission_from_constraints(request.constraints) != ToolPermissionLevel.READ_ONLY:
+        return None
+    return WorkerResult(
+        status="failure",
+        summary="Antigravity mutation requires workspace_write permission.",
+        failure_kind="permission_denied",
+        requested_permission=ToolPermissionLevel.WORKSPACE_WRITE.value,
+        next_action_hint="request_higher_permission",
+    )
 
 
 def _json_object_from_file(path: Path) -> dict[str, Any]:

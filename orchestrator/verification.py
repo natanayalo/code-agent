@@ -36,6 +36,7 @@ _INDEPENDENT_VERIFIER_SUMMARY_MAX_CHARS = 300
 _VERIFICATION_PLACEHOLDER_PREVIEW_MAX = 3
 _DETERMINISTIC_OUTPUT_PREVIEW_MAX_CHARS = 500
 _DETERMINISTIC_SHADOW_GUARD_EXIT_CODE = 97
+_POST_WORKER_VERIFICATION_COMMANDS_CONSTRAINT = "operator_post_worker_verification_commands"
 _PYTHON_MODULE_SHADOW_GUARDS: Mapping[str, tuple[str, ...]] = {
     "pytest": ("pytest.py", "pytest"),
 }
@@ -139,12 +140,19 @@ def _normalize_verification_commands(raw: object) -> list[str]:
 
 
 def resolve_verification_commands(state: OrchestratorState) -> list[str]:
-    """Resolve verifier commands from task spec first, then constraints fallback."""
+    """Resolve worker-visible checks plus operator-only post-worker checks."""
     if state.task_spec is not None:
         commands = _normalize_verification_commands(state.task_spec.verification_commands)
-        if commands:
-            return commands
-    return _normalize_verification_commands(state.task.constraints.get("verification_commands"))
+    else:
+        commands = []
+    if not commands:
+        commands = _normalize_verification_commands(
+            state.task.constraints.get("verification_commands")
+        )
+    post_worker_commands = _normalize_verification_commands(
+        state.task.constraints.get(_POST_WORKER_VERIFICATION_COMMANDS_CONSTRAINT)
+    )
+    return [*commands, *post_worker_commands]
 
 
 def _is_placeholder_verification_command(command: str) -> bool:
@@ -401,7 +409,7 @@ def _build_independent_verifier_request(
     timeout_seconds: int,
 ) -> WorkerRequest:
     constraints = dict(state.task.constraints)
-    constraints["read_only"] = False
+    constraints["read_only"] = True
     if constraints.get("granted_permission") != ToolPermissionLevel.WORKSPACE_WRITE:
         constraints.pop("granted_permission", None)
 
@@ -414,7 +422,7 @@ def _build_independent_verifier_request(
         branch=state.task.branch,
         workspace_id=state.dispatch.workspace_id
         or (state.result.workspace_id if state.result else None),
-        read_only=False,
+        read_only=True,
         task_text=_build_verifier_task_text(state),
         memory_context=state.memory.model_dump(),
         task_spec=state.task_spec.model_dump(mode="json") if state.task_spec is not None else None,

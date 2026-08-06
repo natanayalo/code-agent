@@ -239,6 +239,41 @@ async def test_select_next_node_does_not_overtake_an_ineligible_second_node() ->
     assert selection["node_id"] == "first"
 
 
+@pytest.mark.anyio
+async def test_singleton_merge_projects_runtime_manifest_into_parent_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = _build_fixture(second_parallel_safe=False)
+    monkeypatch.setenv("BUILD_SHA", "abc123")
+    monkeypatch.setenv("CODE_AGENT_ENV", "m25-6-test")
+    selection = await fixture.activity.select_next_node_v2(fixture.task_id)
+    result_ref = _persist_terminal_result(fixture, selection, status="completed")
+
+    result = await fixture.activity.merge_node_wave(
+        fixture.task_id,
+        {"selection": selection, "result_ref": result_ref},
+    )
+
+    assert result["continuation"] == "continue"
+    with session_scope(fixture.session_factory) as session:
+        snapshot = TemporalTaskStateRepository(session).get(task_id=fixture.task_id)
+        assert snapshot is not None
+        merged = OrchestratorState.model_validate(snapshot.state)
+        assert merged.dispatch.runtime_manifest is not None
+        assert merged.dispatch.runtime_manifest["service"] == {
+            "service_name": "code-agent",
+            "schema_version": 1,
+            "environment": "m25-6-test",
+            "build_sha": "abc123",
+        }
+        assert merged.dispatch.runtime_manifest["worker"] == {
+            "worker_type": "codex",
+            "worker_profile": "readonly-profile",
+            "runtime_mode": "native_agent",
+            "workspace_id": None,
+        }
+
+
 @pytest.mark.parametrize(
     ("statuses", "failure_kinds", "continuation"),
     [
@@ -276,6 +311,8 @@ async def test_merge_v2_wave_projects_ordered_multi_result_outcomes(
         assert snapshot is not None
         merged = OrchestratorState.model_validate(snapshot.state)
         assert [outcome.node_id for outcome in merged.node_outcomes] == ["first", "second"]
+        assert merged.dispatch.runtime_manifest is not None
+        assert merged.dispatch.runtime_manifest["worker"]["worker_profile"] == "readonly-profile"
         second = ExecutionPlanRepository(session).get_node(fixture.plan_id, "second")
         assert second is not None
         if continuation == "retry_node":

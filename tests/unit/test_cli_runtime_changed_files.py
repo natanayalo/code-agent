@@ -172,6 +172,10 @@ def test_collect_changed_files_from_repo_path_ignores_only_untracked_native_path
                 b" M .agent_home/.gemini/settings.json\0"
                 b"?? .agent_home/.gemini/antigravity-cli/cache.json\0"
                 b"?? .code-agent/native-agent-runner/stdout.txt\0"
+                b"?? .code-agent/native-events.jsonl\0"
+                b"?? .code-agent/native-final-message.json\0"
+                b"?? .code-agent/native-response.schema.json\0"
+                b" M .code-agent/native-final-message.json\0"
             ),
             stderr=b"",
         )
@@ -184,6 +188,7 @@ def test_collect_changed_files_from_repo_path_ignores_only_untracked_native_path
         "README.md",
         ".vscode/settings.json",
         ".agent_home/.gemini/settings.json",
+        ".code-agent/native-final-message.json",
     ]
 
 
@@ -223,9 +228,7 @@ def test_collect_changed_files_since_ref_preserves_all_baseline_paths(monkeypatc
             args=args,
             returncode=0,
             stdout=(
-                b"README.md\0"
-                b".agent_home/.gemini/settings.json\0"
-                b".vscode/copied-settings.json\0"
+                b"README.md\0.agent_home/.gemini/settings.json\0.vscode/copied-settings.json\0"
             ),
             stderr=b"",
         )

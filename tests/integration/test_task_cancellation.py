@@ -91,7 +91,7 @@ def test_cancel_temporal_task_queues_workflow_cancellation(
     cancel_response = client.post(f"/tasks/{task_id}/cancel")
 
     assert cancel_response.status_code == 200
-    assert cancel_response.json()["status"] == "failed"
+    assert cancel_response.json()["status"] == "cancelled"
     with session_scope(client.app.state.task_service.session_factory) as session:
         command = session.query(TemporalCommand).filter_by(command_type="cancel").one()
         assert command.task_id == task_id

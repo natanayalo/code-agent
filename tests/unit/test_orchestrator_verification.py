@@ -76,7 +76,8 @@ async def test_run_independent_verifier_uses_native_read_only_request() -> None:
 
     args, kwargs = mock_worker.run.call_args
     request = args[0]
-    assert request.constraints["read_only"] is False
+    assert request.read_only is True
+    assert request.constraints["read_only"] is True
     assert request.runtime_mode == WorkerRuntimeMode.NATIVE_AGENT
     assert request.budget["worker_timeout_seconds"] == 90
     assert "read-only mode" in request.task_text.lower()

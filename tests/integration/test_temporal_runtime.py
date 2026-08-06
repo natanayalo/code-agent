@@ -35,6 +35,7 @@ from orchestrator.temporal.activities import TaskExecutionActivities
 from orchestrator.temporal.command_dispatcher import TemporalCommandDispatcher
 from orchestrator.temporal.queues import CODEX_EXECUTION_TASK_QUEUE
 from orchestrator.temporal.workflows import TaskExecutionWorkflow
+from orchestrator.verification import resolve_verification_commands
 from repositories import (
     ExecutionPlanRepository,
     TaskTimelineRepository,
@@ -145,6 +146,40 @@ class _CompletionLoopWorker:
         return WorkerResult(
             status="success",
             summary=f"worker pass {len(self.execution_requests)} completed",
+            files_changed=["main.py"],
+            workspace_id=request.workspace_id or "retained-workspace",
+        )
+
+
+class _VerifierBoundaryWorker:
+    """Capture execution, verifier, and reviewer requests through the real activity."""
+
+    def __init__(self) -> None:
+        self.verifier_requests = []
+
+    async def run(self, request, *, system_prompt=None) -> WorkerResult:
+        if "Independently verify the previously completed task" in request.task_text:
+            self.verifier_requests.append(request)
+            return WorkerResult(
+                status="success",
+                summary=json.dumps({"status": "passed", "summary": "read-only verifier passed"}),
+            )
+        if request.task_text.startswith("Perform an independent review"):
+            return WorkerResult(
+                status="success",
+                summary=json.dumps(
+                    {
+                        "reviewer_kind": "independent_reviewer",
+                        "summary": "no findings",
+                        "confidence": 1.0,
+                        "outcome": "no_findings",
+                        "findings": [],
+                    }
+                ),
+            )
+        return WorkerResult(
+            status="success",
+            summary="initial worker completed",
             files_changed=["main.py"],
             workspace_id=request.workspace_id or "retained-workspace",
         )
@@ -364,6 +399,67 @@ async def _run_completion_loop_workflow(
 
 
 @pytest.mark.anyio
+async def test_temporal_independent_verifier_request_is_read_only(session_factory):
+    """The real verification activity must not grant mutation tools to its inspector."""
+    worker = _VerifierBoundaryWorker()
+    service = TaskExecutionService(
+        session_factory=session_factory,
+        worker=worker,
+        enable_independent_verifier=True,
+    )
+
+    _task_id, workflow_result = await _run_completion_loop_workflow(
+        session_factory=session_factory,
+        service=service,
+        submission=TaskSubmission(task_text="Implement main.py"),
+        configure_activities=lambda _activities: None,
+    )
+
+    assert workflow_result["status"] == "completed"
+    assert len(worker.verifier_requests) == 1
+    verifier_request = worker.verifier_requests[0]
+    assert verifier_request.read_only is True
+    assert verifier_request.constraints["read_only"] is True
+
+
+@pytest.mark.anyio
+async def test_temporal_resolves_operator_post_worker_verification_commands(session_factory):
+    """Private operator checks must arrive only at the post-worker verifier stage."""
+    worker = _CompletionLoopWorker()
+    service = TaskExecutionService(session_factory=session_factory, worker=worker)
+    resolved_commands: list[str] = []
+
+    def configure(activities: TaskExecutionActivities) -> None:
+        async def verifier(state_input):
+            state = OrchestratorState.model_validate(state_input)
+            resolved_commands.extend(resolve_verification_commands(state))
+            return evaluate_verification(
+                state,
+                deterministic_verifier_outcome=("passed", "operator checks passed"),
+            )
+
+        activities.verify_result_node = verifier
+        activities.review_result_node = lambda _state: {}
+
+    _task_id, workflow_result = await _run_completion_loop_workflow(
+        session_factory=session_factory,
+        service=service,
+        submission=TaskSubmission(
+            task_text="Implement main.py",
+            constraints={
+                "verification_commands": ["visible-check"],
+                "operator_post_worker_verification_commands": ["private-fixture-command"],
+            },
+        ),
+        configure_activities=configure,
+    )
+
+    assert workflow_result["status"] == "completed"
+    assert resolved_commands == ["visible-check", "private-fixture-command"]
+    assert worker.execution_requests[0].task_spec["verification_commands"] == ["visible-check"]
+
+
+@pytest.mark.anyio
 async def test_temporal_verifier_repair_completes_through_second_worker_pass(session_factory):
     """A verifier repair request must rerun the selected worker and verify again."""
     worker = _CompletionLoopWorker()
@@ -420,6 +516,7 @@ async def test_temporal_verifier_repair_completes_through_second_worker_pass(ses
         assert [event.event_type for event in events].count(
             TimelineEventType.VERIFICATION_COMPLETED
         ) == 2
+        assert task.constraints["independent_verifier_repair_passes_used"] == 1
         assert session.get(TemporalTaskState, task_id) is None
 
 
@@ -477,6 +574,7 @@ async def test_temporal_independent_review_repair_is_reviewed_again(session_fact
     with session_scope(session_factory) as session:
         task = session.get(Task, task_id)
         assert task is not None and task.status == "completed"
+        assert task.constraints["independent_review_repair_passes_used"] == 1
         assert session.get(TemporalTaskState, task_id) is None
 
 
@@ -629,19 +727,15 @@ async def test_temporal_cancellation_during_repair_projects_one_terminal_state(s
                 )
                 await asyncio.wait_for(worker.repair_started.wait(), timeout=5)
                 cancelled = service.cancel_task(task_id=snapshot.task_id)
-                assert cancelled is not None and cancelled.status == "failed"
+                assert cancelled is not None and cancelled.status == "cancelled"
                 await dispatcher.dispatch_pending()
-                try:
-                    cancellation_result = await run_task
-                except WorkflowFailureError:
-                    cancellation_result = None
-                if cancellation_result is not None:
-                    assert cancellation_result["status"] == "failed"
+                with pytest.raises(WorkflowFailureError):
+                    await run_task
 
     with session_scope(session_factory) as session:
         task = session.get(Task, snapshot.task_id)
         events = TaskTimelineRepository(session).list_by_task(snapshot.task_id)
-        assert task is not None and task.status == "failed"
+        assert task is not None and task.status == "cancelled"
         assert [event.event_type for event in events].count(TimelineEventType.TASK_CANCELLED) == 1
         assert session.get(TemporalTaskState, snapshot.task_id) is None
 
@@ -1358,12 +1452,12 @@ async def test_cancelling_pending_permission_escalation_removes_resumable_state(
     cancelled = service.cancel_task(task_id=snapshot.task_id)
 
     assert cancelled is not None
-    assert cancelled.status == "failed"
+    assert cancelled.status == "cancelled"
     with session_scope(session_factory) as session:
         task = session.get(Task, snapshot.task_id)
         durable_state = TemporalTaskStateRepository(session).get(task_id=snapshot.task_id)
         assert task is not None
-        assert task.status == "failed"
+        assert task.status == "cancelled"
         assert durable_state is None
 
 
@@ -1378,7 +1472,16 @@ async def test_temporal_run_worker_cancellation_reaches_worker_cleanup(
     )
     snapshot, _ = service.create_task(TaskSubmission(task_text="Cancel worker activity"))
     state = OrchestratorState.model_validate(
-        {"task": {"task_id": snapshot.task_id, "task_text": "Cancel worker activity"}}
+        {
+            "task": {"task_id": snapshot.task_id, "task_text": "Cancel worker activity"},
+            "dispatch": {
+                "workspace_id": f"workspace-{snapshot.task_id}",
+                "runtime_manifest": {
+                    "sandbox": {"workspace_root": "/tmp/code-agent-workspaces"},
+                    "worker": {"workspace_id": f"workspace-{snapshot.task_id}"},
+                },
+            },
+        }
     )
     with session_scope(session_factory) as session:
         TemporalTaskStateRepository(session).upsert(
@@ -1394,7 +1497,13 @@ async def test_temporal_run_worker_cancellation_reaches_worker_cleanup(
             await asyncio.Event().wait()
         except asyncio.CancelledError:
             cleaned_up.set()
-            raise
+            return {
+                "result": WorkerResult(
+                    status="failure",
+                    summary="Worker stopped after operator cancellation.",
+                    failure_kind="timeout",
+                ).model_dump(mode="json")
+            }
 
     monkeypatch.setattr("orchestrator.temporal.activities.activity.heartbeat", lambda: None)
     activities = TaskExecutionActivities(service=service)
@@ -1405,6 +1514,12 @@ async def test_temporal_run_worker_cancellation_reaches_worker_cleanup(
     with pytest.raises(asyncio.CancelledError):
         await activity_task
     assert cleaned_up.is_set()
+    with session_scope(session_factory) as session:
+        task = session.get(Task, snapshot.task_id)
+        worker_run = session.query(WorkerRun).filter_by(task_id=snapshot.task_id).one()
+        assert task is not None and task.status == "cancelled"
+        assert worker_run.status == "failure"
+        assert worker_run.artifact_index[0]["name"] == "workspace"
 
 
 @pytest.mark.anyio
@@ -1484,7 +1599,7 @@ async def test_temporal_runtime_cancellation_projects_terminal_state(
 
                 cancelled = service.cancel_task(task_id=snapshot.task_id)
                 assert cancelled is not None
-                assert cancelled.status == "failed"
+                assert cancelled.status == "cancelled"
                 await dispatcher.dispatch_pending()
                 with pytest.raises(WorkflowFailureError):
                     await run_task
@@ -1492,7 +1607,7 @@ async def test_temporal_runtime_cancellation_projects_terminal_state(
     with session_scope(session_factory) as session:
         task = session.get(Task, snapshot.task_id)
         assert task is not None
-        assert task.status == "failed"
+        assert task.status == "cancelled"
         events = (
             session.execute(
                 select(TaskTimelineEvent).where(TaskTimelineEvent.task_id == snapshot.task_id)

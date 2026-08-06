@@ -196,6 +196,7 @@ class CapturedCaseEvidence(StrictModel):
     temporal: TemporalHistoryEvidence
     annotations: OperatorAnnotations
     gate_failures: list[str]
+    source_identity: BundleIdentity | None = None
 
 
 class EvidenceBundleManifest(StrictModel):
@@ -215,6 +216,8 @@ class SanitizedCaseResult(StrictModel):
     category: CaseCategory
     expected_profile: str
     expected_terminal_status: ExpectedTerminalStatus
+    evidence_reused: bool
+    evidence_build_sha: str
     observed_terminal_status: str
     valid: bool
     gate_failures: list[str]

@@ -192,6 +192,8 @@ def test_sanitized_projection_counts_metrics_without_private_content() -> None:
     markdown = render_markdown(report)
 
     assert public_case.repeated_clarification_questions == 1
+    assert public_case.evidence_reused is False
+    assert public_case.evidence_build_sha == IDENTITY.build_sha
     assert public_case.human_interventions == 1
     assert report.status == "incomplete"
     assert "private-task-id" not in markdown
@@ -202,6 +204,25 @@ def test_sanitized_projection_counts_metrics_without_private_content() -> None:
     missing_time_capture = capture.model_copy(update={"database": missing_time_database})
     assert sanitize_case(missing_time_capture).time_to_terminal_seconds is None
     assert build_report(IDENTITY, [capture] * 20).status == "invalid"
+
+
+def test_sanitized_projection_labels_reused_evidence_with_its_source_build() -> None:
+    source_identity = IDENTITY.model_copy(update={"build_sha": "fedcba987654"})
+    capture = CapturedCaseEvidence(
+        case_id="mutation-codex-01",
+        task_id="private-task-id",
+        expected=_case("mutation-codex-01"),
+        database=_database(),
+        temporal=_history(),
+        annotations=ANNOTATIONS,
+        gate_failures=[],
+        source_identity=source_identity,
+    )
+
+    public_case = sanitize_case(capture)
+
+    assert public_case.evidence_reused is True
+    assert public_case.evidence_build_sha == source_identity.build_sha
 
 
 def test_public_payload_validator_rejects_private_fields() -> None:

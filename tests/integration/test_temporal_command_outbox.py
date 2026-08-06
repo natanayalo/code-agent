@@ -158,7 +158,7 @@ def test_cancel_supersedes_an_undelivered_temporal_start(monkeypatch) -> None:
 
     cancelled = service.cancel_task(task_id=snapshot.task_id)
     assert cancelled is not None
-    assert cancelled.status == "failed"
+    assert cancelled.status == "cancelled"
 
     client = _CommandClient()
     asyncio.run(
@@ -172,7 +172,7 @@ def test_cancel_supersedes_an_undelivered_temporal_start(monkeypatch) -> None:
         task = session.get(Task, snapshot.task_id)
         commands = session.query(TemporalCommand).filter_by(task_id=snapshot.task_id).all()
         assert task is not None
-        assert task.status.value == "failed"
+        assert task.status.value == "cancelled"
         assert {command.command_type for command in commands} == {"start", "cancel"}
         assert all(command.superseded_at is not None for command in commands)
         assert all(command.delivered_at is None for command in commands)
@@ -253,7 +253,7 @@ def test_cancellation_during_start_rpc_preserves_follow_up_cancel(monkeypatch) -
             for command in session.query(TemporalCommand).filter_by(task_id=snapshot.task_id)
         }
         assert task is not None
-        assert task.status.value == "failed"
+        assert task.status.value == "cancelled"
         assert commands["start"].delivered_at is not None
         assert commands["start"].superseded_at is None
         assert commands["cancel"].delivered_at is not None

@@ -244,7 +244,7 @@ class TaskRepository:
         terminal_statuses = {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED}
         if task.status in terminal_statuses:
             return task, False
-        task.status = TaskStatus.FAILED
+        task.status = TaskStatus.CANCELLED
         task.last_error = "Task cancelled by operator."
         self.session.execute(
             update(HumanInteraction)

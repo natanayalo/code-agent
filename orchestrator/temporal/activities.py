@@ -7,6 +7,7 @@ import json
 import logging
 from datetime import datetime
 from functools import wraps
+from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -96,7 +97,7 @@ from repositories import (
     session_scope,
 )
 from sandbox.scratch import scratch_namespace_component
-from workers import WorkerResult
+from workers import ArtifactReference, WorkerResult
 
 logger = logging.getLogger(__name__)
 
@@ -281,6 +282,39 @@ def _finalize_worker_activity_state(
     return state, requires_permission
 
 
+def _retain_cancelled_workspace_artifact(state: OrchestratorState) -> OrchestratorState:
+    """Use the pinned dispatch workspace when provider cancellation yields no artifact."""
+    result = state.result
+    if result is None or any(
+        artifact.name == "workspace" or artifact.artifact_type == "workspace"
+        for artifact in result.artifacts
+    ):
+        return state
+    manifest = state.dispatch.runtime_manifest or {}
+    sandbox_manifest = manifest.get("sandbox") or {}
+    worker_manifest = manifest.get("worker") or {}
+    workspace_root = sandbox_manifest.get("workspace_root")
+    workspace_id = state.dispatch.workspace_id or worker_manifest.get("workspace_id")
+    if not isinstance(workspace_root, str) or not isinstance(workspace_id, str):
+        return state
+    workspace_path = Path(workspace_root) / workspace_id
+    if not workspace_path.is_absolute():
+        return state
+    retained_result = result.model_copy(
+        update={
+            "artifacts": [
+                *result.artifacts,
+                ArtifactReference(
+                    name="workspace",
+                    uri=workspace_path.as_uri(),
+                    artifact_type="workspace",
+                ),
+            ]
+        }
+    )
+    return state.model_copy(update={"result": retained_result})
+
+
 def _source_file_changes(files_changed: list[str], logical_activity_key: str) -> list[str]:
     """Exclude only this node's legacy in-repository scratch paths.
 
@@ -301,6 +335,14 @@ def _source_file_changes(files_changed: list[str], logical_activity_key: str) ->
         if not normalized.startswith(scratch_prefixes):
             source_paths.append(path)
     return source_paths
+
+
+def _project_decomposed_runtime_manifest(state: OrchestratorState) -> None:
+    """Carry the effective node-wave deployment contract into parent persistence."""
+    request = _build_worker_request(state)
+    state.dispatch = state.dispatch.model_copy(
+        update={"runtime_manifest": request.runtime_manifest}
+    )
 
 
 def _restore_task_trace_context(func: Any) -> Any:
@@ -551,7 +593,11 @@ class TaskExecutionActivities:
 
             _update_task_route_and_spec(task, state, interaction_repo, plan_repo)
             _apply_approval_constraints(task, state, finished_at)
-            if task.status not in (TaskStatus.COMPLETED, TaskStatus.FAILED):
+            if task.status not in (
+                TaskStatus.COMPLETED,
+                TaskStatus.FAILED,
+                TaskStatus.CANCELLED,
+            ):
                 task.status = force_status or TaskStatus.IN_PROGRESS
             _persist_timeline_events(session, task_id, state)
             # Snapshot the cursor together with the events. The next activity
@@ -837,12 +883,67 @@ class TaskExecutionActivities:
             )
             state.timeline_persisted_count = len(state.timeline_events)
             return {"requires_permission_escalation": requires_permission}
+        except asyncio.CancelledError:
+            await self._persist_cancelled_worker_activity(
+                task_id=task_id,
+                state=state,
+                worker_task=worker_task,
+                repair_execution=repair_execution,
+                started_at=started_at,
+            )
+            raise
         finally:
             if worker_task is not None and not worker_task.done():
                 worker_task.cancel()
                 await asyncio.gather(worker_task, return_exceptions=True)
             heartbeat_task.cancel()
             await asyncio.gather(heartbeat_task, return_exceptions=True)
+
+    async def _persist_cancelled_worker_activity(
+        self,
+        *,
+        task_id: str,
+        state: OrchestratorState,
+        worker_task: asyncio.Task[dict[str, Any]] | None,
+        repair_execution: bool,
+        started_at: datetime,
+    ) -> None:
+        """Retain a cancelled worker's partial result before acknowledging cancellation."""
+        if worker_task is None:
+            return
+        if not worker_task.done():
+            worker_task.cancel()
+        settled = await asyncio.gather(worker_task, return_exceptions=True)
+        updates = settled[0]
+        if not isinstance(updates, dict):
+            logger.warning(
+                "Cancelled worker did not yield partial evidence",
+                extra={"task_id": task_id},
+            )
+            return
+
+        state_dict = _worker_state_for_execution(
+            state,
+            repair_execution=repair_execution,
+        )
+        self._merge_updates(state_dict, updates)
+        cancelled_state, _ = _finalize_worker_activity_state(
+            state_dict,
+            repair_execution=repair_execution,
+        )
+        cancelled_state = _retain_cancelled_workspace_artifact(cancelled_state)
+        # The operator cancellation is already the authoritative terminal timeline
+        # event. The worker update was produced from the pre-cancellation snapshot,
+        # so do not let its stale sequence collide with that durable event.
+        cancelled_state.timeline_persisted_count = len(cancelled_state.timeline_events)
+        await self.service._run_blocking(
+            self._persist_state,
+            task_id=task_id,
+            state=cancelled_state,
+            started_at=started_at,
+            finished_at=utc_now(),
+            force_status=TaskStatus.CANCELLED,
+        )
 
     @activity.defn(name="select_next_node")
     @_restore_task_trace_context
@@ -1456,6 +1557,7 @@ class TaskExecutionActivities:
                 return NodeWaveMergeResult(continuation="continue")
 
         result = await self.service._run_blocking(_merge)
+        _project_decomposed_runtime_manifest(state)
         await self.service._run_blocking(
             self._persist_intermediate_state,
             task_id=task_id,
@@ -1601,6 +1703,7 @@ class TaskExecutionActivities:
                     )
                     if continuation == "continue":
                         continuation = "retry_node"
+            _project_decomposed_runtime_manifest(state)
             TemporalTaskStateRepository(session).upsert(
                 task_id=task_id, state=state.model_dump(mode="json")
             )
@@ -1690,7 +1793,11 @@ class TaskExecutionActivities:
         def _record_failure() -> None:
             with session_scope(self.service.session_factory) as session:
                 task = TaskRepository(session).get(task_id)
-                if task is None or task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
+                if task is None or task.status in (
+                    TaskStatus.COMPLETED,
+                    TaskStatus.FAILED,
+                    TaskStatus.CANCELLED,
+                ):
                     return
                 task.status = TaskStatus.FAILED
                 task.last_error = f"Temporal workflow failed: {failure}"

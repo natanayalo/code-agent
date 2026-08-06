@@ -402,6 +402,17 @@ def sanitize_case(capture: CapturedCaseEvidence) -> SanitizedCaseResult:
         category=expected.category,
         expected_profile=expected.expected_profile,
         expected_terminal_status=expected.expected_terminal_status,
+        evidence_reused=capture.source_identity is not None,
+        evidence_build_sha=(
+            capture.source_identity.build_sha
+            if capture.source_identity is not None
+            else str(
+                (database.get("worker_runs") or [{}])[0]
+                .get("runtime_manifest", {})
+                .get("service", {})
+                .get("build_sha", "unknown")
+            )
+        ),
         observed_terminal_status=str(database["task"].get("status")),
         valid=not capture.gate_failures,
         gate_failures=capture.gate_failures,
@@ -527,12 +538,13 @@ def render_markdown(report: SanitizedReliabilityReport) -> str:
         f"- Validation-evidence rate: {metrics.validation_evidence_rate}",
         (f"- CI/review rejections: {metrics.ci_rejection_count}/{metrics.review_rejection_count}"),
         "",
-        "| Case | Category | Profile | Observed | Valid |",
-        "| --- | --- | --- | --- | --- |",
+        "| Case | Category | Profile | Evidence | Observed | Valid |",
+        "| --- | --- | --- | --- | --- | --- |",
     ]
     lines.extend(
         (
             f"| {case.case_id} | {case.category} | {case.expected_profile} | "
+            f"{'reused' if case.evidence_reused else 'current'} ({case.evidence_build_sha[:12]}) | "
             f"{case.observed_terminal_status} | {'yes' if case.valid else 'no'} |"
         )
         for case in report.cases
