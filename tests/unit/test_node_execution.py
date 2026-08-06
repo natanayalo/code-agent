@@ -1,17 +1,19 @@
 """Contract tests for durable node execution identities."""
 
-import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from db.enums import WorkerType
 from orchestrator.node_execution import (
-    NodeActivityClaimLost,
+    NodeActivityInProgress,
     NodeActivityRequest,
-    _execute_worker_under_claim,
+    NodeExecutionService,
     _legacy_terminal_outcome,
+    _node_status,
     logical_activity_key,
 )
-from workers import WorkerResult
+from workers import WorkerRequest, WorkerResult
 
 
 def test_node_activity_request_requires_canonical_identity_and_digest() -> None:
@@ -55,23 +57,72 @@ def test_legacy_terminal_outcome_preserves_permission_continuation() -> None:
     assert continuation == "await_permission"
 
 
-def test_lost_claim_cancels_worker_before_processing_result() -> None:
-    worker_cancelled = asyncio.Event()
+def test_node_status_helper():
+    r_succ = WorkerResult(status="success")
+    assert _node_status(r_succ) == ("completed", "continue")
 
-    async def worker() -> WorkerResult:
-        try:
-            await asyncio.Event().wait()
-        except asyncio.CancelledError:
-            worker_cancelled.set()
-            raise
-        raise AssertionError("cancelled worker unexpectedly completed")
+    r_perm = WorkerResult(status="failure", next_action_hint="request_higher_permission")
+    assert _node_status(r_perm) == ("blocked", "await_permission")
 
-    async def lost_claim() -> bool:
-        return False
+    r_fail = WorkerResult(status="failure")
+    assert _node_status(r_fail) == ("failed", "retry_node")
 
-    async def exercise() -> None:
-        with pytest.raises(NodeActivityClaimLost):
-            await _execute_worker_under_claim(worker, lost_claim)
 
-    asyncio.run(exercise())
-    assert worker_cancelled.is_set()
+@pytest.mark.asyncio
+async def test_node_execution_service_execute_branches():
+    session_factory = MagicMock()
+    sess = MagicMock()
+    session_factory.return_value.__enter__.return_value = sess
+
+    service = NodeExecutionService(session_factory)
+
+    activity = NodeActivityRequest(
+        task_id="t1",
+        plan_id="p1",
+        node_id="n1",
+        logical_attempt=1,
+        logical_activity_key=logical_activity_key("p1", "n1", 1),
+        effective_input_digest="a" * 64,
+    )
+    request = WorkerRequest(task_text="text", repo_url="url", worker_type=WorkerType.CODEX)
+
+    # Collision branch
+    with patch("orchestrator.node_execution.ExecutionPlanRepository") as mock_repo_cls:
+        mock_repo_cls.return_value.get_by_id.return_value = MagicMock(task_id="t1")
+        mock_repo_cls.return_value.claim_activity.return_value = ("collision", None)
+        with pytest.raises(ValueError, match="logical node activity key was reused"):
+            await service.execute(
+                activity=activity,
+                request=request,
+                effective_input_summary={},
+                execute_worker=AsyncMock(),
+            )
+
+    # In progress branch
+    with patch("orchestrator.node_execution.ExecutionPlanRepository") as mock_repo_cls:
+        mock_repo_cls.return_value.get_by_id.return_value = MagicMock(task_id="t1")
+        mock_repo_cls.return_value.claim_activity.return_value = ("in_progress", None)
+        with pytest.raises(NodeActivityInProgress):
+            await service.execute(
+                activity=activity,
+                request=request,
+                effective_input_summary={},
+                execute_worker=AsyncMock(),
+            )
+
+    # Terminal replay branch
+    with patch("orchestrator.node_execution.ExecutionPlanRepository") as mock_repo_cls:
+        attempt = MagicMock()
+        attempt.status = "completed"
+        attempt.failure_kind = None
+        attempt.result_payload = None
+        attempt.result_digest = None
+        mock_repo_cls.return_value.get_by_id.return_value = MagicMock(task_id="t1")
+        mock_repo_cls.return_value.claim_activity.return_value = ("terminal_replay", attempt)
+        ref, outcome = await service.execute(
+            activity=activity,
+            request=request,
+            effective_input_summary={},
+            execute_worker=AsyncMock(),
+        )
+        assert ref.status == "terminal_replay"

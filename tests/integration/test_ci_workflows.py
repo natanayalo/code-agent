@@ -97,7 +97,7 @@ def test_pytest_workflow_runs_unit_coverage_and_integration_suite_on_push() -> N
         "--cov=workers",
         "--cov-branch",
         "--cov-report=xml",
-        "--cov-fail-under=80",
+        "--cov-fail-under=90",
     ):
         assert expected_flag in unit_step["run"]
 

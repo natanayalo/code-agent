@@ -284,9 +284,9 @@ def test_contract_execution_runs_successfully(tmp_path: Path) -> None:
         env=env,
     )
 
-    assert result.returncode == 0, (
-        f"Script failed with stdout:\n{result.stdout}\n" f"stderr:\n{result.stderr}"
-    )
+    assert (
+        result.returncode == 0
+    ), f"Script failed with stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     assert report_output_path.exists()
 
     with open(report_output_path, encoding="utf-8") as f:

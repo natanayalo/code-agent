@@ -29,7 +29,7 @@ def postgres_session_factory():
     database_url = os.getenv("CODE_AGENT_TEST_POSTGRES_URL")
     if not database_url:
         pytest.skip(
-            "CODE_AGENT_TEST_POSTGRES_URL is not set; " "skipping Postgres search integration."
+            "CODE_AGENT_TEST_POSTGRES_URL is not set; skipping Postgres search integration."
         )
 
     base_url = make_url(database_url)

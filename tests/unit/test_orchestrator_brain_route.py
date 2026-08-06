@@ -334,3 +334,29 @@ def test_suggest_route_rejects_rationale_only_payload() -> None:
         )
     )
     assert suggestion is None
+
+
+@pytest.mark.asyncio
+async def test_suggest_route_with_previous_attempts_history() -> None:
+    from orchestrator.state import TaskTimelineEventState
+
+    worker = _StaticWorker(WorkerResult(status="success", summary='{"suggested_worker":"codex"}'))
+    brain = RuleBasedOrchestratorBrain(planner_worker=worker)
+
+    state = _state()
+    state.attempt_count = 3
+    state.timeline_events = [
+        TaskTimelineEventState(
+            attempt_number=1, event_type="worker_dispatched", payload={"worker_type": "codex"}
+        ),
+        TaskTimelineEventState(attempt_number=1, event_type="worker_failed", message="Failed"),
+        TaskTimelineEventState(attempt_number=2, event_type="infra_failure", message="Infra error"),
+    ]
+
+    suggestion = await brain.suggest_route(
+        state=state,
+        available_workers=frozenset({"codex"}),
+        available_profiles=None,
+    )
+    assert suggestion is not None
+    assert worker.requests[-1].task_text is not None
