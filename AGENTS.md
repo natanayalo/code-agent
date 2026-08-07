@@ -99,9 +99,7 @@ For each task:
 ## Python tooling environment
 
 - Use **Poetry** for dependency management (`poetry install`).
-- Use **Pytest** for testing. The repository target is **90% coverage**. During
-  post-Temporal coverage recovery, CI temporarily enforces an 80% floor;
-  M25.6 restores `--cov-fail-under=90`.
+- Use **Pytest** for testing. The repository target is **90% coverage** (enforced in CI via `--cov-fail-under=90`).
 - Use the repository virtualenv explicitly for Python tooling and checks.
 - Prefer `.venv/bin/...` invocations (for example: `.venv/bin/poetry`, `.venv/bin/pytest`, `.venv/bin/pre-commit`, `.venv/bin/ruff`, `.venv/bin/mypy`).
 - Do not rely on globally installed `python`, `pytest`, or `pre-commit` binaries.

@@ -389,8 +389,7 @@ def _evaluate_admission_outcomes(
         rejection_count = sum(1 for d in actual_decisions if d.decision == "reject")
         if rejection_count != case.expected_rejections:
             failures.append(
-                f"Rejections mismatch. Expected {case.expected_rejections}, "
-                f"got {rejection_count}"
+                f"Rejections mismatch. Expected {case.expected_rejections}, got {rejection_count}"
             )
 
 

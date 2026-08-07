@@ -73,6 +73,9 @@ autonomous privileged maintenance.
 - M25.5 added dependency-aware readiness, stuck-work and terminal-reconciliation
   metrics, responsive dashboard status and recovery guidance, and current-branch
   real-worker lifecycle evidence.
+- M25.6 established the 20-case real-worker Temporal reliability baseline and
+  restored the 90% Python CI coverage gate.
+
 
 ## M25.6 — Real Temporal Reliability Baseline
 

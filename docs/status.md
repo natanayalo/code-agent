@@ -4,13 +4,12 @@
 
 Phase 4A: Temporal stabilization and measured reliability.
 
-Active focus: **M25.6 — Real Temporal Reliability Baseline**.
+Completed milestone: **M25.6 — Real Temporal Reliability Baseline**.
 
-M25.6 now has a reviewed 20-case, 10-Codex/10-Antigravity real-worker baseline:
-20/20 captures passed their deployment, profile, Temporal history, terminal,
-artifact, and scenario-specific proof gates. The sanitized JSON and Markdown
-reports are published under `evaluation/`. M25.6 remains active only for the
-separate slice that restores the 90% Python coverage gate.
+M25.6 is complete: the 20-case real-worker baseline passed all deployment, profile, Temporal history, terminal, artifact, and scenario-specific proof gates, and the 90% Python CI coverage gate has been fully restored with >=90% test coverage.
+
+Active focus: **M26 — Review-Comment Repair**.
+
 
 ## Current capabilities
 
@@ -85,14 +84,12 @@ Temporal migration and rollback record is in the
   yet extract structured decisions and risks from worker results
 - native-agent command audit and several orchestration/worker adapters remain
   complexity hotspots
-- the repository target is 90% Python coverage, while CI temporarily enforces
-  an 80% floor until M25.6 restores the target
+- the repository enforces a 90% Python coverage target in CI
 
 ## Next slices only
 
-1. M25.6: Coverage restoration
-   - restore Python CI coverage to 90%
-   - keep the reviewed real-worker baseline frozen while coverage work lands
+1. M26: Review-comment repair
+   - add review-comment repair workflow supported by M25.6 evidence
 
 ## Deferred
 

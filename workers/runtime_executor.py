@@ -272,7 +272,7 @@ class RuntimeExecutor:
             session_id=request.session_id,
             model_name=getattr(self.runtime_adapter, "model", None),
             adapter_failure_log_message=(
-                "CLI worker self-review adapter failed; recording explicit " "no-findings fallback."
+                "CLI worker self-review adapter failed; recording explicit no-findings fallback."
             ),
             adapter_failure_logger=logger,
             check_cancel_before_review=True,
