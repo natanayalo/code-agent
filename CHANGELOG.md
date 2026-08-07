@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: restore python coverage target to 90 percent ([#362](https://github.com/natanayalo/code-agent/pull/362))
+
 - Feat: add temporal reliability evidence foundation ([#348](https://github.com/natanayalo/code-agent/pull/348))
 
 - Feat(dashboard): add execution status and recovery guidance ([#347](https://github.com/natanayalo/code-agent/pull/347))
