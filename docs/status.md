@@ -33,6 +33,8 @@ Active focus: **M26 — Review-Comment Repair**.
   workspace/branch/draft-PR delivery
 - durable, bounded verifier and independent-review repair loops on retained
   workspaces with permission escalation, re-verification, and manual handoff
+- automated review-comment polling and repair loop on open draft PRs with
+  author filtering, budget capping, thread replies, and dashboard visibility
 - dashboard visibility for tasks, TaskSpec, DAG attempts, interactions,
   timelines, logs, artifacts, traces, memory, proposals, metrics, tools,
   dependency readiness, degraded reasons, and safe recovery guidance

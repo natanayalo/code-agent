@@ -896,6 +896,25 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
                 {Array.isArray(run.delivery_metadata.ci_failed_jobs) && run.delivery_metadata.ci_failed_jobs.length > 0 && (
                   renderStringList('Failed CI Jobs', run.delivery_metadata.ci_failed_jobs as string[])
                 )}
+                {Array.isArray(run.delivery_metadata.review_comments) &&
+                run.delivery_metadata.review_comments.length > 0 ? (
+                  <div className="task-detail-group">
+                    <h5>Review Comments</h5>
+                    <ul>
+                      {run.delivery_metadata.review_comments.map((comment) => (
+                        <li key={comment.id}>
+                          <strong>{comment.path}</strong>
+                          {comment.line != null ? `:${comment.line}` : ''}{' '}
+                          <span className="task-detail-muted">
+                            (by @{comment.user_login}
+                            {comment.replied ? ' · replied' : ''})
+                          </span>
+                          <p>{comment.body}</p>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
               </>
             ) : (
               <p className="task-detail-muted">No delivery metadata available.</p>

@@ -20,13 +20,17 @@ from db.models import WorkerRun
 from orchestrator.execution import TaskExecutionService
 from orchestrator.execution_types import DeliveryKey, SubmissionSession, TaskSubmission
 from orchestrator.github_repo import github_repo_spec_from_url
+from orchestrator.github_reviews import (
+    poll_review_comments,
+    process_review_comment_replies,
+)
 from repositories import session_scope
 
 logger = logging.getLogger(__name__)
 
 
 class CIPollingScheduler:
-    """Polls CI checks for delivered tasks and spawns repair tasks on failure."""
+    """Polls CI checks and PR review comments for delivered tasks and spawns repair tasks."""
 
     def __init__(self, task_service: TaskExecutionService, config: SystemConfig) -> None:
         self.task_service = task_service
@@ -89,7 +93,7 @@ class CIPollingScheduler:
                 break
 
     def tick(self) -> None:
-        """Evaluate pending CI checks and synchronously submit repair tasks if needed."""
+        """Evaluate pending CI checks and review comments synchronously."""
         if not self.config.ci_polling_enabled:
             return
 
@@ -100,7 +104,7 @@ class CIPollingScheduler:
             self._poll_run(run)
 
     def _get_pending_runs(self) -> list[dict[str, Any]]:
-        # Fetch runs from last 7 days that might have active PRs
+        # Fetch runs from last 7 days that have draft PR delivery
         session_factory = self.session_factory
         if session_factory is None:
             return []
@@ -120,11 +124,6 @@ class CIPollingScheduler:
                     continue
 
                 if run.delivery_metadata.get("delivery_mode") != "draft_pr":
-                    continue
-
-                ci_status = run.delivery_metadata.get("ci_status")
-                # Only poll if not already finalized
-                if ci_status in ("passed", "success", "failed", "not_found"):
                     continue
 
                 results.append(
@@ -209,39 +208,56 @@ class CIPollingScheduler:
         env = os.environ.copy()
         env["GH_TOKEN"] = gh_token
 
-        checks = self._get_pr_checks(branch_name, repo_spec, run_info["run_id"], env)
-        if checks is None:
-            return
+        ci_status = metadata.get("ci_status")
+        if ci_status not in ("passed", "success", "failed", "not_found"):
+            checks = self._get_pr_checks(branch_name, repo_spec, run_info["run_id"], env)
+            if checks is not None:
+                all_passed = True
+                failed_checks = []
+                for check in checks:
+                    if not isinstance(check, dict):
+                        continue
+                    state = (check.get("state") or "").upper()
+                    if state in ("FAILURE", "STARTUP_FAILURE", "ERROR"):
+                        failed_checks.append(check)
+                        all_passed = False
+                    elif state in ("PENDING", "IN_PROGRESS", "QUEUED"):
+                        all_passed = False
 
-        all_passed = True
-        failed_checks = []
-        for check in checks:
-            if not isinstance(check, dict):
-                continue
-            state = (check.get("state") or "").upper()
-            if state in ("FAILURE", "STARTUP_FAILURE", "ERROR"):
-                failed_checks.append(check)
-                all_passed = False
-            elif state in ("PENDING", "IN_PROGRESS", "QUEUED"):
-                all_passed = False
+                new_status = (
+                    "failed"
+                    if failed_checks
+                    else "passed"
+                    if (all_passed and checks)
+                    else "pending"
+                )
+                self._update_run_ci_metadata(run_info["run_id"], new_status, failed_checks)
 
-        new_status = (
-            "failed" if failed_checks else "passed" if (all_passed and checks) else "pending"
+                if failed_checks:
+                    self._submit_repair_task(
+                        run_info["task_id"],
+                        repo_url,
+                        repo_spec,
+                        branch_name,
+                        head_sha,
+                        failed_checks[0],
+                        env,
+                    )
+
+        poll_review_comments(
+            self.session_factory,
+            self.task_service,
+            self.config,
+            run_info,
+            repo_spec,
+            gh_token,
         )
-        self._update_run_ci_metadata(run_info["run_id"], new_status, failed_checks)
-
-        if failed_checks:
-            # Only submit a repair task for the first failed check to avoid spawning
-            # multiple conflicting tasks on the same branch simultaneously.
-            self._submit_repair_task(
-                run_info["task_id"],
-                repo_url,
-                repo_spec,
-                branch_name,
-                head_sha,
-                failed_checks[0],
-                env,
-            )
+        process_review_comment_replies(
+            self.session_factory,
+            run_info,
+            repo_spec,
+            gh_token,
+        )
 
     def _update_run_ci_metadata(
         self,
