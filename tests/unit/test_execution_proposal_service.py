@@ -51,12 +51,6 @@ class DummyExecutionService:
             persisted=None,
             duplicate=False,
         )
-        self.tasks[task_id] = snapshot
-        return CreateTaskOutcome(
-            task_snapshot=snapshot,
-            created=True,
-            duplicate=False,
-        )
 
     def cancel_task(self, task_id: str) -> None:
         if self.fail_cancel:
