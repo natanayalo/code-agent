@@ -21,6 +21,7 @@ from orchestrator.execution import TaskExecutionService
 from orchestrator.execution_types import DeliveryKey, SubmissionSession, TaskSubmission
 from orchestrator.github_repo import github_repo_spec_from_url
 from orchestrator.github_reviews import (
+    fetch_repo_owner,
     poll_review_comments,
     process_review_comment_replies,
 )
@@ -97,14 +98,63 @@ class CIPollingScheduler:
         if not self.config.ci_polling_enabled:
             return
 
-        pending_runs = self._get_pending_runs()
-        for run in pending_runs:
+        pending_ci_runs = self._get_pending_runs()
+        for run in pending_ci_runs:
             if not self._running:
                 break
-            self._poll_run(run)
+            self._poll_ci_run(run)
+
+        review_runs = self._get_review_comment_runs()
+        owner_cache: dict[str, str | None] = {}
+        for run in review_runs:
+            if not self._running:
+                break
+            self._poll_review_comments_for_run(run, owner_cache=owner_cache)
 
     def _get_pending_runs(self) -> list[dict[str, Any]]:
-        # Fetch runs from last 7 days that have draft PR delivery
+        # Fetch runs from last 7 days with pending CI status that have draft PR delivery
+        session_factory = self.session_factory
+        if session_factory is None:
+            return []
+        cutoff = datetime.now(UTC) - timedelta(days=7)
+        results = []
+        with session_scope(session_factory) as session:
+            stmt = (
+                select(WorkerRun)
+                .options(selectinload(WorkerRun.task))
+                .where(
+                    WorkerRun.status == WorkerRunStatus.SUCCESS,
+                    WorkerRun.started_at >= cutoff,
+                )
+            )
+            for run in session.scalars(stmt):
+                if not run.delivery_metadata:
+                    continue
+
+                if run.delivery_metadata.get("delivery_mode") != "draft_pr":
+                    continue
+
+                if run.delivery_metadata.get("ci_status") in (
+                    "passed",
+                    "success",
+                    "failed",
+                    "not_found",
+                ):
+                    continue
+
+                results.append(
+                    {
+                        "run_id": run.id,
+                        "task_id": run.task_id,
+                        "repo_url": run.task.repo_url if run.task else None,
+                        "secrets": run.task.secrets if run.task else None,
+                        "delivery_metadata": run.delivery_metadata,
+                    }
+                )
+        return results
+
+    def _get_review_comment_runs(self) -> list[dict[str, Any]]:
+        # Fetch runs from last 7 days with draft PR delivery regardless of CI status
         session_factory = self.session_factory
         if session_factory is None:
             return []
@@ -178,7 +228,7 @@ class CIPollingScheduler:
 
         return checks
 
-    def _poll_run(self, run_info: dict[str, Any]) -> None:
+    def _poll_ci_run(self, run_info: dict[str, Any]) -> None:
         metadata = run_info["delivery_metadata"]
         branch_name = metadata.get("branch_name")
         repo_url = run_info.get("repo_url")
@@ -208,41 +258,67 @@ class CIPollingScheduler:
         env = os.environ.copy()
         env["GH_TOKEN"] = gh_token
 
-        ci_status = metadata.get("ci_status")
-        if ci_status not in ("passed", "success", "failed", "not_found"):
-            checks = self._get_pr_checks(branch_name, repo_spec, run_info["run_id"], env)
-            if checks is not None:
-                all_passed = True
-                failed_checks = []
-                for check in checks:
-                    if not isinstance(check, dict):
-                        continue
-                    state = (check.get("state") or "").upper()
-                    if state in ("FAILURE", "STARTUP_FAILURE", "ERROR"):
-                        failed_checks.append(check)
-                        all_passed = False
-                    elif state in ("PENDING", "IN_PROGRESS", "QUEUED"):
-                        all_passed = False
+        checks = self._get_pr_checks(branch_name, repo_spec, run_info["run_id"], env)
+        if checks is not None:
+            all_passed = True
+            failed_checks = []
+            for check in checks:
+                if not isinstance(check, dict):
+                    continue
+                state = (check.get("state") or "").upper()
+                if state in ("FAILURE", "STARTUP_FAILURE", "ERROR"):
+                    failed_checks.append(check)
+                    all_passed = False
+                elif state in ("PENDING", "IN_PROGRESS", "QUEUED"):
+                    all_passed = False
 
-                new_status = (
-                    "failed"
-                    if failed_checks
-                    else "passed"
-                    if (all_passed and checks)
-                    else "pending"
+            new_status = (
+                "failed" if failed_checks else "passed" if (all_passed and checks) else "pending"
+            )
+            self._update_run_ci_metadata(run_info["run_id"], new_status, failed_checks)
+
+            if failed_checks:
+                self._submit_repair_task(
+                    run_info["task_id"],
+                    repo_url,
+                    repo_spec,
+                    branch_name,
+                    head_sha,
+                    failed_checks[0],
+                    env,
                 )
-                self._update_run_ci_metadata(run_info["run_id"], new_status, failed_checks)
 
-                if failed_checks:
-                    self._submit_repair_task(
-                        run_info["task_id"],
-                        repo_url,
-                        repo_spec,
-                        branch_name,
-                        head_sha,
-                        failed_checks[0],
-                        env,
-                    )
+    def _poll_run(self, run_info: dict[str, Any]) -> None:
+        """Backwards compatibility wrapper for polling single run."""
+        self._poll_ci_run(run_info)
+        self._poll_review_comments_for_run(run_info, owner_cache={})
+
+    def _poll_review_comments_for_run(
+        self,
+        run_info: dict[str, Any],
+        owner_cache: dict[str, str | None],
+    ) -> None:
+        metadata = run_info.get("delivery_metadata") or {}
+        repo_url = run_info.get("repo_url")
+        if not repo_url or not metadata.get("pr_number"):
+            return
+        repo_spec = github_repo_spec_from_url(repo_url)
+        if not repo_spec:
+            return
+
+        task_secrets = run_info.get("secrets") or {}
+        gh_token = (
+            task_secrets.get("GH_TOKEN")
+            or task_secrets.get("GITHUB_TOKEN")
+            or os.environ.get("GH_TOKEN")
+            or os.environ.get("GITHUB_TOKEN")
+        )
+        if not gh_token:
+            return
+
+        if repo_spec not in owner_cache:
+            owner_cache[repo_spec] = fetch_repo_owner(repo_spec, gh_token)
+        owner_login = owner_cache[repo_spec]
 
         poll_review_comments(
             self.session_factory,
@@ -251,6 +327,7 @@ class CIPollingScheduler:
             run_info,
             repo_spec,
             gh_token,
+            owner_login=owner_login,
         )
         process_review_comment_replies(
             self.session_factory,

@@ -30,9 +30,10 @@ from repositories import create_engine_from_url, create_session_factory
 
 
 class MockHTTPResponse:
-    def __init__(self, data: Any, status: int = 200) -> None:
+    def __init__(self, data: Any, status: int = 200, headers: dict[str, str] | None = None) -> None:
         self._raw = json.dumps(data).encode("utf-8")
         self.status = status
+        self.headers = headers or {}
 
     def __enter__(self) -> MockHTTPResponse:
         return self
@@ -158,6 +159,39 @@ def test_fetch_review_comments_since_filter(monkeypatch: Any) -> None:
     monkeypatch.setattr("orchestrator.github_reviews.urlopen", mock_urlopen)
     comments = fetch_review_comments("owner/repo", 1, "token123", since="2026-08-07T10:00:00Z")
     assert comments == []
+
+
+def test_fetch_review_comments_pagination(monkeypatch: Any) -> None:
+    c1 = {
+        "id": 1,
+        "path": "app.py",
+        "body": "First",
+        "user": {"login": "alice"},
+        "created_at": "2026-08-07T12:00:00Z",
+        "updated_at": "2026-08-07T12:00:00Z",
+    }
+    c2 = {
+        "id": 2,
+        "path": "app.py",
+        "body": "Second",
+        "user": {"login": "alice"},
+        "created_at": "2026-08-07T12:01:00Z",
+        "updated_at": "2026-08-07T12:01:00Z",
+    }
+
+    requests_made = []
+
+    def mock_urlopen(req: Request, timeout: int = 30) -> MockHTTPResponse:
+        requests_made.append(req.full_url)
+        if "&page=1" in req.full_url:
+            headers = {"Link": '<https://api.github.com/...>; rel="next"'}
+            return MockHTTPResponse([c1] * 100, headers=headers)
+        return MockHTTPResponse([c2], headers={})
+
+    monkeypatch.setattr("orchestrator.github_reviews.urlopen", mock_urlopen)
+    comments = fetch_review_comments("owner/repo", 1, "token123", owner_login="alice")
+    assert len(comments) == 101
+    assert len(requests_made) == 2
 
 
 def test_reply_to_review_comment_invalid_args() -> None:

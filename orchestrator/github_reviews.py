@@ -80,6 +80,34 @@ def fetch_repo_owner(
     return owner
 
 
+def _parse_review_comment(item: dict[str, Any], owner_login: str | None) -> ReviewComment | None:
+    if not isinstance(item, dict):
+        return None
+    user = item.get("user") or {}
+    login = user.get("login") if isinstance(user, dict) else ""
+    if owner_login and login != owner_login:
+        return None
+    comment_id = item.get("id")
+    path = item.get("path")
+    body = item.get("body")
+    if not comment_id or not path or not body:
+        return None
+
+    return ReviewComment(
+        id=int(comment_id),
+        path=str(path),
+        line=item.get("line"),
+        original_line=item.get("original_line"),
+        body=str(body),
+        diff_hunk=item.get("diff_hunk"),
+        user_login=str(login),
+        created_at=str(item.get("created_at") or ""),
+        updated_at=str(item.get("updated_at") or ""),
+        in_reply_to_id=item.get("in_reply_to_id"),
+        html_url=str(item.get("html_url") or ""),
+    )
+
+
 def fetch_review_comments(
     repo_spec: str,
     pr_number: int,
@@ -92,71 +120,54 @@ def fetch_review_comments(
         return []
 
     owner, repository = repo_spec.split("/", 1)
-    query_dict: dict[str, Any] = {"per_page": 100}
-    if since:
-        query_dict["since"] = since
-    query = urlencode(query_dict)
-
-    request_url = (
-        f"https://api.github.com/repos/{quote(owner, safe='')}/"
-        f"{quote(repository, safe='')}/pulls/{pr_number}/comments?{query}"
-    )
-    request = Request(
-        request_url,
-        headers={
-            "Accept": "application/vnd.github+json",
-            "Authorization": f"Bearer {token}",
-            "User-Agent": "code-agent-github-reviews",
-            "X-GitHub-Api-Version": "2022-11-28",
-        },
-    )
-
-    try:
-        with urlopen(request, timeout=30) as response:  # noqa: S310 - fixed GitHub API host
-            raw_comments = json.load(response)
-    except (HTTPError, json.JSONDecodeError, OSError, TimeoutError, ValueError) as exc:
-        logger.warning(
-            "Failed to fetch review comments from GitHub API",
-            extra={"repo_spec": repo_spec, "pr_number": pr_number, "error": str(exc)},
-        )
-        return []
-
-    if not isinstance(raw_comments, list):
-        return []
-
     comments: list[ReviewComment] = []
-    for item in raw_comments:
-        if not isinstance(item, dict):
-            continue
-        user = item.get("user") or {}
-        login = user.get("login") if isinstance(user, dict) else ""
-        if owner_login and login != owner_login:
-            continue
-        comment_id = item.get("id")
-        path = item.get("path")
-        body = item.get("body")
-        if not comment_id:
-            continue
-        if not path:
-            continue
-        if not body:
-            continue
+    page = 1
 
-        comments.append(
-            ReviewComment(
-                id=int(comment_id),
-                path=str(path),
-                line=item.get("line"),
-                original_line=item.get("original_line"),
-                body=str(body),
-                diff_hunk=item.get("diff_hunk"),
-                user_login=str(login),
-                created_at=str(item.get("created_at") or ""),
-                updated_at=str(item.get("updated_at") or ""),
-                in_reply_to_id=item.get("in_reply_to_id"),
-                html_url=str(item.get("html_url") or ""),
-            )
+    while True:
+        query_dict: dict[str, Any] = {"per_page": 100, "page": page}
+        if since:
+            query_dict["since"] = since
+        query = urlencode(query_dict)
+
+        request_url = (
+            f"https://api.github.com/repos/{quote(owner, safe='')}/"
+            f"{quote(repository, safe='')}/pulls/{pr_number}/comments?{query}"
         )
+        request = Request(
+            request_url,
+            headers={
+                "Accept": "application/vnd.github+json",
+                "Authorization": f"Bearer {token}",
+                "User-Agent": "code-agent-github-reviews",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        )
+
+        link_header = ""
+        try:
+            with urlopen(request, timeout=30) as response:  # noqa: S310 - fixed GitHub API host
+                raw_comments = json.load(response)
+                headers = getattr(response, "headers", {})
+                link_header = headers.get("Link", "") if hasattr(headers, "get") else ""
+        except (HTTPError, json.JSONDecodeError, OSError, TimeoutError, ValueError) as exc:
+            logger.warning(
+                "Failed to fetch review comments from GitHub API",
+                extra={"repo_spec": repo_spec, "pr_number": pr_number, "error": str(exc)},
+            )
+            break
+
+        if not isinstance(raw_comments, list) or not raw_comments:
+            break
+
+        for item in raw_comments:
+            comment = _parse_review_comment(item, owner_login)
+            if comment:
+                comments.append(comment)
+
+        if 'rel="next"' not in link_header or len(raw_comments) < 100:
+            break
+        page += 1
+
     return comments
 
 
@@ -294,6 +305,7 @@ def poll_review_comments(
     run_info: dict[str, Any],
     repo_spec: str,
     gh_token: str,
+    owner_login: str | None = None,
 ) -> None:
     """Poll review comments for a run's PR and submit a repair task if new comments exist."""
     metadata = run_info.get("delivery_metadata") or {}
@@ -301,10 +313,10 @@ def poll_review_comments(
     if not pr_number:
         return
 
-    owner_login = fetch_repo_owner(repo_spec, gh_token)
+    resolved_owner = owner_login or fetch_repo_owner(repo_spec, gh_token)
     since = metadata.get("review_comments_last_checked_at")
     comments = fetch_review_comments(
-        repo_spec, int(pr_number), gh_token, since=since, owner_login=owner_login
+        repo_spec, int(pr_number), gh_token, since=since, owner_login=resolved_owner
     )
     if not comments:
         return
@@ -356,23 +368,13 @@ def poll_review_comments(
     update_run_review_comment_metadata(session_factory, run_info["run_id"], unprocessed)
 
 
-def process_review_comment_replies(
+def _build_review_comment_reply_plan(
     session_factory: Any,
-    run_info: dict[str, Any],
-    repo_spec: str,
-    gh_token: str,
-) -> None:
-    """Process thread replies for completed review-comment repair tasks."""
-    if session_factory is None:
-        return
-
-    task_id = run_info["task_id"]
-    metadata = run_info.get("delivery_metadata") or {}
-    pr_number = metadata.get("pr_number")
-    if not pr_number:
-        return
-
-    replied_ids = set(metadata.get("replied_review_comment_ids") or [])
+    task_id: str,
+    replied_ids: set[int],
+) -> list[tuple[int, str]]:
+    """Query repair tasks and build reply bodies inside DB session scope."""
+    reply_plan: list[tuple[int, str]] = []
     with session_scope(session_factory) as session:
         stmt = (
             select(Task)
@@ -384,7 +386,6 @@ def process_review_comment_replies(
             )
         )
         repair_tasks = list(session.scalars(stmt))
-        newly_replied: list[int] = []
 
         for repair_task in repair_tasks:
             if repair_task.status not in (
@@ -417,11 +418,43 @@ def process_review_comment_replies(
                 )
 
             for cid in unreplied:
-                if reply_to_review_comment(repo_spec, int(pr_number), cid, body, gh_token):
-                    replied_ids.add(cid)
-                    newly_replied.append(cid)
+                reply_plan.append((cid, body))
+    return reply_plan
 
-        if newly_replied:
+
+def process_review_comment_replies(
+    session_factory: Any,
+    run_info: dict[str, Any],
+    repo_spec: str,
+    gh_token: str,
+) -> None:
+    """Process thread replies for completed review-comment repair tasks."""
+    if session_factory is None:
+        return
+
+    task_id = run_info["task_id"]
+    metadata = run_info.get("delivery_metadata") or {}
+    pr_number = metadata.get("pr_number")
+    if not pr_number:
+        return
+
+    replied_ids = set(metadata.get("replied_review_comment_ids") or [])
+
+    # Phase 1: Query DB for unreplied comments and construct reply bodies
+    reply_plan = _build_review_comment_reply_plan(session_factory, task_id, replied_ids)
+    if not reply_plan:
+        return
+
+    # Phase 2: Execute HTTP calls to GitHub outside DB session scope
+    newly_replied: list[int] = []
+    for cid, body in reply_plan:
+        if reply_to_review_comment(repo_spec, int(pr_number), cid, body, gh_token):
+            replied_ids.add(cid)
+            newly_replied.append(cid)
+
+    # Phase 3: Persist reply metadata in a fresh DB session scope
+    if newly_replied:
+        with session_scope(session_factory) as session:
             db_run = session.get(WorkerRun, run_info["run_id"])
             if db_run and db_run.delivery_metadata:
                 meta = db_run.delivery_metadata
