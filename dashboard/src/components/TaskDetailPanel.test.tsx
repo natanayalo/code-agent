@@ -1229,4 +1229,36 @@ describe('TaskDetailPanel', () => {
     expect(screen.getByText('Passed')).toBeInTheDocument();
     expect(screen.queryByText('Failed CI Jobs')).not.toBeInTheDocument();
   });
+
+  it('renders review comments in delivery metadata when present', () => {
+    const task = buildTask({
+      latest_run: buildLatestRun({
+        delivery_metadata: {
+          pr_url: 'https://github.com/test/repo/pull/123',
+          branch_name: 'test-branch',
+          head_sha: 'abcdef123',
+          ci_status: 'passed',
+          review_comments: [
+            {
+              id: 901,
+              path: 'src/app.py',
+              line: 42,
+              body: 'Improve error handling',
+              user_login: 'reviewer1',
+              created_at: '2026-08-07T12:00:00Z',
+              replied: true,
+            },
+          ],
+        },
+      }),
+    });
+
+    render(<TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />);
+
+    expect(screen.getByText('Review Comments')).toBeInTheDocument();
+    expect(screen.getByText('src/app.py')).toBeInTheDocument();
+    expect(screen.getByText('Improve error handling')).toBeInTheDocument();
+    expect(screen.getByText(/@reviewer1/)).toBeInTheDocument();
+    expect(screen.getByText(/replied/)).toBeInTheDocument();
+  });
 });

@@ -20,13 +20,18 @@ from db.models import WorkerRun
 from orchestrator.execution import TaskExecutionService
 from orchestrator.execution_types import DeliveryKey, SubmissionSession, TaskSubmission
 from orchestrator.github_repo import github_repo_spec_from_url
+from orchestrator.github_reviews import (
+    fetch_repo_owner,
+    poll_review_comments,
+    process_review_comment_replies,
+)
 from repositories import session_scope
 
 logger = logging.getLogger(__name__)
 
 
 class CIPollingScheduler:
-    """Polls CI checks for delivered tasks and spawns repair tasks on failure."""
+    """Polls CI checks and PR review comments for delivered tasks and spawns repair tasks."""
 
     def __init__(self, task_service: TaskExecutionService, config: SystemConfig) -> None:
         self.task_service = task_service
@@ -89,18 +94,25 @@ class CIPollingScheduler:
                 break
 
     def tick(self) -> None:
-        """Evaluate pending CI checks and synchronously submit repair tasks if needed."""
+        """Evaluate pending CI checks and review comments synchronously."""
         if not self.config.ci_polling_enabled:
             return
 
-        pending_runs = self._get_pending_runs()
-        for run in pending_runs:
+        pending_ci_runs = self._get_pending_runs()
+        for run in pending_ci_runs:
             if not self._running:
                 break
-            self._poll_run(run)
+            self._poll_ci_run(run)
+
+        review_runs = self._get_review_comment_runs()
+        owner_cache: dict[str, str | None] = {}
+        for run in review_runs:
+            if not self._running:
+                break
+            self._poll_review_comments_for_run(run, owner_cache=owner_cache)
 
     def _get_pending_runs(self) -> list[dict[str, Any]]:
-        # Fetch runs from last 7 days that might have active PRs
+        # Fetch runs from last 7 days with pending CI status that have draft PR delivery
         session_factory = self.session_factory
         if session_factory is None:
             return []
@@ -122,9 +134,46 @@ class CIPollingScheduler:
                 if run.delivery_metadata.get("delivery_mode") != "draft_pr":
                     continue
 
-                ci_status = run.delivery_metadata.get("ci_status")
-                # Only poll if not already finalized
-                if ci_status in ("passed", "success", "failed", "not_found"):
+                if run.delivery_metadata.get("ci_status") in (
+                    "passed",
+                    "success",
+                    "failed",
+                    "not_found",
+                ):
+                    continue
+
+                results.append(
+                    {
+                        "run_id": run.id,
+                        "task_id": run.task_id,
+                        "repo_url": run.task.repo_url if run.task else None,
+                        "secrets": run.task.secrets if run.task else None,
+                        "delivery_metadata": run.delivery_metadata,
+                    }
+                )
+        return results
+
+    def _get_review_comment_runs(self) -> list[dict[str, Any]]:
+        # Fetch runs from last 7 days with draft PR delivery regardless of CI status
+        session_factory = self.session_factory
+        if session_factory is None:
+            return []
+        cutoff = datetime.now(UTC) - timedelta(days=7)
+        results = []
+        with session_scope(session_factory) as session:
+            stmt = (
+                select(WorkerRun)
+                .options(selectinload(WorkerRun.task))
+                .where(
+                    WorkerRun.status == WorkerRunStatus.SUCCESS,
+                    WorkerRun.started_at >= cutoff,
+                )
+            )
+            for run in session.scalars(stmt):
+                if not run.delivery_metadata:
+                    continue
+
+                if run.delivery_metadata.get("delivery_mode") != "draft_pr":
                     continue
 
                 results.append(
@@ -179,7 +228,7 @@ class CIPollingScheduler:
 
         return checks
 
-    def _poll_run(self, run_info: dict[str, Any]) -> None:
+    def _poll_ci_run(self, run_info: dict[str, Any]) -> None:
         metadata = run_info["delivery_metadata"]
         branch_name = metadata.get("branch_name")
         repo_url = run_info.get("repo_url")
@@ -210,38 +259,82 @@ class CIPollingScheduler:
         env["GH_TOKEN"] = gh_token
 
         checks = self._get_pr_checks(branch_name, repo_spec, run_info["run_id"], env)
-        if checks is None:
+        if checks is not None:
+            all_passed = True
+            failed_checks = []
+            for check in checks:
+                if not isinstance(check, dict):
+                    continue
+                state = (check.get("state") or "").upper()
+                if state in ("FAILURE", "STARTUP_FAILURE", "ERROR"):
+                    failed_checks.append(check)
+                    all_passed = False
+                elif state in ("PENDING", "IN_PROGRESS", "QUEUED"):
+                    all_passed = False
+
+            new_status = (
+                "failed" if failed_checks else "passed" if (all_passed and checks) else "pending"
+            )
+            self._update_run_ci_metadata(run_info["run_id"], new_status, failed_checks)
+
+            if failed_checks:
+                self._submit_repair_task(
+                    run_info["task_id"],
+                    repo_url,
+                    repo_spec,
+                    branch_name,
+                    head_sha,
+                    failed_checks[0],
+                    env,
+                )
+
+    def _poll_run(self, run_info: dict[str, Any]) -> None:
+        """Backwards compatibility wrapper for polling single run."""
+        self._poll_ci_run(run_info)
+        self._poll_review_comments_for_run(run_info, owner_cache={})
+
+    def _poll_review_comments_for_run(
+        self,
+        run_info: dict[str, Any],
+        owner_cache: dict[str, str | None],
+    ) -> None:
+        metadata = run_info.get("delivery_metadata") or {}
+        repo_url = run_info.get("repo_url")
+        if not repo_url or not metadata.get("pr_number"):
+            return
+        repo_spec = github_repo_spec_from_url(repo_url)
+        if not repo_spec:
             return
 
-        all_passed = True
-        failed_checks = []
-        for check in checks:
-            if not isinstance(check, dict):
-                continue
-            state = (check.get("state") or "").upper()
-            if state in ("FAILURE", "STARTUP_FAILURE", "ERROR"):
-                failed_checks.append(check)
-                all_passed = False
-            elif state in ("PENDING", "IN_PROGRESS", "QUEUED"):
-                all_passed = False
-
-        new_status = (
-            "failed" if failed_checks else "passed" if (all_passed and checks) else "pending"
+        task_secrets = run_info.get("secrets") or {}
+        gh_token = (
+            task_secrets.get("GH_TOKEN")
+            or task_secrets.get("GITHUB_TOKEN")
+            or os.environ.get("GH_TOKEN")
+            or os.environ.get("GITHUB_TOKEN")
         )
-        self._update_run_ci_metadata(run_info["run_id"], new_status, failed_checks)
+        if not gh_token:
+            return
 
-        if failed_checks:
-            # Only submit a repair task for the first failed check to avoid spawning
-            # multiple conflicting tasks on the same branch simultaneously.
-            self._submit_repair_task(
-                run_info["task_id"],
-                repo_url,
-                repo_spec,
-                branch_name,
-                head_sha,
-                failed_checks[0],
-                env,
-            )
+        if repo_spec not in owner_cache:
+            owner_cache[repo_spec] = fetch_repo_owner(repo_spec, gh_token)
+        owner_login = owner_cache[repo_spec]
+
+        poll_review_comments(
+            self.session_factory,
+            self.task_service,
+            self.config,
+            run_info,
+            repo_spec,
+            gh_token,
+            owner_login=owner_login,
+        )
+        process_review_comment_replies(
+            self.session_factory,
+            run_info,
+            repo_spec,
+            gh_token,
+        )
 
     def _update_run_ci_metadata(
         self,
