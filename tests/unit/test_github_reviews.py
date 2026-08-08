@@ -454,3 +454,145 @@ def test_process_review_comment_replies_failed_task(monkeypatch: Any) -> None:
     assert replies[0][0] == 404
     assert "failed" in replies[0][1]
     assert "Syntax error in fix" in replies[0][1]
+
+
+def test_process_review_comment_replies_deduplication(monkeypatch: Any) -> None:
+    session_factory = _setup_test_db()
+
+    with session_factory() as session:
+        user = User(external_user_id="u1", display_name="User 1")
+        session.add(user)
+        session.flush()
+
+        p_session = Session(user_id=user.id, channel="web", external_thread_id="t1")
+        session.add(p_session)
+        session.flush()
+
+        parent_task = Task(session_id=p_session.id, task_text="Parent", status=TaskStatus.COMPLETED)
+        session.add(parent_task)
+        session.flush()
+
+        parent_run = WorkerRun(
+            task_id=parent_task.id,
+            session_id=p_session.id,
+            worker_type="codex",
+            started_at=datetime.now(UTC),
+            status=WorkerRunStatus.SUCCESS,
+            delivery_metadata={"pr_number": 10},
+        )
+        session.add(parent_run)
+        session.flush()
+
+        rc_session = Session(
+            user_id=user.id, channel="review_comment_polling", external_thread_id=parent_task.id
+        )
+        session.add(rc_session)
+        session.flush()
+
+        # Pass 1: Failed
+        child1 = Task(
+            session_id=rc_session.id,
+            task_text="Repair pass 1",
+            repair_for_task_id=parent_task.id,
+            constraints={"review_comment_ids": [505]},
+            status=TaskStatus.FAILED,
+            last_error="Pass 1 failed",
+        )
+        # Pass 2: Completed
+        child2 = Task(
+            session_id=rc_session.id,
+            task_text="Repair pass 2",
+            repair_for_task_id=parent_task.id,
+            constraints={"review_comment_ids": [505]},
+            status=TaskStatus.COMPLETED,
+        )
+        session.add_all([child1, child2])
+        session.commit()
+
+        p_task_id = parent_task.id
+        p_run_id = parent_run.id
+
+    replies = []
+    monkeypatch.setattr(
+        "orchestrator.github_reviews.reply_to_review_comment",
+        lambda repo_spec, pr_num, cid, body, token: replies.append((cid, body)) or True,
+    )
+
+    run_info = {"task_id": p_task_id, "run_id": p_run_id, "delivery_metadata": {"pr_number": 10}}
+    process_review_comment_replies(session_factory, run_info, "owner/repo", "token")
+
+    # Should be deduplicated into 1 reply preserving the latest pass (COMPLETED)
+    assert len(replies) == 1
+    assert replies[0][0] == 505
+    assert "addressed these review comments" in replies[0][1]
+
+
+def test_process_review_comment_replies_immediate_checkpointing(monkeypatch: Any) -> None:
+    session_factory = _setup_test_db()
+    comments_meta = [
+        {"id": 601, "path": "a.py", "body": "c1", "replied": False},
+        {"id": 602, "path": "b.py", "body": "c2", "replied": False},
+    ]
+
+    with session_factory() as session:
+        user = User(external_user_id="u1", display_name="User 1")
+        session.add(user)
+        session.flush()
+
+        p_session = Session(user_id=user.id, channel="web", external_thread_id="t1")
+        session.add(p_session)
+        session.flush()
+
+        parent_task = Task(session_id=p_session.id, task_text="Parent", status=TaskStatus.COMPLETED)
+        session.add(parent_task)
+        session.flush()
+
+        parent_run = WorkerRun(
+            task_id=parent_task.id,
+            session_id=p_session.id,
+            worker_type="codex",
+            started_at=datetime.now(UTC),
+            status=WorkerRunStatus.SUCCESS,
+            delivery_metadata={"pr_number": 10, "review_comments": comments_meta},
+        )
+        rc_session = Session(
+            user_id=user.id, channel="review_comment_polling", external_thread_id=parent_task.id
+        )
+        session.add_all([parent_run, rc_session])
+        session.flush()
+
+        child = Task(
+            session_id=rc_session.id,
+            task_text="Repair pass",
+            repair_for_task_id=parent_task.id,
+            constraints={"review_comment_ids": [601, 602]},
+            status=TaskStatus.COMPLETED,
+        )
+        session.add(child)
+        session.commit()
+        p_task_id, p_run_id = parent_task.id, parent_run.id
+
+    def mock_reply(repo_spec: str, pr_num: int, cid: int, body: str, token: str) -> bool:
+        if cid == 601:
+            return True
+        raise RuntimeError("API crash on second comment")
+
+    monkeypatch.setattr("orchestrator.github_reviews.reply_to_review_comment", mock_reply)
+    run_info = {
+        "task_id": p_task_id,
+        "run_id": p_run_id,
+        "delivery_metadata": {"pr_number": 10, "review_comments": comments_meta},
+    }
+
+    try:
+        process_review_comment_replies(session_factory, run_info, "owner/repo", "token")
+    except RuntimeError:
+        pass
+
+    with session_factory() as session:
+        db_run = session.get(WorkerRun, p_run_id)
+        assert db_run is not None
+        meta = db_run.delivery_metadata
+        assert 601 in meta.get("replied_review_comment_ids", [])
+        assert 602 not in meta.get("replied_review_comment_ids", [])
+        assert any(c["id"] == 601 and c.get("replied") is True for c in meta["review_comments"])

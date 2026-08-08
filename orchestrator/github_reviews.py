@@ -374,7 +374,7 @@ def _build_review_comment_reply_plan(
     replied_ids: set[int],
 ) -> list[tuple[int, str]]:
     """Query repair tasks and build reply bodies inside DB session scope."""
-    reply_plan: list[tuple[int, str]] = []
+    plan_map: dict[int, str] = {}
     with session_scope(session_factory) as session:
         stmt = (
             select(Task)
@@ -418,8 +418,28 @@ def _build_review_comment_reply_plan(
                 )
 
             for cid in unreplied:
-                reply_plan.append((cid, body))
-    return reply_plan
+                plan_map[cid] = body
+    return list(plan_map.items())
+
+
+def _record_review_comment_reply(
+    session_factory: Any,
+    run_id: str,
+    cid: int,
+    replied_ids: set[int],
+) -> None:
+    """Persist a single successfully sent review comment reply to DB delivery_metadata."""
+    with session_scope(session_factory) as session:
+        db_run = session.get(WorkerRun, run_id)
+        if db_run and db_run.delivery_metadata:
+            meta = db_run.delivery_metadata
+            meta["replied_review_comment_ids"] = list(replied_ids)
+            meta["review_comments_replied_at"] = datetime.now(UTC).isoformat()
+            if isinstance(meta.get("review_comments"), list):
+                for c in meta["review_comments"]:
+                    if isinstance(c, dict) and c.get("id") == cid:
+                        c["replied"] = True
+            flag_modified(db_run, "delivery_metadata")
 
 
 def process_review_comment_replies(
@@ -445,23 +465,8 @@ def process_review_comment_replies(
     if not reply_plan:
         return
 
-    # Phase 2: Execute HTTP calls to GitHub outside DB session scope
-    newly_replied: list[int] = []
+    # Phase 2 & Phase 3: Execute HTTP calls outside DB session scope, checkpointing DB per success
     for cid, body in reply_plan:
         if reply_to_review_comment(repo_spec, int(pr_number), cid, body, gh_token):
             replied_ids.add(cid)
-            newly_replied.append(cid)
-
-    # Phase 3: Persist reply metadata in a fresh DB session scope
-    if newly_replied:
-        with session_scope(session_factory) as session:
-            db_run = session.get(WorkerRun, run_info["run_id"])
-            if db_run and db_run.delivery_metadata:
-                meta = db_run.delivery_metadata
-                meta["replied_review_comment_ids"] = list(replied_ids)
-                meta["review_comments_replied_at"] = datetime.now(UTC).isoformat()
-                if isinstance(meta.get("review_comments"), list):
-                    for c in meta["review_comments"]:
-                        if isinstance(c, dict) and c.get("id") in replied_ids:
-                            c["replied"] = True
-                flag_modified(db_run, "delivery_metadata")
+            _record_review_comment_reply(session_factory, run_info["run_id"], cid, replied_ids)
