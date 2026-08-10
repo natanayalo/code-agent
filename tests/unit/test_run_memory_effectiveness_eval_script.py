@@ -49,6 +49,7 @@ def test_memory_effectiveness_script_writes_passing_report(tmp_path: Path) -> No
     assert result.returncode == 0
     assert "status=passed" in result.stdout
     assert payload["passed_cases"] == 4
+    assert payload["retrieval_mode"] == "sqlite_substring_fallback"
     assert output_path.read_text(encoding="utf-8").endswith("\n")
 
 
@@ -65,17 +66,23 @@ def test_memory_effectiveness_script_returns_nonzero_for_failed_case(tmp_path: P
     assert json.loads(output_path.read_text(encoding="utf-8"))["status"] == "failed"
 
 
-def test_memory_effectiveness_script_accepts_disposable_database_url(tmp_path: Path) -> None:
+def test_memory_effectiveness_script_reuses_disposable_database_url(tmp_path: Path) -> None:
     output_path = tmp_path / "report.json"
     database_path = tmp_path / "evaluation.db"
 
-    result = _run_script(
+    first_result = _run_script(
+        output_path=output_path,
+        database_url=f"sqlite:///{database_path}",
+    )
+    second_result = _run_script(
         output_path=output_path,
         database_url=f"sqlite:///{database_path}",
     )
 
-    assert result.returncode == 0
+    assert first_result.returncode == 0
+    assert second_result.returncode == 0
     assert database_path.exists()
+    assert json.loads(output_path.read_text(encoding="utf-8"))["status"] == "passed"
 
 
 def test_memory_effectiveness_script_database_url_overrides_ambient_database_url(

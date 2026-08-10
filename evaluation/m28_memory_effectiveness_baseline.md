@@ -31,7 +31,10 @@ the source, confidence, scope, verification state, retrieval, gate decision,
 worker-context availability, and reason codes for every fixture.
 
 The initial baseline verification passed all four cases against both the SQLite
-fallback and a freshly migrated disposable PostgreSQL database.
+fallback and a freshly migrated disposable PostgreSQL database. The report
+labels these backends separately as `sqlite_substring_fallback` and
+`postgres_full_text`; the existing timeline's logical retrieval label is kept
+separately for diagnostics.
 
 `available_to_worker` means the value was serialized into the worker-visible
 memory context. It does not mean a worker used the value to complete work.

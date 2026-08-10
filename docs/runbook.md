@@ -437,9 +437,9 @@ resumes M26/M27 or changes production routing automatically.
 
 The M28.1 evaluator is deterministic and runs the existing database-backed
 memory load path. It never submits a task, invokes a provider, or changes
-production memory policy. It writes a local report containing fixture metadata
-and worker-visible context, so use only the checked-in synthetic suite or a
-disposable evaluation database.
+production memory policy. It writes a local report containing reloaded fixture
+metadata and worker-visible context, so use only the checked-in synthetic suite
+or a disposable evaluation database.
 
 ```bash
 .venv/bin/python scripts/e2e/run_memory_effectiveness_eval.py \
@@ -461,6 +461,11 @@ An exit status of `0` means all four paired assertions passed; `1` means the
 report captured a context, gate, or session-continuity regression. This is a
 context-delivery baseline only—it does not establish worker outcome improvement
 or justify semantic/vector retrieval.
+
+The report's `retrieval_mode` records the search backend actually exercised:
+the default SQLite run reports `sqlite_substring_fallback`, while a PostgreSQL
+run reports `postgres_full_text`. `timeline_retrieval_mode` preserves the
+existing load-memory timeline diagnostic separately.
 
 ## 10) Antigravity Migration Guide
 

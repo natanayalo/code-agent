@@ -8,13 +8,19 @@ from pathlib import Path
 import pytest
 from sqlalchemy.pool import StaticPool
 
+import evaluation.memory_effectiveness as memory_effectiveness
 from db.base import Base
 from evaluation.memory_effectiveness import (
     evaluate_memory_effectiveness,
     load_memory_effectiveness_suite,
     write_memory_effectiveness_report,
 )
-from repositories import create_engine_from_url, create_session_factory
+from repositories import (
+    ProjectMemoryRepository,
+    create_engine_from_url,
+    create_session_factory,
+    session_scope,
+)
 
 
 def _sqlite_session_factory():
@@ -115,6 +121,58 @@ def test_evaluate_memory_effectiveness_reports_failed_expectation() -> None:
         "candidate:project:m28_verified_test_matrix:context_disposition"
         in next(result for result in report.results if result.case_id == "useful-hit").failures
     )
+
+
+def test_evaluate_memory_effectiveness_detects_persisted_metadata_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_seed = memory_effectiveness._seed_assisted_contexts
+
+    def seed_with_drift(**kwargs):
+        session_refs = original_seed(**kwargs)
+        with session_scope(kwargs["session_factory"]) as session:
+            entry = ProjectMemoryRepository(session).get(
+                repo_url=kwargs["suite"].repo_url,
+                memory_key="m28_verified_test_matrix",
+            )
+            assert entry is not None
+            entry.source = "unexpected_persisted_source"
+            entry.scope = "branch"
+            entry.last_verified_at = None
+            suppressed_entry = ProjectMemoryRepository(session).get(
+                repo_url=kwargs["suite"].repo_url,
+                memory_key="m28_deployment_policy",
+            )
+            assert suppressed_entry is not None
+            suppressed_entry.source = "unexpected_suppressed_source"
+            suppressed_entry.scope = "branch"
+            suppressed_entry.last_verified_at = None
+        return session_refs
+
+    monkeypatch.setattr(memory_effectiveness, "_seed_assisted_contexts", seed_with_drift)
+
+    report = evaluate_memory_effectiveness(
+        suite=load_memory_effectiveness_suite(),
+        session_factory=_sqlite_session_factory(),
+    )
+
+    useful = next(result for result in report.results if result.case_id == "useful-hit")
+    candidate = useful.assisted.candidates[0]
+    assert candidate.source == "unexpected_persisted_source"
+    assert candidate.scope == "branch"
+    assert candidate.verification_state == "unverified"
+    assert useful.passed is False
+    assert "candidate:project:m28_verified_test_matrix:source" in useful.failures
+    assert "candidate:project:m28_verified_test_matrix:scope" in useful.failures
+    assert "candidate:project:m28_verified_test_matrix:verification_state" in useful.failures
+    stale = next(result for result in report.results if result.case_id == "stale-reverification")
+    suppressed_candidate = stale.assisted.candidates[0]
+    assert suppressed_candidate.source == "unexpected_suppressed_source"
+    assert suppressed_candidate.scope == "branch"
+    assert suppressed_candidate.verification_state == "unverified"
+    assert "candidate:project:m28_deployment_policy:source" in stale.failures
+    assert "candidate:project:m28_deployment_policy:scope" in stale.failures
+    assert "candidate:project:m28_deployment_policy:verification_state" in stale.failures
 
 
 def test_write_memory_effectiveness_report_is_sorted_and_newline_terminated(tmp_path: Path) -> None:
