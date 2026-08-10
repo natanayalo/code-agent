@@ -51,6 +51,20 @@ class MemoryGateDecision(BaseModel):
     category: str
     reason_codes: list[str] = Field(default_factory=list)
     value: dict[str, Any] = Field(default_factory=dict)
+    memory: MemoryEntry
+
+    @classmethod
+    def from_entry(
+        cls, *, entry: MemoryEntry, category: str, reason_codes: list[str]
+    ) -> MemoryGateDecision:
+        """Retain the pre-gate entry that was suppressed."""
+        return cls(
+            memory_key=entry.memory_key,
+            category=category,
+            reason_codes=reason_codes,
+            value=entry.value,
+            memory=entry,
+        )
 
 
 class ReadSideMemoryGateResult(BaseModel):
@@ -236,11 +250,10 @@ class ReadSideMemoryGateService:
         for entry in project:
             if entry.gate_status == "suppressed":
                 suppressed_project.append(
-                    MemoryGateDecision(
-                        memory_key=entry.memory_key,
+                    MemoryGateDecision.from_entry(
+                        entry=entry,
                         category="project",
                         reason_codes=entry.gate_reason_codes,
-                        value=entry.value,
                     )
                 )
                 for rc in entry.gate_reason_codes:
@@ -252,11 +265,10 @@ class ReadSideMemoryGateService:
         for entry in personal:
             if entry.gate_status == "suppressed":
                 suppressed_personal.append(
-                    MemoryGateDecision(
-                        memory_key=entry.memory_key,
+                    MemoryGateDecision.from_entry(
+                        entry=entry,
                         category="personal",
                         reason_codes=entry.gate_reason_codes,
-                        value=entry.value,
                     )
                 )
                 for rc in entry.gate_reason_codes:
@@ -308,11 +320,10 @@ class ReadSideMemoryGateService:
                     proj_match.gate_reason_codes.append("resolved_conflict_penalty")
 
             suppressed_personal.append(
-                MemoryGateDecision(
-                    memory_key=key,
+                MemoryGateDecision.from_entry(
+                    entry=personal_entry,
                     category="personal",
                     reason_codes=reason_codes,
-                    value=personal_entry.value,
                 )
             )
             reason_counts[reason] = reason_counts.get(reason, 0) + 1
@@ -320,11 +331,10 @@ class ReadSideMemoryGateService:
             if _values_contradict(proj_match.value, personal_entry.value):
                 reason = "high_risk_conflict"
                 suppressed_personal.append(
-                    MemoryGateDecision(
-                        memory_key=key,
+                    MemoryGateDecision.from_entry(
+                        entry=personal_entry,
                         category="personal",
                         reason_codes=[reason],
-                        value=personal_entry.value,
                     )
                 )
                 reason_counts[reason] = reason_counts.get(reason, 0) + 1

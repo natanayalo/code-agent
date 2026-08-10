@@ -433,6 +433,40 @@ only after all 20 captures pass and the operator confirms it is safe. A
 `ready_for_operator_review` result is a technical evidence gate only; it never
 resumes M26/M27 or changes production routing automatically.
 
+### M28 paired memory-effectiveness baseline
+
+The M28.1 evaluator is deterministic and runs the existing database-backed
+memory load path. It never submits a task, invokes a provider, or changes
+production memory policy. It writes a local report containing reloaded fixture
+metadata and worker-visible context, so use only the checked-in synthetic suite
+or a disposable evaluation database.
+
+```bash
+.venv/bin/python scripts/e2e/run_memory_effectiveness_eval.py \
+  --output artifacts/evaluations/m28-memory-effectiveness-report.json
+```
+
+To compare the PostgreSQL full-text path, set a disposable database URL in an
+environment variable. The runner applies migrations and writes fixtures, so do
+not point it at an operator or production database.
+
+```bash
+export CODE_AGENT_M28_EVAL_DATABASE_URL="postgresql+psycopg://..."
+.venv/bin/python scripts/e2e/run_memory_effectiveness_eval.py \
+  --postgres-url-env CODE_AGENT_M28_EVAL_DATABASE_URL \
+  --output artifacts/evaluations/m28-memory-effectiveness-postgres-report.json
+```
+
+An exit status of `0` means all four paired assertions passed; `1` means the
+report captured a context, gate, or session-continuity regression. This is a
+context-delivery baseline only—it does not establish worker outcome improvement
+or justify semantic/vector retrieval.
+
+The report's `retrieval_mode` records the search backend actually exercised:
+the default SQLite run reports `sqlite_substring_fallback`, while a PostgreSQL
+run reports `postgres_full_text`. `timeline_retrieval_mode` preserves the
+existing load-memory timeline diagnostic separately.
+
 ## 10) Antigravity Migration Guide
 
 When migrating existing workspaces and settings to Antigravity:

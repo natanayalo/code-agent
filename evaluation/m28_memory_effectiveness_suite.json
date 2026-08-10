@@ -1,0 +1,132 @@
+{
+  "suite_name": "m28-memory-effectiveness-baseline",
+  "schema_version": 1,
+  "repo_url": "https://github.com/natanayalo/code-agent",
+  "cases": [
+    {
+      "case_id": "conflict-handling",
+      "scenario": "conflict_handling",
+      "task_text": "test execution preference",
+      "memory_fixtures": [
+        {
+          "category": "personal",
+          "memory_key": "m28_test_execution_preference",
+          "value": {"guidance": "test execution preference uses concise output"},
+          "scope": "global"
+        },
+        {
+          "category": "project",
+          "memory_key": "m28_test_execution_preference",
+          "value": {"guidance": "test execution preference uses full output"},
+          "scope": "repo"
+        }
+      ],
+      "session_fixture": {
+        "active_goal": "reuse the repository test preference",
+        "decisions_made": {"verification_output": "full"},
+        "identified_risks": {"personal_override": "must not replace project guidance"},
+        "files_touched": ["tests/integration/test_memory_retrieval_evaluation.py"]
+      },
+      "expected_candidates": [
+        {
+          "category": "personal",
+          "memory_key": "m28_test_execution_preference",
+          "context_disposition": "suppressed",
+          "verification_state": "fresh",
+          "required_reason_codes": ["project_overrides_personal"]
+        },
+        {
+          "category": "project",
+          "memory_key": "m28_test_execution_preference",
+          "context_disposition": "available_to_worker",
+          "verification_state": "fresh",
+          "required_reason_codes": ["resolved_conflict_penalty"]
+        }
+      ]
+    },
+    {
+      "case_id": "irrelevant-rejection",
+      "scenario": "irrelevant_rejection",
+      "task_text": "unused memory rejection token",
+      "memory_fixtures": [
+        {
+          "category": "project",
+          "memory_key": "m28_irrelevant_distractor",
+          "value": {"guidance": "distractor maintenance notebook"},
+          "scope": "repo"
+        }
+      ],
+      "session_fixture": {
+        "active_goal": "avoid irrelevant context",
+        "decisions_made": {"retrieval": "query scoped"},
+        "identified_risks": {"prompt_noise": "reject distractors"},
+        "files_touched": ["memory/read_side_gate.py"]
+      },
+      "expected_candidates": [
+        {
+          "category": "project",
+          "memory_key": "m28_irrelevant_distractor",
+          "context_disposition": "not_retrieved",
+          "verification_state": "fresh",
+          "required_reason_codes": ["not_retrieved_for_query"]
+        }
+      ]
+    },
+    {
+      "case_id": "stale-reverification",
+      "scenario": "stale_reverification",
+      "task_text": "release deployment policy",
+      "memory_fixtures": [
+        {
+          "category": "project",
+          "memory_key": "m28_deployment_policy",
+          "value": {"guidance": "release deployment policy requires approval"},
+          "scope": "repo",
+          "verification_age_days": 365
+        }
+      ],
+      "session_fixture": {
+        "active_goal": "reverify deployment guidance",
+        "decisions_made": {"memory_policy": "stale guidance is advisory only"},
+        "identified_risks": {"deployment": "stale policy requires verification"},
+        "files_touched": ["memory/read_side_gate.py"]
+      },
+      "expected_candidates": [
+        {
+          "category": "project",
+          "memory_key": "m28_deployment_policy",
+          "context_disposition": "suppressed",
+          "verification_state": "stale",
+          "required_reason_codes": ["high_risk_unverified_or_stale"]
+        }
+      ]
+    },
+    {
+      "case_id": "useful-hit",
+      "scenario": "useful_hit",
+      "task_text": "verified test matrix command",
+      "memory_fixtures": [
+        {
+          "category": "project",
+          "memory_key": "m28_verified_test_matrix",
+          "value": {"guidance": "verified test matrix command"},
+          "scope": "repo"
+        }
+      ],
+      "session_fixture": {
+        "active_goal": "reuse verified testing knowledge",
+        "decisions_made": {"verification": "run focused tests first"},
+        "identified_risks": {"coverage": "keep regression coverage"},
+        "files_touched": ["tests/unit/test_memory_retrieval_evaluation.py"]
+      },
+      "expected_candidates": [
+        {
+          "category": "project",
+          "memory_key": "m28_verified_test_matrix",
+          "context_disposition": "available_to_worker",
+          "verification_state": "fresh"
+        }
+      ]
+    }
+  ]
+}
