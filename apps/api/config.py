@@ -46,6 +46,7 @@ class SystemConfig:
     ci_polling_interval_minutes: int = 15
     ci_polling_log_limit_bytes: int = 50000
     ci_polling_llm_profile: str | None = None
+    review_comment_max_repair_passes: int = 3
     scout_task_text: str = DEFAULT_SCOUT_TASK_TEXT
     scout_repo_key: str | None = None
     scout_branch: str | None = None
@@ -94,6 +95,9 @@ class SystemConfig:
             ),
             ci_polling_llm_profile=(
                 (environ.get("CODE_AGENT_CI_POLLING_LLM_PROFILE") or "").strip() or None
+            ),
+            review_comment_max_repair_passes=coerce_non_negative_int_env(
+                environ.get("CODE_AGENT_REVIEW_COMMENT_MAX_REPAIR_PASSES"), default=3
             ),
             scout_task_text=environ.get("CODE_AGENT_SCOUT_TASK_TEXT", "").strip()
             or DEFAULT_SCOUT_TASK_TEXT,

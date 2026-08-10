@@ -4,11 +4,11 @@
 
 Phase 4A: Temporal stabilization and measured reliability.
 
-Completed milestone: **M25.6 — Real Temporal Reliability Baseline**.
+Completed milestone: **M26 — Review-Comment Repair**.
 
-M25.6 is complete: the 20-case real-worker baseline passed all deployment, profile, Temporal history, terminal, artifact, and scenario-specific proof gates, and the 90% Python CI coverage gate has been fully restored with >=90% test coverage.
+M26 is complete: review-comment repair polling on open draft PRs, author filtering, budget capping, deduplicated reply planning, immediate per-reply DB checkpointing, and thread replies are fully implemented and verified.
 
-Active focus: **M26 — Review-Comment Repair**.
+Active focus: **M28 — Memory Effectiveness and Session Continuity**.
 
 
 ## Current capabilities
@@ -33,6 +33,8 @@ Active focus: **M26 — Review-Comment Repair**.
   workspace/branch/draft-PR delivery
 - durable, bounded verifier and independent-review repair loops on retained
   workspaces with permission escalation, re-verification, and manual handoff
+- automated review-comment polling and repair loop on open draft PRs with
+  author filtering, budget capping, thread replies, and dashboard visibility
 - dashboard visibility for tasks, TaskSpec, DAG attempts, interactions,
   timelines, logs, artifacts, traces, memory, proposals, metrics, tools,
   dependency readiness, degraded reasons, and safe recovery guidance
@@ -65,6 +67,9 @@ Temporal migration and rollback record is in the
   isolated Codex/Antigravity draft-PR delivery. Operator redaction review and
   the forbidden-field validator passed for the public reports. The result does
   not change routing automatically.
+- The completed M26 slice adds automated review-comment polling on open draft
+  PRs, structured prompt building for review comments, deduplicated reply
+  planning, immediate per-reply DB checkpointing, and GitHub GraphQL thread replies.
 - The 25-case frozen evaluation remains a deterministic domain-logic regression
   suite. It uses replayed worker outcomes and is not a real-provider Temporal
   reliability baseline.
@@ -88,13 +93,11 @@ Temporal migration and rollback record is in the
 
 ## Next slices only
 
-1. M26: Review-comment repair
-   - add review-comment repair workflow supported by M25.6 evidence
+1. M28: Memory effectiveness and session continuity
+   - prove durable memory and compact session state reduce repeated work without stale context control
 
 ## Deferred
 
-- M26 review-comment repair remains reserved until CI and Temporal repair
-  stability are supported by M25.6 evidence.
 - M27 reliability-based autonomy remains reserved until real-task metrics can
   support reversible policy thresholds, and additionally requires M29's
   expanded evidence.

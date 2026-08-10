@@ -71,6 +71,17 @@ export interface TaskSummarySnapshot {
   trace_url?: string | null;
 }
 
+export interface ReviewCommentSnapshot {
+  id: number;
+  path: string;
+  line?: number | null;
+  body: string;
+  user_login: string;
+  created_at: string;
+  html_url?: string | null;
+  replied?: boolean;
+}
+
 export interface DeliveryMetadataSnapshot {
   branch_name?: string | null;
   pr_title?: string | null;
@@ -79,6 +90,9 @@ export interface DeliveryMetadataSnapshot {
   head_sha?: string | null;
   ci_status?: string | null;
   ci_failed_jobs?: string[] | null;
+  review_comments?: ReviewCommentSnapshot[] | null;
+  review_comments_last_checked_at?: string | null;
+  review_comments_replied_at?: string | null;
   [key: string]: unknown;
 }
 
