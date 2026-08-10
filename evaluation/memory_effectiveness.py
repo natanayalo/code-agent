@@ -323,19 +323,6 @@ def _verification_state(
     return "stale"
 
 
-def _persisted_memory_entry(row: Any) -> MemoryEntry:
-    """Map a reloaded fixture row into the lifecycle metadata report."""
-    return MemoryEntry(
-        memory_key=row.memory_key,
-        value=dict(row.value or {}),
-        source=row.source,
-        confidence=row.confidence,
-        scope=row.scope,
-        last_verified_at=row.last_verified_at,
-        requires_verification=row.requires_verification,
-    )
-
-
 def _observed_fixture_entries(
     *, session_factory: Any, suite: MemoryEffectivenessSuite
 ) -> dict[str, dict[tuple[str, str], MemoryEntry]]:
@@ -352,22 +339,30 @@ def _observed_fixture_entries(
                 else:
                     row = project_repo.get(repo_url=suite.repo_url, memory_key=fixture.memory_key)
                 if row is not None:
-                    entries[(fixture.category, fixture.memory_key)] = _persisted_memory_entry(row)
+                    entries[(fixture.category, fixture.memory_key)] = MemoryEntry(
+                        memory_key=row.memory_key,
+                        value=dict(row.value or {}),
+                        source=row.source,
+                        confidence=row.confidence,
+                        scope=row.scope,
+                        last_verified_at=row.last_verified_at,
+                        requires_verification=row.requires_verification,
+                    )
             entries_by_case[case.case_id] = entries
     return entries_by_case
 
 
 def _diagnostic_entries(
     memory: dict[str, Any],
-) -> tuple[dict[tuple[str, str], dict[str, Any]], set[tuple[str, str]]]:
+) -> tuple[dict[tuple[str, str], dict[str, Any]], dict[tuple[str, str], dict[str, Any]]]:
     diagnostics = memory.get("gate_diagnostics") or {}
     accepted: dict[tuple[str, str], dict[str, Any]] = {}
-    suppressed: set[tuple[str, str]] = set()
+    suppressed: dict[tuple[str, str], dict[str, Any]] = {}
     for category in ("personal", "project"):
         for entry in diagnostics.get(f"accepted_{category}", []):
             accepted[(category, entry["memory_key"])] = entry
         for entry in diagnostics.get(f"suppressed_{category}", []):
-            suppressed.add((category, entry["memory_key"]))
+            suppressed[(category, entry["memory_key"])] = entry
     return accepted, suppressed
 
 
@@ -388,26 +383,24 @@ def _candidate_lifecycles(
     for fixture in sorted(fixtures, key=lambda item: (item.category, item.memory_key)):
         key = (fixture.category, fixture.memory_key)
         accepted_entry = accepted.get(key)
+        suppressed_entry = suppressed.get(key)
         if accepted_entry is not None:
             disposition: ContextDisposition = "available_to_worker"
             reason_codes = list(accepted_entry.get("gate_reason_codes", []))
             gate_status = str(accepted_entry.get("gate_status"))
-        elif key in suppressed:
+        elif suppressed_entry is not None:
             disposition = "suppressed"
-            suppressed_entry = next(
-                entry
-                for entry in (memory.get("gate_diagnostics") or {}).get(
-                    f"suppressed_{fixture.category}", []
-                )
-                if entry["memory_key"] == fixture.memory_key
-            )
             reason_codes = list(suppressed_entry.get("reason_codes", []))
             gate_status = "suppressed"
         else:
             disposition = "not_retrieved"
             reason_codes = ["not_retrieved_for_query"]
             gate_status = None
-        observed = worker_visible.get(key) or observed_entries.get(key)
+        observed = worker_visible.get(key)
+        if observed is None and suppressed_entry is not None:
+            observed = MemoryEntry.model_validate(suppressed_entry["memory"])
+        if observed is None:
+            observed = observed_entries.get(key)
         lifecycles.append(
             CandidateLifecycle(
                 category=fixture.category,

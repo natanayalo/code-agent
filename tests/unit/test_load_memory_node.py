@@ -702,6 +702,11 @@ def test_read_side_gate_diagnostics_timeline_payload(session_factory) -> None:
         PersonalMemoryRepository(session).upsert(
             memory_key="editor",
             value={"theme": "light"},
+            source="operator",
+            confidence=0.7,
+            scope="global",
+            last_verified_at=datetime(2026, 8, 1, tzinfo=UTC),
+            requires_verification=False,
         )
         ProjectMemoryRepository(session).upsert(
             repo_url=repo_url,
@@ -738,6 +743,10 @@ def test_read_side_gate_diagnostics_timeline_payload(session_factory) -> None:
     assert "project_overrides_personal" in payload["reason_counts"]
     assert "editor" in payload["accepted_keys"]
     assert "editor" in payload["suppressed_keys"]
+    suppressed = payload["suppressed_details"][0]["memory"]
+    assert suppressed["source"] == "operator"
+    assert suppressed["confidence"] == 0.7
+    assert suppressed["scope"] == "global"
 
 
 def test_determine_risk_high_risk_substrings() -> None:
