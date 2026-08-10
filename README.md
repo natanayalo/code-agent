@@ -256,9 +256,9 @@ no-op or formatting-only runs after the generated commit lands.
 
 The current phase is Temporal stabilization and measured reliability:
 
-1. M25.6: a 20-task real-worker Temporal reliability baseline
+1. M28: memory effectiveness and session continuity
 
-M26 review-comment repair and M27 reliability-based autonomy are reserved but
-deferred until the M25.6 evidence review.
+M26 review-comment repair is complete. M27 reliability-based autonomy remains
+deferred until M29 provides sufficient repeated real-task evidence.
 
 See [`docs/roadmap.md`](docs/roadmap.md) for full milestone plans and sequencing.
