@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: implement M26 review comment repair polling and thread replies ([#364](https://github.com/natanayalo/code-agent/pull/364))
+
 - Feat: restore python coverage target to 90 percent ([#362](https://github.com/natanayalo/code-agent/pull/362))
 
 - Feat: add temporal reliability evidence foundation ([#348](https://github.com/natanayalo/code-agent/pull/348))
