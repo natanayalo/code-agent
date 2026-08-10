@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: add M28 paired memory effectiveness baseline ([#365](https://github.com/natanayalo/code-agent/pull/365))
+
 - Feat: implement M26 review comment repair polling and thread replies ([#364](https://github.com/natanayalo/code-agent/pull/364))
 
 - Feat: restore python coverage target to 90 percent ([#362](https://github.com/natanayalo/code-agent/pull/362))
