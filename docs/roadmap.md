@@ -75,6 +75,9 @@ autonomous privileged maintenance.
   real-worker lifecycle evidence.
 - M25.6 established the 20-case real-worker Temporal reliability baseline and
   restored the 90% Python CI coverage gate.
+- M26 added review-comment repair polling on open draft PRs with author filtering,
+  budget capping, deduplicated reply planning, immediate per-reply DB checkpointing,
+  and GitHub GraphQL thread replies.
 
 
 ## M25.6 — Real Temporal Reliability Baseline
@@ -284,17 +287,11 @@ read-only maintenance without introducing unattended mutation risk.
 
 ## Deferred milestones
 
-### M26 — Review Comment Repair
+### M26 — Review Comment Repair (Completed)
 
-Reserved goal: extend the draft-PR repair loop from CI failures to actionable
-GitHub review comments.
-
-Entry condition: CI repair and the core Temporal repair loop are stable in the
-M25.6 real-worker evidence set. Promotion requires successful verifier and
-independent-review repair cases, successful draft-PR delivery cases, no silent
-terminal divergence, and explicit operator acceptance. Passing the gate makes
-M26 eligible for reprioritization; it does not start the milestone
-automatically. No auto-merge or deploy behavior is included.
+Goal: extend the draft-PR repair loop from CI failures to actionable GitHub
+review comments with author filtering, budget capping, deduplicated reply planning,
+immediate per-reply DB checkpointing, and thread replies. Completed in Phase 4A.
 
 ### M27 — Reliability-Based Autonomy Policy
 
