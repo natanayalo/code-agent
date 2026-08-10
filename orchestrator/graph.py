@@ -120,6 +120,8 @@ DEFAULT_ORCHESTRATOR_TIMEOUT_SECONDS = (
     DEFAULT_WORKER_TIMEOUT_SECONDS + DEFAULT_ORCHESTRATOR_GRACE_SECONDS
 )
 ORCHESTRATOR_TIMEOUT_GRACE_SECONDS = DEFAULT_ORCHESTRATOR_GRACE_SECONDS
+COMPACT_SESSION_REVIEW_FINDINGS_LIMIT = 10
+COMPACT_SESSION_REVIEW_TEXT_LIMIT = 240
 _WORKER_FAILURE_REROUTE_KINDS = frozenset(
     {
         "compile",
@@ -3389,11 +3391,88 @@ def _session_state_update_from_result(
     result: WorkerResult,
 ) -> SessionStateUpdate:
     """Build the compact session-state update emitted after worker completion."""
+    task_spec = state.task_spec
+    dispatch = state.dispatch
+    route = state.route
+    verification = state.verification
+
+    decisions_made = {
+        "task_type": task_spec.task_type if task_spec is not None else None,
+        "delivery_mode": task_spec.delivery_mode if task_spec is not None else None,
+        "worker_type": dispatch.worker_type or route.chosen_worker,
+        "worker_profile": dispatch.worker_profile or route.chosen_profile,
+        "approval_status": state.approval.status if state.approval is not None else None,
+    }
+    identified_risks = {
+        "risk_level": task_spec.risk_level if task_spec is not None else None,
+        "requires_permission": task_spec.requires_permission if task_spec is not None else None,
+        "worker_status": result.status,
+        "worker_failure_kind": result.failure_kind,
+        "requested_permission": result.requested_permission,
+        "verification_status": verification.status if verification is not None else None,
+        "verification_failure_kind": verification.failure_kind
+        if verification is not None
+        else None,
+        "review_findings": _compact_session_review_findings(state, result),
+    }
+
     return SessionStateUpdate(
         active_goal=state.normalized_task_text or state.task.task_text,
+        decisions_made=decisions_made,
+        identified_risks=identified_risks,
         files_touched=result.files_changed,
-        # TODO: extract decisions_made and identified_risks from result.summary or a dedicated field
     )
+
+
+def _compact_session_review_findings(
+    state: OrchestratorState,
+    result: WorkerResult,
+) -> list[dict[str, str]]:
+    """Return concise, structured review risks without retaining free-form evidence."""
+    findings: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str, str, str]] = set()
+    truncated = False
+    for review in (result.review_result, state.review):
+        if review is None:
+            continue
+        for finding in review.findings:
+            compact_finding = {
+                "reviewer": review.reviewer_kind,
+                "severity": finding.severity,
+                "category": _truncate_compact_session_review_text(finding.category),
+                "title": _truncate_compact_session_review_text(finding.title),
+                "file_path": _truncate_compact_session_review_text(finding.file_path),
+            }
+            key = (
+                compact_finding["reviewer"],
+                compact_finding["severity"],
+                compact_finding["category"],
+                compact_finding["title"],
+                compact_finding["file_path"],
+            )
+            if key not in seen:
+                seen.add(key)
+                if len(findings) < COMPACT_SESSION_REVIEW_FINDINGS_LIMIT:
+                    findings.append(compact_finding)
+                else:
+                    truncated = True
+    if truncated:
+        logger.info(
+            "Compact session review findings truncated",
+            extra={
+                "task_id": state.task.task_id,
+                "limit": COMPACT_SESSION_REVIEW_FINDINGS_LIMIT,
+            },
+        )
+    return findings
+
+
+def _truncate_compact_session_review_text(value: str) -> str:
+    """Keep persisted compact-session review values bounded and single-line."""
+    normalized = " ".join(value.split())
+    if len(normalized) <= COMPACT_SESSION_REVIEW_TEXT_LIMIT:
+        return normalized
+    return normalized[: COMPACT_SESSION_REVIEW_TEXT_LIMIT - 3].rstrip() + "..."
 
 
 def summarize_result(state_input: OrchestratorState) -> dict[str, Any]:

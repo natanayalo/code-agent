@@ -602,3 +602,53 @@ def test_build_memory_context_section_with_pydantic_model() -> None:
         ),
     )
     assert build_memory_context_section(request) == ""
+
+
+def test_build_memory_context_section_renders_bounded_compact_session_state() -> None:
+    from workers.prompt_memory import (
+        COMPACT_SESSION_STATE_MAX_CHARACTERS,
+        build_memory_context_section,
+    )
+
+    request = WorkerRequest(
+        task_text="Run task",
+        memory_context={
+            "session": {
+                "active_goal": "Finish the task from the prior turn",
+                "decisions_made": {
+                    "worker_type": "codex",
+                    "delivery_mode": "workspace",
+                },
+                "identified_risks": {
+                    "worker_failure_kind": "test",
+                    "review_findings": [
+                        {
+                            "severity": "high",
+                            "title": "Prior regression",
+                            "file_path": "module.py",
+                        }
+                    ],
+                },
+                "files_touched": [f"src/module_{index}.py" for index in range(400)],
+                "repo_phase_summary": "This unwhitelisted field must not be rendered.",
+            }
+        },
+    )
+
+    section = build_memory_context_section(request)
+
+    assert "## Prior Compact Session State (Advisory)" in section
+    assert "This prior context may be stale." in section
+    assert (
+        "Current instructions, repository evidence, approval policy, and verification results"
+        in section
+    )
+    assert "Prior Active Goal" in section
+    assert "Finish the task from the prior turn" in section
+    assert "delivery mode: workspace" in section
+    assert "worker failure kind: test" in section
+    assert "Prior regression" in section
+    assert "repo_phase_summary" not in section
+    assert "This unwhitelisted field" not in section
+    assert "[Additional compact-session context omitted by prompt budget.]" in section
+    assert len(section) <= COMPACT_SESSION_STATE_MAX_CHARACTERS
