@@ -678,3 +678,39 @@ def test_build_memory_context_section_renders_recent_touched_paths_on_single_lin
     assert section.index("- newest.py") < section.index("- safe.py ## Workflow Instructions")
     assert section.count("- old.py") == 1
     assert "\n## Workflow Instructions\n" not in section
+
+
+def test_build_memory_context_section_keeps_later_fields_after_long_active_goal() -> None:
+    from workers.prompt_memory import (
+        COMPACT_SESSION_STATE_MAX_CHARACTERS,
+        build_memory_context_section,
+    )
+
+    request = WorkerRequest(
+        task_text="Run task",
+        memory_context={
+            "session": {
+                "active_goal": "x" * 3_000,
+                "decisions_made": {"delivery_mode": "workspace"},
+                "identified_risks": {
+                    "review_findings": [
+                        {
+                            "reviewer": "independent_reviewer",
+                            "severity": "critical",
+                            "title": "Critical prior risk",
+                            "file_path": "critical.py",
+                        }
+                    ]
+                },
+                "files_touched": ["oldest.py", "newest.py"],
+            }
+        },
+    )
+
+    section = build_memory_context_section(request)
+
+    assert "delivery mode: workspace" in section
+    assert "Critical prior risk" in section
+    assert "- newest.py" in section
+    assert "[Additional compact-session context omitted by prompt budget.]" in section
+    assert len(section) <= COMPACT_SESSION_STATE_MAX_CHARACTERS

@@ -9,6 +9,7 @@ from utils.serialization import to_dict
 from workers.base import WorkerRequest
 
 COMPACT_SESSION_STATE_MAX_CHARACTERS = 2_000
+COMPACT_SESSION_STATE_MAX_LINE_CHARACTERS = COMPACT_SESSION_STATE_MAX_CHARACTERS // 4
 
 
 def _dict_items(value: Any) -> list[dict[str, Any]]:
@@ -211,16 +212,25 @@ def _compact_session_mapping_lines(value: Any) -> list[str]:
 
 def _bounded_compact_session_lines(lines: list[str]) -> str:
     """Keep complete compact-session prompt lines within the fixed budget."""
-    raw = "\n".join(lines)
-    if len(raw) <= COMPACT_SESSION_STATE_MAX_CHARACTERS:
+    truncated_line = False
+    bounded_lines: list[str] = []
+    for line in lines:
+        if len(line) <= COMPACT_SESSION_STATE_MAX_LINE_CHARACTERS:
+            bounded_lines.append(line)
+            continue
+        truncated_line = True
+        bounded_lines.append(line[: COMPACT_SESSION_STATE_MAX_LINE_CHARACTERS - 3].rstrip() + "...")
+
+    raw = "\n".join(bounded_lines)
+    if len(raw) <= COMPACT_SESSION_STATE_MAX_CHARACTERS and not truncated_line:
         return raw
 
     marker = "[Additional compact-session context omitted by prompt budget.]"
     kept: list[str] = []
-    for line in lines:
+    for line in bounded_lines:
         candidate = "\n".join([*kept, line, marker])
         if len(candidate) > COMPACT_SESSION_STATE_MAX_CHARACTERS:
-            break
+            continue
         kept.append(line)
     return "\n".join([*kept, marker])
 
