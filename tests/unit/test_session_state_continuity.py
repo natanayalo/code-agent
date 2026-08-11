@@ -76,18 +76,18 @@ _EXPECTED_RISKS = {
     "verification_failure_kind": "test_regression",
     "review_findings": [
         {
-            "reviewer": "worker_self_review",
-            "severity": "medium",
-            "category": "tests",
-            "title": "Regression coverage is incomplete",
-            "file_path": "tests/unit/test_session_state_continuity.py",
-        },
-        {
             "reviewer": "independent_reviewer",
             "severity": "high",
             "category": "correctness",
             "title": "State is not persisted",
             "file_path": "orchestrator/graph.py",
+        },
+        {
+            "reviewer": "worker_self_review",
+            "severity": "medium",
+            "category": "tests",
+            "title": "Regression coverage is incomplete",
+            "file_path": "tests/unit/test_session_state_continuity.py",
         },
     ],
 }
@@ -167,3 +167,66 @@ def test_summarize_result_bounds_compact_review_findings() -> None:
     assert len(review_findings) == 10
     assert review_findings[0]["title"] == "x" * 237 + "..."
     assert review_findings[-1]["title"] == "Finding 9"
+
+
+def test_summarize_result_prioritizes_independent_critical_review_findings() -> None:
+    self_review_findings = [
+        {
+            "severity": "low",
+            "category": "correctness",
+            "confidence": 0.9,
+            "file_path": f"module_{index}.py",
+            "title": f"Self finding {index}",
+            "why_it_matters": "The regression should be visible.",
+        }
+        for index in range(10)
+    ]
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "Inspect the review findings"},
+            "review": {
+                "reviewer_kind": "independent_reviewer",
+                "summary": "Review found a critical issue.",
+                "confidence": 0.9,
+                "outcome": "findings",
+                "findings": [
+                    {
+                        "severity": "critical",
+                        "category": "correctness",
+                        "confidence": 0.9,
+                        "file_path": "critical.py",
+                        "title": "Critical independent finding",
+                        "why_it_matters": "The regression must be fixed first.",
+                    },
+                    {
+                        "severity": "low",
+                        "category": "correctness",
+                        "confidence": 0.9,
+                        "file_path": "module_0.py",
+                        "title": "Self finding 0",
+                        "why_it_matters": "The independent reviewer confirmed it.",
+                    },
+                ],
+            },
+            "result": {
+                "status": "success",
+                "summary": "done",
+                "review_result": {
+                    "reviewer_kind": "worker_self_review",
+                    "summary": "Self review found issues.",
+                    "confidence": 0.9,
+                    "outcome": "findings",
+                    "findings": self_review_findings,
+                },
+            },
+        }
+    )
+
+    review_findings = summarize_result(state)["session_state_update"]["identified_risks"][
+        "review_findings"
+    ]
+
+    assert len(review_findings) == 10
+    assert review_findings[0]["title"] == "Critical independent finding"
+    assert review_findings[1]["reviewer"] == "independent_reviewer"
+    assert review_findings[1]["title"] == "Self finding 0"

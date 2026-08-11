@@ -231,11 +231,15 @@ def _build_compact_session_section(memory_context: dict[str, Any]) -> str:
     active_goal = session.get("active_goal")
     decision_lines = _compact_session_mapping_lines(session.get("decisions_made"))
     risk_lines = _compact_session_mapping_lines(session.get("identified_risks"))
-    file_lines = [
-        f"- {path.strip()}"
-        for path in session.get("files_touched", [])
-        if isinstance(path, str) and path.strip()
-    ]
+    file_lines: list[str] = []
+    seen_paths: set[str] = set()
+    for path in reversed(session.get("files_touched", [])):
+        if not isinstance(path, str):
+            continue
+        compact_path = _compact_session_value(path)
+        if compact_path and compact_path not in seen_paths:
+            seen_paths.add(compact_path)
+            file_lines.append(f"- {compact_path}")
 
     if not any(
         (

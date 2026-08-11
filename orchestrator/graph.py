@@ -65,7 +65,7 @@ from orchestrator.nodes.verification import (
     verify_result as verify_result,
 )
 from orchestrator.performance_routing import PerformanceRoutingPolicy
-from orchestrator.review import REPAIR_REQUEST_CONSTRAINT, review_result
+from orchestrator.review import REPAIR_REQUEST_CONSTRAINT, SEVERITY_RANK, review_result
 from orchestrator.runtime_manifest import build_runtime_manifest
 from orchestrator.scout_proposals import (
     normalize_scout_worker_result,
@@ -122,6 +122,10 @@ DEFAULT_ORCHESTRATOR_TIMEOUT_SECONDS = (
 ORCHESTRATOR_TIMEOUT_GRACE_SECONDS = DEFAULT_ORCHESTRATOR_GRACE_SECONDS
 COMPACT_SESSION_REVIEW_FINDINGS_LIMIT = 10
 COMPACT_SESSION_REVIEW_TEXT_LIMIT = 240
+COMPACT_SESSION_REVIEWER_PRECEDENCE: Final[dict[str, int]] = {
+    "independent_reviewer": 0,
+    "worker_self_review": 1,
+}
 _WORKER_FAILURE_REROUTE_KINDS = frozenset(
     {
         "compile",
@@ -3429,34 +3433,35 @@ def _compact_session_review_findings(
     result: WorkerResult,
 ) -> list[dict[str, str]]:
     """Return concise, structured review risks without retaining free-form evidence."""
-    findings: list[dict[str, str]] = []
-    seen: set[tuple[str, str, str, str, str]] = set()
-    truncated = False
+    candidates: list[dict[str, str]] = []
     for review in (result.review_result, state.review):
         if review is None:
             continue
         for finding in review.findings:
-            compact_finding = {
-                "reviewer": review.reviewer_kind,
-                "severity": finding.severity,
-                "category": _truncate_compact_session_review_text(finding.category),
-                "title": _truncate_compact_session_review_text(finding.title),
-                "file_path": _truncate_compact_session_review_text(finding.file_path),
-            }
-            key = (
-                compact_finding["reviewer"],
-                compact_finding["severity"],
-                compact_finding["category"],
-                compact_finding["title"],
-                compact_finding["file_path"],
+            candidates.append(
+                {
+                    "reviewer": review.reviewer_kind,
+                    "severity": finding.severity,
+                    "category": _truncate_compact_session_review_text(finding.category),
+                    "title": _truncate_compact_session_review_text(finding.title),
+                    "file_path": _truncate_compact_session_review_text(finding.file_path),
+                }
             )
-            if key not in seen:
-                seen.add(key)
-                if len(findings) < COMPACT_SESSION_REVIEW_FINDINGS_LIMIT:
-                    findings.append(compact_finding)
-                else:
-                    truncated = True
-    if truncated:
+
+    candidates.sort(
+        key=lambda finding: (
+            -SEVERITY_RANK[finding["severity"]],
+            COMPACT_SESSION_REVIEWER_PRECEDENCE[finding["reviewer"]],
+        )
+    )
+    findings: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for candidate in candidates:
+        key = (candidate["category"], candidate["title"], candidate["file_path"])
+        if key not in seen:
+            seen.add(key)
+            findings.append(candidate)
+    if len(findings) > COMPACT_SESSION_REVIEW_FINDINGS_LIMIT:
         logger.info(
             "Compact session review findings truncated",
             extra={
@@ -3464,7 +3469,7 @@ def _compact_session_review_findings(
                 "limit": COMPACT_SESSION_REVIEW_FINDINGS_LIMIT,
             },
         )
-    return findings
+    return findings[:COMPACT_SESSION_REVIEW_FINDINGS_LIMIT]
 
 
 def _truncate_compact_session_review_text(value: str) -> str:
