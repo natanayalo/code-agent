@@ -12,6 +12,9 @@
   acceptance, verification, review, and delivery outcomes distinct
 - default to one strong native coding agent plus verification, independent
   review, and bounded repair; add decomposition/fan-out only for measured needs
+- use provider reasoning for coding decisions and deterministic platform code
+  for mechanical inspection, validation, verification, evidence collection,
+  reconciliation, and capability enforcement
 - keep trust-boundary and high-risk changes human-controlled
 - require measured real-worker evidence before increasing autonomy
 
@@ -20,20 +23,28 @@
 Phase 4A: Temporal stabilization and measured reliability. M25.6 and M26 are
 complete. M28 is active.
 
-Priority sequence:
+Committed/current priority:
 
 1. finish M28: Memory Effectiveness and Session Continuity
 2. M28.5: Execution Architecture Foundation
 3. M29: Provider Reliability and Evidence-Driven Routing
 4. M30: GitHub-Native Task and Delivery Control
 5. M31: Proactive Operations and Safe Scheduled Work
-6. later, conditional Execution Architecture V2 / durable multi-agent work
-7. M27: Reliability-Based Autonomy Policy only after sufficient evidence
 
-Milestone numbers are stable identifiers; the priority sequence above is the
-authoritative execution order. M28.5 is the only numbering addition. M27 stays
-deferred: it requires broader repeated evidence from M29 and later operational
-work and cannot resume from the 20-task baseline alone.
+Deferred / evidence-gated:
+
+- M27: Reliability-Based Autonomy Policy
+
+Future / conditional:
+
+- Execution Architecture V2 / durable multi-agent work
+- the conditional items documented below; none has a committed milestone
+  number
+
+Milestone numbers are stable identifiers; the committed/current sequence above
+is the authoritative execution order. M28.5 is the only numbering addition.
+M27 stays deferred: it requires broader repeated evidence from M29 and later
+operational work and cannot resume from the 20-task baseline alone.
 
 ## Product north star
 
@@ -229,12 +240,21 @@ before choosing a dedicated broker, rootless Docker, user namespaces,
 containerd/runtime abstraction, remote sandbox service, or future remote
 execution.
 
+Workflow/orchestration contracts should prefer opaque `SecretRef` or capability
+references instead of raw credentials. The sandbox broker/runtime resolves and
+injects only the credential required by the grant, just in time and for the
+narrowest practical process and lifetime. Secrets should not unnecessarily
+enter Temporal history, `AgentEvent`, persisted `ContextEnvelope`, logs,
+artifacts, or general worker-request payloads. The exact mechanism remains an
+M28.5A design decision.
+
 Exit criteria:
 
 - documented threat model across control plane, sandbox infrastructure,
   native process, workspace, network, provider auth, and artifact paths
 - native agent cannot use the container-control interface
 - credentials follow least-privilege exposure
+- execution contracts and persisted evidence avoid raw secret propagation
 - existing supported task reliability still passes focused and end-to-end
   verification
 - no increase in autonomous privileges
@@ -438,6 +458,22 @@ Manual, GitHub, API, Telegram, and scheduled tasks share the same execution,
 evidence, acceptance, and delivery lifecycle. Temporal remains the only
 scheduler.
 
+### Entry Prerequisite: Supported Temporal Compatibility Baseline
+
+Before introducing long-lived scheduled/proactive workflows, establish and
+test a supported compatibility baseline covering:
+
+- the selected Temporal Server version and Python SDK range/version
+- Workflow replay compatibility policy and replay tests
+- Worker Deployment Versioning strategy
+- old-workflow drainage
+- Continue-As-New/history strategy where needed
+- lifecycle and removal strategy for existing workflow patch markers
+
+This is a bounded architecture/operations prerequisite, not an instruction to
+upgrade blindly to the latest release. M31 scheduling work starts only after
+the selected server/SDK combination and workflow-evolution policy are proven.
+
 ### Scope
 
 - notify through Telegram and generic webhooks when readiness, outbox age,
@@ -561,6 +597,9 @@ rather than accumulating permanent compatibility branches indefinitely.
 
 - remote sandbox scaling requires measured host saturation, contention, or
   concurrency pressure
+- deep-scout / multi-phase research chaining remains conditional until simpler
+  single-agent and bounded read-only fan-out approaches show a measurable
+  limitation
 - semantic retrieval requires an M28 miss that full-text/indexing/admission
   improvements cannot address
 - new worker providers require M29 evidence for existing Codex/Antigravity
@@ -595,11 +634,14 @@ replacements. URLs were verified on 2026-08-13.
 - [Python Queries, Signals, and Updates](https://docs.temporal.io/develop/python/workflows/message-passing)
 - [Schedules](https://docs.temporal.io/schedule)
 - [Continue-As-New](https://docs.temporal.io/workflow-execution/continue-as-new)
-- [Worker Deployments and Versioning](https://docs.temporal.io/production-deployment/worker-deployments)
+- [Python Workflow/Worker Versioning and replay](https://docs.temporal.io/develop/python/workflows/versioning)
+- [Temporal Server releases](https://github.com/temporalio/temporal/releases)
 - [Python SDK releases](https://github.com/temporalio/sdk-python/releases)
 
-Temporal recommends starting with one Workflow until a separate child history
-or service has a clear need, which matches the evidence-gated approach here.
+These references describe Temporal capabilities and compatibility mechanisms.
+Our code-agent design default is to start with one Workflow and introduce Child
+Workflows only when independent lifecycle, history, cancellation, scaling, or
+isolation needs justify the additional coordination.
 
 ### Hermes Agent (Nous Research)
 

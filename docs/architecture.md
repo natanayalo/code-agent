@@ -45,6 +45,26 @@ and reviewable branch or draft-PR delivery.
    native coding agent plus verification, independent review, and bounded
    repair. Decompose or fan out only when independent context, parallel
    research, large context, or subsystem separation provides measured benefit.
+8. **Reasoning and mechanics stay separate.** Use provider/LLM reasoning for
+   the coding decisions that require it; use deterministic platform code for
+   known operations such as Git status/diff inspection, validation rules,
+   tests and linters, artifact collection, acceptance-evidence extraction,
+   merge/reconciliation where possible, and permission/capability enforcement.
+
+### Thin Orchestration Kernel Target
+
+The current system has accumulated orchestration glue across workflows, graph
+nodes, activities, execution services, routing, memory, verification, repair,
+and delivery. This is not a proposal for an immediate refactor.
+
+The target is a small, deterministic durable core with conceptually separate
+responsibilities such as `TaskWorkflow`, `PlanPolicy`, `CapabilityPolicy`,
+`ContextAssembler`, `RuntimeRouter`, `AcceptanceEvaluator`, verification/review
+coordination, and `DeliveryController`. These are responsibility boundaries,
+not required class names or an M28.5 module-renaming task. Native providers
+continue to own session-local coding cognition. New contracts such as
+`AgentEvent` and `ContextEnvelope` should sharpen these boundaries rather than
+add more responsibilities to existing orchestration hotspots.
 
 ## Current Layered Architecture
 
@@ -284,6 +304,15 @@ authority. Native agent processes must not access the container-control
 interface, unrelated host resources, or broad infrastructure credentials.
 Provider credentials should be exposed at the narrowest practical scope and
 lifetime.
+
+Target workflow and orchestration contracts should prefer opaque `SecretRef`
+or capability references over raw secret values. The sandbox broker/runtime
+should resolve and inject only the credential required by the granted
+capability, just in time and for the narrowest practical process and lifetime.
+Secrets should not unnecessarily enter Temporal history, `AgentEvent`, a
+persisted `ContextEnvelope`, logs, artifacts, or general worker-request
+payloads. M28.5A will define the contract and threat model without prescribing
+the exact secret-resolution implementation.
 
 The planned threat model comes before an implementation choice. A dedicated
 broker, rootless Docker, user namespaces, a containerd/runtime abstraction, a
