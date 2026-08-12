@@ -36,6 +36,7 @@ from orchestrator.graph import (
     _build_worker_request,
     _effective_input_evidence,
     _resolve_orchestrator_timeout_seconds,
+    _session_state_update_from_result,
     _skipped_node_result,
     build_await_result_node,
     build_decompose_task_node,
@@ -71,7 +72,7 @@ from orchestrator.nodes.provisioning import (
 )
 from orchestrator.nodes.utils import _available_workers
 from orchestrator.nodes.verification import build_verify_result_node
-from orchestrator.state import ApprovalCheckpoint, NodeOutcome, OrchestratorState
+from orchestrator.state import NodeOutcome, OrchestratorState
 from orchestrator.temporal.completion_loop import (
     CompletionLoopDecision,
     apply_repair_rejection,
@@ -150,12 +151,6 @@ def _reject_permission_escalation(
     blocked: NodeOutcome | None,
     plan: Any,
 ) -> None:
-    approval = state.approval
-    state.approval = (
-        approval.model_copy(update={"status": "rejected"})
-        if approval is not None
-        else ApprovalCheckpoint(required=True, status="rejected")
-    )
     task.last_error = "Worker permission escalation rejected by operator."
     TaskTimelineRepository(session).create_next_for_attempt(
         task_id=task_id,
@@ -179,7 +174,12 @@ def _reject_permission_escalation(
             task_id=task_id, state=state.model_dump(mode="json")
         )
         return
-    _persist_rejected_session_state(session, task, state)
+    _persist_rejected_session_state(
+        session,
+        task,
+        state,
+        initial_approval_rejected=False,
+    )
     task.status = TaskStatus.FAILED
     TemporalTaskStateRepository(session).delete(task_id=task_id)
 
@@ -188,10 +188,16 @@ def _persist_rejected_session_state(
     session: Any,
     task: Task,
     state: OrchestratorState,
+    *,
+    initial_approval_rejected: bool,
 ) -> None:
     """Persist the typed compact context before a rejection removes resumable state."""
     session_id = state.session.session_id if state.session is not None else task.session_id
-    update = build_rejected_session_state_update(state)
+    update = (
+        build_rejected_session_state_update(state)
+        if initial_approval_rejected
+        else _session_state_update_from_result(state, state.result)
+    )
     SessionStateRepository(session).upsert(
         session_id=session_id,
         active_goal=update.active_goal,
@@ -1834,6 +1840,7 @@ class TaskExecutionActivities:
                     session,
                     task,
                     OrchestratorState.model_validate(snapshot.state),
+                    initial_approval_rejected=True,
                 )
 
         await self.service._run_blocking(_persist)

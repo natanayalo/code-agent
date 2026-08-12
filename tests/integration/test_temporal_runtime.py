@@ -1314,6 +1314,7 @@ async def test_permission_escalation_rejection_projects_terminal_state(session_f
     state = OrchestratorState.model_validate(
         {
             "task": {"task_id": snapshot.task_id, "task_text": "Implement bounded change"},
+            "approval": {"required": True, "status": "approved"},
             "result": WorkerResult(
                 status="failure",
                 failure_kind="permission_denied",
@@ -1353,7 +1354,7 @@ async def test_permission_escalation_rejection_projects_terminal_state(session_f
         ) == 1
         context = SessionStateRepository(session).get(snapshot.session_id)
         assert context is not None
-        assert context.decisions_made["approval_status"] == "rejected"
+        assert context.decisions_made["approval_status"] == "approved"
         assert context.identified_risks["worker_status"] == "failure"
         assert context.identified_risks["worker_failure_kind"] == "permission_denied"
         assert context.identified_risks["requested_permission"] == "workspace_write"
@@ -1455,6 +1456,7 @@ async def test_repair_permission_rejection_persists_manual_handoff_for_delivery(
                 "task_text": "Repair bounded change",
                 "constraints": {"independent_verifier_repair_request": "fix tests"},
             },
+            "approval": {"required": True, "status": "approved"},
             "result": WorkerResult(
                 status="failure",
                 summary="Need workspace write permission.",
@@ -1492,6 +1494,14 @@ async def test_repair_permission_rejection_persists_manual_handoff_for_delivery(
         assert [event.event_type for event in timeline].count(
             TimelineEventType.APPROVAL_REJECTED
         ) == 1
+        assert handoff.approval.status == "approved"
+
+    await activities.deliver_result(snapshot.task_id)
+
+    with session_scope(session_factory) as session:
+        task = session.get(Task, snapshot.task_id)
+        assert task is not None
+        assert (task.constraints or {})["approval"]["status"] == "approved"
 
 
 @pytest.mark.anyio
