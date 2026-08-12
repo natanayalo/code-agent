@@ -4,6 +4,7 @@ import asyncio
 import json
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 from sqlalchemy import select
@@ -38,6 +39,7 @@ from orchestrator.temporal.workflows import TaskExecutionWorkflow
 from orchestrator.verification import resolve_verification_commands
 from repositories import (
     ExecutionPlanRepository,
+    SessionStateRepository,
     TaskTimelineRepository,
     TemporalCommandRepository,
     TemporalTaskStateRepository,
@@ -81,6 +83,18 @@ async def _start_workflow_via_dispatcher(
     await dispatcher.dispatch_pending()
     handle = client.get_workflow_handle(f"task-{task_id}")
     return asyncio.create_task(handle.result())
+
+
+async def _wait_for_pending_approval(session_factory: Any, task_id: str) -> None:
+    """Wait until classification has projected its durable approval checkpoint."""
+    for _ in range(20):
+        with session_scope(session_factory) as session:
+            task = session.get(Task, task_id)
+            approval = (task.constraints or {}).get("approval") if task else None
+        if isinstance(approval, dict) and approval.get("status") == "pending":
+            return
+        await asyncio.sleep(0.1)
+    pytest.fail("Temporal workflow did not persist the pending approval checkpoint.")
 
 
 class _ScriptedAdapter(CliRuntimeAdapter):
@@ -1302,12 +1316,18 @@ async def test_permission_escalation_rejection_projects_terminal_state(session_f
             "task": {"task_id": snapshot.task_id, "task_text": "Implement bounded change"},
             "result": WorkerResult(
                 status="failure",
+                failure_kind="permission_denied",
                 requested_permission="workspace_write",
                 next_action_hint="request_higher_permission",
             ).model_dump(),
         }
     )
     with session_scope(session_factory) as session:
+        SessionStateRepository(session).upsert(
+            session_id=snapshot.session_id,
+            active_goal="Prior successful task",
+            identified_risks={"worker_status": "success"},
+        )
         TemporalTaskStateRepository(session).upsert(
             task_id=snapshot.task_id, state=state.model_dump(mode="json")
         )
@@ -1331,6 +1351,91 @@ async def test_permission_escalation_rejection_projects_terminal_state(session_f
         assert [event.event_type for event in timeline].count(
             TimelineEventType.APPROVAL_REJECTED
         ) == 1
+        context = SessionStateRepository(session).get(snapshot.session_id)
+        assert context is not None
+        assert context.decisions_made["approval_status"] == "rejected"
+        assert context.identified_risks["worker_status"] == "failure"
+        assert context.identified_risks["worker_failure_kind"] == "permission_denied"
+        assert context.identified_risks["requested_permission"] == "workspace_write"
+
+
+@pytest.mark.anyio
+async def test_temporal_approval_rejection_persists_compact_session_context(
+    session_factory,
+    monkeypatch,
+):
+    """An initial approval rejection must replace stale session continuity state."""
+    from orchestrator.state import ApprovalCheckpoint
+
+    monkeypatch.setattr(
+        "orchestrator.temporal.activities.check_approval",
+        lambda _state: {
+            "approval": ApprovalCheckpoint(
+                required=True,
+                status="pending",
+                approval_type="manual_approval",
+            )
+        },
+    )
+    service = TaskExecutionService(
+        session_factory=session_factory,
+        worker=CodexCliWorker(runtime_adapter=_ScriptedAdapter([])),
+    )
+    snapshot, _ = service.create_task(TaskSubmission(task_text="Reject this approval"))
+    with session_scope(session_factory) as session:
+        SessionStateRepository(session).upsert(
+            session_id=snapshot.session_id,
+            active_goal="Prior successful task",
+            identified_risks={
+                "worker_status": "success",
+                "worker_failure_kind": None,
+                "requested_permission": "workspace_write",
+            },
+        )
+
+    async with await WorkflowEnvironment.start_time_skipping() as environment:
+        activities = TaskExecutionActivities(service=service)
+        temporal_worker = Worker(
+            environment.client,
+            task_queue="task-execution-queue",
+            workflows=[TaskExecutionWorkflow],
+            workflow_runner=UnsandboxedWorkflowRunner(),
+            activities=[
+                activities.classify_and_plan,
+                activities.persist_rejected_session_state,
+                activities.record_workflow_failure,
+            ],
+        )
+        async with temporal_worker:
+            dispatcher = TemporalCommandDispatcher(
+                client=environment.client,
+                session_factory=session_factory,
+            )
+            with environment.auto_time_skipping_disabled():
+                run_task = await _start_workflow_via_dispatcher(
+                    dispatcher,
+                    environment.client,
+                    snapshot.task_id,
+                )
+                await _wait_for_pending_approval(session_factory, snapshot.task_id)
+
+                rejected = service.apply_task_approval_decision(
+                    task_id=snapshot.task_id,
+                    approved=False,
+                )
+                assert rejected.status == "applied"
+                await dispatcher.dispatch_pending()
+                workflow_result = await run_task
+
+    assert workflow_result == {"status": "rejected", "summary": "Manual approval rejected."}
+    with session_scope(session_factory) as session:
+        context = SessionStateRepository(session).get(snapshot.session_id)
+        assert context is not None
+        assert context.active_goal == "Reject this approval"
+        assert context.decisions_made["approval_status"] == "rejected"
+        assert context.identified_risks["worker_status"] is None
+        assert context.identified_risks["worker_failure_kind"] is None
+        assert context.identified_risks["requested_permission"] is None
 
 
 @pytest.mark.anyio

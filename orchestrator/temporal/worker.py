@@ -90,6 +90,7 @@ def _build_temporal_workers(
             activities.run_decomposed_node,
             activities.request_permission_escalation,
             activities.resolve_permission_escalation,
+            activities.persist_rejected_session_state,
             activities.record_workflow_failure,
             activities.verify_result,
             activities.deliver_result,

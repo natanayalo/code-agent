@@ -55,6 +55,7 @@ def _run_one_temporal_task(client: TestClient) -> None:
                     activities.run_decomposed_node,
                     activities.request_permission_escalation,
                     activities.resolve_permission_escalation,
+                    activities.persist_rejected_session_state,
                     activities.record_workflow_failure,
                     activities.verify_result,
                     activities.deliver_result,

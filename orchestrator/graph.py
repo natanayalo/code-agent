@@ -3392,9 +3392,9 @@ def _map_worker_memory_to_persist(
 
 def _session_state_update_from_result(
     state: OrchestratorState,
-    result: WorkerResult,
+    result: WorkerResult | None,
 ) -> SessionStateUpdate:
-    """Build the compact session-state update emitted after worker completion."""
+    """Build the compact session-state update emitted after a terminal outcome."""
     task_spec = state.task_spec
     dispatch = state.dispatch
     route = state.route
@@ -3410,9 +3410,9 @@ def _session_state_update_from_result(
     identified_risks = {
         "risk_level": task_spec.risk_level if task_spec is not None else None,
         "requires_permission": task_spec.requires_permission if task_spec is not None else None,
-        "worker_status": result.status,
-        "worker_failure_kind": result.failure_kind,
-        "requested_permission": result.requested_permission,
+        "worker_status": result.status if result is not None else None,
+        "worker_failure_kind": result.failure_kind if result is not None else None,
+        "requested_permission": result.requested_permission if result is not None else None,
         "verification_status": verification.status if verification is not None else None,
         "verification_failure_kind": verification.failure_kind
         if verification is not None
@@ -3424,17 +3424,29 @@ def _session_state_update_from_result(
         active_goal=state.normalized_task_text or state.task.task_text,
         decisions_made=decisions_made,
         identified_risks=identified_risks,
-        files_touched=result.files_changed,
+        files_touched=result.files_changed if result is not None else [],
     )
+
+
+def build_rejected_session_state_update(state: OrchestratorState) -> SessionStateUpdate:
+    """Build the typed compact update for an operator-rejected terminal path."""
+    approval = state.approval
+    rejected_approval = (
+        approval.model_copy(update={"status": "rejected"})
+        if approval is not None
+        else ApprovalCheckpoint(required=True, status="rejected")
+    )
+    rejected_state = state.model_copy(update={"approval": rejected_approval})
+    return _session_state_update_from_result(rejected_state, rejected_state.result)
 
 
 def _compact_session_review_findings(
     state: OrchestratorState,
-    result: WorkerResult,
+    result: WorkerResult | None,
 ) -> list[dict[str, str]]:
     """Return concise, structured review risks without retaining free-form evidence."""
     candidates: list[dict[str, str]] = []
-    for review in (result.review_result, state.review):
+    for review in (result.review_result if result is not None else None, state.review):
         if review is None:
             continue
         for finding in review.findings:

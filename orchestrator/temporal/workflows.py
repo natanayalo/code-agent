@@ -13,6 +13,7 @@ NODE_WAVE_PATCH_ID = "m25-1b-temporal-node-wave"
 M25_2_FANOUT_PATCH_ID = "m25-2-bounded-selective-fanout"
 COMPLETION_LOOP_PATCH_ID = "m25-4-temporal-completion-loop"
 CANCELLATION_TERMINAL_PATCH_ID = "m25-6-cancelled-terminal-state"
+REJECTED_SESSION_STATE_PATCH_ID = "m28-2-rejected-session-state"
 
 
 def _temporal_cancellation_cause(exc: Exception) -> TemporalCancelledError | None:
@@ -65,11 +66,8 @@ class TaskExecutionWorkflow:
             await workflow.wait_condition(lambda: self.clarification_resolved)
 
         # Step 3: approval check
-        if requires_approval:
-            # Wait for approval signal
-            await workflow.wait_condition(lambda: self.approval_decision is not None)
-            if not self.approval_decision:
-                return {"status": "rejected", "summary": "Manual approval rejected."}
+        if requires_approval and not await self._await_initial_approval(task_id):
+            return {"status": "rejected", "summary": "Manual approval rejected."}
 
         # Step 4: Decompose Task
         decomposition = await workflow.execute_activity(
@@ -126,6 +124,19 @@ class TaskExecutionWorkflow:
             )
 
         return await self._persist_and_deliver(task_id, completion_decision)
+
+    async def _await_initial_approval(self, task_id: str) -> bool:
+        """Wait for approval and retain typed state when the operator rejects it."""
+        await workflow.wait_condition(lambda: self.approval_decision is not None)
+        if self.approval_decision:
+            return True
+        if workflow.patched(REJECTED_SESSION_STATE_PATCH_ID):
+            await workflow.execute_activity(
+                "persist_rejected_session_state",
+                task_id,
+                **activity_options("persist_rejected_session_state"),
+            )
+        return False
 
     async def _persist_and_deliver(
         self,
