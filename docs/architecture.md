@@ -1,5 +1,10 @@
 # Architecture
 
+This document distinguishes **Current** implementation, **Planned** milestone
+work, **Target architecture** direction, and **Future / conditional** options.
+Target and future sections do not claim that the described boundaries exist on
+the current branch.
+
 ## Product Model
 
 `code-agent` is a local-first coding agent platform with a strict separation between:
@@ -10,7 +15,38 @@
 
 Core principle: use the platform for cross-run control, and worker runtimes for session-local cognition.
 
-## Layered Architecture
+The product is not restarting. Its direction remains a local-first personal
+coding agent with native provider cognition, Temporal durability, strong
+sandboxing and permissions, deterministic verification, independent review,
+inspectable evidence, skeptical memory, human control for risky operations,
+and reviewable branch or draft-PR delivery.
+
+## Target Architectural Principles
+
+1. **Providers own cognition.** Codex, Antigravity, and future native coding
+   agents own the session-local coding/reasoning loop. `code-agent` adapts and
+   governs them instead of recreating provider-local cognition.
+2. **Temporal owns durable coordination.** Workflow lifecycle, retries, waits,
+   cancellation, durable child work, scheduling, and long-running coordination
+   belong in Temporal.
+3. **The sandbox owns effects.** Native or otherwise untrusted agents must not
+   directly control privileged infrastructure or unrelated host resources.
+4. **Policy owns capabilities.** Effective read, write, shell, network, Git,
+   GitHub, and secret access is generated and enforced deterministically. A
+   prompt can explain a grant; it is not the enforcement boundary.
+5. **Postgres owns product projections and durable knowledge.** Postgres stores
+   queryable product views, memory, evaluations, artifact metadata, external
+   identities, search/reporting data, and external-side-effect idempotency. It
+   should not grow into a second full workflow state machine beside Temporal.
+6. **Evidence determines success.** Provider exit codes and self-reported
+   completion are execution evidence, not task acceptance. Agent execution,
+   acceptance, verification, review, and delivery are separate outcomes.
+7. **Orchestration complexity must earn its place.** Default to one strong
+   native coding agent plus verification, independent review, and bounded
+   repair. Decompose or fan out only when independent context, parallel
+   research, large context, or subsystem separation provides measured benefit.
+
+## Current Layered Architecture
 
 ## 1) Platform / Control Plane
 
@@ -115,6 +151,15 @@ Codex `exec` supports several sandbox modes mapped by repository trust:
 **2. Antigravity Native Sandbox**
 
 The Antigravity CLI uses a boolean sandbox mechanism controlled via `CODE_AGENT_ANTIGRAVITY_NATIVE_SANDBOX_ENABLED`. It defaults to `0` since the primary isolation boundary is the `docker-compose` worker container itself.
+
+#### Current Privilege Concentration
+
+The Compose worker currently mounts the host Docker socket and the Codex and
+Antigravity authentication directories while also launching native provider
+execution. Trusted Codex execution may select `danger-full-access` inside this
+worker-controlled container topology. Docker isolation remains useful, but
+container-runtime authority, provider credentials, and native execution are
+too concentrated for the intended long-term trust boundary.
 
 ## 4) Memory Layer
 
@@ -222,6 +267,140 @@ repair-loop branch. The patch-aware workflow must remain deployed until all
 M25.4 histories have closed. Deep-scout phase chaining is not a supported
 Temporal lifecycle path.
 
+## Planned Execution Trust Boundary
+
+M28.5A will define and harden this boundary before selecting a specific
+container/runtime product:
+
+```mermaid
+flowchart TD
+    CP["Temporal worker / control plane"] --> BROKER["Narrow Sandbox Broker / Sandbox Runtime API"]
+    BROKER --> ISO["Isolated execution environment"]
+    ISO --> AGENT["Codex / Antigravity"]
+```
+
+Only the sandbox infrastructure component should need container-runtime
+authority. Native agent processes must not access the container-control
+interface, unrelated host resources, or broad infrastructure credentials.
+Provider credentials should be exposed at the narrowest practical scope and
+lifetime.
+
+The planned threat model comes before an implementation choice. A dedicated
+broker, rootless Docker, user namespaces, a containerd/runtime abstraction, a
+remote sandbox service, and future remote execution are options to evaluate,
+not decisions already made. Hardening must preserve current task reliability
+and must not increase autonomous privileges.
+
+## Target State Ownership
+
+Current lifecycle information overlaps across Temporal workflow/history state,
+serialized `TemporalTaskState` (`OrchestratorState`), task and worker-run
+tables, execution-plan/node-attempt rows, and timeline/event projections.
+Existing persistence remains useful for activity handoff, idempotency,
+operator queries, and compatibility; M28.5B will not delete it for
+architectural purity.
+
+| Owner | Target authoritative responsibilities |
+| --- | --- |
+| Temporal | Lifecycle/control truth, current workflow decisions, waits, retries, cancellation, durable coordination, and future schedules/child work |
+| Postgres | Product/query projections, memory, evaluations, artifact metadata, external GitHub/channel identities, operator/search/reporting data, and external-side-effect idempotency where needed |
+| Sandbox runtime | Execution-environment lifecycle and effect evidence within the capability grant |
+| Native provider | Session-local reasoning and native execution stream, never product lifecycle authority |
+
+New features should not deepen duplicate lifecycle ownership in Temporal and
+Postgres. M28.5B will document field-level authority and a compatibility plan;
+reducing full-state `TemporalTaskState` duplication is gradual work only after
+replay, recovery, projection, and rollback behavior remain proven.
+
+## Target Provider, Event, and Context Contracts
+
+### Provider-Neutral `AgentEvent`
+
+**Current:** provider adapters accept `WorkerRequest` and return terminal
+`WorkerResult` from `workers/base.py`.
+
+**Planned M28.5C direction:** normalize Codex/Antigravity native streams into a
+versioned provider-neutral event model such as:
+
+- `AgentStarted`
+- `AgentProgress`
+- `ToolRequested` and `ToolCompleted`
+- `FileChanged`
+- `PermissionRequested`
+- `ArtifactProduced`
+- `BudgetUpdated`
+- `AgentMessage`
+- `AgentFailed` and `AgentCompleted`
+
+The event stream should support live progress, audit, stuck detection,
+cancellation, memory evidence, budget/cost accounting, debugging, and provider
+reliability evaluation. `WorkerResult` remains a compatible terminal projection
+during migration. This is an observability/control boundary, not a custom
+provider-independent reasoning loop.
+
+### Versioned `ContextEnvelope`
+
+**Planned M28.5D direction:** give each worker a bounded, inspectable,
+reproducible context contract containing only what execution needs:
+
+- objective and acceptance criteria
+- relevant repository facts and selected file/context references
+- dependency outputs
+- accepted/gated memory with provenance
+- compact session decisions and known risks
+- applicable repository skills/instructions
+- capability summary
+- explicit exclusions
+
+The envelope should be persisted or referenceable as evidence. Memory remains
+advisory and provenance-aware. M28's typed compact session state is an input;
+`ContextEnvelope` is not a copy of the entire parent conversation.
+
+### Incremental Task-Contract Cleanup
+
+Current TaskSpec is useful but combines intent, policy hints, verification, and
+delivery. Preserve compatibility while evolving incrementally toward:
+
+| Contract | Responsibility |
+| --- | --- |
+| `IntentSpec` | Goal, acceptance criteria, assumptions, and non-goals |
+| `ContextEnvelope` | Repository, session, memory, and dependency context |
+| `ExecutionPlan` | Nodes, dependencies, and expected outputs |
+| `CapabilityGrant` | Deterministically generated read/write/shell/network/Git/GitHub/secret capabilities |
+| `VerificationPlan` | Deterministic checks and required evidence |
+| `DeliverySpec` | Summary, workspace, branch, or draft-PR delivery |
+| `BudgetSpec` | Time, cost/tokens, attempts, child/concurrency, and repair limits |
+
+M28.5 establishes stable seams; it does not need to complete this split or
+require an immediate breaking migration.
+
+## Target Evidence and Acceptance Model
+
+Report these outcomes separately:
+
+1. **Agent execution outcome** — what the provider process did and reported
+2. **Acceptance outcome** — whether the requested criteria were satisfied
+3. **Verification outcome** — deterministic checks and their evidence
+4. **Review outcome** — independent findings and repair decision
+5. **Delivery outcome** — workspace, branch, commit, or draft-PR result
+
+A successful provider exit is neither acceptance nor delivery. A failed
+verification can reject otherwise successful provider execution, as the
+current completion loop already demonstrates.
+
+## Operational Shape and Temporal Lifecycle
+
+The current local stack includes Postgres, Temporal, API, Temporal worker,
+sandbox containers, dashboard, and optional Phoenix and tunnel/webhook
+services. The operator experience should feel like one local appliance even
+when those services remain separate. Reducing container count is not a reason
+to sacrifice durability.
+
+Long-lived operation must plan for compatible Temporal server/SDK upgrades,
+Worker Deployment Versioning, workflow-code compatibility, Continue-As-New,
+history management, old-workflow drainage, and replay tests. Permanent patch
+markers must have a lifecycle strategy rather than accumulating indefinitely.
+
 ## Safety Boundaries
 
 Hard boundaries currently enforced:
@@ -232,6 +411,10 @@ Hard boundaries currently enforced:
 - callback SSRF protections for outbound progress webhooks
 - secret-redaction and command artifact capture for inspection/audit
 - budget and tool permission gates in orchestration/worker runtime paths
+
+Target enforcement rule: deterministic policy produces the capability grant,
+the sandbox enforces it, and execution evidence records which capabilities were
+used. Prompt text alone never enlarges the grant.
 
 ## Source Of Truth For Behavior
 
