@@ -36,12 +36,14 @@ from orchestrator.graph import (
     _build_worker_request,
     _effective_input_evidence,
     _resolve_orchestrator_timeout_seconds,
+    _session_state_update_from_result,
     _skipped_node_result,
     build_await_result_node,
     build_decompose_task_node,
     build_generate_task_spec_and_route_node,
     build_load_memory_node,
     build_persist_memory_node,
+    build_rejected_session_state_update,
     build_review_result_node,
     check_approval,
     summarize_result,
@@ -91,6 +93,7 @@ from orchestrator.temporal.queues import execution_task_queue_for_profile
 from repositories import (
     ExecutionCapacityPermitRepository,
     ExecutionPlanRepository,
+    SessionStateRepository,
     TaskRepository,
     TaskTimelineRepository,
     TemporalTaskStateRepository,
@@ -171,8 +174,41 @@ def _reject_permission_escalation(
             task_id=task_id, state=state.model_dump(mode="json")
         )
         return
+    _persist_rejected_session_state(
+        session,
+        task,
+        state,
+        initial_approval_rejected=False,
+    )
     task.status = TaskStatus.FAILED
     TemporalTaskStateRepository(session).delete(task_id=task_id)
+
+
+def _persist_rejected_session_state(
+    session: Any,
+    task: Task,
+    state: OrchestratorState,
+    *,
+    initial_approval_rejected: bool,
+) -> None:
+    """Persist the typed compact context before a rejection removes resumable state."""
+    session_id = state.session.session_id if state.session is not None else task.session_id
+    update = (
+        build_rejected_session_state_update(state)
+        if initial_approval_rejected
+        else _session_state_update_from_result(state, state.result)
+    )
+    SessionStateRepository(session).upsert(
+        session_id=session_id,
+        active_goal=update.active_goal,
+        decisions_made=update.decisions_made,
+        identified_risks=update.identified_risks,
+        files_touched=update.files_touched,
+    )
+    logger.info(
+        "Persisted compact session state for rejected task",
+        extra={"session_id": session_id, "task_id": task.id},
+    )
 
 
 def _approve_permission_escalation(
@@ -1784,6 +1820,30 @@ class TaskExecutionActivities:
             task_id,
             approved,
         )
+
+    @activity.defn(name="persist_rejected_session_state")
+    @_restore_task_trace_context
+    async def persist_rejected_session_state(self, task_id: str) -> None:
+        """Persist compact state for an initial approval rejection."""
+
+        def _persist() -> None:
+            with session_scope(self.service.session_factory) as session:
+                task = TaskRepository(session).get(task_id)
+                snapshot = TemporalTaskStateRepository(session).get(task_id=task_id)
+                if task is None or snapshot is None:
+                    logger.warning(
+                        "Cannot persist rejected compact session state without task snapshot",
+                        extra={"task_id": task_id},
+                    )
+                    return
+                _persist_rejected_session_state(
+                    session,
+                    task,
+                    OrchestratorState.model_validate(snapshot.state),
+                    initial_approval_rejected=True,
+                )
+
+        await self.service._run_blocking(_persist)
 
     @activity.defn(name="record_workflow_failure")
     @_restore_task_trace_context

@@ -8,6 +8,9 @@ from typing import Any
 from utils.serialization import to_dict
 from workers.base import WorkerRequest
 
+COMPACT_SESSION_STATE_MAX_CHARACTERS = 2_000
+COMPACT_SESSION_STATE_MAX_LINE_CHARACTERS = COMPACT_SESSION_STATE_MAX_CHARACTERS // 4
+
 
 def _dict_items(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list):
@@ -182,12 +185,105 @@ def _build_observation_section(memory_context: dict[str, Any]) -> str:
     return "## Recent Observations (Untrusted Session History)\n" + raw
 
 
+def _compact_session_value(value: Any) -> str:
+    """Render a compact-session value on one deterministic prompt line."""
+    if isinstance(value, str):
+        return " ".join(value.split())
+    if isinstance(value, bool):
+        return str(value).lower()
+    if isinstance(value, dict):
+        return "; ".join(f"{key}={_compact_session_value(value[key])}" for key in sorted(value))
+    if isinstance(value, list | tuple):
+        return "; ".join(_compact_session_value(item) for item in value)
+    return str(value)
+
+
+def _compact_session_mapping_lines(value: Any) -> list[str]:
+    """Format only meaningful typed decision or risk values."""
+    mapping = to_dict(value)
+    lines: list[str] = []
+    for key in sorted(mapping):
+        item = mapping[key]
+        if item is None or item == "" or item == [] or item == {}:
+            continue
+        lines.append(f"- {key.replace('_', ' ')}: {_compact_session_value(item)}")
+    return lines
+
+
+def _bounded_compact_session_lines(lines: list[str]) -> str:
+    """Keep complete compact-session prompt lines within the fixed budget."""
+    truncated_line = False
+    bounded_lines: list[str] = []
+    for line in lines:
+        if len(line) <= COMPACT_SESSION_STATE_MAX_LINE_CHARACTERS:
+            bounded_lines.append(line)
+            continue
+        truncated_line = True
+        bounded_lines.append(line[: COMPACT_SESSION_STATE_MAX_LINE_CHARACTERS - 3].rstrip() + "...")
+
+    raw = "\n".join(bounded_lines)
+    if len(raw) <= COMPACT_SESSION_STATE_MAX_CHARACTERS and not truncated_line:
+        return raw
+
+    marker = "[Additional compact-session context omitted by prompt budget.]"
+    kept: list[str] = []
+    for line in bounded_lines:
+        candidate = "\n".join([*kept, line, marker])
+        if len(candidate) > COMPACT_SESSION_STATE_MAX_CHARACTERS:
+            continue
+        kept.append(line)
+    return "\n".join([*kept, marker])
+
+
+def _build_compact_session_section(memory_context: dict[str, Any]) -> str:
+    """Render persisted session state as bounded advisory context for a resumed worker."""
+    session = to_dict(memory_context.get("session"))
+    active_goal = session.get("active_goal")
+    decision_lines = _compact_session_mapping_lines(session.get("decisions_made"))
+    risk_lines = _compact_session_mapping_lines(session.get("identified_risks"))
+    file_lines: list[str] = []
+    seen_paths: set[str] = set()
+    for path in reversed(session.get("files_touched", [])):
+        if not isinstance(path, str):
+            continue
+        compact_path = _compact_session_value(path)
+        if compact_path and compact_path not in seen_paths:
+            seen_paths.add(compact_path)
+            file_lines.append(f"- {compact_path}")
+
+    if not any(
+        (
+            isinstance(active_goal, str) and active_goal.strip(),
+            decision_lines,
+            risk_lines,
+            file_lines,
+        )
+    ):
+        return ""
+
+    lines = [
+        "## Prior Compact Session State (Advisory)",
+        "This prior context may be stale. Current instructions, repository evidence, "
+        "approval policy, and verification results override it.",
+    ]
+    if isinstance(active_goal, str) and active_goal.strip():
+        lines.extend(["### Prior Active Goal", f"- {_compact_session_value(active_goal)}"])
+    if decision_lines:
+        lines.extend(["### Prior Decisions", *decision_lines])
+    if risk_lines:
+        lines.extend(["### Prior Risks", *risk_lines])
+    if file_lines:
+        lines.extend(["### Previously Touched Files", *file_lines])
+    return _bounded_compact_session_lines(lines)
+
+
 def build_memory_context_section(request: WorkerRequest) -> str:
-    """Render durable memory and untrusted observations into separate sections."""
+    """Render durable, compact-session, and observation context for a worker."""
     if not request.memory_context:
         return ""
     memory_context = to_dict(request.memory_context)
     sections = [
+        _build_compact_session_section(memory_context),
         _build_durable_memory_section(memory_context),
         _build_observation_section(memory_context),
     ]

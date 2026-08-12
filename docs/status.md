@@ -70,6 +70,9 @@ Temporal migration and rollback record is in the
 - The completed M26 slice adds automated review-comment polling on open draft
   PRs, structured prompt building for review comments, deduplicated reply
   planning, immediate per-reply DB checkpointing, and GitHub GraphQL thread replies.
+- The M28.2 slice records typed task, route, approval, worker, verifier, and
+  review outcomes in compact session state, then makes that bounded advisory
+  context available to replayed and resumed workers.
 - The 25-case frozen evaluation remains a deterministic domain-logic regression
   suite. It uses replayed worker outcomes and is not a real-provider Temporal
   reliability baseline.
@@ -85,8 +88,9 @@ Temporal migration and rollback record is in the
   default
 - deep-scout repo-to-research chaining is deferred and is not part of the
   supported Temporal completion loop
-- compact session state records the active goal and touched files but does not
-  yet extract structured decisions and risks from worker results
+- M28 still needs paired real-worker evidence before claiming that memory or
+  compact session state reduces repeated questions, interventions, or time to
+  a validated result
 - native-agent command audit and several orchestration/worker adapters remain
   complexity hotspots
 - the repository enforces a 90% Python coverage target in CI
@@ -94,7 +98,8 @@ Temporal migration and rollback record is in the
 ## Next slices only
 
 1. M28: Memory effectiveness and session continuity
-   - prove durable memory and compact session state reduce repeated work without stale context control
+   - collect paired real-worker evidence that durable memory and compact
+     session state reduce repeated work without stale context control
 
 ## Deferred
 

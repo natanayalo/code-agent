@@ -65,7 +65,7 @@ from orchestrator.nodes.verification import (
     verify_result as verify_result,
 )
 from orchestrator.performance_routing import PerformanceRoutingPolicy
-from orchestrator.review import REPAIR_REQUEST_CONSTRAINT, review_result
+from orchestrator.review import REPAIR_REQUEST_CONSTRAINT, SEVERITY_RANK, review_result
 from orchestrator.runtime_manifest import build_runtime_manifest
 from orchestrator.scout_proposals import (
     normalize_scout_worker_result,
@@ -120,6 +120,12 @@ DEFAULT_ORCHESTRATOR_TIMEOUT_SECONDS = (
     DEFAULT_WORKER_TIMEOUT_SECONDS + DEFAULT_ORCHESTRATOR_GRACE_SECONDS
 )
 ORCHESTRATOR_TIMEOUT_GRACE_SECONDS = DEFAULT_ORCHESTRATOR_GRACE_SECONDS
+COMPACT_SESSION_REVIEW_FINDINGS_LIMIT = 10
+COMPACT_SESSION_REVIEW_TEXT_LIMIT = 240
+COMPACT_SESSION_REVIEWER_PRECEDENCE: Final[dict[str, int]] = {
+    "independent_reviewer": 0,
+    "worker_self_review": 1,
+}
 _WORKER_FAILURE_REROUTE_KINDS = frozenset(
     {
         "compile",
@@ -3386,14 +3392,104 @@ def _map_worker_memory_to_persist(
 
 def _session_state_update_from_result(
     state: OrchestratorState,
-    result: WorkerResult,
+    result: WorkerResult | None,
 ) -> SessionStateUpdate:
-    """Build the compact session-state update emitted after worker completion."""
+    """Build the compact session-state update emitted after a terminal outcome."""
+    task_spec = state.task_spec
+    dispatch = state.dispatch
+    route = state.route
+    verification = state.verification
+
+    decisions_made = {
+        "task_type": task_spec.task_type if task_spec is not None else None,
+        "delivery_mode": task_spec.delivery_mode if task_spec is not None else None,
+        "worker_type": dispatch.worker_type or route.chosen_worker,
+        "worker_profile": dispatch.worker_profile or route.chosen_profile,
+        "approval_status": state.approval.status if state.approval is not None else None,
+    }
+    identified_risks = {
+        "risk_level": task_spec.risk_level if task_spec is not None else None,
+        "requires_permission": task_spec.requires_permission if task_spec is not None else None,
+        "worker_status": result.status if result is not None else None,
+        "worker_failure_kind": result.failure_kind if result is not None else None,
+        "requested_permission": result.requested_permission if result is not None else None,
+        "verification_status": verification.status if verification is not None else None,
+        "verification_failure_kind": verification.failure_kind
+        if verification is not None
+        else None,
+        "review_findings": _compact_session_review_findings(state, result),
+    }
+
     return SessionStateUpdate(
         active_goal=state.normalized_task_text or state.task.task_text,
-        files_touched=result.files_changed,
-        # TODO: extract decisions_made and identified_risks from result.summary or a dedicated field
+        decisions_made=decisions_made,
+        identified_risks=identified_risks,
+        files_touched=result.files_changed if result is not None else [],
     )
+
+
+def build_rejected_session_state_update(state: OrchestratorState) -> SessionStateUpdate:
+    """Build the typed compact update for an operator-rejected terminal path."""
+    approval = state.approval
+    rejected_approval = (
+        approval.model_copy(update={"status": "rejected"})
+        if approval is not None
+        else ApprovalCheckpoint(required=True, status="rejected")
+    )
+    rejected_state = state.model_copy(update={"approval": rejected_approval})
+    return _session_state_update_from_result(rejected_state, rejected_state.result)
+
+
+def _compact_session_review_findings(
+    state: OrchestratorState,
+    result: WorkerResult | None,
+) -> list[dict[str, str]]:
+    """Return concise, structured review risks without retaining free-form evidence."""
+    candidates: list[dict[str, str]] = []
+    for review in (result.review_result if result is not None else None, state.review):
+        if review is None:
+            continue
+        for finding in review.findings:
+            candidates.append(
+                {
+                    "reviewer": review.reviewer_kind,
+                    "severity": finding.severity,
+                    "category": _truncate_compact_session_review_text(finding.category),
+                    "title": _truncate_compact_session_review_text(finding.title),
+                    "file_path": _truncate_compact_session_review_text(finding.file_path),
+                }
+            )
+
+    candidates.sort(
+        key=lambda finding: (
+            -SEVERITY_RANK[finding["severity"]],
+            COMPACT_SESSION_REVIEWER_PRECEDENCE[finding["reviewer"]],
+        )
+    )
+    findings: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for candidate in candidates:
+        key = (candidate["category"], candidate["title"], candidate["file_path"])
+        if key not in seen:
+            seen.add(key)
+            findings.append(candidate)
+    if len(findings) > COMPACT_SESSION_REVIEW_FINDINGS_LIMIT:
+        logger.info(
+            "Compact session review findings truncated",
+            extra={
+                "task_id": state.task.task_id,
+                "limit": COMPACT_SESSION_REVIEW_FINDINGS_LIMIT,
+            },
+        )
+    return findings[:COMPACT_SESSION_REVIEW_FINDINGS_LIMIT]
+
+
+def _truncate_compact_session_review_text(value: str) -> str:
+    """Keep persisted compact-session review values bounded and single-line."""
+    normalized = " ".join(value.split())
+    if len(normalized) <= COMPACT_SESSION_REVIEW_TEXT_LIMIT:
+        return normalized
+    return normalized[: COMPACT_SESSION_REVIEW_TEXT_LIMIT - 3].rstrip() + "..."
 
 
 def summarize_result(state_input: OrchestratorState) -> dict[str, Any]:

@@ -13,6 +13,19 @@ from db.models import Session as ConversationSession
 from db.models import SessionState, User
 
 
+def _merge_files_touched_by_recency(
+    existing_files: list[str],
+    new_files: list[str],
+) -> list[str]:
+    """Retain unique touched files in least-to-most-recent order."""
+    newest_files = list(dict.fromkeys(new_files))
+    newest_file_set = set(newest_files)
+    older_files = list(
+        dict.fromkeys(path for path in existing_files if path not in newest_file_set)
+    )
+    return [*older_files, *newest_files]
+
+
 class UserRepository:
     """Persist and query users."""
 
@@ -165,7 +178,7 @@ class SessionStateRepository:
                 active_goal=active_goal,
                 decisions_made=decisions_made or {},
                 identified_risks=identified_risks or {},
-                files_touched=files_touched or [],
+                files_touched=_merge_files_touched_by_recency([], files_touched or []),
             )
             try:
                 with self.session.begin_nested():
@@ -184,8 +197,9 @@ class SessionStateRepository:
         if identified_risks is not None:
             state.identified_risks = {**(state.identified_risks or {}), **identified_risks}
         if files_touched is not None:
-            state.files_touched = list(
-                dict.fromkeys([*(state.files_touched or []), *files_touched])
+            state.files_touched = _merge_files_touched_by_recency(
+                state.files_touched or [],
+                files_touched,
             )
         self.session.flush()
         return state

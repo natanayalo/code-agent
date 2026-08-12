@@ -9,6 +9,7 @@ from orchestrator.temporal.workflows import (
     CANCELLATION_TERMINAL_PATCH_ID,
     COMPLETION_LOOP_PATCH_ID,
     MAX_PERMISSION_ESCALATIONS,
+    REJECTED_SESSION_STATE_PATCH_ID,
     TaskExecutionWorkflow,
 )
 
@@ -51,6 +52,16 @@ def test_projection_failure_policy_is_bounded_and_does_not_use_a_worker_queue() 
     assert "task_queue" not in options
     retry_policy = options["retry_policy"]
     assert retry_policy.maximum_attempts == 3
+
+
+def test_rejected_session_state_policy_is_bounded_and_does_not_use_a_worker_queue() -> None:
+    """Approval rejection persistence must run on the orchestration queue."""
+    options = activity_options("persist_rejected_session_state")
+
+    assert options["start_to_close_timeout"] == timedelta(minutes=5)
+    assert "heartbeat_timeout" not in options
+    assert "task_queue" not in options
+    assert options["retry_policy"].maximum_attempts == 3
 
 
 def test_unknown_activity_policy_is_rejected() -> None:
@@ -116,6 +127,38 @@ async def test_workflow_persists_memory_before_terminal_delivery(monkeypatch) ->
     await TaskExecutionWorkflow()._run_lifecycle("task-id")
 
     assert activity_names[-2:] == ["persist_memory", "deliver_result"]
+
+
+@pytest.mark.anyio
+async def test_workflow_persists_compact_state_before_initial_approval_rejection(
+    monkeypatch,
+) -> None:
+    """New histories persist typed rejection state before returning terminally."""
+    activity_names: list[str] = []
+    workflow_instance = TaskExecutionWorkflow()
+
+    async def execute_activity(name: str, *args, **kwargs):
+        activity_names.append(name)
+        if name == "classify_and_plan":
+            return {"requires_approval": True}
+        return None
+
+    async def wait_condition(predicate):
+        assert not predicate()
+        workflow_instance.approval_decision = False
+
+    monkeypatch.setattr(workflow, "execute_activity", execute_activity)
+    monkeypatch.setattr(workflow, "wait_condition", wait_condition)
+    monkeypatch.setattr(
+        workflow,
+        "patched",
+        lambda patch_id: patch_id == REJECTED_SESSION_STATE_PATCH_ID,
+    )
+
+    result = await workflow_instance._run_lifecycle("task-id")
+
+    assert result == {"status": "rejected", "summary": "Manual approval rejected."}
+    assert activity_names == ["classify_and_plan", "persist_rejected_session_state"]
 
 
 @pytest.mark.anyio

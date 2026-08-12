@@ -219,6 +219,36 @@ def test_session_state_repository_merges_updates(session):
     ]
 
 
+def test_session_state_repository_refreshes_touched_file_recency_for_prompt(session):
+    """Re-touched files should remain visible to a budget-limited resumed worker."""
+    from workers import WorkerRequest
+    from workers.prompt_memory import build_memory_context_section
+
+    user = UserRepository(session).create(external_user_id="user_recency")
+    conversation = SessionRepository(session).create(
+        user_id=user.id,
+        channel="test",
+        external_thread_id="thread_recency",
+    )
+    state_repo = SessionStateRepository(session)
+    older_paths = [f"older_{index}_{'x' * 32}.py" for index in range(100)]
+    state_repo.upsert(
+        session_id=conversation.id,
+        files_touched=["hot.py", *older_paths],
+    )
+
+    refreshed = state_repo.upsert(session_id=conversation.id, files_touched=["hot.py"])
+    section = build_memory_context_section(
+        WorkerRequest(
+            task_text="Resume the prior task",
+            memory_context={"session": {"files_touched": refreshed.files_touched}},
+        )
+    )
+
+    assert refreshed.files_touched[-1] == "hot.py"
+    assert "- hot.py" in section
+
+
 def test_session_state_repository_upsert_raises_when_race_recovery_cannot_reload(session):
     """If an insert race still cannot reload state, the repository should re-raise the DB error."""
     user_repo = UserRepository(session)

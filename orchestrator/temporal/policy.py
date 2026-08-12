@@ -49,6 +49,7 @@ _POLICIES: dict[str, TemporalActivityPolicy] = {
     ),
     "request_permission_escalation": TemporalActivityPolicy(timedelta(minutes=5), _STANDARD_RETRY),
     "resolve_permission_escalation": TemporalActivityPolicy(timedelta(minutes=5), _STANDARD_RETRY),
+    "persist_rejected_session_state": TemporalActivityPolicy(timedelta(minutes=5), _STANDARD_RETRY),
     "verify_result": TemporalActivityPolicy(
         timedelta(minutes=15), _STANDARD_RETRY, heartbeat_timeout=timedelta(seconds=20)
     ),

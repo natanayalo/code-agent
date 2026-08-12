@@ -280,7 +280,8 @@ def test_temporal_worker_builds_workflow_and_bounded_execution_workers(monkeypat
 
     assert workflow.config["task_queue"] == "workflow-queue"
     assert workflow.config["workflow_runner"] == "runner"
-    assert len(workflow.config["activities"]) == 16
+    assert len(workflow.config["activities"]) == 17
+    assert "persist_rejected_session_state" in workflow.config["activities"]
     assert execution.config["task_queue"] == temporal_worker.CODEX_EXECUTION_TASK_QUEUE
     assert execution.config["activities"] == ["run_worker", "run_decomposed_node"]
     assert execution.config["max_concurrent_activities"] == 2
