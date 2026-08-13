@@ -35,6 +35,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Documentation
 
+- Docs: define execution architecture foundation ([#367](https://github.com/natanayalo/code-agent/pull/367))
+
 - Docs: prioritize post-baseline milestones ([#349](https://github.com/natanayalo/code-agent/pull/349))
 
 - Docs: reset roadmap for Temporal stabilization ([#344](https://github.com/natanayalo/code-agent/pull/344))
