@@ -33,7 +33,13 @@ This repo intentionally focuses on coding execution infrastructure. It is not cu
 
 ## Architecture At A Glance
 
-The platform is organized into clear layers:
+The current product uses native provider agents for session-local coding
+cognition, Temporal for durable lifecycle coordination, Postgres for
+operator-facing projections and durable knowledge, and Docker sandboxes for
+repository effects and evidence. Deterministic policy, verification, and
+independent review remain separate from provider self-report.
+
+The platform is organized into these layers:
 
 - control plane: ingress, orchestration, routing, approvals, persistence
 - worker runtime layer: provider-specific coding loops behind a shared worker contract
@@ -256,9 +262,15 @@ no-op or formatting-only runs after the generated commit lands.
 
 The current phase is Temporal stabilization and measured reliability:
 
-1. M28: memory effectiveness and session continuity
+1. finish M28 memory effectiveness and session continuity
+2. M28.5 execution architecture foundation
+3. M29 provider reliability and evidence-driven routing
+4. M30 GitHub-native task and delivery control
+5. M31 proactive operations and safe scheduled work
 
 M26 review-comment repair is complete. M27 reliability-based autonomy remains
-deferred until M29 provides sufficient repeated real-task evidence.
+deferred until M29 and later operational evidence support reversible policy
+thresholds. Durable multi-agent execution remains future/conditional work, not
+current product scope.
 
 See [`docs/roadmap.md`](docs/roadmap.md) for full milestone plans and sequencing.

@@ -5,29 +5,46 @@
 - prioritize reliability, safety, and inspectability over feature breadth
 - prefer runtime leverage from Codex, Antigravity, and OpenRouter over
   rebuilding provider-local cognition
+- keep Temporal authoritative for durable coordination and scheduling, the
+  sandbox authoritative for effects, deterministic policy authoritative for
+  capabilities, and Postgres focused on product projections/durable knowledge
+- treat provider execution as evidence rather than task acceptance; keep
+  acceptance, verification, review, and delivery outcomes distinct
+- default to one strong native coding agent plus verification, independent
+  review, and bounded repair; add decomposition/fan-out only for measured needs
+- use provider reasoning for coding decisions and deterministic platform code
+  for mechanical inspection, validation, verification, evidence collection,
+  reconciliation, and capability enforcement
 - keep trust-boundary and high-risk changes human-controlled
 - require measured real-worker evidence before increasing autonomy
 
 ## Current phase
 
-Phase 4A: Temporal stabilization and measured reliability.
+Phase 4A: Temporal stabilization and measured reliability. M25.6 and M26 are
+complete. M28 is active.
 
-Priority sequence:
+Committed/current priority:
 
-1. M25.6: Real Temporal Reliability Baseline
-2. M28: Memory Effectiveness and Session Continuity
+1. finish M28: Memory Effectiveness and Session Continuity
+2. M28.5: Execution Architecture Foundation
 3. M29: Provider Reliability and Evidence-Driven Routing
 4. M30: GitHub-Native Task and Delivery Control
 5. M31: Proactive Operations and Safe Scheduled Work
 
-M26 review-comment repair and M27 reliability-based autonomy remain reserved
-but explicitly deferred. Neither milestone resumes until the M25.6 evidence
-review concludes that its entry conditions are satisfied.
+Deferred / evidence-gated:
 
-Milestone numbers are stable identifiers; the priority sequence above is the
-authoritative execution order. M26 may be promoted into that sequence only by
-an explicit post-M25.6 decision. M27 requires broader repeated evidence from
-M29 and cannot resume from the 20-task baseline alone.
+- M27: Reliability-Based Autonomy Policy
+
+Future / conditional:
+
+- Execution Architecture V2 / durable multi-agent work
+- the conditional items documented below; none has a committed milestone
+  number
+
+Milestone numbers are stable identifiers; the committed/current sequence above
+is the authoritative execution order. M28.5 is the only numbering addition.
+M27 stays deferred: it requires broader repeated evidence from M29 and later
+operational work and cannot resume from the 20-task baseline alone.
 
 ## Product north star
 
@@ -49,6 +66,13 @@ Primary success metrics:
 The project remains personal-use first. It does not currently optimize for
 multi-user SaaS, auto-merge, auto-deploy, broad multi-agent swarms, or
 autonomous privileged maintenance.
+
+`code-agent` intentionally accepts more internal operational complexity than
+Hermes/OpenClaw-style assistant stacks in exchange for stronger durable
+coordination and safety boundaries. Every service and orchestration primitive
+must still justify that complexity. The long-term operator experience should
+feel like one local appliance even if Postgres, Temporal, API, worker, sandbox,
+dashboard, and optional observability/webhook services remain separate.
 
 ## Completed foundation
 
@@ -80,12 +104,16 @@ autonomous privileged maintenance.
   and GitHub GraphQL thread replies.
 
 
-## M25.6 — Real Temporal Reliability Baseline
+## M25.6 — Real Temporal Reliability Baseline (Completed)
 
 ### Goal
 
 Measure real provider and Temporal behavior before resuming review automation
 or increasing autonomy.
+
+This section preserves the historical goal and evidence contract. The reviewed
+20-case baseline and 90% Python coverage restoration are complete; it did not
+change routing automatically or authorize M27.
 
 ### Evidence set
 
@@ -145,12 +173,19 @@ without allowing stale or weakly supported context to control execution.
 - compare current full-text retrieval against the observed misses before
   considering semantic retrieval infrastructure
 
+The paired evaluation baseline and typed compact-session continuity slices are
+implemented. Finish M28 with paired real-worker evidence and a reviewed
+effectiveness conclusion. The typed compact session fields remain useful and
+can later feed `ContextEnvelope`.
+
 ### Boundaries
 
 - retain the existing personal, project, and session-state categories
 - keep memory inspectable, editable, deletable, scoped, and skeptical
 - do not add a vector database unless the paired evaluation demonstrates a
   material retrieval failure that full-text improvements cannot address
+- do not add learned skills, large dependencies, or an execution-architecture
+  rewrite unless measured M28 evidence demonstrates a need
 - do not store autonomous approval, deployment, or destructive-action policy
   in learned memory
 
@@ -165,6 +200,135 @@ without allowing stale or weakly supported context to control execution.
 - decisions and risks persist across a resumed session and are visible through
   the API and dashboard
 
+## M28.5 — Execution Architecture Foundation
+
+### Goal
+
+Strengthen the execution trust boundary and establish stable contracts for
+future provider, orchestration, and observability work without rewriting the
+proven Temporal lifecycle.
+
+This is a bounded foundation milestone delivered in small compatible slices,
+not a broad repo or workflow rewrite.
+
+### M28.5A — Sandbox / Trust-Boundary Hardening
+
+Highest priority after M28.
+
+Current concern: the Temporal worker mounts the host Docker socket, launches
+native provider execution, mounts Codex/Antigravity authentication, and may
+select trusted Codex `danger-full-access` inside the current worker-controlled
+container topology. This concentrates container-runtime authority, provider
+credentials, and native execution too closely.
+
+Required direction:
+
+```text
+Temporal worker / control plane
+        ↓
+narrow Sandbox Broker / Sandbox Runtime API
+        ↓
+isolated execution environments
+        ↓
+Codex / Antigravity
+```
+
+Only sandbox infrastructure should need container-runtime authority. Native
+agents must not access the container-control interface, unrelated host
+resources, or broad infrastructure credentials. Define the threat boundary
+before choosing a dedicated broker, rootless Docker, user namespaces,
+containerd/runtime abstraction, remote sandbox service, or future remote
+execution.
+
+Workflow/orchestration contracts should prefer opaque `SecretRef` or capability
+references instead of raw credentials. The sandbox broker/runtime resolves and
+injects only the credential required by the grant, just in time and for the
+narrowest practical process and lifetime. Secrets should not unnecessarily
+enter Temporal history, `AgentEvent`, persisted `ContextEnvelope`, logs,
+artifacts, or general worker-request payloads. The exact mechanism remains an
+M28.5A design decision.
+
+Exit criteria:
+
+- documented threat model across control plane, sandbox infrastructure,
+  native process, workspace, network, provider auth, and artifact paths
+- native agent cannot use the container-control interface
+- credentials follow least-privilege exposure
+- execution contracts and persisted evidence avoid raw secret propagation
+- existing supported task reliability still passes focused and end-to-end
+  verification
+- no increase in autonomous privileges
+
+### M28.5B — State Ownership Contract
+
+Current lifecycle information overlaps across Temporal workflow/history state,
+serialized `TemporalTaskState` / `OrchestratorState`, task/product tables,
+execution-plan/node-attempt rows, and timeline/event projections.
+
+Target ownership:
+
+- **Temporal**: lifecycle/control truth, current workflow decisions, waits,
+  retries, cancellation, durable coordination, and future schedules/child work
+- **Postgres**: product/query projections, memory, evaluations, artifact
+  metadata, external GitHub/channel identities, operator/search/reporting data,
+  and external-side-effect idempotency where needed
+
+Do not immediately remove current persistence. First document field-level
+authority, recovery/projection rules, and compatibility. New features must not
+deepen duplicate lifecycle ownership. Reduce full-state `TemporalTaskState`
+duplication only when replay, recovery, query, and rollback behavior remain
+proven.
+
+### M28.5C — Provider-Neutral `AgentEvent`
+
+Keep `WorkerRequest -> WorkerResult` compatibility while defining a versioned
+event direction:
+
+- `AgentStarted`, `AgentProgress`, and `AgentMessage`
+- `ToolRequested` and `ToolCompleted`
+- `FileChanged`, `PermissionRequested`, and `ArtifactProduced`
+- `BudgetUpdated`
+- `AgentFailed` and `AgentCompleted`
+
+Adapters should normalize Codex/Antigravity native streams into these events.
+`WorkerResult` remains a terminal projection during migration. The stream
+supports progress, audit, stuck detection, cancellation, memory evidence,
+budget/cost accounting, debugging, and reliability evaluation; it must not
+become a custom provider-independent reasoning loop.
+
+### M28.5D — Versioned `ContextEnvelope`
+
+Design a bounded, inspectable, reproducible context contract containing:
+
+- objective and acceptance criteria
+- relevant repository facts and selected file/context references
+- dependency outputs
+- accepted/gated memory with provenance
+- compact session decisions and known risks
+- applicable repository skills/instructions
+- capability summary and explicit exclusions
+
+Persist or reference the envelope as execution evidence. Memory remains
+advisory. M28 typed compact-session state is an input; copying the entire parent
+conversation is not a `ContextEnvelope`.
+
+### Incremental Contract Direction
+
+Current TaskSpec remains compatible while the architecture evolves toward:
+
+| Contract | Responsibility |
+| --- | --- |
+| `IntentSpec` | Goal, acceptance criteria, assumptions, non-goals |
+| `ContextEnvelope` | Repository/session/memory/dependency context |
+| `ExecutionPlan` | Nodes, dependencies, expected outputs |
+| `CapabilityGrant` | Deterministically generated read/write/shell/network/Git/GitHub/secret access |
+| `VerificationPlan` | Deterministic checks and required evidence |
+| `DeliverySpec` | Summary/workspace/branch/draft-PR result |
+| `BudgetSpec` | Time, cost/tokens, attempts, child/concurrency, repair limits |
+
+M28.5 establishes stable seams; it need not finish this split or require an
+immediate breaking migration.
+
 ## M29 — Provider Reliability and Evidence-Driven Routing
 
 ### Goal
@@ -172,12 +336,31 @@ without allowing stale or weakly supported context to control execution.
 Turn real task outcomes into current, explainable worker-profile recommendations
 without silently changing production routing or weakening safety boundaries.
 
+Routing should evolve conceptually from named/static profiles toward:
+
+```text
+task requirements
+    ∩
+runtime capabilities
+    ∩
+measured reliability
+    ∩
+budget
+    ↓
+route decision
+```
+
 ### Scope
 
 - define minimum sample counts by task class and worker profile before
   collecting the expanded post-M25.6 evidence set
 - measure completion, typed failure, repair, intervention, latency, and budget
   outcomes for the current Codex and Antigravity native profiles
+- define and measure capabilities such as native structured output, event
+  streaming, sandbox/read-only enforcement, session resume, network control,
+  tool audit quality, context limits, cost visibility, and delivery support
+- distinguish agent execution, acceptance, verification, review, and delivery
+  outcomes in the reliability evidence
 - add operator diagnostics for provider authentication, CLI availability,
   sandbox readiness, and other last-mile capability failures that a fresh
   worker heartbeat cannot prove
@@ -187,6 +370,8 @@ without silently changing production routing or weakening safety boundaries.
   recommendation
 - preserve manual profile overrides and a reversible path back to the current
   static routing policy
+- evaluate hierarchical budgets for the whole task, node/child, repair,
+  maximum worker calls, wall time, and concurrency
 
 ### Boundaries
 
@@ -226,12 +411,18 @@ keeping task creation, repair, merge, and deployment decisions explicit.
   direct links and safe next actions
 - preserve one traceable chain from source issue through task, worker evidence,
   validation, branch, and draft PR
+- evaluate Temporal-native interaction primitives where they simplify real
+  M30 requirements: Queries for status/current plan/pending decision; Updates
+  for clarify, approve/reject, capability grant, node retry, budget increase,
+  or worker switch; and Signals for asynchronous external events
 
 ### Boundaries
 
 - require an explicit assignment, command, or operator action before creating
   a mutable task
-- keep automatic review-comment repair in the deferred M26 milestone
+- do not rewrite the proven signal/outbox or completed M26 review-comment path
+  solely for architectural purity; migrate only where an M30 flow becomes
+  simpler without losing reliability
 - no auto-merge, auto-deploy, broad repository write scope, or new secret scope
 - keep GitHub as the only native source-control integration in this slice
 
@@ -250,6 +441,38 @@ keeping task creation, repair, merge, and deployment decisions explicit.
 
 Move from dashboard-only detection to actionable notification and repeatable
 read-only maintenance without introducing unattended mutation risk.
+
+Natural-language schedule requests resolve through one lifecycle:
+
+```text
+"Every Monday check outdated dependencies"
+        ↓
+ScheduleSpec
+        ↓
+Temporal Schedule
+        ↓
+normal TaskExecutionWorkflow / TaskSpec pipeline
+```
+
+Manual, GitHub, API, Telegram, and scheduled tasks share the same execution,
+evidence, acceptance, and delivery lifecycle. Temporal remains the only
+scheduler.
+
+### Entry Prerequisite: Supported Temporal Compatibility Baseline
+
+Before introducing long-lived scheduled/proactive workflows, establish and
+test a supported compatibility baseline covering:
+
+- the selected Temporal Server version and Python SDK range/version
+- Workflow replay compatibility policy and replay tests
+- Worker Deployment Versioning strategy
+- old-workflow drainage
+- Continue-As-New/history strategy where needed
+- lifecycle and removal strategy for existing workflow patch markers
+
+This is a bounded architecture/operations prerequisite, not an instruction to
+upgrade blindly to the latest release. M31 scheduling work starts only after
+the selected server/SDK combination and workflow-evolution policy are proven.
 
 ### Scope
 
@@ -285,7 +508,7 @@ read-only maintenance without introducing unattended mutation risk.
 - operators can determine what happened and the safe next action without
   starting with container logs
 
-## Deferred milestones
+## Completed and Deferred Milestones
 
 ### M26 — Review Comment Repair (Completed)
 
@@ -300,34 +523,167 @@ Reserved goal: allow selected low-risk work to move from blocking approval to
 
 Entry condition: M25.6 and the expanded M29 evidence provide sufficient
 repeated samples, provenance, and reversible thresholds by repository and task
-category. The 20-task baseline alone is not sufficient. High-risk categories
-remain blocking.
+category, with M28.5 capability/evidence boundaries and later operational
+evidence where relevant. The 20-task baseline alone is not sufficient.
+High-risk categories remain blocking. M27 does not permit automatic merge or
+deploy.
 
-## Conditional backlog
+## Future / Conditional Execution Architecture
 
-- remote sandbox scaling becomes a milestone only after measured host
-  saturation, workspace contention, or required concurrency exceeds the local
-  Docker model
-- semantic memory retrieval becomes a milestone only if M28 proves a material
-  miss that cannot be addressed with full-text indexing, query normalization,
-  or better admission metadata
-- broader mutable fan-out, platform-managed multi-agent workflows, and
-  deep-scout chaining remain deferred until sequential execution and the
-  read-only pilot show measurable benefit
-- new worker providers remain deferred until M29 establishes reliable evidence
-  for the profiles already supported
-- multi-user SaaS, billing, RBAC, auto-merge, and auto-deploy remain outside the
-  personal v1 product boundary
+These are not committed near-term scope. Promote an idea only with a measured
+problem, bounded design, rollback path, and explicit milestone.
 
-## Open planning questions
+### Durable Child Workflows / Agent Tree
 
-1. What minimum sample count by task class and worker profile should M29 require
-   before a routing recommendation is considered current?
-2. Which GitHub issue events may create tasks directly in M30, and which must
-   remain operator-confirmed?
-3. Which notification channels and degraded thresholds are required for the
-   first M31 slice?
-4. What measured improvement in the M28 paired evaluation would justify adding
-   semantic retrieval rather than improving full-text behavior?
-5. If M25.6 makes M26 eligible, should it be promoted ahead of M28 or remain
-   deferred until the committed M28-M31 sequence is complete?
+Potential shape:
+
+```text
+TaskExecutionWorkflow
+├── AgentChildWorkflow
+├── AgentChildWorkflow
+├── Verify
+├── Review
+└── Delivery
+```
+
+Temporal Child Workflows may fit truly independent, long-running, cancellable
+agent tasks with separate histories. Do not map every small DAG node to a Child
+Workflow; start with one workflow/agent until context or durability needs
+justify the added coordination.
+
+### Isolated Worktree / Patch Execution
+
+Evaluate replacing shared mutable workspace assumptions with isolated
+node/agent worktrees that produce patches or commits against a base revision,
+followed by deterministic merge/reconciliation. Potential benefits include
+retry safety, clearer ownership, easier rollback, and safer mutable parallelism.
+Prove the replacement before removing the current node claim/lease mechanism.
+
+### Durable Operator-Visible Agent Tree
+
+A future dashboard could show Analyze, Implement, Verify/Repair, Independent
+Review, and Delivery as a task tree. Each node could expose context,
+runtime/provider, capability grant, duration, budget/cost, artifacts, patch,
+retries, verification, and memory/skills used. This depends on stable event,
+context, budget, and child-work contracts.
+
+### Evidence-Backed Procedural Skills
+
+Keep the distinction: memory records **what is known**; a skill records **how a
+procedure is performed**. Repeated successful executions may produce a
+`SkillCandidate`, but promotion requires supporting evidence, evaluation,
+operator review, versioning, regression checks, and rollback.
+
+A future `RepoSkill` could contain its trigger, prerequisites, procedure,
+verification, required capabilities, failure modes, provenance, last verified
+revision, and confidence. Agents must not install or activate self-created
+trusted skills without evidence and review.
+
+### Workspace Checkpoints / Rollback UX
+
+Expose reversible checkpoints before/after mutation with patch/diff, verifier
+results, and restore/retry controls, including an explicit retry with another
+provider when safe. Prefer Git, worktrees, and patches over a bespoke snapshot
+system when they satisfy the requirement.
+
+### Long-Lived Temporal Workflow Lifecycle
+
+Plan for compatible Temporal server/SDK upgrades, Worker Deployment Versioning,
+workflow-code compatibility, Continue-As-New, history limits, old-workflow
+drainage, and replay testing. Establish a lifecycle for current patch markers
+rather than accumulating permanent compatibility branches indefinitely.
+
+### Other Conditional Triggers
+
+- remote sandbox scaling requires measured host saturation, contention, or
+  concurrency pressure
+- deep-scout / multi-phase research chaining remains conditional until simpler
+  single-agent and bounded read-only fan-out approaches show a measurable
+  limitation
+- semantic retrieval requires an M28 miss that full-text/indexing/admission
+  improvements cannot address
+- new worker providers require M29 evidence for existing Codex/Antigravity
+  profiles first
+
+## Explicit Non-Goals and Deferred Actions
+
+- no repository rewrite or architecture restart
+- no replacement of Temporal with Hermes, OpenClaw, LangGraph, or another
+  lifecycle engine
+- no custom provider-independent reasoning loop
+- no general multi-agent swarm or broad mutable fan-out
+- no automatic merge or deploy
+- no scheduler beside Temporal
+- no vector database without M28 evidence
+- no autonomous skill installation/activation
+- no automatic reliability-based autonomy yet
+- no broad provider expansion during M29
+- no deletion of current reliability, state, claim/lease, signal/outbox, or
+  compatibility mechanisms before a replacement is proven
+- multi-user SaaS, billing, and broad RBAC remain outside personal v1
+
+## Comparative References
+
+These official/primary sources are design references, not proposed runtime
+replacements. URLs were verified on 2026-08-13.
+
+### Temporal
+
+- [Workflow and durable execution model](https://docs.temporal.io/workflows)
+- [Child Workflows](https://docs.temporal.io/child-workflows)
+- [Python Queries, Signals, and Updates](https://docs.temporal.io/develop/python/workflows/message-passing)
+- [Schedules](https://docs.temporal.io/schedule)
+- [Continue-As-New](https://docs.temporal.io/workflow-execution/continue-as-new)
+- [Python Workflow/Worker Versioning and replay](https://docs.temporal.io/develop/python/workflows/versioning)
+- [Temporal Server releases](https://github.com/temporalio/temporal/releases)
+- [Python SDK releases](https://github.com/temporalio/sdk-python/releases)
+
+These references describe Temporal capabilities and compatibility mechanisms.
+Our code-agent design default is to start with one Workflow and introduce Child
+Workflows only when independent lifecycle, history, cancellation, scaling, or
+isolation needs justify the additional coordination.
+
+### Hermes Agent (Nous Research)
+
+- [Delegation and isolated child contexts](https://hermes-agent.nousresearch.com/docs/guides/delegation-patterns/)
+- [Durable Kanban versus process-local delegation](https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban)
+- [Memory, schedules, checkpoints, and subagents](https://hermes-agent.nousresearch.com/docs/user-guide/features/overview/)
+- [Procedural skills](https://hermes-agent.nousresearch.com/docs/user-guide/features/skills)
+
+Hermes provides useful delegation, schedule UX, checkpoint, and
+memory-versus-skill patterns. Its docs also state that ordinary top-level
+delegation is process-local, so it is not a substitute for Temporal durability.
+
+### OpenClaw
+
+- [Subagent hierarchy, context, tool restrictions, and completion handling](https://github.com/openclaw/openclaw/blob/main/docs/tools/subagents.md)
+- [Sandbox scopes](https://github.com/openclaw/openclaw/blob/main/docs/gateway/sandboxing.md)
+- [Agent workspaces, memory, and skills](https://github.com/openclaw/openclaw/blob/main/docs/concepts/agent.md)
+
+OpenClaw offers useful gateway/channel UX, session hierarchy, and sandbox/tool
+scoping. It persists queued completion handoffs, but documents direct announce
+attempts and cleanup timers as best-effort; that differs from making the full
+child lifecycle a Temporal Workflow.
+
+### OpenHands Software Agent SDK
+
+- [Typed actions/observations, immutable events, and workspace abstraction](https://docs.openhands.dev/sdk/arch/sdk)
+- [Architecture overview](https://docs.openhands.dev/sdk/arch/overview)
+
+Its event and action/execution separation are useful references for
+`AgentEvent` and the sandbox boundary. This roadmap does not propose replacing
+provider-native cognition with the OpenHands reasoning loop.
+
+## Open Planning Questions
+
+1. What M28 paired-result threshold supports an effectiveness claim, and what
+   measured miss would justify semantic retrieval?
+2. Which M28.5A threat assumptions differ for local and future remote sandbox
+   execution?
+3. Which `AgentEvent` subset can both native providers expose without lossy
+   inference?
+4. What minimum sample size/recency by task class and capability should M29
+   require?
+5. Which M30 interactions materially benefit from Temporal Updates rather than
+   the proven signal/outbox path?
+6. Which read-only schedule and degraded thresholds form the first M31 slice?

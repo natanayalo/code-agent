@@ -10,6 +10,12 @@ M26 is complete: review-comment repair polling on open draft PRs, author filteri
 
 Active focus: **M28 — Memory Effectiveness and Session Continuity**.
 
+Implemented M28 slices: the paired memory-effectiveness evaluation baseline and
+typed compact-session continuity for goals, decisions, risks, and touched
+files. The milestone is not complete: paired real-worker evidence and the
+reviewed effectiveness conclusion remain outstanding.
+
+The execution architecture described for M28.5 is planned, not implemented.
 
 ## Current capabilities
 
@@ -91,18 +97,36 @@ Temporal migration and rollback record is in the
 - M28 still needs paired real-worker evidence before claiming that memory or
   compact session state reduces repeated questions, interventions, or time to
   a validated result
+- the Temporal worker currently mounts the host Docker socket and provider-auth
+  directories while launching native provider execution; the planned M28.5A
+  trust-boundary work will separate container-runtime authority from native
+  agent execution
+- lifecycle data currently overlaps across Temporal history/workflow state,
+  serialized `TemporalTaskState`, task/product projections, execution-plan
+  rows, and timeline events; no existing persistence has been removed
+- the worker boundary is currently terminal `WorkerRequest -> WorkerResult`;
+  provider-neutral streaming `AgentEvent` and `ContextEnvelope` contracts are
+  planned rather than available today
 - native-agent command audit and several orchestration/worker adapters remain
   complexity hotspots
 - the repository enforces a 90% Python coverage target in CI
 
 ## Next slices only
 
-1. M28: Memory effectiveness and session continuity
-   - collect paired real-worker evidence that durable memory and compact
-     session state reduce repeated work without stale context control
+1. Finish M28
+   - collect and review paired real-worker evidence that durable memory and
+     compact session state reduce repeated work without stale context control
+   - close the milestone without adding a vector database, learned-skill
+     system, or execution-architecture rewrite absent measured need
+2. Begin M28.5A only after M28 closeout
+   - document the current execution threat model and required sandbox/control
+     boundary before choosing a broker or runtime implementation
 
 ## Deferred
 
 - M27 reliability-based autonomy remains reserved until real-task metrics can
   support reversible policy thresholds, and additionally requires M29's
   expanded evidence.
+- durable child workflows, broad mutable fan-out, isolated worktree/patch
+  reconciliation, an operator-visible agent tree, and evidence-backed
+  procedural skills remain future/conditional ideas rather than current work.
