@@ -2047,6 +2047,24 @@ def _memory_loaded_payload(
                 "accepted_keys": accepted_keys,
                 "suppressed_keys": suppressed_keys,
                 "suppressed_details": suppressed_p + suppressed_proj,
+                "accepted_details": [
+                    {
+                        "category": category,
+                        "memory_key": entry.get("memory_key"),
+                        "source": entry.get("source"),
+                        "confidence": entry.get("confidence"),
+                        "scope": entry.get("scope"),
+                        "last_verified_at": entry.get("last_verified_at"),
+                        "requires_verification": entry.get("requires_verification"),
+                        "gate_status": entry.get("gate_status"),
+                        "reason_codes": entry.get("gate_reason_codes", []),
+                    }
+                    for category, entries in (
+                        ("personal", accepted_p),
+                        ("project", accepted_proj),
+                    )
+                    for entry in entries
+                ],
             }
         )
     return payload

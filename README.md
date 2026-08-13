@@ -244,11 +244,11 @@ The dashboard uses HttpOnly cookies for session management. To enable it:
 ## Verification Commands
 
 The repository coverage target is 90%. During post-Temporal coverage recovery,
-Python CI temporarily enforces an 80% floor; M25.6 restores the 90% gate. Run
-the currently enforced checks from the repository virtualenv:
+Python CI enforces a 90% coverage floor. Run the currently enforced checks from
+the repository virtualenv:
 
 ```bash
-poetry run pytest tests/unit --cov=apps --cov=db --cov=memory --cov=orchestrator --cov=repositories --cov=sandbox --cov=tools --cov=workers --cov-branch --cov-report=term-missing --cov-report=xml --cov-fail-under=80
+poetry run pytest tests/unit --cov=apps --cov=db --cov=memory --cov=orchestrator --cov=repositories --cov=sandbox --cov=tools --cov=workers --cov-branch --cov-report=term-missing --cov-report=xml --cov-fail-under=90
 poetry run pytest tests/integration
 poetry run pre-commit run --all-files
 # Dashboard checks

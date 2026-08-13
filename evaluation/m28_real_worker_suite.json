@@ -1,0 +1,14 @@
+{
+  "suite_name": "m28-real-worker-memory-effectiveness",
+  "schema_version": 1,
+  "cases": [
+    {"case_id": "useful-hit-codex", "scenario": "useful_hit", "worker_profile": "codex-native-executor-read-only"},
+    {"case_id": "irrelevant-rejection-codex", "scenario": "irrelevant_rejection", "worker_profile": "codex-native-executor-read-only"},
+    {"case_id": "stale-reverification-codex", "scenario": "stale_reverification", "worker_profile": "codex-native-executor-read-only"},
+    {"case_id": "conflict-handling-codex", "scenario": "conflict_handling", "worker_profile": "codex-native-executor-read-only"},
+    {"case_id": "useful-hit-antigravity", "scenario": "useful_hit", "worker_profile": "antigravity-native-executor-read-only"},
+    {"case_id": "irrelevant-rejection-antigravity", "scenario": "irrelevant_rejection", "worker_profile": "antigravity-native-executor-read-only"},
+    {"case_id": "stale-reverification-antigravity", "scenario": "stale_reverification", "worker_profile": "antigravity-native-executor-read-only"},
+    {"case_id": "conflict-handling-antigravity", "scenario": "conflict_handling", "worker_profile": "antigravity-native-executor-read-only"}
+  ]
+}

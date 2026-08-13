@@ -222,6 +222,9 @@ class ReadSideMemoryGateService:
         elif risk == "medium" or entry.requires_verification or staleness >= 0.5:
             status = "advisory"
             reason_codes.append("medium_risk_or_stale")
+        else:
+            # Record explicit positive admission for auditability.
+            reason_codes.append("accepted_low_risk_fresh")
 
         return entry.model_copy(
             update={

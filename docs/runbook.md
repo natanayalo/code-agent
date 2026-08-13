@@ -513,6 +513,37 @@ the default SQLite run reports `sqlite_substring_fallback`, while a PostgreSQL
 run reports `postgres_full_text`. `timeline_retrieval_mode` preserves the
 existing load-memory timeline diagnostic separately.
 
+### M28 real-worker effectiveness collection
+
+The real-worker collector compares a cold task with an assisted repeat for all
+four memory scenarios on both native read-only profiles. It submits real tasks
+and writes evaluator-owned fixtures, so run it only on a disposable
+Postgres/Temporal/sandbox stack and disposable repository.
+
+```bash
+.venv/bin/python scripts/e2e/run_m28_real_worker_eval.py init \
+  --bundle-dir artifacts/m28-real-worker/baseline-01 \
+  --build-sha "$BUILD_SHA" --environment m28-local \
+  --repository-revision "$(git rev-parse HEAD)" --operator "operator-name" \
+  --ack-disposable-stack
+
+.venv/bin/python scripts/e2e/run_m28_real_worker_eval.py run-pair \
+  --bundle-dir artifacts/m28-real-worker/baseline-01 \
+  --case-id useful-hit-codex --repo-url <disposable-repository-url>
+
+.venv/bin/python scripts/e2e/run_m28_real_worker_eval.py report \
+  --bundle-dir artifacts/m28-real-worker/baseline-01 \
+  --json-output artifacts/m28-real-worker/report.json \
+  --markdown-output artifacts/m28-real-worker/report.md
+```
+
+Keep the private bundle under ignored `artifacts/`: it contains task IDs and
+authenticated timeline data. The public report is allowlisted and excludes task
+text, repository URLs, memory values, logs, artifacts, secrets, and notes.
+Only an `effective` report after manual private-bundle review supports closing
+M28. Use `cleanup --repo-url <disposable-repo-url>` to remove only
+evaluator-owned fixtures.
+
 ## 10) Antigravity Migration Guide
 
 When migrating existing workspaces and settings to Antigravity:

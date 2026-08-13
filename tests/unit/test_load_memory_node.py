@@ -235,6 +235,13 @@ def test_load_memory_node_loads_memory_and_skepticism_metadata(session_factory) 
     assert event.payload["observation_ids"] == [memory["observations"][0]["id"]]
     payload_without_observation_ids = dict(event.payload)
     payload_without_observation_ids.pop("observation_ids")
+    accepted_details = payload_without_observation_ids.pop("accepted_details")
+    assert [item["memory_key"] for item in accepted_details] == [
+        "communication_style",
+        "test_command",
+    ]
+    assert all("value" not in item for item in accepted_details)
+    assert "session_context" not in payload_without_observation_ids
     assert payload_without_observation_ids == {
         "retrieval_mode": "full_text",
         "search_query": "memory-match",
@@ -619,6 +626,7 @@ def test_read_side_gate_staleness_and_advisory_strength() -> None:
     # strength = 0.8 * (1.0 - 0.357 * 0.5) = 0.657
     assert pytest.approx(deploy_ann.advisory_strength, abs=0.01) == 0.657
     assert deploy_ann.gate_status == "accepted"
+    assert "accepted_low_risk_fresh" in deploy_ann.gate_reason_codes
 
     assert not any(
         e.memory_key == "deploy_policy_without_timestamp" for e in result.accepted_personal
@@ -743,6 +751,11 @@ def test_read_side_gate_diagnostics_timeline_payload(session_factory) -> None:
     assert "project_overrides_personal" in payload["reason_counts"]
     assert "editor" in payload["accepted_keys"]
     assert "editor" in payload["suppressed_keys"]
+    accepted = payload["accepted_details"][0]
+    assert accepted["category"] == "project"
+    assert accepted["memory_key"] == "editor"
+    assert accepted["source"] is None
+    assert "value" not in accepted
     suppressed = payload["suppressed_details"][0]["memory"]
     assert suppressed["source"] == "operator"
     assert suppressed["confidence"] == 0.7
