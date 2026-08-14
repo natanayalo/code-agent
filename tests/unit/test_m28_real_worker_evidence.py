@@ -111,6 +111,25 @@ def test_assisted_capture_requires_native_memory_delivery_receipt() -> None:
         _assert_assisted_memory_delivery(task, case)
 
 
+def test_conflict_capture_requires_the_project_conflict_key() -> None:
+    case = next(case for case in load_suite().cases if case.case_id == "conflict-handling-codex")
+    task = {
+        "latest_run": {
+            "budget_usage": {
+                "native_agent": {
+                    "memory_delivery": {
+                        "delivered_memory_keys": ["m28-conflict-personal"],
+                        "missing_accepted_memory_keys": [],
+                        "complete": True,
+                    }
+                }
+            }
+        }
+    }
+
+    _assert_assisted_memory_delivery(task, case)
+
+
 def test_complete_valid_matrix_renders_effective_allowlisted_report(tmp_path: Path) -> None:
     suite = load_suite()
     bundle_dir = tmp_path / "private"

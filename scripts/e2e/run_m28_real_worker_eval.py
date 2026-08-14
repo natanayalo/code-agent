@@ -124,9 +124,16 @@ def _fixture_key(case: RealWorkerPairCase) -> str:
     return f"m28-{case.scenario.replace('_', '-')}-{case.worker_profile.split('-')[0]}"
 
 
+def _expected_assisted_memory_key(case: RealWorkerPairCase) -> str:
+    """Return the accepted project key the assisted task must receive."""
+    if case.scenario == "conflict_handling":
+        return "m28-conflict-personal"
+    return _fixture_key(case)
+
+
 def _fixture_payloads(case: RealWorkerPairCase, *, source: str) -> list[tuple[str, dict[str, Any]]]:
     """Return evaluator-owned values; none is copied into public output."""
-    key = _fixture_key(case)
+    key = _expected_assisted_memory_key(case)
     base = {"source": source, "confidence": 0.95, "scope": "repo"}
     marker = f"m28-{case.scenario}-marker"
     if case.scenario == "useful_hit":
@@ -314,7 +321,7 @@ def _assert_assisted_memory_delivery(task: dict[str, Any], case: RealWorkerPairC
     """Reject an assisted capture unless its expected key reached the native prompt."""
     if case.scenario not in {"useful_hit", "conflict_handling"}:
         return
-    key = _fixture_key(case)
+    key = _expected_assisted_memory_key(case)
     receipt = _native_memory_delivery(task)
     delivered = receipt.get("delivered_memory_keys") or []
     missing = receipt.get("missing_accepted_memory_keys") or []
