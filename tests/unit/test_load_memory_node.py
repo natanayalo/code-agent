@@ -40,7 +40,7 @@ def session_factory():
 
 
 def _seed_memory_context(session_factory: Any) -> tuple[str, str]:
-    verified_at = datetime(2026, 7, 2, 9, 30, tzinfo=UTC)
+    verified_at = datetime.now(UTC)
     repo_url = "https://github.com/natanayalo/code-agent"
 
     with session_scope(session_factory) as session:
@@ -606,9 +606,16 @@ def test_read_side_gate_staleness_and_advisory_strength() -> None:
         last_verified_at=None,
         requires_verification=False,
     )
+    entry_stale_command = MemoryEntry(
+        memory_key="m28-stale",
+        value={"command": "printf stale-marker"},
+        confidence=0.95,
+        last_verified_at=now - timedelta(days=365),
+        requires_verification=False,
+    )
 
     result = ReadSideMemoryGateService.process(
-        personal=[entry_pitfall, entry_deploy, entry_unverified_deploy],
+        personal=[entry_pitfall, entry_deploy, entry_unverified_deploy, entry_stale_command],
         project=[],
     )
 
@@ -635,6 +642,10 @@ def test_read_side_gate_staleness_and_advisory_strength() -> None:
         e for e in result.suppressed_personal if e.memory_key == "deploy_policy_without_timestamp"
     )
     assert suppressed_deploy.reason_codes == ["high_risk_unverified_or_stale"]
+    suppressed_command = next(
+        entry for entry in result.suppressed_personal if entry.memory_key == "m28-stale"
+    )
+    assert suppressed_command.reason_codes == ["actionable_memory_stale"]
 
     assert _calculate_staleness(None, requires_verification=False, window_days=30) == 1.0
     assert _calculate_staleness(now, requires_verification=False, window_days=0) == 1.0
