@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: isolate native agents in Docker ([#369](https://github.com/natanayalo/code-agent/pull/369))
+
 - Feat: populate compact session decisions and risks ([#366](https://github.com/natanayalo/code-agent/pull/366))
 
 - Feat: add M28 paired memory effectiveness baseline ([#365](https://github.com/natanayalo/code-agent/pull/365))
