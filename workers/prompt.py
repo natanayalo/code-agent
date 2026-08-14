@@ -412,3 +412,28 @@ def build_system_prompt(
     prompt = "\n\n".join(section for section in sections if section.strip())
     redacted_prompt, _ = redact_private_tags(prompt)
     return redacted_prompt
+
+
+def build_effective_system_prompt(
+    request: WorkerRequest,
+    workspace_path: Path,
+    *,
+    system_prompt_override: str | None = None,
+    tool_registry: ToolRegistry | None = None,
+    tool_client: McpToolClient | None = None,
+) -> str:
+    """Build a prompt without allowing role-specific overrides to drop memory."""
+    if system_prompt_override is None:
+        prompt = build_system_prompt(
+            request,
+            workspace_path,
+            tool_registry=tool_registry,
+            tool_client=tool_client,
+        )
+    else:
+        prompt = system_prompt_override
+    memory_section = build_memory_context_section(request)
+    if memory_section and memory_section not in prompt:
+        prompt = f"{prompt}\n\n{memory_section}"
+    redacted_prompt, _ = redact_private_tags(prompt)
+    return redacted_prompt

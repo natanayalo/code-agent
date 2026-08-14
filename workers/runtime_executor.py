@@ -29,7 +29,7 @@ from workers.cli_runtime import (
     settings_from_budget,
 )
 from workers.post_run_lint import collect_changed_files_and_apply_post_run_lint_format
-from workers.prompt import build_system_prompt
+from workers.prompt import build_effective_system_prompt
 from workers.review import ReviewResult
 from workers.sandbox_adapter import SandboxSessionAdapter
 from workers.self_review import collect_diff_for_review, run_shared_self_review_fix_loop
@@ -164,14 +164,11 @@ class RuntimeExecutor:
             if isinstance(constraints.get("post_run_lint_format_command"), str)
             else None
         )
-        system_prompt = (
-            system_prompt_override
-            if system_prompt_override is not None
-            else build_system_prompt(
-                request,
-                workspace.repo_path,
-                tool_registry=self.tool_registry,
-            )
+        system_prompt = build_effective_system_prompt(
+            request,
+            workspace.repo_path,
+            system_prompt_override=system_prompt_override,
+            tool_registry=self.tool_registry,
         )
 
         return _RuntimeSetup(

@@ -21,6 +21,7 @@ from evaluation.m28_real_worker_evidence import (
 )
 from evaluation.m28_real_worker_models import BundleIdentity, PairMeasurements, PrivatePairCapture
 from scripts.e2e.run_m28_real_worker_eval import (
+    _assert_assisted_memory_delivery,
     _assert_fixture_safe,
     _command_markers_from_artifacts,
     _compact_session_context,
@@ -86,6 +87,28 @@ def test_stale_and_conflict_gates_fail_closed() -> None:
     conflict.assisted.command_markers = []
     assert "stale_memory_not_suppressed" in evaluate_pair(stale)
     assert "project_memory_not_used" in evaluate_pair(conflict)
+
+
+def test_assisted_capture_requires_native_memory_delivery_receipt() -> None:
+    case = load_suite().cases[0]
+    task = {
+        "latest_run": {
+            "budget_usage": {
+                "native_agent": {
+                    "memory_delivery": {
+                        "delivered_memory_keys": ["m28-useful-hit-codex"],
+                        "missing_accepted_memory_keys": [],
+                        "complete": True,
+                    }
+                }
+            }
+        }
+    }
+
+    _assert_assisted_memory_delivery(task, case)
+    task["latest_run"]["budget_usage"]["native_agent"]["memory_delivery"]["complete"] = False
+    with pytest.raises(ValueError, match="not delivered"):
+        _assert_assisted_memory_delivery(task, case)
 
 
 def test_complete_valid_matrix_renders_effective_allowlisted_report(tmp_path: Path) -> None:

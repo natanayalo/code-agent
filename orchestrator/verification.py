@@ -418,6 +418,7 @@ def _build_independent_verifier_request(
 
     return WorkerRequest(
         session_id=state.session.session_id if state.session is not None else None,
+        task_id=state.task.task_id,
         repo_url=state.task.repo_url,
         branch=state.task.branch,
         workspace_id=state.dispatch.workspace_id
@@ -619,6 +620,7 @@ def _build_deterministic_verification_request(
 
     return WorkerRequest(
         session_id=state.session.session_id if state.session is not None else None,
+        task_id=state.task.task_id,
         repo_url=state.task.repo_url,
         branch=state.task.branch,
         workspace_id=workspace_id,

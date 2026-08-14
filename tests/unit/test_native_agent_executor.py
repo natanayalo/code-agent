@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -24,10 +25,10 @@ from sandbox.scratch import node_agent_home
 def test_executor_command_is_hardened_and_mounts_only_task_paths(tmp_path: Path) -> None:
     workspace_root = tmp_path / "task"
     repo = workspace_root / "repo"
-    artifacts = tmp_path / "artifacts"
+    artifacts = workspace_root / ".code-agent" / "artifacts"
     agent_home = tmp_path / "agent-home"
     repo.mkdir(parents=True)
-    artifacts.mkdir()
+    artifacts.mkdir(parents=True)
     agent_home.mkdir()
     command = DockerNativeAgentExecutor(image="native-image").build_run_command(
         container_name="native-test",
@@ -42,6 +43,7 @@ def test_executor_command_is_hardened_and_mounts_only_task_paths(tmp_path: Path)
     )
 
     joined = " ".join(command)
+    assert "--rm" not in command
     assert "--read-only" in command
     cap_drop_index = command.index("--cap-drop")
     assert ["--cap-drop", "ALL"] == command[cap_drop_index : cap_drop_index + 2]
@@ -50,11 +52,20 @@ def test_executor_command_is_hardened_and_mounts_only_task_paths(tmp_path: Path)
     assert ["--ipc", "private"] == command[command.index("--ipc") : command.index("--ipc") + 2]
     assert "/tmp:rw,noexec,nosuid,size=64m" in joined
     assert f"source={workspace_root.resolve()},target={workspace_root.resolve()},readonly" in joined
+    runtime_root = (workspace_root / ".code-agent").resolve()
+    assert f"source={runtime_root},target={runtime_root}" in joined
     assert f"source={artifacts.resolve()},target={artifacts.resolve()}" in joined
     assert f"source={agent_home.resolve()},target={agent_home.resolve()}" in joined
     assert "/var/run/docker.sock" not in joined
     assert "seccomp=unconfined" not in joined
     assert "--network none" in joined
+
+
+def test_executor_reads_exited_container_code_without_attached_client() -> None:
+    executor = DockerNativeAgentExecutor(image="native-image")
+    executor._docker = lambda _command: subprocess.CompletedProcess([], 0, "false 17\n", "")  # type: ignore[method-assign]
+
+    assert executor._exited_container_code("native-test") == 17  # noqa: SLF001
 
 
 def test_executor_environment_drops_control_plane_and_requires_github_grant() -> None:

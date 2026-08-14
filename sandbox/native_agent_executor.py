@@ -262,7 +262,6 @@ class DockerNativeAgentExecutor:
         docker_command = [
             self.docker_binary,
             "run",
-            "--rm",
             "-i",
             "--name",
             container_name,
@@ -285,13 +284,27 @@ class DockerNativeAgentExecutor:
             "/tmp:rw,noexec,nosuid,size=64m",
             "--mount",
             f"type=bind,source={workspace_path},target={workspace_path}{ro}",
-            "--mount",
-            f"type=bind,source={artifact_root},target={artifact_root}",
-            "--mount",
-            f"type=bind,source={agent_home},target={agent_home}",
-            "--workdir",
-            str(workspace.repo_path.resolve()),
         ]
+        if read_only_workspace:
+            docker_command.extend(
+                [
+                    "--mount",
+                    (
+                        "type=bind,source="
+                        f"{workspace_path / '.code-agent'},target={workspace_path / '.code-agent'}"
+                    ),
+                ]
+            )
+        docker_command.extend(
+            [
+                "--mount",
+                f"type=bind,source={artifact_root},target={artifact_root}",
+                "--mount",
+                f"type=bind,source={agent_home},target={agent_home}",
+                "--workdir",
+                str(workspace.repo_path.resolve()),
+            ]
+        )
         for key, value in sorted(environment.items()):
             docker_command.extend(["--env", f"{key}={value}"])
         docker_command.append(self.image)
@@ -306,6 +319,21 @@ class DockerNativeAgentExecutor:
             text=True,
             timeout=15,
         )
+
+    def _exited_container_code(self, container_name: str) -> int | None:
+        """Return an exited executor's code without relying on its attached client."""
+        inspected = self._docker(
+            ["inspect", "--format", "{{.State.Running}} {{.State.ExitCode}}", container_name]
+        )
+        if inspected.returncode != 0:
+            return None
+        running, _, exit_code = inspected.stdout.strip().partition(" ")
+        if running == "true":
+            return None
+        try:
+            return int(exit_code)
+        except ValueError:
+            return None
 
     def _docker(self, command: list[str], *, timeout: int = 30) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -508,7 +536,34 @@ class DockerNativeAgentExecutor:
                 f"Failed to start isolated Docker executor: {exc}"
             ) from exc
         try:
+            last_container_check = started
             while process.poll() is None:
+                now = time.monotonic()
+                if now - last_container_check >= 1:
+                    last_container_check = now
+                    exit_code = self._exited_container_code(container_name)
+                    if exit_code is not None:
+                        process.terminate()
+                        stdout, stderr = process.communicate(timeout=15)
+                        self._remove(container_name)
+                        manifest.update(
+                            {
+                                "termination_reason": "completed",
+                                "cleanup": self._cleanup_network(
+                                    network_name=network_name, proxy_name=proxy_name
+                                ),
+                            }
+                        )
+                        manifest_path.write_text(
+                            json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+                        )
+                        return NativeAgentExecution(
+                            completed=subprocess.CompletedProcess(
+                                docker_command, exit_code, stdout, stderr
+                            ),
+                            termination_reason="completed",
+                            manifest_path=manifest_path,
+                        )
                 if cancel_requested and cancel_requested():
                     self._remove(container_name)
                     stdout, stderr = process.communicate(timeout=15)
@@ -555,6 +610,7 @@ class DockerNativeAgentExecutor:
             raise NativeAgentExecutorError(f"Isolated Docker executor failed: {exc}") from exc
         finally:
             shutil.rmtree(agent_home, ignore_errors=True)
+        self._remove(container_name)
         manifest.update(
             {
                 "termination_reason": "completed",

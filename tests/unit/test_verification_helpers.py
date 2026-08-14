@@ -6,6 +6,8 @@ from unittest.mock import MagicMock
 
 from orchestrator.state import OrchestratorState
 from orchestrator.verification import (
+    _build_deterministic_verification_request,
+    _build_independent_verifier_request,
     _build_verifier_task_text,
     _coerce_outcome_status,
     _deterministic_exception_result,
@@ -33,6 +35,25 @@ from orchestrator.verification import (
     split_verification_commands,
 )
 from workers import WorkerCommand, WorkerResult
+
+
+def test_verifier_requests_keep_task_id_for_nested_trace_filtering() -> None:
+    state = OrchestratorState(
+        task={
+            "task_id": "00000000-0000-0000-0000-000000000123",
+            "task_text": "Verify task",
+            "repo_url": "https://example.com/repo.git",
+        }
+    )
+
+    independent = _build_independent_verifier_request(state, timeout_seconds=30)
+    deterministic = _build_deterministic_verification_request(
+        state, commands=["pytest -q"], timeout_seconds=30
+    )
+
+    assert independent.task_id == state.task.task_id
+    assert deterministic.task_id == state.task.task_id
+
 
 # ---------------------------------------------------------------------------
 # _normalize_verification_commands

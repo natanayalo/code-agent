@@ -49,7 +49,8 @@ from workers.native_agent_runner import (
     run_native_agent,
 )
 from workers.native_agent_security import native_github_credentials
-from workers.prompt import build_system_prompt
+from workers.prompt import build_effective_system_prompt
+from workers.prompt_memory import native_memory_delivery_receipt
 from workers.review import ReviewResult
 
 logger = logging.getLogger(__name__)
@@ -104,6 +105,17 @@ def _workspace_artifacts(workspace: WorkspaceHandle) -> list[ArtifactReference]:
             artifact_type="workspace",
         )
     ]
+
+
+def _cancelled_before_native_execution_result(workspace: WorkspaceHandle) -> WorkerResult:
+    """Return the standard result for work cancelled before native execution."""
+    return WorkerResult(
+        status="error",
+        summary="Codex native-agent run was cancelled before execution.",
+        failure_kind="timeout",
+        artifacts=_workspace_artifacts(workspace),
+        next_action_hint="inspect_workspace_artifacts",
+    )
 
 
 def _apply_cleanup_outcome(result: WorkerResult, *, workspace_deleted: bool) -> WorkerResult:
@@ -369,14 +381,11 @@ class CodexCliWorkerNativeMixin:
         system_prompt_override: str | None,
     ) -> tuple[NativeAgentRunRequest, dict[str, Any]]:
         """Build the run request and setup paths for native execution."""
-        system_prompt = (
-            system_prompt_override
-            if system_prompt_override is not None
-            else build_system_prompt(
-                request,
-                workspace.repo_path,
-                tool_registry=self.tool_registry,  # type: ignore[attr-defined]
-            )
+        system_prompt = build_effective_system_prompt(
+            request,
+            workspace.repo_path,
+            system_prompt_override=system_prompt_override,
+            tool_registry=self.tool_registry,  # type: ignore[attr-defined]
         )
         node_root = (
             node_run_root(workspace.workspace_path, request.scratch_namespace)
@@ -406,9 +415,14 @@ class CodexCliWorkerNativeMixin:
             runtime_mode=runtime_mode,
             output_schema_path=output_schema_path,
         )
+        native_prompt = self._build_native_prompt(system_prompt=system_prompt, request=request)
+        memory_delivery = native_memory_delivery_receipt(
+            request, system_prompt=system_prompt, native_prompt=native_prompt
+        )
+        sandbox_metadata["memory_delivery"] = memory_delivery
         run_request = NativeAgentRunRequest(
             command=command,
-            prompt=self._build_native_prompt(system_prompt=system_prompt, request=request),
+            prompt=native_prompt,
             repo_path=workspace.repo_path,
             workspace_path=workspace.workspace_path,
             scratch_namespace=request.scratch_namespace,
@@ -449,17 +463,25 @@ class CodexCliWorkerNativeMixin:
     ) -> WorkerResult:
         """Execute one native-agent `codex exec` run and map it into WorkerResult."""
         if cancel_token and cancel_token():
-            return WorkerResult(
-                status="error",
-                summary="Codex native-agent run was cancelled before execution.",
-                failure_kind="timeout",
-                artifacts=_workspace_artifacts(workspace),
-                next_action_hint="inspect_workspace_artifacts",
-            )
+            return _cancelled_before_native_execution_result(workspace)
 
         run_request, sandbox_metadata = self._prepare_native_agent_run_request(
             request, workspace, runtime_settings, runtime_mode, system_prompt_override
         )
+        memory_delivery = sandbox_metadata["memory_delivery"]
+        if not memory_delivery["complete"]:
+            logger.error(
+                "Codex native execution blocked because accepted memory was not delivered",
+                extra={"session_id": request.session_id, "memory_delivery": memory_delivery},
+            )
+            return WorkerResult(
+                status="error",
+                summary="Accepted memory was not delivered to the native worker prompt.",
+                failure_kind="incomplete_delivery",
+                budget_usage={"runtime_mode": runtime_mode.value, "native_agent": sandbox_metadata},
+                artifacts=_workspace_artifacts(workspace),
+                next_action_hint="inspect_worker_configuration",
+            )
         run_request = replace(run_request, cancel_requested=cancel_token)
         native_result = run_native_agent(run_request)
 

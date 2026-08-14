@@ -302,6 +302,26 @@ def _memory_event(task: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
+def _native_memory_delivery(task: dict[str, Any]) -> dict[str, Any]:
+    """Read the value-free native prompt delivery receipt from a task snapshot."""
+    budget_usage = (task.get("latest_run") or {}).get("budget_usage") or {}
+    native_agent = budget_usage.get("native_agent") if isinstance(budget_usage, dict) else None
+    receipt = native_agent.get("memory_delivery") if isinstance(native_agent, dict) else None
+    return receipt if isinstance(receipt, dict) else {}
+
+
+def _assert_assisted_memory_delivery(task: dict[str, Any], case: RealWorkerPairCase) -> None:
+    """Reject an assisted capture unless its expected key reached the native prompt."""
+    if case.scenario not in {"useful_hit", "conflict_handling"}:
+        return
+    key = _fixture_key(case)
+    receipt = _native_memory_delivery(task)
+    delivered = receipt.get("delivered_memory_keys") or []
+    missing = receipt.get("missing_accepted_memory_keys") or []
+    if key not in delivered or key in missing or receipt.get("complete") is not True:
+        raise ValueError(f"assisted memory was not delivered to native worker prompt: {key}")
+
+
 def _compact_session_context(value: object) -> dict[str, Any]:
     """Keep only the compact session fields captured in private evidence."""
     if not isinstance(value, dict):
@@ -423,6 +443,7 @@ def run_pair(args: argparse.Namespace) -> int:
             delivery_namespace=delivery_namespace,
         )
         assisted = _wait_for_task(client, assisted_submission["task_id"], args.timeout_seconds)
+        _assert_assisted_memory_delivery(assisted, case)
     capture = PrivatePairCapture(
         case_id=case.case_id,
         scenario=case.scenario,
