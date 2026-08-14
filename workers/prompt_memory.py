@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from privacy.redaction import redact_private_tags
 from utils.serialization import to_dict
 from workers.base import WorkerRequest
 
@@ -333,7 +334,7 @@ def native_memory_delivery_receipt(
             and _as_str(memory.get("memory_key"))
         }
     )
-    memory_section = build_memory_context_section(request)
+    memory_section, _ = redact_private_tags(build_memory_context_section(request))
     system_has_section = bool(memory_section) and memory_section in system_prompt
     native_has_section = bool(memory_section) and memory_section in native_prompt
     delivered_keys = [

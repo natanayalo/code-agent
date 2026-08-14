@@ -422,7 +422,11 @@ def build_effective_system_prompt(
     tool_registry: ToolRegistry | None = None,
     tool_client: McpToolClient | None = None,
 ) -> str:
-    """Build a prompt without allowing role-specific overrides to drop memory."""
+    """Build a prompt without allowing role-specific overrides to drop memory.
+
+    Overrides specialize the worker role but are not complete replacements: accepted
+    memory remains part of the worker contract and is appended when absent.
+    """
     if system_prompt_override is None:
         prompt = build_system_prompt(
             request,

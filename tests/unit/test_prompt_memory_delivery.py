@@ -42,6 +42,18 @@ def test_native_memory_delivery_receipt_does_not_expose_values(tmp_path) -> None
     assert "secret-looking-command" not in str(receipt)
 
 
+def test_native_memory_delivery_receipt_handles_private_tag_redaction(tmp_path) -> None:
+    request = _accepted_memory_request(value="printf <private>secret-marker</private>")
+    system_prompt = build_effective_system_prompt(request, tmp_path)
+
+    receipt = native_memory_delivery_receipt(
+        request, system_prompt=system_prompt, native_prompt=system_prompt
+    )
+
+    assert receipt["complete"] is True
+    assert receipt["delivered_memory_keys"] == ["accepted-command"]
+
+
 def test_effective_system_prompt_appends_memory_to_role_override(tmp_path) -> None:
     prompt = build_effective_system_prompt(
         _accepted_memory_request(),
