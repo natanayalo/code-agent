@@ -13,6 +13,7 @@ from temporalio.client import WorkflowFailureError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
+import workers.native_agent_runner as native_agent_runner
 from db.enums import (
     ExecutionPlanNodeStatus,
     HumanInteractionHitlMode,
@@ -48,6 +49,7 @@ from repositories import (
     session_scope,
 )
 from sandbox import DockerShellCommandResult, DockerShellSession
+from tests.native_agent_test_doubles import LocalNativeAgentRunner
 from workers import CodexCliWorker, WorkerResult
 from workers.cli_runtime import CliRuntimeAdapter, CliRuntimeStep
 
@@ -771,6 +773,7 @@ def session_factory(tmp_path: Path):
 async def test_temporal_runtime_happy_path(session_factory, tmp_path: Path, monkeypatch):
     """Temporal workflow path should ingest, run in sandbox, and persist result."""
     monkeypatch.setattr("sandbox.workspace.default_workspace_root", lambda: tmp_path)
+    monkeypatch.setattr(native_agent_runner, "DockerNativeAgentExecutor", LocalNativeAgentRunner)
     if not _docker_available():
         pytest.skip("Docker daemon is unavailable")
 
@@ -887,6 +890,7 @@ async def test_temporal_runtime_happy_path(session_factory, tmp_path: Path, monk
 async def test_temporal_runtime_hitl_approval(session_factory, tmp_path: Path, monkeypatch):
     """Workflow should pause at the approval checkpoint, resume on handle_approval, and complete."""
     monkeypatch.setattr("sandbox.workspace.default_workspace_root", lambda: tmp_path)
+    monkeypatch.setattr(native_agent_runner, "DockerNativeAgentExecutor", LocalNativeAgentRunner)
     if not _docker_available():
         pytest.skip("Docker daemon is unavailable")
 
@@ -1015,6 +1019,7 @@ async def test_temporal_runtime_clarification_interaction_resumes_workflow(
 ):
     """A pre-classification clarification response must not skip routing."""
     monkeypatch.setattr("sandbox.workspace.default_workspace_root", lambda: tmp_path)
+    monkeypatch.setattr(native_agent_runner, "DockerNativeAgentExecutor", LocalNativeAgentRunner)
     if not _docker_available():
         pytest.skip("Docker daemon is unavailable")
 
@@ -1737,6 +1742,7 @@ async def test_temporal_runtime_cancellation_projects_terminal_state(
 async def test_temporal_runtime_idempotency_and_retry(session_factory, tmp_path: Path, monkeypatch):
     """Workflow should recover from activity crashes without duplicate events."""
     monkeypatch.setattr("sandbox.workspace.default_workspace_root", lambda: tmp_path)
+    monkeypatch.setattr(native_agent_runner, "DockerNativeAgentExecutor", LocalNativeAgentRunner)
     if not _docker_available():
         pytest.skip("Docker daemon is unavailable")
 

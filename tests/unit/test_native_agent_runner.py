@@ -30,7 +30,7 @@ _UNIFIED_SUGGESTION_SCHEMA = {
 }
 
 
-def test_namespaced_codex_home_copies_auth_without_reusing_shared_source(tmp_path: Path) -> None:
+def test_namespaced_codex_home_is_deferred_to_the_isolated_executor(tmp_path: Path) -> None:
     source = tmp_path / "source-codex"
     source.mkdir()
     (source / "auth.json").write_text('{"token":"test"}', encoding="utf-8")
@@ -47,9 +47,9 @@ def test_namespaced_codex_home_copies_auth_without_reusing_shared_source(tmp_pat
     environment = native_runner._build_effective_env(request)
 
     codex_home = Path(environment["CODEX_HOME"])
-    assert codex_home != source
-    assert (codex_home / "auth.json").read_text(encoding="utf-8") == '{"token":"test"}'
-    assert (codex_home / "config.toml").exists()
+    # The Docker executor, not the trusted worker, performs the task-scoped
+    # copy immediately before creating its one-shot provider container.
+    assert codex_home == source
 
 
 def _write_fake_binary(path: Path, body: str) -> Path:
@@ -198,6 +198,7 @@ print("stderr payload", file=sys.stderr)
         "native-agent-events",
         "native-agent-final-message",
         "native-agent-diff",
+        "native-isolation-manifest",
     }
     for artifact in result.artifacts:
         assert Path(artifact.uri.removeprefix("file://")).is_file()
@@ -232,7 +233,7 @@ raise SystemExit(7)
     assert result.exit_code == 7
     assert result.summary == "Native agent command exited with code 7."
     assert result.final_message == "failure stdout"
-    assert len(result.artifacts) == 2
+    assert len(result.artifacts) == 3
     assert result.artifacts[0].name == "native-agent-stdout"
     assert result.artifacts[1].name == "native-agent-stderr"
 
@@ -324,7 +325,7 @@ def test_native_agent_runner_uses_devnull_when_prompt_is_argv(
         stdin_prompt=False,
     )
 
-    completed = native_runner._execute_native_agent_subprocess(  # noqa: SLF001
+    result = native_runner._execute_native_agent_subprocess(  # noqa: SLF001
         request,
         tmp_path,
         "fake-native --prompt task",
@@ -333,7 +334,10 @@ def test_native_agent_runner_uses_devnull_when_prompt_is_argv(
         events_path=None,
     )
 
+    assert isinstance(result, tuple)
+    completed, termination_reason = result
     assert isinstance(completed, subprocess.CompletedProcess)
+    assert termination_reason == "completed"
     assert captured_kwargs["input"] is None
     assert captured_kwargs["stdin"] == subprocess.DEVNULL
 

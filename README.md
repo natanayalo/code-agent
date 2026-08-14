@@ -39,6 +39,14 @@ operator-facing projections and durable knowledge, and Docker sandboxes for
 repository effects and evidence. Deterministic policy, verification, and
 independent review remain separate from provider self-report.
 
+Native Codex and Antigravity commands run only in one-shot, hardened,
+per-task Docker containers. The trusted Temporal worker retains Docker
+authority; executor containers receive only the task workspace, scratch
+directories, staged provider auth, and a task-private public-HTTPS proxy.
+They never receive the Docker socket, control-plane credentials, or host auth
+mounts. M28 effectiveness evidence is paused until this isolation prerequisite
+has been verified.
+
 The platform is organized into these layers:
 
 - control plane: ingress, orchestration, routing, approvals, persistence
@@ -190,18 +198,36 @@ npm run build
 
 ## CLI Worker Auth Bootstrap
 
-Before running real worker tasks with mounted auth directories, ensure the CLIs are installed and in your `PATH`, then run:
+Before running real worker tasks with mounted auth directories, ensure the CLIs are installed and in your `PATH`, then authenticate on the host against the directory configured for the worker:
 
 ```bash
 codex login
-agy auth login
+GEMINI_HOME="$CODE_AGENT_ANTIGRAVITY_AUTH_DIR" agy
 ```
 
-If host CLIs are unavailable, run one-time login through the worker image:
+For Antigravity, run the trusted operator enrollment container instead. It has
+no task workspace, Docker socket, or control-plane credentials; only the
+configured provider-auth directory is writable. It uses the same private HTTPS
+proxy pattern as the executor:
+
+```bash
+CODE_AGENT_ANTIGRAVITY_AUTH_DIR="/absolute/provider-auth-path" \
+  scripts/bootstrap_antigravity_auth.sh
+
+# Verify the enrolled credential without exposing a task workspace.
+CODE_AGENT_ANTIGRAVITY_AUTH_DIR="/absolute/provider-auth-path" \
+  scripts/bootstrap_antigravity_auth.sh --check
+
+```
+
+Complete the browser or printed-URL sign-in, then exit the CLI. Do not
+authenticate from the worker or a task executor: the executor home is deleted
+after each task and does not receive the host keyring.
+
+If the Codex host CLI is unavailable, run its one-time login through the worker image:
 
 ```bash
 docker compose run --rm --no-deps worker codex login
-docker compose run --rm --no-deps worker agy auth login
 ```
 
 ### Dashboard Authentication

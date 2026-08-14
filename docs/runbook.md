@@ -17,14 +17,33 @@ Bootstrap on host (ensure CLIs are installed and in PATH):
 
 ```bash
 codex login
-agy auth login
+GEMINI_HOME="$CODE_AGENT_ANTIGRAVITY_AUTH_DIR" agy
 ```
 
-Fallback bootstrap via container (may not work for Antigravity depending on host OS keyring integration):
+Antigravity authentication must be enrolled through the trusted, operator-run
+container rather than the worker or a task executor. It has a private network
+with the HTTPS proxy as its only egress path, mounts no workspace or Docker
+socket, and grants write access only to the configured provider-auth directory:
+
+```bash
+CODE_AGENT_ANTIGRAVITY_AUTH_DIR="/absolute/provider-auth-path" \
+  scripts/bootstrap_antigravity_auth.sh
+
+# Runs a fixed prompt in the same trusted enrollment container. It does not
+# mount a task workspace or Docker socket.
+CODE_AGENT_ANTIGRAVITY_AUTH_DIR="/absolute/provider-auth-path" \
+  scripts/bootstrap_antigravity_auth.sh --check
+
+```
+
+Complete the browser or printed-URL OAuth flow and exit the CLI. The worker
+mount remains read-only; every task executor receives a staged copy which is
+deleted after artifact collection.
+
+Fallback bootstrap via container is supported for Codex only:
 
 ```bash
 docker compose run --rm --no-deps worker codex login
-docker compose run --rm --no-deps worker agy auth login
 ```
 
 ## 2) Process Model
@@ -46,6 +65,22 @@ scripts/up.sh
 ## 2.1) Codex and Antigravity Runtime Mode Deprecation
 
 Codex and Antigravity native execution workers are now native-only.
+
+### Native-agent isolation boundary
+
+Native provider commands are never executed as subprocesses in the long-lived
+Temporal worker. Each run uses a one-shot Docker container with a read-only
+root filesystem, dropped capabilities, `no-new-privileges`, PID/CPU/memory
+limits, private IPC, bounded tmpfs, and only task workspace/artifact/provider
+scratch mounts. Provider auth is staged into task scratch and deleted after
+artifact collection. The executor has no Docker socket, database, Temporal,
+API, or ambient provider credentials. Egress is HTTPS CONNECT through a
+task-private proxy; private, loopback, metadata, control-plane, and
+DNS-rebinding destinations are rejected. On timeout or cancellation the worker
+removes the executor, proxy, and private network while retaining partial
+artifacts and the redacted isolation manifest. Roll back by reverting and
+redeploying this change; never re-enable host CLI execution. M28 live evidence
+remains paused while this prerequisite is under verification.
 
 - `CODE_AGENT_CODEX_RUNTIME_MODE`, `CODE_AGENT_GEMINI_RUNTIME_MODE`, and legacy tool-loop configurations (e.g., `CODE_AGENT_CODEX_TOOL_LOOP_LEGACY_ENABLED`, `CODE_AGENT_GEMINI_TOOL_LOOP_LEGACY_ENABLED`) are deprecated, ignored by the factory, and no longer create operation-selector profiles like `codex-tool-loop-executor` or `gemini-tool-loop-executor`.
 - `/metrics` still exposes `runtime_mode_usage` and `legacy_tool_loop_usage` for historical migration tracking.
@@ -263,6 +298,14 @@ Checks:
 
 ### Antigravity (`agy`) specific issues
 
+**Default model**
+Native Antigravity tasks default to `gemini-3.5-flash-low`, the lowest-cost
+model available to the enrolled account at this slice's verification time. To
+override it, first run `agy models` through the trusted enrollment container
+and set `CODE_AGENT_ANTIGRAVITY_MODEL` to one of the returned IDs. Do not use
+legacy `auto-*` values such as `auto-gemini-2.5`: they are routing aliases, not
+valid explicit `agy --model` IDs.
+
 **`agy: command not found`**
 Ensure that the Antigravity CLI is installed and its binary is available in the `PATH` environment variable of the context executing the command (host or Docker worker).
 
@@ -270,7 +313,10 @@ Ensure that the Antigravity CLI is installed and its binary is available in the 
 Antigravity stores auth tokens in OS keyrings. In a headless environment (like Linux Docker containers), you might see DBus errors or locked keyrings. Ensure a compatible Secret Service is running or fallback auth mechanisms are configured correctly per official Antigravity documentation.
 
 **Permission-prompt timeouts**
-If `agy` runs hang and eventually timeout, it might be prompting for user permission interactively. Verify that `CODE_AGENT_ANTIGRAVITY_TOOL_PERMISSION` is set to a non-interactive mode (e.g. `proceed-in-sandbox`) and that settings are propagated correctly.
+Native print-mode runs use Antigravity's noninteractive permission flag because
+its persisted `toolPermission` setting alone can soft-deny repository reads.
+This flag is safe only within the Docker-native executor: the task workspace
+mount and post-run read-only validation remain the enforcement points.
 
 ## Callback delivery rejections
 

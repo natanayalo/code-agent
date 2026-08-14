@@ -170,16 +170,33 @@ Codex `exec` supports several sandbox modes mapped by repository trust:
 
 **2. Antigravity Native Sandbox**
 
-The Antigravity CLI uses a boolean sandbox mechanism controlled via `CODE_AGENT_ANTIGRAVITY_NATIVE_SANDBOX_ENABLED`. It defaults to `0` since the primary isolation boundary is the `docker-compose` worker container itself.
+The Antigravity CLI uses a boolean sandbox mechanism controlled via
+`CODE_AGENT_ANTIGRAVITY_NATIVE_SANDBOX_ENABLED`. It defaults to `0` because
+the primary boundary is the hardened, per-task Docker executor described
+below—not the long-lived Compose worker.
 
-#### Current Privilege Concentration
+#### Trusted Worker Scope
 
-The Compose worker currently mounts the host Docker socket and the Codex and
-Antigravity authentication directories while also launching native provider
-execution. Trusted Codex execution may select `danger-full-access` inside this
-worker-controlled container topology. Docker isolation remains useful, but
-container-runtime authority, provider credentials, and native execution are
-too concentrated for the intended long-term trust boundary.
+The Compose/Temporal worker remains trusted to hold Docker authority and the
+read-only source-auth mounts. It provisions the executor, stages the selected
+provider's minimum auth files into task scratch, collects artifacts, and cleans
+up. It does not run provider CLI commands itself.
+
+#### M28.5A Native-Agent Docker Isolation
+
+The Temporal worker is trusted to provision a one-shot executor container,
+collect artifacts, and remove its task-private network and proxy. The native
+provider process is untrusted: it receives only its task workspace (read-only
+when requested), mounted artifact/provider-home scratch, an allowlisted
+environment, and a private HTTPS CONNECT proxy. It has a read-only root,
+dropped capabilities, `no-new-privileges`, default Docker seccomp, private
+IPC, bounded tmpfs, and resource limits. It never receives the Docker socket,
+workspace parent/siblings, database/Temporal/API credentials, or a host auth
+mount. The proxy validates DNS results and rejects loopback, private,
+link-local, metadata, control-plane, and rebinding destinations; audit records
+identity, time, host/IP, method, and outcome only. Provider auth remains a
+residual risk inside its own task-scoped process. Cleanup failure is
+`sandbox_infra`; rollback is revert/redeploy, never host execution.
 
 ## 4) Memory Layer
 

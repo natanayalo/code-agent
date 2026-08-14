@@ -8,14 +8,15 @@ Completed milestone: **M26 — Review-Comment Repair**.
 
 M26 is complete: review-comment repair polling on open draft PRs, author filtering, budget capping, deduplicated reply planning, immediate per-reply DB checkpointing, and thread replies are fully implemented and verified.
 
-Active focus: **M28 — Memory Effectiveness and Session Continuity**.
+Active prerequisite: **M28.5A — Native-Agent Docker Isolation**.
 
 Implemented M28 slices: the paired memory-effectiveness evaluation baseline and
 typed compact-session continuity for goals, decisions, risks, and touched
 files. The milestone is not complete: paired real-worker evidence and the
 reviewed effectiveness conclusion remain outstanding.
 
-The execution architecture described for M28.5 is planned, not implemented.
+M28 live-effectiveness evidence is explicitly paused. This prerequisite must
+merge and be verified before any M28 live evidence is resumed or claimed.
 
 ## Current capabilities
 
@@ -97,10 +98,9 @@ Temporal migration and rollback record is in the
 - M28 still needs paired real-worker evidence before claiming that memory or
   compact session state reduces repeated questions, interventions, or time to
   a validated result
-- the Temporal worker currently mounts the host Docker socket and provider-auth
-  directories while launching native provider execution; the planned M28.5A
-  trust-boundary work will separate container-runtime authority from native
-  agent execution
+- the trusted Temporal worker retains Docker authority, while native provider
+  CLI execution is confined to one-shot task containers; a separate sandbox
+  broker remains deferred
 - lifecycle data currently overlaps across Temporal history/workflow state,
   serialized `TemporalTaskState`, task/product projections, execution-plan
   rows, and timeline events; no existing persistence has been removed
@@ -113,14 +113,9 @@ Temporal migration and rollback record is in the
 
 ## Next slices only
 
-1. Finish M28
-   - collect and review paired real-worker evidence that durable memory and
-     compact session state reduce repeated work without stale context control
-   - close the milestone without adding a vector database, learned-skill
-     system, or execution-architecture rewrite absent measured need
-2. Begin M28.5A only after M28 closeout
-   - document the current execution threat model and required sandbox/control
-     boundary before choosing a broker or runtime implementation
+1. Complete and verify M28.5A native-agent Docker isolation.
+2. Only then resume paired M28 real-worker evidence; do not make an
+   effectiveness claim from isolation compatibility checks.
 
 ## Deferred
 

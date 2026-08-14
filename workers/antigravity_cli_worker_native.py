@@ -384,12 +384,17 @@ def build_antigravity_native_command(
         prompt=prompt,
         cwd=workspace.repo_path,
     )
+    # Antigravity print mode otherwise soft-denies every tool confirmation,
+    # including repository reads. Docker mount mode and post-run validation
+    # remain the enforcement point for writable versus read-only requests.
+    command.append("--dangerously-skip-permissions")
     command.extend(["--log-file", str(log_file)])
     metadata = {
         "provider": "antigravity",
         "tool_permission": tool_permission,
         "artifact_review_policy": adapter.artifact_review_policy,
         "terminal_sandbox_enabled": native_sandbox_enabled,
+        "noninteractive_tool_confirmation_bypass": True,
         "gemini_home": str(gemini_home),
         "migration_actions": migration_actions,
         "settings_path": str(settings_path),

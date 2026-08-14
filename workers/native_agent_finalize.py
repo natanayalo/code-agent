@@ -167,6 +167,7 @@ def _finalize_native_agent_run(
     json_payload_source: str | None = None,
     json_payload_rejected_reason: str | None = None,
     friction_reports: list[dict[str, Any]] | None = None,
+    termination_reason: Literal["completed", "timeout", "cancelled", "startup_error"] = "completed",
 ) -> NativeAgentRunResult:
     """Centralize NativeAgentRunResult construction and standardized span metadata recording."""
     elapsed = time.perf_counter() - started_at
@@ -185,6 +186,7 @@ def _finalize_native_agent_run(
         stderr=stderr,
         json_payload=json_payload,
         friction_reports=friction_reports or [],
+        termination_reason=termination_reason,
     )
 
     # Standardized Tracing Metadata
