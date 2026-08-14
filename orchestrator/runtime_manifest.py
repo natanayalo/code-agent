@@ -9,6 +9,7 @@ from typing import Any, Final, get_args
 from pydantic import BaseModel, ConfigDict, Field
 
 from sandbox.container import DEFAULT_SANDBOX_IMAGE
+from sandbox.native_agent_executor import DEFAULT_NATIVE_AGENT_IMAGE
 from sandbox.workspace import default_workspace_root
 from tools.registry import DEFAULT_TOOL_REGISTRY, ToolDefinition, ToolRegistry
 from workers.base import MaintenanceActionType
@@ -33,7 +34,7 @@ class RuntimeServiceIdentity(RuntimeManifestModel):
     """Identity fields for the running code-agent service."""
 
     service_name: str = "code-agent"
-    schema_version: int = 1
+    schema_version: int = 2
     environment: str = "local"
     build_sha: str | None = None
 
@@ -43,6 +44,10 @@ class RuntimeSandboxManifest(RuntimeManifestModel):
 
     default_image: str
     workspace_root: str
+    native_execution_backend: str = "docker_native_agent_executor"
+    native_executor_image: str | None = None
+    native_network_policy: str = "public_https_via_private_proxy"
+    provider_auth_scope: str = "task_scoped_staged_home"
 
 
 class RuntimeWorkerManifest(RuntimeManifestModel):
@@ -194,6 +199,9 @@ def build_runtime_manifest(
         sandbox=RuntimeSandboxManifest(
             default_image=default_image or DEFAULT_SANDBOX_IMAGE,
             workspace_root=workspace_root or str(default_workspace_root()),
+            native_executor_image=os.getenv(
+                "CODE_AGENT_NATIVE_AGENT_EXECUTOR_IMAGE", DEFAULT_NATIVE_AGENT_IMAGE
+            ),
         ),
         worker=RuntimeWorkerManifest(
             worker_type=_enum_value(worker_type),

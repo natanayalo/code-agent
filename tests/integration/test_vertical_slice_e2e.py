@@ -11,6 +11,7 @@ from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner
 from temporalio.worker import Worker as TemporalWorker
 
+import workers.native_agent_runner as native_agent_runner
 from db.enums import TimelineEventType
 from db.models import Base, Task, TaskTimelineEvent, WorkerRun
 from orchestrator.execution import TaskExecutionService, TaskSubmission
@@ -21,6 +22,7 @@ from orchestrator.temporal.command_dispatcher import TemporalCommandDispatcher
 from orchestrator.temporal.workflows import TaskExecutionWorkflow
 from repositories import create_engine_from_url, create_session_factory, session_scope
 from sandbox import DockerShellCommandResult, DockerShellSession
+from tests.native_agent_test_doubles import LocalNativeAgentRunner
 from workers import CodexCliWorker
 from workers.cli_runtime import CliRuntimeAdapter, CliRuntimeStep
 
@@ -79,6 +81,7 @@ def session_factory(tmp_path: Path):
 async def test_vertical_slice_e2e_happy_path(session_factory, tmp_path: Path, monkeypatch):
     """The full stack should ingest a task, run it in a sandbox, and persist the result."""
     monkeypatch.setattr("sandbox.workspace.default_workspace_root", lambda: tmp_path)
+    monkeypatch.setattr(native_agent_runner, "DockerNativeAgentExecutor", LocalNativeAgentRunner)
     if not _docker_available():
         pytest.skip("Docker daemon is unavailable")
 

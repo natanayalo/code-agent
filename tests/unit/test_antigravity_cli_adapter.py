@@ -81,6 +81,40 @@ def test_antigravity_adapter_from_env_builds_prompt_command_and_scoped_env(tmp_p
     assert adapter.env == {"XDG_RUNTIME_DIR": "/tmp/runtime"}
 
 
+def test_antigravity_adapter_omits_auto_model_to_use_provider_default(tmp_path: Path) -> None:
+    adapter = AntigravityCliRuntimeAdapter(
+        executable="/opt/bin/agy",
+        model="auto-gemini-2.5",
+    )
+
+    assert adapter.build_native_command(prompt="do the work", cwd=tmp_path) == [
+        "/opt/bin/agy",
+        "-p",
+        "do the work",
+    ]
+
+
+def test_antigravity_adapter_uses_lowest_cost_default_model(tmp_path: Path) -> None:
+    adapter = AntigravityCliRuntimeAdapter(executable="/opt/bin/agy")
+
+    assert adapter.build_native_command(prompt="do the work", cwd=tmp_path) == [
+        "/opt/bin/agy",
+        "-p",
+        "do the work",
+        "--model",
+        "gemini-3.5-flash-low",
+    ]
+
+
+def test_antigravity_adapter_from_env_uses_lowest_cost_default_model(tmp_path: Path) -> None:
+    adapter = AntigravityCliRuntimeAdapter.from_env({})
+
+    assert adapter.build_native_command(prompt="do the work", cwd=tmp_path)[-2:] == [
+        "--model",
+        "gemini-3.5-flash-low",
+    ]
+
+
 def test_antigravity_settings_generation_merges_workspace_settings(tmp_path: Path) -> None:
     agent_home = tmp_path / ".agent_home"
     settings_dir = agent_home / ".gemini" / "antigravity-cli"
@@ -243,6 +277,7 @@ print(json.dumps({"response": {"status": "passed", "summary": args.prompt}}))
         "native-agent-stdout",
         "native-agent-stderr",
         "native-agent-diff",
+        "native-isolation-manifest",
     }
 
 
@@ -257,6 +292,7 @@ import argparse
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-p", required=True)
+parser.add_argument("--model")
 parser.parse_args()
 print("No changes needed.")
 """,

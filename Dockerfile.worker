@@ -1,5 +1,7 @@
 FROM python:3.12-slim
 
+ARG ANTIGRAVITY_CLI_VERSION=1.1.13
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_CERT=/etc/ssl/certs/ca-certificates.crt \
@@ -31,9 +33,15 @@ RUN set -eu; \
     rm -rf /tmp/docker /tmp/docker.tgz; \
     npm install -g @openai/codex && \
     npm cache clean --force && \
-    curl -fsSL https://antigravity.google/cli/install.sh > /tmp/install.sh && \
-    bash /tmp/install.sh -d /usr/local/bin && \
-    rm /tmp/install.sh && \
+    case "$arch" in \
+      amd64) antigravity_url="https://storage.googleapis.com/antigravity-public/antigravity-cli/${ANTIGRAVITY_CLI_VERSION}-6057583128215552/linux-x64/cli_linux_x64.tar.gz"; antigravity_sha512="89c6881b6c1999cb8236e7181c2192ae8f372b0413396c0f7bcff83d27ac9c0cc1202795cc0d629ec1ecbf4937d1c294cf4f5e4f9f8e05b1e972e27198313442" ;; \
+      arm64) antigravity_url="https://storage.googleapis.com/antigravity-public/antigravity-cli/${ANTIGRAVITY_CLI_VERSION}-6057583128215552/linux-arm/cli_linux_arm64.tar.gz"; antigravity_sha512="d2f3642873e3283265ebf4d4e2cc8c3652dff5a0b193a33ebfe0dded68521dd02b4c28ed92ff54784f6a6267e95c807b4d8194e8a6d619d4348638ab5c810d44" ;; \
+    esac; \
+    curl -fsSL "$antigravity_url" -o /tmp/antigravity.tar.gz; \
+    echo "$antigravity_sha512  /tmp/antigravity.tar.gz" | sha512sum -c -; \
+    tar -xzf /tmp/antigravity.tar.gz -C /tmp antigravity; \
+    install -m 0755 /tmp/antigravity /usr/local/bin/agy; \
+    rm -f /tmp/antigravity.tar.gz /tmp/antigravity && \
     rm -rf /var/lib/apt/lists/*
 
 RUN git config --system --add safe.directory '*'

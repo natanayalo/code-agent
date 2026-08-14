@@ -5,7 +5,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import workers.native_agent_runner as native_agent_runner
 from db.enums import WorkerRuntimeMode
+from tests.native_agent_test_doubles import LocalNativeAgentRunner
 from tests.unit.test_gemini_cli_worker import (
     _FakeContainerManager,
     _FakeWorkspaceManager,
@@ -45,7 +47,8 @@ sys.exit(0)
         runtime_adapter=MagicMock(env={}, executable="gemini", model="gemini-pro"),
         workspace_manager=_FakeWorkspaceManager(workspace),
         container_manager=_FakeContainerManager(_make_container(workspace)),
-        # We'll use the real runner but mock the environment to find our fake binary
+        # The fake provider is intentionally host-local, so this test explicitly
+        # injects a test runner rather than relying on production Docker behavior.
     )
 
     # We need to ensure the worker uses our fake binary.
@@ -53,6 +56,7 @@ sys.exit(0)
     # We'll patch the environment used by run_native_agent.
 
     with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(native_agent_runner, "DockerNativeAgentExecutor", LocalNativeAgentRunner)
         current_path = os.environ.get("PATH", "")
         new_path = f"{bin_dir}{os.pathsep}{tmp_path}"
         if current_path:
@@ -111,6 +115,7 @@ sys.exit(1)
     )
 
     with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(native_agent_runner, "DockerNativeAgentExecutor", LocalNativeAgentRunner)
         current_path = os.environ.get("PATH", "")
         new_path = f"{bin_dir}{os.pathsep}{tmp_path}"
         if current_path:

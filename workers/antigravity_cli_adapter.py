@@ -38,6 +38,7 @@ AntigravityArtifactReviewPolicy = Literal[
 ]
 
 DEFAULT_ANTIGRAVITY_EXECUTABLE: Final[str] = "agy"
+DEFAULT_ANTIGRAVITY_MODEL: Final[str] = "gemini-3.5-flash-low"
 DEFAULT_ANTIGRAVITY_TOOL_PERMISSION: Final[AntigravityToolPermission] = "proceed-in-sandbox"
 DEFAULT_ANTIGRAVITY_ARTIFACT_REVIEW_POLICY: Final[AntigravityArtifactReviewPolicy] = "agent-decides"
 
@@ -79,6 +80,11 @@ def _normalize_optional_text(value: str | None) -> str | None:
         return None
     stripped = value.strip()
     return stripped or None
+
+
+def _uses_provider_default_model(model: str | None) -> bool:
+    """Return whether configuration delegates model selection to Antigravity."""
+    return bool(model and model.lower().startswith("auto-"))
 
 
 def build_antigravity_settings(
@@ -137,7 +143,7 @@ class AntigravityCliRuntimeAdapter(CliRuntimeAdapter):
         self,
         *,
         executable: str = DEFAULT_ANTIGRAVITY_EXECUTABLE,
-        model: str | None = None,
+        model: str | None = DEFAULT_ANTIGRAVITY_MODEL,
         request_timeout_seconds: int = DEFAULT_GEMINI_REQUEST_TIMEOUT_SECONDS,
         tool_permission: str = DEFAULT_ANTIGRAVITY_TOOL_PERMISSION,
         artifact_review_policy: str = DEFAULT_ANTIGRAVITY_ARTIFACT_REVIEW_POLICY,
@@ -167,7 +173,8 @@ class AntigravityCliRuntimeAdapter(CliRuntimeAdapter):
                 resolved_env.get("CODE_AGENT_GEMINI_CLI_BIN", DEFAULT_ANTIGRAVITY_EXECUTABLE),
             ),
             model=resolved_env.get(ANTIGRAVITY_MODEL_ENV_VAR)
-            or resolved_env.get("CODE_AGENT_GEMINI_MODEL"),
+            or resolved_env.get("CODE_AGENT_GEMINI_MODEL")
+            or DEFAULT_ANTIGRAVITY_MODEL,
             request_timeout_seconds=coerce_positive_int(
                 resolved_env.get(ANTIGRAVITY_TIMEOUT_ENV_VAR)
                 or resolved_env.get("CODE_AGENT_GEMINI_TIMEOUT_SECONDS"),
@@ -192,7 +199,7 @@ class AntigravityCliRuntimeAdapter(CliRuntimeAdapter):
     ) -> list[str]:
         """Build the documented one-shot Antigravity CLI command."""
         command = [self.executable, "-p", prompt]
-        if self.model is not None:
+        if self.model is not None and not _uses_provider_default_model(self.model):
             command.extend(["--model", self.model])
         return command
 

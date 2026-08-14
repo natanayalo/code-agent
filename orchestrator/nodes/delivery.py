@@ -28,6 +28,7 @@ from orchestrator.nodes.utils import (
 )
 from orchestrator.runtime_manifest import build_runtime_manifest
 from orchestrator.state import OrchestratorState
+from tools import ToolPermissionLevel
 from workers.base import Worker, WorkerRequest, WorkerResult
 
 logger = logging.getLogger(__name__)
@@ -243,7 +244,12 @@ def _build_delivery_worker_request(
         branch=state.task.branch,
         workspace_id=state.dispatch.workspace_id,
         task_text=prompt,
-        constraints=dict(state.task.constraints or {}),
+        constraints={
+            **(state.task.constraints or {}),
+            # Delivery is the explicit, auditable capability grant that permits
+            # the native executor to receive the task's GitHub token.
+            "granted_permission": ToolPermissionLevel.GIT_PUSH_OR_DEPLOY.value,
+        },
         budget=budget,
         network_enabled=True,
         secrets={

@@ -6,7 +6,7 @@ import json
 import logging
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -48,6 +48,7 @@ from workers.native_agent_runner import (
     NativeAgentRunRequest,
     run_native_agent,
 )
+from workers.native_agent_security import native_github_credentials
 from workers.prompt import build_system_prompt
 from workers.review import ReviewResult
 
@@ -338,6 +339,8 @@ class CodexCliWorkerNativeMixin:
         """Classify failure kind for native-agent outcomes."""
         if native_result.status == "success":
             return None
+        if "READ_ONLY_VIOLATION" in native_result.summary:
+            return "read_only_violation"
         if native_result.timed_out:
             return "timeout"
         summary = build_failure_summary(
@@ -425,6 +428,12 @@ class CodexCliWorkerNativeMixin:
             redactor=SecretRedactor(list((request.secrets or {}).values())),
             response_format=request.response_format,
             response_schema=request.response_schema,
+            read_only_workspace=request.read_only or bool(request.constraints.get("read_only")),
+            # Provider transport is always constrained to the executor's HTTPS
+            # proxy. This is distinct from generic tool-network capability.
+            network_enabled=True,
+            github_credentials=native_github_credentials(request),
+            provider_auth_source=Path("/root/.codex"),
         )
         return run_request, sandbox_metadata
 
@@ -451,6 +460,7 @@ class CodexCliWorkerNativeMixin:
         run_request, sandbox_metadata = self._prepare_native_agent_run_request(
             request, workspace, runtime_settings, runtime_mode, system_prompt_override
         )
+        run_request = replace(run_request, cancel_requested=cancel_token)
         native_result = run_native_agent(run_request)
 
         summary = build_failure_summary(

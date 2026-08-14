@@ -262,7 +262,7 @@ async def test_singleton_merge_projects_runtime_manifest_into_parent_state(
         assert merged.dispatch.runtime_manifest is not None
         assert merged.dispatch.runtime_manifest["service"] == {
             "service_name": "code-agent",
-            "schema_version": 1,
+            "schema_version": 2,
             "environment": "m25-6-test",
             "build_sha": "abc123",
         }

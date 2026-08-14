@@ -75,7 +75,7 @@ fi
 
 if [ ! -f "$CODE_AGENT_ANTIGRAVITY_AUTH_DIR/antigravity-cli/antigravity-oauth-token" ]; then
   echo "[run-production-like][warn] Antigravity auth token was not found." >&2
-  echo "[run-production-like][warn] Antigravity worker may fail until you run 'agy auth login' on host." >&2
+  echo "[run-production-like][warn] Antigravity worker may fail until you run scripts/bootstrap_antigravity_auth.sh with CODE_AGENT_ANTIGRAVITY_AUTH_DIR set and complete its OAuth flow." >&2
 fi
 
 if [ "$CODE_AGENT_CODEX_SANDBOX" = "read-only" ] && [ "$ALLOW_READ_ONLY_SANDBOX" != "1" ]; then

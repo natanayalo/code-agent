@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -38,6 +39,7 @@ class NativeAgentRunResult:
     stderr: str = ""
     json_payload: dict[str, Any] | None = None
     friction_reports: list[dict[str, Any]] = field(default_factory=list)
+    termination_reason: Literal["completed", "timeout", "cancelled", "startup_error"] = "completed"
 
 
 @dataclass(frozen=True)
@@ -68,3 +70,9 @@ class NativeAgentRunRequest:
     response_format: Literal["text", "json"] = "text"
     response_schema: dict[str, Any] | None = None
     span_kind: str = SPAN_KIND_LLM
+    read_only_workspace: bool = False
+    cancel_requested: Callable[[], bool] | None = None
+    process_runner: Any | None = None
+    network_enabled: bool = True
+    github_credentials: dict[str, str] = field(default_factory=dict)
+    provider_auth_source: Path | None = None

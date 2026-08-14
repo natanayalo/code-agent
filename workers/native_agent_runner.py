@@ -6,7 +6,6 @@ import json
 import logging
 import os
 import shlex
-import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -21,6 +20,12 @@ from apps.observability import (
     set_current_span_attribute,
     start_optional_span,
     with_span_kind,
+)
+from sandbox.native_agent_executor import (
+    DockerNativeAgentExecutor,
+    NativeAgentExecutorError,
+    NativeAgentProcessRunner,
+    native_executor_workspace_handle,
 )
 from sandbox.redact import SecretRedactor, sanitize_command
 from sandbox.scratch import node_agent_home, node_run_root
@@ -168,16 +173,11 @@ def _build_effective_env(request: NativeAgentRunRequest) -> dict[str, str]:
                 continue
             effective_env[k] = v
 
-    if request.scratch_namespace:
-        for key, source in auth_home_overrides.items():
-            target = agent_home / (".codex" if key == "CODEX_HOME" else ".gemini")
-            _copy_provider_auth_home(Path(source), target)
-
     effective_env.update(
         {
             "HOME": agent_home_value,
-            "CODEX_HOME": str(agent_home / ".codex"),
-            "GEMINI_HOME": str(agent_home / ".gemini"),
+            "CODEX_HOME": auth_home_overrides.get("CODEX_HOME", str(agent_home / ".codex")),
+            "GEMINI_HOME": auth_home_overrides.get("GEMINI_HOME", str(agent_home / ".gemini")),
             "CODE_AGENT_ENABLE_TRACING": "0",
             "CODE_AGENT_ENABLE_TASK_SERVICE": "0",
             "CODE_AGENT_INDEPENDENT_VERIFIER_ENABLED": "0",
@@ -187,23 +187,7 @@ def _build_effective_env(request: NativeAgentRunRequest) -> dict[str, str]:
     )
     if "DBUS_SESSION_BUS_ADDRESS" not in effective_env and "DBUS_SESSION_BUS_ADDRESS" in os.environ:
         effective_env["DBUS_SESSION_BUS_ADDRESS"] = os.environ["DBUS_SESSION_BUS_ADDRESS"]
-    if not request.scratch_namespace:
-        effective_env.update(auth_home_overrides)
     return effective_env
-
-
-def _copy_provider_auth_home(source: Path, target: Path) -> None:
-    """Copy only provider authentication/config files into a node-local home."""
-    try:
-        if source.resolve() == target.resolve():
-            return
-    except OSError:
-        return
-    target.mkdir(parents=True, exist_ok=True)
-    for name in ("auth.json", "config.toml", "settings.json"):
-        candidate = source / name
-        if candidate.is_file():
-            shutil.copy2(candidate, target / name)
 
 
 def _build_friction_report_dict(
@@ -532,7 +516,7 @@ def _execute_native_agent_subprocess(
     artifact_root: Path,  # type: ignore[name-defined]
     events_path: Path | None,  # type: ignore[name-defined]
     provider_log_path: Path | None = None,  # type: ignore[name-defined]
-) -> subprocess.CompletedProcess[str] | NativeAgentRunResult:
+) -> tuple[subprocess.CompletedProcess[str], str] | NativeAgentRunResult:
     """Run the native agent subprocess with retries for network errors."""
     max_retries = 2
     retry_count = 0
@@ -547,20 +531,32 @@ def _execute_native_agent_subprocess(
                 session_id=request.session_id,
                 kind=request.span_kind,
             ):
-                effective_env = _build_effective_env(request)
-                stdin = None if request.stdin_prompt else subprocess.DEVNULL
-
-                completed = subprocess.run(
-                    request.command,
-                    input=request.prompt if request.stdin_prompt else None,
-                    stdin=stdin,
-                    check=False,
-                    capture_output=True,
-                    text=True,
-                    cwd=repo_path,
-                    env=inject_w3c_trace_context_env(effective_env),
-                    timeout=request.timeout_seconds,
+                effective_env = inject_w3c_trace_context_env(_build_effective_env(request))
+                runner: NativeAgentProcessRunner = (
+                    request.process_runner
+                    if request.process_runner is not None
+                    else DockerNativeAgentExecutor()
                 )
+                execution = runner.run(
+                    command=request.command,
+                    prompt=request.prompt if request.stdin_prompt else None,
+                    workspace=native_executor_workspace_handle(
+                        workspace_path=request.workspace_path,
+                        repo_path=repo_path,
+                        task_id=request.task_id,
+                    ),
+                    artifact_root=artifact_root,
+                    environment=effective_env,
+                    timeout_seconds=request.timeout_seconds,
+                    read_only_workspace=request.read_only_workspace,
+                    scratch_namespace=request.scratch_namespace,
+                    cancel_requested=request.cancel_requested,
+                    redactor=request.redactor,
+                    network_enabled=request.network_enabled,
+                    github_credentials=request.github_credentials,
+                    provider_auth_source=request.provider_auth_source,
+                )
+                completed = execution.completed
                 llm_output, llm_metadata = _split_llm_output_and_metadata(completed.stdout or "")
                 set_llm_span_output(llm_output)
                 _process_llm_metadata(llm_metadata)
@@ -573,7 +569,57 @@ def _execute_native_agent_subprocess(
                 retry_count += 1
                 continue
 
-            return completed
+            if execution.termination_reason == "timeout":
+                _retry, timeout_result = _handle_native_agent_timeout(
+                    request,
+                    subprocess.TimeoutExpired(
+                        request.command,
+                        request.timeout_seconds,
+                        completed.stdout,
+                        completed.stderr,
+                    ),
+                    retry_count,
+                    max_retries,
+                    command_text,
+                    started_at,
+                    artifact_root,
+                    events_path,
+                    provider_log_path,
+                )
+                if timeout_result is None:
+                    timeout_result = _finalize_native_agent_run(
+                        request=request,
+                        status="error",
+                        summary="Native agent executor timed out.",
+                        command_text=command_text,
+                        started_at=started_at,
+                        timed_out=True,
+                        termination_reason="timeout",
+                    )
+                timeout_result.termination_reason = "timeout"
+                return timeout_result
+            if execution.termination_reason == "cancelled":
+                return _finalize_native_agent_run(
+                    request=request,
+                    status="error",
+                    summary="Native agent execution was cancelled by the orchestrator.",
+                    command_text=command_text,
+                    started_at=started_at,
+                    timed_out=False,
+                    exit_code=completed.returncode,
+                    stdout=completed.stdout or "",
+                    stderr=completed.stderr or "",
+                    artifacts=_collect_standard_artifacts(
+                        artifact_root=artifact_root,
+                        stdout_text=completed.stdout or "",
+                        stderr_text=completed.stderr or "",
+                        events_path=events_path,
+                        provider_log_path=provider_log_path,
+                        redactor=request.redactor,
+                    ),
+                    termination_reason="cancelled",
+                )
+            return completed, execution.termination_reason
         except subprocess.TimeoutExpired as exc:
             should_retry, result = _handle_native_agent_timeout(
                 request,
@@ -591,6 +637,16 @@ def _execute_native_agent_subprocess(
                 continue
             assert result is not None
             return result
+        except NativeAgentExecutorError as exc:
+            return _finalize_native_agent_run(
+                request=request,
+                status="error",
+                summary=f"Native agent isolated executor failed: {exc}",
+                command_text=command_text,
+                started_at=started_at,
+                timed_out=False,
+                termination_reason="startup_error",
+            )
 
     raise RuntimeError("Unexpected escape from retry loop")
 
@@ -657,6 +713,15 @@ def _build_native_agent_artifacts(
             redactor=request.redactor,
         )
     )
+    isolation_manifest = artifact_root / "native-isolation-manifest.json"
+    if isolation_manifest.is_file():
+        artifacts.append(
+            ArtifactReference(
+                name="native-isolation-manifest",
+                uri=isolation_manifest.as_uri(),
+                artifact_type="security_manifest",
+            )
+        )
 
     final_message_artifact = (
         _copy_artifact(
@@ -888,7 +953,7 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
         if isinstance(result_or_completed, NativeAgentRunResult):
             return result_or_completed
 
-        completed = result_or_completed
+        completed, termination_reason = result_or_completed
         if completed is None:
             # Should be unreachable if the loop exited via break
             return _finalize_native_agent_run(
@@ -900,7 +965,7 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
                 timed_out=False,
             )
 
-        return _collect_native_agent_results(
+        result = _collect_native_agent_results(
             request=request,
             completed=completed,
             repo_path=repo_path,
@@ -912,3 +977,18 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
             provider_log_path=provider_log_path,
             final_message_path=final_message_path,
         )
+        result.termination_reason = termination_reason  # type: ignore[assignment]
+        if request.read_only_workspace and (result.files_changed or result.diff_text):
+            result.status = "failure"
+            result.summary = (
+                "READ_ONLY_VIOLATION: native executor reported workspace mutation evidence."
+            )
+            result.friction_reports.append(
+                _build_friction_report_dict(
+                    source="sandbox",
+                    description="Read-only native execution produced repository mutation evidence.",
+                    impact="blocked",
+                    context={"files_changed": result.files_changed},
+                )
+            )
+        return result

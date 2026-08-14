@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from apps.observability import SPAN_KIND_TOOL
 from sandbox import (
@@ -16,6 +19,7 @@ from sandbox import (
     WorkspaceManager,
     WorkspaceRequest,
 )
+from sandbox.native_agent_executor import NativeAgentExecution
 from sandbox.redact import SecretRedactor
 from sandbox.workspace import default_workspace_root
 from workers.async_runner import run_sync_with_cancellable_executor
@@ -28,6 +32,37 @@ from workers.native_agent_runner import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class _TrustedDockerExecRunner:
+    """Run deterministic worker-owned `docker exec` control commands.
+
+    This is intentionally not available to Codex or Antigravity. Those
+    provider invocations always use DockerNativeAgentExecutor; this narrow
+    runner only controls an already-provisioned sandbox container.
+    """
+
+    def run(self, **kwargs: Any) -> NativeAgentExecution:
+        artifact_root = kwargs["artifact_root"]
+        manifest_path = artifact_root / "trusted-docker-exec-manifest.json"
+        completed = subprocess.run(
+            kwargs["command"],
+            input=kwargs["prompt"],
+            cwd=kwargs["workspace"].repo_path,
+            env=dict(kwargs["environment"]),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=kwargs["timeout_seconds"],
+        )
+        manifest_path.write_text(
+            json.dumps({"execution_backend": "trusted_docker_exec"}) + "\n",
+            encoding="utf-8",
+        )
+        return NativeAgentExecution(completed, "completed", manifest_path)
+
+
+_TRUSTED_DOCKER_EXEC_RUNNER = _TrustedDockerExecRunner()
 
 
 def _apply_diff_if_provided(
@@ -65,6 +100,7 @@ def _apply_diff_if_provided(
             redactor=SecretRedactor(list((request.secrets or {}).values())),
             span_kind=SPAN_KIND_TOOL,
             require_observable_result=False,
+            process_runner=_TRUSTED_DOCKER_EXEC_RUNNER,
         )
     )
     setup_commands = [
@@ -170,6 +206,7 @@ def _run_shell_script(
             redactor=SecretRedactor(list((request.secrets or {}).values())),
             span_kind=SPAN_KIND_TOOL,
             require_observable_result=False,
+            process_runner=_TRUSTED_DOCKER_EXEC_RUNNER,
         )
     )
     return _build_shell_worker_result(native_result, setup_commands, cancel_requested)

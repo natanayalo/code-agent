@@ -213,7 +213,8 @@ not a broad repo or workflow rewrite.
 
 ### M28.5A — Sandbox / Trust-Boundary Hardening
 
-Highest priority after M28.
+Active prerequisite. M28 live evidence is paused until this isolation gate has
+merged and passed its verification suite.
 
 Current concern: the Temporal worker mounts the host Docker socket, launches
 native provider execution, mounts Codex/Antigravity authentication, and may
@@ -221,19 +222,17 @@ select trusted Codex `danger-full-access` inside the current worker-controlled
 container topology. This concentrates container-runtime authority, provider
 credentials, and native execution too closely.
 
-Required direction:
+Implemented direction for this slice:
 
 ```text
-Temporal worker / control plane
+Trusted Temporal worker (Docker authority)
         ↓
-narrow Sandbox Broker / Sandbox Runtime API
+one-shot per-task Docker executor + task-private HTTPS proxy
         ↓
-isolated execution environments
-        ↓
-Codex / Antigravity
+Codex / Antigravity native CLI
 ```
 
-Only sandbox infrastructure should need container-runtime authority. Native
+Only trusted sandbox infrastructure should need container-runtime authority. Native
 agents must not access the container-control interface, unrelated host
 resources, or broad infrastructure credentials. Define the threat boundary
 before choosing a dedicated broker, rootless Docker, user namespaces,
@@ -252,7 +251,7 @@ Exit criteria:
 
 - documented threat model across control plane, sandbox infrastructure,
   native process, workspace, network, provider auth, and artifact paths
-- native agent cannot use the container-control interface
+- native agent cannot use the container-control interface or host socket
 - credentials follow least-privilege exposure
 - execution contracts and persisted evidence avoid raw secret propagation
 - existing supported task reliability still passes focused and end-to-end

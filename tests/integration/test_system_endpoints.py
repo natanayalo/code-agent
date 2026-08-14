@@ -76,10 +76,14 @@ def test_get_runtime_manifest_returns_operating_contract(
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
     assert data["service"]["service_name"] == "code-agent"
-    assert data["service"]["schema_version"] == 1
+    assert data["service"]["schema_version"] == 2
     assert data["sandbox"] == {
         "default_image": "manifest-test-image",
         "workspace_root": "/tmp/manifest-workspace-root",
+        "native_execution_backend": "docker_native_agent_executor",
+        "native_executor_image": "code-agent-worker",
+        "native_network_policy": "public_https_via_private_proxy",
+        "provider_auth_scope": "task_scoped_staged_home",
     }
     assert data["worker"]["worker_type"] is None
     assert data["task"]["read_only"] is False
