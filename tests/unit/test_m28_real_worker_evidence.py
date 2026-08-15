@@ -20,13 +20,16 @@ from evaluation.m28_real_worker_evidence import (
     write_public_report,
 )
 from evaluation.m28_real_worker_models import BundleIdentity, PairMeasurements, PrivatePairCapture
+from scripts.e2e.m28_real_worker_capture import (
+    _command_markers_from_artifacts,
+    _compact_session_context,
+)
 from scripts.e2e.run_m28_real_worker_eval import (
     _assert_assisted_memory_delivery,
     _assert_fixture_safe,
-    _command_markers_from_artifacts,
-    _compact_session_context,
     _external_thread_id,
     _fixture_source,
+    _parser,
     _task_text,
 )
 
@@ -284,6 +287,33 @@ def test_bundle_scoped_thread_and_fixture_ownership_protect_cold_runs() -> None:
         _assert_fixture_safe(
             _Client(second_source), "project", payload, "https://example.test/repo", first_source
         )
+
+
+def test_provider_pairs_share_scenario_scoped_fixture_ownership() -> None:
+    suite = load_suite()
+    codex = next(case for case in suite.cases if case.case_id == "stale-reverification-codex")
+    antigravity = next(
+        case for case in suite.cases if case.case_id == "stale-reverification-antigravity"
+    )
+    useful = next(case for case in suite.cases if case.case_id == "useful-hit-codex")
+
+    assert _fixture_source("bundle", codex) == _fixture_source("bundle", antigravity)
+    assert _fixture_source("bundle", codex) != _fixture_source("bundle", useful)
+
+
+def test_cli_accepts_batch_collection_arguments(tmp_path: Path) -> None:
+    args = _parser().parse_args(
+        [
+            "run-batch",
+            "--bundle-dir",
+            str(tmp_path / "private"),
+            "--repo-url",
+            "https://example.test/disposable.git",
+        ]
+    )
+
+    assert args.command == "run-batch"
+    assert args.bundle_dir == tmp_path / "private"
 
 
 def test_only_useful_and_conflict_tasks_request_an_accepted_memory_command() -> None:

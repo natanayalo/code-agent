@@ -12,7 +12,6 @@ import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlparse
 
 import httpx
 
@@ -24,24 +23,15 @@ from evaluation.m28_real_worker_evidence import (
     persist_pair,
     write_public_report,
 )
-from evaluation.m28_real_worker_models import (
-    BundleIdentity,
-    PairMeasurements,
-    PrivatePairCapture,
-    RealWorkerPairCase,
+from evaluation.m28_real_worker_models import BundleIdentity, PrivatePairCapture, RealWorkerPairCase
+from scripts.e2e.m28_real_worker_capture import (
+    _artifact_uris,
+    _compact_session_context,
+    _measure,
 )
 
 PRIVATE_PREFIX = "m28-real-worker-eval:"
 TERMINAL = {"completed", "failed", "cancelled"}
-COMPACT_SESSION_KEYS = (
-    "active_goal",
-    "decisions_made",
-    "identified_risks",
-    "files_touched",
-)
-EVIDENCE_ARTIFACT_NAMES = frozenset(
-    {"native-agent-stdout", "native-agent-events", "native-agent-provider-log"}
-)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -59,6 +49,10 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--case-id", required=True)
     _add_live_arguments(run)
     _add_repo_url_argument(run)
+    batch = commands.add_parser("run-batch")
+    batch.add_argument("--bundle-dir", type=Path, required=True)
+    _add_live_arguments(batch)
+    _add_repo_url_argument(batch)
     cleanup = commands.add_parser("cleanup")
     cleanup.add_argument("--bundle-dir", type=Path, required=True)
     _add_live_arguments(cleanup)
@@ -115,8 +109,8 @@ def _external_thread_id(delivery_namespace: str, case: RealWorkerPairCase) -> st
 
 
 def _fixture_source(delivery_namespace: str, case: RealWorkerPairCase) -> str:
-    """Tag fixtures with the exact bundle that may safely resume them."""
-    digest = hashlib.sha256(f"{delivery_namespace}:{case.case_id}".encode()).hexdigest()[:16]
+    """Tag fixtures by bundle and scenario so provider pairs can share one fixture."""
+    digest = hashlib.sha256(f"{delivery_namespace}:{case.scenario}".encode()).hexdigest()[:16]
     return f"{PRIVATE_PREFIX}{digest}"
 
 
@@ -302,13 +296,6 @@ def _wait_for_task(client: httpx.Client, task_id: str, timeout_seconds: int) -> 
     raise TimeoutError(f"task did not reach terminal state: {task_id}")
 
 
-def _memory_event(task: dict[str, Any]) -> dict[str, Any]:
-    for event in reversed(task.get("timeline") or []):
-        if event.get("event_type") == "memory_loaded" and isinstance(event.get("payload"), dict):
-            return event["payload"]
-    return {}
-
-
 def _native_memory_delivery(task: dict[str, Any]) -> dict[str, Any]:
     """Read the value-free native prompt delivery receipt from a task snapshot."""
     budget_usage = (task.get("latest_run") or {}).get("budget_usage") or {}
@@ -327,82 +314,6 @@ def _assert_assisted_memory_delivery(task: dict[str, Any], case: RealWorkerPairC
     missing = receipt.get("missing_accepted_memory_keys") or []
     if key not in delivered or key in missing or receipt.get("complete") is not True:
         raise ValueError(f"assisted memory was not delivered to native worker prompt: {key}")
-
-
-def _compact_session_context(value: object) -> dict[str, Any]:
-    """Keep only the compact session fields captured in private evidence."""
-    if not isinstance(value, dict):
-        return {}
-    return {key: value.get(key) for key in COMPACT_SESSION_KEYS}
-
-
-def _artifact_uris(task: dict[str, Any]) -> list[str]:
-    """Return private run artifact locations without copying them to public reports."""
-    artifacts = (task.get("latest_run") or {}).get("artifacts") or []
-    return sorted(
-        str(artifact["uri"])
-        for artifact in artifacts
-        if isinstance(artifact, dict) and artifact.get("uri")
-    )
-
-
-def _command_markers_from_artifacts(task: dict[str, Any]) -> list[str]:
-    """Read native event/log artifacts privately; wrapper commands omit tool calls."""
-    markers = (
-        "m28-useful_hit-marker",
-        "m28-irrelevant_rejection-marker",
-        "m28-stale_reverification-marker",
-        "m28-conflict_handling-marker",
-    )
-    artifacts = (task.get("latest_run") or {}).get("artifacts") or []
-    artifact_text = ""
-    for artifact in artifacts:
-        if not isinstance(artifact, dict) or artifact.get("name") not in EVIDENCE_ARTIFACT_NAMES:
-            continue
-        parsed = urlparse(str(artifact.get("uri") or ""))
-        if parsed.scheme != "file":
-            continue
-        try:
-            artifact_text += Path(unquote(parsed.path)).read_text(
-                encoding="utf-8", errors="replace"
-            )
-        except OSError:
-            continue
-    return [marker for marker in markers if marker in artifact_text]
-
-
-def _measure(task: dict[str, Any], *, session_continuity: bool = False) -> PairMeasurements:
-    event = _memory_event(task)
-    markers = _command_markers_from_artifacts(task)
-    interactions = task.get("interactions") or []
-    questions = sum(1 for item in interactions if item.get("interaction_type") == "clarification")
-    interventions = sum(
-        1 for item in interactions if item.get("status") in {"resolved", "rejected"}
-    )
-    created = task.get("created_at")
-    updated = task.get("updated_at")
-    elapsed = None
-    if created and updated:
-        elapsed = max(
-            0.0, (datetime.fromisoformat(updated) - datetime.fromisoformat(created)).total_seconds()
-        )
-    return PairMeasurements(
-        terminal_status=str(task.get("status")),
-        memory_keys=sorted(event.get("accepted_keys") or []),
-        suppressed_keys=sorted(event.get("suppressed_keys") or []),
-        accepted_reason_codes=sorted(
-            {
-                reason
-                for item in event.get("accepted_details") or []
-                for reason in item.get("reason_codes") or []
-            }
-        ),
-        command_markers=markers,
-        questions=questions,
-        interventions=interventions,
-        time_to_terminal_seconds=elapsed,
-        session_continuity=session_continuity,
-    )
 
 
 def run_pair(args: argparse.Namespace) -> int:
@@ -472,6 +383,116 @@ def run_pair(args: argparse.Namespace) -> int:
     return 0
 
 
+def _batch_fixtures(
+    cases: list[RealWorkerPairCase], delivery_namespace: str, repo_url: str
+) -> dict[str, list[tuple[str, dict[str, Any]]]]:
+    fixtures_by_case = {
+        case.case_id: _fixture_payloads(case, source=_fixture_source(delivery_namespace, case))
+        for case in cases
+    }
+    for fixtures in fixtures_by_case.values():
+        for category, payload in fixtures:
+            if category == "project":
+                payload["repo_url"] = repo_url
+    return fixtures_by_case
+
+
+def _collect_cold_wave(
+    client: httpx.Client,
+    cases: list[RealWorkerPairCase],
+    fixtures_by_case: dict[str, list[tuple[str, dict[str, Any]]]],
+    args: argparse.Namespace,
+    delivery_namespace: str,
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    for case in cases:
+        source = _fixture_source(delivery_namespace, case)
+        for category, payload in fixtures_by_case[case.case_id]:
+            _assert_fixture_safe(client, category, payload, args.repo_url, source)
+    submissions = {
+        case.case_id: _submit(
+            client, case, phase="cold", args=args, delivery_namespace=delivery_namespace
+        )
+        for case in cases
+    }
+    print(f"submitted cold wave: {len(submissions)} task(s)")
+    tasks = {
+        case.case_id: _wait_for_task(
+            client, submissions[case.case_id]["task_id"], args.timeout_seconds
+        )
+        for case in cases
+    }
+    sessions: dict[str, dict[str, Any]] = {}
+    for case in cases:
+        submission = submissions[case.case_id]
+        session = client.get(f"/sessions/{submission['session_id']}")
+        session.raise_for_status()
+        sessions[case.case_id] = _compact_session_context(session.json().get("working_context"))
+        if str(tasks[case.case_id].get("repo_url") or "") != args.repo_url:
+            raise ValueError("task repository does not match the disposable repository URL")
+    return submissions, tasks, sessions
+
+
+def run_batch(args: argparse.Namespace) -> int:
+    """Collect every remaining pair in cold and assisted submission waves."""
+    bundle, suite = load_bundle(args.bundle_dir)
+    cases = [case for case in suite.cases if case.case_id not in bundle.completed_case_ids]
+    if not cases:
+        print("all pairs already captured")
+        return 0
+    delivery_namespace = _delivery_namespace(args.bundle_dir)
+    fixtures_by_case = _batch_fixtures(cases, delivery_namespace, args.repo_url)
+    with _client(args) as client:
+        cold_submissions, cold_tasks, expected_sessions = _collect_cold_wave(
+            client, cases, fixtures_by_case, args, delivery_namespace
+        )
+        for case in cases:
+            for category, payload in fixtures_by_case[case.case_id]:
+                response = client.put(f"/knowledge-base/{category}", json=payload)
+                response.raise_for_status()
+        assisted_pre_run_sessions: dict[str, dict[str, Any]] = {}
+        for case in cases:
+            session = client.get(f"/sessions/{cold_submissions[case.case_id]['session_id']}")
+            session.raise_for_status()
+            assisted_pre_run_sessions[case.case_id] = _compact_session_context(
+                session.json().get("working_context")
+            )
+        assisted_submissions = {
+            case.case_id: _submit(
+                client, case, phase="assisted", args=args, delivery_namespace=delivery_namespace
+            )
+            for case in cases
+        }
+        print(f"submitted assisted wave: {len(assisted_submissions)} task(s)")
+        assisted_tasks = {
+            case.case_id: _wait_for_task(
+                client, assisted_submissions[case.case_id]["task_id"], args.timeout_seconds
+            )
+            for case in cases
+        }
+        for case in cases:
+            assisted = assisted_tasks[case.case_id]
+            _assert_assisted_memory_delivery(assisted, case)
+            capture = PrivatePairCapture(
+                case_id=case.case_id,
+                scenario=case.scenario,
+                worker_profile=case.worker_profile,
+                cold_task_id=cold_submissions[case.case_id]["task_id"],
+                assisted_task_id=assisted_submissions[case.case_id]["task_id"],
+                cold=_measure(cold_tasks[case.case_id]),
+                assisted=_measure(
+                    assisted,
+                    session_continuity=bool(expected_sessions[case.case_id])
+                    and assisted_pre_run_sessions[case.case_id] == expected_sessions[case.case_id],
+                ),
+                assisted_pre_run_session_context=assisted_pre_run_sessions[case.case_id],
+                cold_artifact_uris=_artifact_uris(cold_tasks[case.case_id]),
+                assisted_artifact_uris=_artifact_uris(assisted),
+            )
+            persist_pair(args.bundle_dir, capture)
+            print(f"captured pair: {case.case_id}")
+    return 0
+
+
 def cleanup(args: argparse.Namespace) -> int:
     _, suite = load_bundle(args.bundle_dir)
     delivery_namespace = _delivery_namespace(args.bundle_dir)
@@ -518,6 +539,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "run-pair":
             return run_pair(args)
+        if args.command == "run-batch":
+            return run_batch(args)
         if args.command == "cleanup":
             return cleanup(args)
         report = build_report(args.bundle_dir)
