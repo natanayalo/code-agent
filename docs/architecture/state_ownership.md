@@ -37,8 +37,8 @@ This document is the authoritative field-level state ownership contract for
    - `temporal_task_states` exists solely to pass uncommitted `OrchestratorState`
      across activity boundaries during an active workflow run.
    - At terminal workflow completion (`COMPLETED`, `FAILED`, `CANCELLED`),
-     `TemporalTaskState` is deleted on standard terminal paths (with a known
-     exception for initial approval rejection documented below). Relational
+     `TemporalTaskState` is deleted on all terminal paths (including delivery,
+     failure, escalation rejection, and initial approval rejection). Relational
      tables are the permanent record of completed work.
 
 4. **Lifecycle awareness prevents premature state pruning:**
@@ -87,7 +87,7 @@ field to:
 | `review` | `temporal_task_states.state` | `temporal_task_states.state` (not in `artifacts` mid-flight) | `artifacts` (`type="independent_review_result"`) & `worker_runs.artifact_index` | `orchestrator/execution_outcome_service.py` (`_persist_artifacts_for_run`) | Completion loop repair decisions, Dashboard Review tab |
 | `friction_reports` | `temporal_task_states.state` | `temporal_task_states.state` | Ephemeral in Temporal (`persist_friction_proposals=False`); `proposals` (`type=REFLECTION`) when enabled | `orchestrator/execution_improvement_proposal_service.py` | API `/proposals`, Dashboard Proposals tab |
 | `memory_to_persist` | `temporal_task_states.state` | `temporal_task_states.state` | `memory_personal`, `memory_project`, `memory_observations`, `memory_proposals` | Extracted during run; persisted post-commit via `ObservationMemoryBridge` | Read by `persist_memory` activity (`persist_memory_node -> _admit_memory_candidates`) |
-| `progress_updates` | Ephemeral in-memory accumulation | `temporal_task_states.state` (unnecessarily buffered) | Ephemeral (not stored relationally) | `_progress_update()` / state accumulation (separate from `_notify_progress()`) | Legacy state accumulation; product progress notification is independently emitted by `_notify_progress()` |
+| `progress_updates` | Ephemeral in-memory accumulation | Not persisted; activity-local / runtime accumulation only | Ephemeral (not stored relationally) | `_progress_update()` / state accumulation (separate from `_notify_progress()`) | Legacy state accumulation; product progress notification is independently emitted by `_notify_progress()`. Excluded from `temporal_task_states` under Wave 1. |
 | `timeline_events` | `temporal_task_states.state` (active in-memory buffer) | `task_timeline_events` (batch inserted) & `temporal_task_states.state` | `task_timeline_events` table | `orchestrator/execution_outcome_service.py` (`_persist_timeline_events`) | Dashboard/API, **and** `_has_event()` activity idempotency guards |
 | `timeline_persisted_count` | `temporal_task_states.state` | `temporal_task_states.state` | `TaskTimelineRepository.count_by_attempt` | `orchestrator/execution_outcome_service.py` (`_persist_intermediate_state`), reconciled in `_get_current_state` | Timeline batch insertion deduplication cursor |
 | `repair_handoff_requested` | Temporal History & `temporal_task_states.state` | `temporal_task_states.state` | Checkpoint-only (no full terminal relational column; triggers manual handoff timeline event) | Completion loop decisions in `orchestrator/temporal/activities.py` | Delivery activity, manual handoff notifications |
@@ -136,16 +136,14 @@ It is critical to distinguish what the codebase currently supports from the targ
 
 ### 4. Terminal State Cleanup
 
-- Standard terminal paths (`_persist_state()` upon successful delivery, `record_workflow_failure()`, and permission escalation rejection in `_reject_permission_escalation()`) explicitly invoke `TemporalTaskStateRepository.delete(task_id=task_id)`.
-- **Known Exception (Initial Approval Rejection):**
-  - In `persist_rejected_session_state` (`orchestrator/temporal/activities.py:1826-1845`), the activity reads the snapshot to persist compact session state but currently omits the `delete()` call. This leaves an uncleaned `temporal_task_states` row attached to the failed task.
-  - A follow-up code fix will add `TemporalTaskStateRepository.delete()` to `persist_rejected_session_state` to make the "no terminal snapshots remain" invariant 100% universal across all paths.
+- Standard terminal paths (`_persist_state()` upon successful delivery, `record_workflow_failure()`, permission escalation rejection in `_reject_permission_escalation()`, and initial approval rejection in `persist_rejected_session_state()`) explicitly invoke `TemporalTaskStateRepository.delete(task_id=task_id)`.
+- All terminal outcomes guarantee that no orphan `temporal_task_states` rows remain attached to completed, failed, or cancelled tasks.
 
 ---
 
 ## Section 3: Prioritized Reduction Candidates
 
-The 31 fields in `OrchestratorState` are currently serialized into `TemporalTaskState` at every activity boundary. Reduction must follow a strictly prerequisite-gated wave sequence:
+The 31 fields in `OrchestratorState` are defined across workflow steps. Under Wave 1, `progress_updates` is excluded from `TemporalTaskState` snapshots at the persistence boundary, while the remaining 30 fields are serialized across activity boundaries. Further reduction must follow a strictly prerequisite-gated wave sequence:
 
 ```mermaid
 flowchart TD
@@ -170,11 +168,12 @@ flowchart TD
     Wave 1 --> Wave 2 --> Wave 3
 ```
 
-### Wave 1: Immediate Safe Exclusions (Low Risk, Zero Semantic/Control-Flow Consumers)
+### Wave 1: Immediate Safe Exclusions (Completed)
 
 #### 1. `progress_updates`
-- **Current Behavior:** Transient notification strings accumulated in state during execution and serialized into the blob.
+- **Current Behavior:** Transient notification strings accumulated in state during activity execution; excluded from `TemporalTaskState` snapshots at the persistence boundary.
 - **Why Safe to Exclude:** `progress_updates` has no semantic or control-flow consumers in Temporal execution. Some legacy nodes read prior values only to preserve accumulated progress history; product progress notifications are independently constructed and emitted by `_notify_progress()` from explicit `phase`/`summary` arguments.
+- **Status:** **Completed (M28.5B Wave 1)**. `EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS` omits `progress_updates` from all `TemporalTaskState` writes, while runtime `OrchestratorState.progress_updates` defaults to `[]` upon snapshot reload.
 - **Risk Level:** **Low**
 - **Size Impact:** Low
 - **What Breaks if Wrong:** Nothing; no control-flow, persistence, notification, or behavioral dependency exists on previous progress messages.
@@ -286,7 +285,7 @@ To guarantee zero regressions when reducing `TemporalTaskState` serialization in
 | **Coordination & Step** | `current_step`, `current_node_id`, `completion_loop`, `fanout_disabled_for_remainder`, `repair_handoff_requested` | Temporal History / State Checkpoint | Temporal History / `tasks.constraints` (partial) | Retain in Checkpoint | Compact activity control struct |
 | **Ingress & Spec** | `session`, `task`, `task_spec`, `task_kind`, `normalized_task_text`, `repo_profile`, `memory`, `route`, `approval`, `attempt_count` | `tasks`, `sessions`, `human_interactions(type=PERMISSION)` / State Checkpoint | `tasks`, `sessions`, `human_interactions(type=PERMISSION)` | Retain in Checkpoint (reference IDs where feasible) | Read-through from `tasks` table |
 | **Execution Outcomes** | `dispatch`, `result`, `verification`, `review` | `temporal_task_states.state` | `worker_runs`, `artifacts` | Retain in Checkpoint during active turn | Retain until terminal delivery; deleted on completion |
-| **Ephemeral Notifications** | `progress_updates` | Ephemeral in-memory | Ephemeral (not stored relationally) | **Wave 1 (Immediate)** | **Exclude from blob**; use `_notify_progress()` directly |
+| **Ephemeral Notifications** | `progress_updates` | Ephemeral in-memory | Ephemeral (not stored relationally) | **Wave 1 — Completed** | **Excluded from snapshot payload**; runtime accumulation only |
 | **Proposals & Friction** | `friction_reports` | `temporal_task_states.state` | `proposals` (when enabled) / Ephemeral | **Wave 2 (Gated)** | Establish projection policy, then exclude from blob |
 | **Timeline & Events** | `timeline_events`, `timeline_persisted_count` | `temporal_task_states.state` | `task_timeline_events` | **Wave 2 (Gated)** | Refactor `_has_event` to DB/idempotency marker, then exclude `timeline_events` |
 | **Memory & Ephemeral Updates** | `memory_to_persist`, `scout_phase_results`, `session_state_update`, `errors` | `temporal_task_states.state` | `memory_*`, `proposals`, `session_states`, `tasks` | **Wave 2 (Gated)** | Verify/retire legacy activity consumers, then exclude from blob |

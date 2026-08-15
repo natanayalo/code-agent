@@ -194,8 +194,9 @@ def test_executor_cleans_network_when_polling_is_interrupted(tmp_path: Path, mon
     monkeypatch.setattr(
         executor,
         "_cleanup_network",
-        lambda *, network_name, proxy_name: cleanup_calls.append((network_name, proxy_name))
-        or "removed",
+        lambda *, network_name, proxy_name: (
+            cleanup_calls.append((network_name, proxy_name)) or "removed"
+        ),
     )
     monkeypatch.setattr(
         "sandbox.native_agent_executor.subprocess.Popen",

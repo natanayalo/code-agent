@@ -106,6 +106,16 @@ logger = logging.getLogger(__name__)
 
 EXECUTION_CAPACITY_LEASE_SECONDS = 60
 
+EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS: frozenset[str] = frozenset({"progress_updates"})
+
+
+def _serialize_temporal_task_state(state: OrchestratorState) -> dict[str, Any]:
+    """Serialize orchestrator state for Temporal activity handoff snapshot storage.
+
+    Excludes transient fields that are not part of intermediate activity handoff contracts.
+    """
+    return state.model_dump(mode="json", exclude=set(EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS))
+
 
 def _permission_escalation_retry_is_complete(
     task_id: str,
@@ -171,7 +181,7 @@ def _reject_permission_escalation(
         task.constraints = state.task.constraints
         task.status = TaskStatus.IN_PROGRESS
         TemporalTaskStateRepository(session).upsert(
-            task_id=task_id, state=state.model_dump(mode="json")
+            task_id=task_id, state=_serialize_temporal_task_state(state)
         )
         return
     _persist_rejected_session_state(
@@ -239,7 +249,7 @@ def _approve_permission_escalation(
     else:
         state.result = None
     TemporalTaskStateRepository(session).upsert(
-        task_id=task_id, state=state.model_dump(mode="json")
+        task_id=task_id, state=_serialize_temporal_task_state(state)
     )
 
 
@@ -644,7 +654,7 @@ class TaskExecutionActivities:
                 TemporalTaskStateRepository(session).delete(task_id=task_id)
             else:
                 TemporalTaskStateRepository(session).upsert(
-                    task_id=task_id, state=state.model_dump(mode="json")
+                    task_id=task_id, state=_serialize_temporal_task_state(state)
                 )
 
     def _merge_updates(self, state_dict: dict[str, Any], updates: dict[str, Any] | None) -> None:
@@ -1741,7 +1751,7 @@ class TaskExecutionActivities:
                         continuation = "retry_node"
             _project_decomposed_runtime_manifest(state)
             TemporalTaskStateRepository(session).upsert(
-                task_id=task_id, state=state.model_dump(mode="json")
+                task_id=task_id, state=_serialize_temporal_task_state(state)
             )
             return NodeWaveMergeResult(
                 continuation=continuation,
@@ -1842,6 +1852,7 @@ class TaskExecutionActivities:
                     OrchestratorState.model_validate(snapshot.state),
                     initial_approval_rejected=True,
                 )
+                TemporalTaskStateRepository(session).delete(task_id=task_id)
 
         await self.service._run_blocking(_persist)
 
