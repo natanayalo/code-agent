@@ -22,6 +22,14 @@ M28.5B Wave 1 is complete: `progress_updates` is excluded from intermediate
 compatibility is preserved, and terminal snapshot deletion is universal across
 all exit paths including initial approval rejection.
 
+Completed slice: **M28.5B Wave 2 (`timeline_events` slice) — Relational Read-Through & Snapshot Pruning**.
+
+The `timeline_events` slice of M28.5B Wave 2 is complete: `timeline_events` is
+excluded from intermediate `TemporalTaskState` serialization, Postgres
+`task_timeline_events` is established as the single authority with read-through
+rehydration in `_get_current_state()`, deduplication uses current-attempt list-offset
+slicing, and terminal snapshot cleanup is guaranteed on crash retry.
+
 ## Current capabilities
 
 - authenticated API, generic webhook, and Telegram task intake
@@ -123,8 +131,9 @@ Temporal migration and rollback record is in the
 
 ## Next slices only
 
-1. Prepare M28.5B Wave 2 state reduction prerequisites (`friction_reports`,
-   `memory_to_persist`, `timeline_events`) following the field-level state
+1. Continue M28.5B Wave 2 state reduction for remaining candidate fields
+   (`friction_reports`, `memory_to_persist`, `scout_phase_results`,
+   `session_state_update`, `errors`) following the field-level state
    ownership contract in
    [`docs/architecture/state_ownership.md`](architecture/state_ownership.md).
 2. Continue M28.5 execution-architecture foundation work (M28.5A sandbox broker/threat model,

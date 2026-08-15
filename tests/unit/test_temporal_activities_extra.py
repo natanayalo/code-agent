@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -180,6 +181,146 @@ def test_has_event_string_event_type():
     state.timeline_events = [event]
 
     assert activities._has_event(state, TimelineEventType.TASK_INGESTED) is True
+
+
+def test_has_event_task_wide_matches_across_attempts():
+    """Test that _has_event matches task-wide across different attempts (HITL resume)."""
+    activities = _make_activities()
+    from orchestrator.state import TaskTimelineEventState
+
+    event_a0 = TaskTimelineEventState(
+        event_type=TimelineEventType.WORKSPACE_PROVISIONED.value,
+        message="provisioned",
+        sequence_number=0,
+        attempt_number=0,
+    )
+    # Current attempt has advanced to 1 due to lease / resume
+    state = OrchestratorState(
+        task={"task_text": "txt", "repo_url": "url"},
+        attempt_count=1,
+    )
+    state.timeline_events = [event_a0]
+
+    assert activities._has_event(state, TimelineEventType.WORKSPACE_PROVISIONED) is True
+
+
+def test_serialize_temporal_task_state_excludes_timeline_and_progress():
+    """Verify serialization excludes timeline_events/progress_updates but retains cursor."""
+    from orchestrator.state import TaskTimelineEventState
+    from orchestrator.temporal.activities import _serialize_temporal_task_state
+
+    state = OrchestratorState(
+        task={"task_text": "txt", "repo_url": "url"},
+        progress_updates=["step 1", "step 2"],
+        timeline_events=[
+            TaskTimelineEventState(
+                event_type=TimelineEventType.TASK_INGESTED.value,
+                attempt_number=0,
+                sequence_number=0,
+            )
+        ],
+        timeline_persisted_count=42,
+    )
+    serialized = _serialize_temporal_task_state(state)
+    assert "timeline_events" not in serialized
+    assert "progress_updates" not in serialized
+    assert serialized["timeline_persisted_count"] == 42
+
+
+def test_get_current_state_rehydrates_timeline_from_db_and_repairs_cursor():
+    """Verify _get_current_state replaces legacy snapshot timeline and repairs cursor."""
+    from datetime import datetime
+
+    from orchestrator.state import TaskTimelineEventState
+
+    activities = _make_activities()
+    created_ts = datetime(2026, 8, 15, 12, 0, tzinfo=UTC)
+
+    # Legacy snapshot has in-blob timeline events and stale/larger persisted count
+    snapshot_state = OrchestratorState(
+        task={"task_text": "txt", "repo_url": "url"},
+        attempt_count=1,
+        timeline_events=[
+            TaskTimelineEventState(
+                event_type="legacy_event",
+                attempt_number=0,
+                sequence_number=0,
+            )
+        ],
+        timeline_persisted_count=99,
+    )
+    snapshot = MagicMock()
+    snapshot.state = snapshot_state.model_dump(mode="json")
+
+    # Authoritative DB records
+    db_row1 = MagicMock()
+    db_row1.event_type = TimelineEventType.TASK_INGESTED
+    db_row1.attempt_number = 0
+    db_row1.sequence_number = 0
+    db_row1.message = "ingested"
+    db_row1.payload = None
+    db_row1.created_at = created_ts
+
+    db_row2 = MagicMock()
+    db_row2.event_type = TimelineEventType.WORKSPACE_PROVISIONED
+    db_row2.attempt_number = 1
+    db_row2.sequence_number = 0
+    db_row2.message = "provisioned"
+    db_row2.payload = {"w": "id"}
+    db_row2.created_at = created_ts
+
+    with (
+        patch("orchestrator.temporal.activities.session_scope") as mock_scope,
+        patch(
+            "orchestrator.temporal.activities.TemporalTaskStateRepository"
+        ) as mock_state_repo_cls,
+        patch("orchestrator.temporal.activities.TaskRepository") as mock_task_repo_cls,
+        patch("orchestrator.temporal.activities.TaskTimelineRepository") as mock_timeline_repo_cls,
+    ):
+        mock_scope.return_value.__enter__.return_value = MagicMock()
+        mock_state_repo_cls.return_value.get.return_value = snapshot
+        mock_task_repo_cls.return_value.get.return_value = None
+        mock_timeline_repo_cls.return_value.list_by_task.return_value = [db_row1, db_row2]
+        mock_timeline_repo_cls.return_value.count_by_attempt.return_value = 1
+
+        rehydrated = activities._get_current_state("task-123")
+
+        # DB records replace legacy snapshot timeline
+        assert len(rehydrated.timeline_events) == 2
+        assert rehydrated.timeline_events[0].event_type == TimelineEventType.TASK_INGESTED.value
+        assert rehydrated.timeline_events[0].message == "ingested"
+        prov_event = rehydrated.timeline_events[1]
+        assert prov_event.event_type == TimelineEventType.WORKSPACE_PROVISIONED.value
+        assert prov_event.payload == {"w": "id"}
+        # Stale snapshot count (99) is repaired by authoritative DB count (1)
+        assert rehydrated.timeline_persisted_count == 1
+
+
+@pytest.mark.asyncio
+async def test_deliver_result_duplicate_cleans_up_snapshot():
+    """Verify that deliver_result deletes temporal snapshot when skipping duplicate completion."""
+    from orchestrator.state import TaskTimelineEventState
+
+    activities = _make_activities()
+    state = OrchestratorState(
+        task={"task_text": "txt", "repo_url": "url"},
+        timeline_events=[
+            TaskTimelineEventState(
+                event_type=TimelineEventType.TASK_COMPLETED.value,
+                attempt_number=0,
+                sequence_number=0,
+            )
+        ],
+    )
+    activities._get_current_state = MagicMock(return_value=state)
+    activities._delete_temporal_snapshot = MagicMock()
+    activities.service._run_blocking = AsyncMock(
+        side_effect=lambda fn, *args, **kwargs: fn(*args, **kwargs)
+    )
+
+    await activities.deliver_result("task-done")
+
+    activities._delete_temporal_snapshot.assert_called_once_with("task-done")
 
 
 # ---------------------------------------------------------------------------

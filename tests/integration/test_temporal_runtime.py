@@ -1853,3 +1853,80 @@ async def test_temporal_runtime_idempotency_and_retry(session_factory, tmp_path:
         )
         events = session.execute(stmt_events).scalars().all()
         assert len(events) == 1
+
+
+@pytest.mark.anyio
+async def test_temporal_runtime_deliver_result_crash_retry_cleans_snapshot(
+    session_factory,
+):
+    """If deliver_result crashes after outcome commit, retry skips and cleans snapshot."""
+    service = TaskExecutionService(
+        session_factory=session_factory,
+        worker=CodexCliWorker(runtime_adapter=_ScriptedAdapter([])),
+    )
+    snapshot, _ = service.create_task(TaskSubmission(task_text="Deliver crash test"))
+    task_id, deliver_attempts = snapshot.task_id, 0
+
+    async with await WorkflowEnvironment.start_time_skipping() as env:
+        activities = TaskExecutionActivities(service=service)
+        orig_deliver = activities.deliver_result
+
+        from temporalio import activity
+
+        @activity.defn(name="deliver_result")
+        async def mock_deliver(t_id: str) -> None:
+            nonlocal deliver_attempts
+            deliver_attempts += 1
+            if deliver_attempts == 1:
+                await orig_deliver(t_id)
+                with session_scope(session_factory) as s:
+                    st = OrchestratorState(
+                        task={"task_id": t_id, "task_text": "t", "repo_url": "u"}
+                    )
+                    TemporalTaskStateRepository(s).upsert(
+                        task_id=t_id, state=st.model_dump(mode="json")
+                    )
+                raise RuntimeError("Crash after outcome persist before snapshot delete")
+            await orig_deliver(t_id)
+
+        activities.deliver_result = mock_deliver
+        temporal_worker = Worker(
+            env.client,
+            task_queue="task-execution-queue",
+            workflows=[TaskExecutionWorkflow],
+            workflow_runner=UnsandboxedWorkflowRunner(),
+            activities=[
+                activities.classify_and_plan,
+                activities.decompose_task,
+                activities.load_memory,
+                activities.provision_workspace,
+                activities.run_worker,
+                activities.record_workflow_failure,
+                activities.verify_result,
+                activities.deliver_result,
+                activities.persist_memory,
+            ],
+        )
+        async with temporal_worker:
+            disp = TemporalCommandDispatcher(client=env.client, session_factory=session_factory)
+            run_task = await _start_workflow_via_dispatcher(disp, env.client, task_id)
+            await run_task
+
+    assert deliver_attempts == 2
+    with session_scope(session_factory) as s:
+        task = s.execute(select(Task).where(Task.id == task_id)).scalar_one_or_none()
+        assert task is not None and task.status in ("completed", "failed")
+        assert TemporalTaskStateRepository(s).get(task_id=task_id) is None
+        evts = (
+            s.execute(
+                select(TaskTimelineEvent).where(
+                    TaskTimelineEvent.task_id == task_id,
+                    TaskTimelineEvent.event_type.in_(
+                        [TimelineEventType.TASK_COMPLETED, TimelineEventType.TASK_FAILED]
+                    ),
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(evts) == 1
