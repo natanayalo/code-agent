@@ -1442,6 +1442,8 @@ async def test_temporal_approval_rejection_persists_compact_session_context(
         assert context.identified_risks["worker_status"] is None
         assert context.identified_risks["worker_failure_kind"] is None
         assert context.identified_risks["requested_permission"] is None
+        durable_state = TemporalTaskStateRepository(session).get(task_id=snapshot.task_id)
+        assert durable_state is None
 
 
 @pytest.mark.anyio

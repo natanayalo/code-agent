@@ -15,6 +15,13 @@ executor boundary. The scoped matrix is effective: all eight Codex/Antigravity
 cold-and-assisted pairs passed useful-hit, irrelevant-rejection,
 stale-reverification, and conflict-handling gates.
 
+Completed milestone: **M28.5B Wave 1 — State Reduction & Universal Terminal Cleanup**.
+
+M28.5B Wave 1 is complete: `progress_updates` is excluded from intermediate
+`TemporalTaskState` serialization at the persistence boundary while runtime
+compatibility is preserved, and terminal snapshot deletion is universal across
+all exit paths including initial approval rejection.
+
 ## Current capabilities
 
 - authenticated API, generic webhook, and Telegram task intake
@@ -105,7 +112,8 @@ Temporal migration and rollback record is in the
   broker remains deferred
 - lifecycle data currently overlaps across Temporal history/workflow state,
   serialized `TemporalTaskState`, task/product projections, execution-plan
-  rows, and timeline events; no existing persistence has been removed
+  rows, and timeline events; Wave 1 has pruned ephemeral `progress_updates`
+  from intermediate snapshots while relational projections remain intact
 - the worker boundary is currently terminal `WorkerRequest -> WorkerResult`;
   provider-neutral streaming `AgentEvent` and `ContextEnvelope` contracts are
   planned rather than available today
@@ -115,9 +123,9 @@ Temporal migration and rollback record is in the
 
 ## Next slices only
 
-1. Execute M28.5B Wave 1 state reduction (`progress_updates`) and prepare
-   Wave 2 prerequisites (`friction_reports`, `memory_to_persist`, `timeline_events`)
-   following the field-level state ownership contract in
+1. Prepare M28.5B Wave 2 state reduction prerequisites (`friction_reports`,
+   `memory_to_persist`, `timeline_events`) following the field-level state
+   ownership contract in
    [`docs/architecture/state_ownership.md`](architecture/state_ownership.md).
 2. Continue M28.5 execution-architecture foundation work (M28.5A sandbox broker/threat model,
    M28.5C `AgentEvent`, M28.5D `ContextEnvelope`).
