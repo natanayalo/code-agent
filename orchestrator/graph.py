@@ -3408,6 +3408,19 @@ def _map_worker_memory_to_persist(
     return memory_to_persist
 
 
+def _resolve_memory_to_persist(state: OrchestratorState) -> list[PersistMemoryEntry]:
+    """Resolve effective memory-to-persist candidates for admission.
+
+    If state already contains memory_to_persist (e.g. legacy snapshot or in-memory graph),
+    use it directly. Otherwise, derive candidates canonically from the retained worker result.
+    """
+    if state.memory_to_persist:
+        return list(state.memory_to_persist)
+    if state.result is None or not getattr(state.result, "memory_to_persist", None):
+        return []
+    return _map_worker_memory_to_persist(state, state.result)
+
+
 def _session_state_update_from_result(
     state: OrchestratorState,
     result: WorkerResult | None,
@@ -3847,6 +3860,11 @@ def build_persist_memory_node(
 
     def persist_memory_node(state_input: OrchestratorState) -> dict[str, Any]:
         state = _ensure_state(state_input)
+        state = state.model_copy(
+            update={
+                "memory_to_persist": _resolve_memory_to_persist(state),
+            }
+        )
         with start_optional_span(
             tracer_name="orchestrator.graph",
             span_name="orchestrator.node.persist_memory",
