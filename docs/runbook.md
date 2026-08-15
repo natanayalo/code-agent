@@ -527,9 +527,9 @@ Postgres/Temporal/sandbox stack and disposable repository.
   --repository-revision "$(git rev-parse HEAD)" --operator "operator-name" \
   --ack-disposable-stack
 
-.venv/bin/python scripts/e2e/run_m28_real_worker_eval.py run-pair \
+.venv/bin/python scripts/e2e/run_m28_real_worker_eval.py run-batch \
   --bundle-dir artifacts/m28-real-worker/baseline-01 \
-  --case-id useful-hit-codex --repo-url <disposable-repository-url>
+  --repo-url <disposable-repository-url>
 
 .venv/bin/python scripts/e2e/run_m28_real_worker_eval.py report \
   --bundle-dir artifacts/m28-real-worker/baseline-01 \

@@ -44,8 +44,9 @@ per-task Docker containers. The trusted Temporal worker retains Docker
 authority; executor containers receive only the task workspace, scratch
 directories, staged provider auth, and a task-private public-HTTPS proxy.
 They never receive the Docker socket, control-plane credentials, or host auth
-mounts. M28 effectiveness evidence is paused until this isolation prerequisite
-has been verified.
+mounts. The M28 real-worker matrix has run through this boundary with eight
+Codex/Antigravity cold-and-assisted pairs; it establishes safe expected memory
+behavior, not a general timing-improvement claim.
 
 The platform is organized into these layers:
 
