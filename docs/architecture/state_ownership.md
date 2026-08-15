@@ -107,8 +107,8 @@ field to:
 - When a worker restarts or an activity fails, Temporal replays the workflow event history up to the point of failure.
 - Completed activities are **not re-executed**; their recorded outputs are replayed deterministically from Temporal history.
 - When an in-flight activity begins or retries, it calls `_get_current_state(task_id)`:
-  - If a snapshot exists in `TemporalTaskState`, it parses the state and reconciles approval status (`task.constraints["approval"]`), rehydrates `timeline_events` from `TaskTimelineRepository.list_by_task()`, and sets `timeline_persisted_count` from `TaskTimelineRepository.count_by_attempt()`.
-  - If no snapshot exists (e.g. initial workflow start), it falls back to `_load_submission_for_task` + `build_orchestrator_graph_input()`, which reconstructs the **initial task input**, not mid-flight state.
+  - If a snapshot exists in `TemporalTaskState`, it parses the state, reconciles approval status (`task.constraints["approval"]`), rehydrates `timeline_events` from `TaskTimelineRepository.list_by_task()`, and sets `timeline_persisted_count` from `TaskTimelineRepository.count_by_attempt()`.
+  - If no snapshot exists (e.g. initial workflow start or missing-snapshot recovery), `_load_submission_for_task()` performs **partial relational reconstruction** from `tasks`, `worker_runs`, `execution_plans`, `execution_plan_nodes`, `execution_plan_node_attempts`, and `task_timeline_events` (restoring task spec, decomposed plan, node outcomes, latest dispatch/result, attempt count, and timeline history).
 
 ### 2. Workflow Restart / Continue-As-New
 - When a workflow is restarted or continued-as-new, durable progress must be reconstructable without relying on deleted in-memory state.
@@ -124,15 +124,14 @@ It is critical to distinguish what the codebase currently supports from the targ
   - For completed, failed, or cancelled tasks, Postgres relational tables (`tasks`, `worker_runs`, `artifacts`, `execution_plans`, `execution_plan_nodes`, `execution_plan_node_attempts`, `task_timeline_events`, `proposals`, `session_states`, `human_interactions`) store 100% of the durable record. `TemporalTaskState` is deleted upon terminal completion on standard execution paths.
 
 - **Current Reality (In-Flight Tasks):**
-  - The missing-snapshot fallback in `_get_current_state()` only rebuilds **initial task input**.
-  - Postgres relational tables **cannot currently reconstruct mid-flight state** if `TemporalTaskState` is lost while a task is running. If the snapshot is missing mid-flight:
-    - Worker results, verification reports, and review outcomes are lost from active workflow memory.
-    - Completion loop repair pass counters, phase state, repair source, and summary are lost.
+  - The no-snapshot fallback in `_get_current_state()` performs **partial relational reconstruction** from tasks, worker runs, execution-plan evidence, and timeline events (via `_load_submission_for_task()`). It is sufficient for selected state (latest worker dispatch, worker result, decomposed plan, node outcomes, relational timeline, attempt count, and task spec), but is **not sufficient for arbitrary mid-flight recovery**:
+    - Verification and review records (`state.verification`, `state.review`) are not re-attached mid-turn until persisted.
+    - Completion loop repair pass counters, phase state (`phase`), repair source, and summary remain incomplete in pure fallback.
     - Permission escalation strictly asserts that `TemporalTaskState` exists (`assert snapshot is not None`).
-    - DAG wave execution loses in-memory node outcome aggregations.
+    - Ephemeral workflow coordination flags (`fanout_disabled_for_remainder`, `repair_handoff_requested`) are not persisted relationally.
 
 - **Target Architecture (Prerequisite for Full State Pruning):**
-  - Before eliminating core execution state from `TemporalTaskState`, dedicated relational reconstructors (e.g. loading `node_outcomes` from `execution_plan_node_attempts`, `decomposed_plan` from `execution_plan_nodes`, and worker results from `worker_runs`) must be implemented and tested.
+  - Before eliminating core execution state from `TemporalTaskState`, dedicated relational reconstructors and completion-loop rehydrators must be completed and verified.
 
 ### 4. Terminal State Cleanup
 

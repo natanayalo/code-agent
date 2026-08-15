@@ -544,7 +544,7 @@ def test_wave_2_read_through_rehydrates_authoritative_timeline_and_repairs_curso
     with session_scope(factory) as session:
         TemporalTaskStateRepository(session).upsert(
             task_id=task_id,
-            state=_serialize_temporal_task_state(state),
+            state=state.model_dump(mode="json"),
         )
 
     rehydrated = activities._get_current_state(task_id)
