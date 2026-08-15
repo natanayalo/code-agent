@@ -364,3 +364,118 @@ def test_16_legacy_outcome_attempt_count_mismatch_fails_closed() -> None:
         db_node = ExecutionPlanRepository(session).get_node(plan.id, "step-1")
         assert db_node is not None
         assert db_node.merged_logical_activity_key is None
+
+
+def test_17_mixed_version_rolling_deploy_promotes_marker_when_snapshot_newer() -> None:
+    """17. Snapshot K2 (attempt 2) + marker K1 (attempt 1) -> validates K2 and advances marker."""
+    factory = _make_db()
+    task_id = "task-3b-17"
+    node = _make_sample_node("step-1", "Step 1")
+    decomposed_plan = DecomposedTaskPlan(triggered=True, status="decomposed", nodes=[node])
+    _seed_task_and_timeline(factory, task_id, decomposed_plan=decomposed_plan)
+
+    k1, k2 = "activity:step-1:1", "activity:step-1:2"
+    _, p1, d1 = _make_outcome_payload(
+        "step-1", "failed", WorkerResult(status="failure", summary="Attempt 1 failed"), 1, k1
+    )
+    snap_outcome, p2, d2 = _make_outcome_payload(
+        "step-1",
+        "completed",
+        WorkerResult(status="success", summary="Attempt 2 succeeded"),
+        2,
+        k2,
+    )
+
+    with session_scope(factory) as session:
+        plan = _seed_sql_plan_nodes(session, task_id, [node])
+        _add_attempt(session, plan.nodes[0].id, 1, k1, "failed", p1, d1)
+        _add_attempt(session, plan.nodes[0].id, 2, k2, "completed", p2, d2)
+        # Wave 3A worker merged K2: updated status/terminal payload, but marker remains K1
+        ExecutionPlanRepository(session).update_node(
+            plan_id=plan.id,
+            node_id="step-1",
+            status=ExecutionPlanNodeStatus.COMPLETED,
+            latest_logical_activity_key=k2,
+            merged_logical_activity_key=k1,
+            terminal_result_digest=d2,
+            terminal_result_payload=p2,
+        )
+        raw_state_dict = {
+            "task": {
+                "task_id": task_id,
+                "repo_url": "https://github.com/example/repo",
+                "task_text": "t",
+            },
+            "decomposed_plan": decomposed_plan.model_dump(mode="json"),
+            "node_outcomes": [snap_outcome.model_dump(mode="json")],
+        }
+        _seed_snapshot(session, task_id, raw_dict=raw_state_dict)
+
+    activities = _make_activities(factory)
+    loaded = activities._get_current_state(task_id)
+
+    # Marker promoted K1 -> K2 in DB
+    with session_scope(factory) as session:
+        db_node = ExecutionPlanRepository(session).get_node(plan.id, "step-1")
+        assert db_node is not None
+        assert db_node.merged_logical_activity_key == k2
+
+    # Node outcomes rehydrated to K2
+    assert len(loaded.node_outcomes) == 1
+    assert loaded.node_outcomes[0].logical_activity_key == k2
+    assert loaded.node_outcomes[0].status == "completed"
+    assert loaded.node_outcomes[0].attempts == 2
+
+
+def test_18_mixed_version_rolling_deploy_blocked_permission_escalation_advances_marker() -> None:
+    """18. Marker K1 + Wave 3A snapshot K2 blocked -> advances marker and resolves escalation."""
+    factory = _make_db()
+    task_id = "task-3b-18"
+    node = _make_sample_node("step-1", "Blocked step")
+    decomposed_plan = DecomposedTaskPlan(triggered=True, status="decomposed", nodes=[node])
+    _seed_task_and_timeline(factory, task_id, decomposed_plan=decomposed_plan)
+
+    k1, k2 = "activity:step-1:1", "activity:step-1:2"
+    res_blocked = WorkerResult(
+        status="failure",
+        summary="Permission needed",
+        next_action_hint="request_higher_permission",
+        requested_permission="command_execution",
+    )
+    _, p1, d1 = _make_outcome_payload(
+        "step-1", "failed", WorkerResult(status="failure", summary="Attempt 1 failed"), 1, k1
+    )
+    snap_outcome, p2, d2 = _make_outcome_payload("step-1", "blocked", res_blocked, 2, k2)
+
+    with session_scope(factory) as session:
+        plan = _seed_sql_plan_nodes(session, task_id, [node])
+        _add_attempt(session, plan.nodes[0].id, 1, k1, "failed", p1, d1)
+        _add_attempt(session, plan.nodes[0].id, 2, k2, "blocked", p2, d2)
+        # Wave 3A worker merged K2 blocked: status=BLOCKED, latest=K2, marker remains K1
+        ExecutionPlanRepository(session).update_node(
+            plan_id=plan.id,
+            node_id="step-1",
+            status=ExecutionPlanNodeStatus.BLOCKED,
+            latest_logical_activity_key=k2,
+            merged_logical_activity_key=k1,
+            terminal_result_digest=d2,
+            terminal_result_payload=p2,
+        )
+        raw_state_dict = {
+            "task": {
+                "task_id": task_id,
+                "repo_url": "https://github.com/example/repo",
+                "task_text": "t",
+            },
+            "decomposed_plan": decomposed_plan.model_dump(mode="json"),
+            "node_outcomes": [snap_outcome.model_dump(mode="json")],
+        }
+        _seed_snapshot(session, task_id, raw_dict=raw_state_dict)
+
+    # Permission escalation resolution succeeds without fail-closed error
+    _resolve_permission_escalation_state(factory, task_id, approved=True)
+
+    with session_scope(factory) as session:
+        db_node = ExecutionPlanRepository(session).get_node(plan.id, "step-1")
+        assert db_node is not None
+        assert db_node.merged_logical_activity_key == k2

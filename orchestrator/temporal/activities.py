@@ -337,6 +337,63 @@ def _validate_legacy_outcome_parity(
         )
 
 
+def _fetch_node_attempts(
+    session: Any,
+    db_node: Any,
+    keys: list[str],
+) -> list[Any]:
+    existing = [
+        a
+        for a in getattr(db_node, "attempts", []) or []
+        if getattr(a, "logical_activity_key", None) in keys
+    ]
+    existing_keys = {getattr(a, "logical_activity_key", None) for a in existing}
+    missing_keys = [k for k in keys if k not in existing_keys]
+    if missing_keys:
+        fetched = ExecutionPlanRepository(session).get_attempts_by_activity_keys(
+            plan_node_ids=[db_node.id],
+            logical_activity_keys=missing_keys,
+        )
+        existing.extend(fetched)
+    return existing
+
+
+def _should_advance_marker(
+    session: Any,
+    db_node: Any,
+    marker: str,
+    key: str,
+) -> bool:
+    attempts = _fetch_node_attempts(session, db_node, [marker, key])
+    marker_attempt = next(
+        (a for a in attempts if getattr(a, "logical_activity_key", None) == marker),
+        None,
+    )
+    snap_attempt = next(
+        (a for a in attempts if getattr(a, "logical_activity_key", None) == key),
+        None,
+    )
+    if marker_attempt is not None and snap_attempt is not None:
+        if snap_attempt.attempt_number > marker_attempt.attempt_number:
+            return True
+        if snap_attempt.attempt_number < marker_attempt.attempt_number:
+            return False
+        raise RuntimeError(
+            f"Conflicting logical activity keys '{marker}' and '{key}' for node "
+            f"{db_node.node_id} at attempt {snap_attempt.attempt_number}"
+        )
+
+    if marker == db_node.latest_logical_activity_key:
+        return False
+    if key == db_node.latest_logical_activity_key:
+        return True
+
+    raise RuntimeError(
+        f"Cannot determine chronology between marker '{marker}' and snapshot key '{key}' "
+        f"for node {db_node.node_id}"
+    )
+
+
 def _bootstrap_single_legacy_outcome(
     session: Any,
     plan: Any,
@@ -353,26 +410,15 @@ def _bootstrap_single_legacy_outcome(
     db_node = ExecutionPlanRepository(session).get_node(plan.id, nid)
     if db_node is None:
         raise RuntimeError(f"Legacy outcome node {nid} does not exist in execution plan")
-    if db_node.merged_logical_activity_key is not None:
-        # DB marker is already the active relational authority.
-        # A different snapshot key is simply a stale dual-write copy from a crash window.
+
+    marker = db_node.merged_logical_activity_key
+    if marker == key:
+        return
+    if marker is not None and not _should_advance_marker(session, db_node, marker, key):
         return
 
-    attempt = next(
-        (
-            a
-            for a in getattr(db_node, "attempts", []) or []
-            if getattr(a, "logical_activity_key", None) == key
-        ),
-        None,
-    )
-    if attempt is None:
-        matched = ExecutionPlanRepository(session).get_attempts_by_activity_keys(
-            plan_node_ids=[db_node.id],
-            logical_activity_keys=[key],
-        )
-        attempt = matched[0] if matched else None
-
+    attempts = _fetch_node_attempts(session, db_node, [key])
+    attempt = attempts[0] if attempts else None
     has_term = (
         db_node.latest_logical_activity_key == key and db_node.terminal_result_payload is not None
     )
