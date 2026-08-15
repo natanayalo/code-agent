@@ -29,6 +29,11 @@ from db.utils import compute_interaction_content_hash
 from orchestrator.decomposition import is_read_only_fanout_eligible
 from orchestrator.execution_graph_input import build_orchestrator_graph_input
 from orchestrator.execution_policy import _apply_execution_budget_policy
+from orchestrator.execution_resume_service import (
+    restore_decomposed_plan_from_events,
+    restore_task_plan_from_events,
+    validate_decomposed_plan_projection,
+)
 from orchestrator.execution_types import ProgressEvent, ProgressPhase
 from orchestrator.graph import (
     _aggregate_decomposed_results,
@@ -72,7 +77,13 @@ from orchestrator.nodes.provisioning import (
 )
 from orchestrator.nodes.utils import _available_workers
 from orchestrator.nodes.verification import build_verify_result_node
-from orchestrator.state import NodeOutcome, OrchestratorState, TaskTimelineEventState
+from orchestrator.state import (
+    DecomposedTaskPlan,
+    NodeOutcome,
+    OrchestratorState,
+    TaskPlan,
+    TaskTimelineEventState,
+)
 from orchestrator.temporal.completion_loop import (
     CompletionLoopDecision,
     apply_repair_rejection,
@@ -115,6 +126,8 @@ EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS: frozenset[str] = frozenset(
         "session_state_update",
         "scout_phase_results",
         "memory_to_persist",
+        "task_plan",
+        "decomposed_plan",
     }
 )
 
@@ -263,6 +276,85 @@ def _approve_permission_escalation(
     )
 
 
+def _rehydrate_dag_state(
+    session: Any,
+    task_id: str,
+    state: OrchestratorState,
+    raw_snapshot: Any = None,
+) -> OrchestratorState:
+    """Authoritatively rehydrate timeline, task_plan, and decomposed_plan from timeline events.
+
+    Invariants:
+    1. Timeline is the exact authority for task_plan and decomposed_plan and replaces any
+       older SQL-synthesized models (even on no-snapshot paths).
+    2. Wave 3A MUST NEVER overwrite or derive state.node_outcomes.
+    3. Operational execution_plan_nodes in Postgres are validated against restored decomposed_plan.
+    """
+    task = TaskRepository(session).get(task_id)
+    approval_data = (task.constraints or {}).get("approval") if task is not None else None
+    approval_status = approval_data.get("status") if isinstance(approval_data, dict) else None
+    if (
+        approval_status in {"approved", "rejected"}
+        and state.approval is not None
+        and state.approval.required
+    ):
+        state.approval = state.approval.model_copy(update={"status": approval_status})
+
+    timeline_repo = TaskTimelineRepository(session)
+    raw_events = timeline_repo.list_by_task(task_id)
+    state.timeline_events = [
+        TaskTimelineEventState(
+            event_type=(
+                event.event_type.value
+                if hasattr(event.event_type, "value")
+                else str(event.event_type)
+            ),
+            attempt_number=event.attempt_number,
+            sequence_number=event.sequence_number,
+            message=event.message,
+            payload=event.payload,
+            created_at=event.created_at,
+        )
+        for event in raw_events
+    ]
+    state.timeline_persisted_count = timeline_repo.count_by_attempt(
+        task_id=task_id,
+        attempt_number=state.attempt_count,
+    )
+
+    timeline_task_plan = restore_task_plan_from_events(state.timeline_events)
+    if timeline_task_plan is not None:
+        state.task_plan = timeline_task_plan
+    elif (
+        raw_snapshot is not None
+        and isinstance(getattr(raw_snapshot, "state", None), dict)
+        and raw_snapshot.state.get("task_plan")
+    ):
+        state.task_plan = TaskPlan.model_validate(raw_snapshot.state["task_plan"])
+    else:
+        state.task_plan = None
+
+    timeline_decomposed_plan = restore_decomposed_plan_from_events(state.timeline_events)
+    if timeline_decomposed_plan is not None:
+        state.decomposed_plan = timeline_decomposed_plan
+    elif (
+        raw_snapshot is not None
+        and isinstance(getattr(raw_snapshot, "state", None), dict)
+        and raw_snapshot.state.get("decomposed_plan")
+    ):
+        state.decomposed_plan = DecomposedTaskPlan.model_validate(
+            raw_snapshot.state["decomposed_plan"]
+        )
+    else:
+        state.decomposed_plan = None
+
+    if state.decomposed_plan is not None and state.decomposed_plan.status == "decomposed":
+        plan = ExecutionPlanRepository(session).get_by_task_id(task_id)
+        validate_decomposed_plan_projection(plan, state.decomposed_plan)
+
+    return state
+
+
 def _resolve_permission_escalation_state(
     session_factory: Any,
     task_id: str,
@@ -275,6 +367,7 @@ def _resolve_permission_escalation_state(
             return
         assert task is not None and snapshot is not None
         state = OrchestratorState.model_validate(snapshot.state)
+        state = _rehydrate_dag_state(session, task_id, state, raw_snapshot=snapshot)
         if (
             not approved
             and state.completion_loop.phase == "manual_follow_up"
@@ -542,67 +635,30 @@ class TaskExecutionActivities:
             snapshot = TemporalTaskStateRepository(session).get(task_id=task_id)
             if snapshot is not None:
                 state = OrchestratorState.model_validate(snapshot.state)
-                task = TaskRepository(session).get(task_id)
-                approval_data = (
-                    (task.constraints or {}).get("approval") if task is not None else None
-                )
-                approval_status = (
-                    approval_data.get("status") if isinstance(approval_data, dict) else None
-                )
-                if (
-                    approval_status in {"approved", "rejected"}
-                    and state.approval is not None
-                    and state.approval.required
-                ):
-                    state.approval = state.approval.model_copy(update={"status": approval_status})
-                timeline_repo = TaskTimelineRepository(session)
-                raw_events = timeline_repo.list_by_task(task_id)
-                state.timeline_events = [
-                    TaskTimelineEventState(
-                        event_type=(
-                            event.event_type.value
-                            if hasattr(event.event_type, "value")
-                            else str(event.event_type)
-                        ),
-                        attempt_number=event.attempt_number,
-                        sequence_number=event.sequence_number,
-                        message=event.message,
-                        payload=event.payload,
-                        created_at=event.created_at,
-                    )
-                    for event in raw_events
-                ]
-                state.timeline_persisted_count = timeline_repo.count_by_attempt(
-                    task_id=task_id,
-                    attempt_number=state.attempt_count,
-                )
-                return state
+                return _rehydrate_dag_state(session, task_id, state, raw_snapshot=snapshot)
 
-        loaded = self.service._load_submission_for_task(task_id=task_id)
-        if not loaded:
-            raise RuntimeError(f"Task {task_id} not found")
-        submission, persisted = loaded
+            loaded = self.service._load_submission_for_task(task_id=task_id)
+            if not loaded:
+                raise RuntimeError(f"Task {task_id} not found")
+            submission, persisted = loaded
 
-        def _get_count() -> int:
-            with session_scope(self.service.session_factory) as session:
-                return TaskTimelineRepository(session).count_by_attempt(
-                    task_id=task_id,
-                    attempt_number=persisted.attempt_count,
-                )
-
-        timeline_persisted_count = _get_count()
-        effective_budget = _apply_execution_budget_policy(
-            channel=persisted.channel,
-            constraints=submission.constraints,
-            budget=submission.budget,
-        )
-        graph_input = build_orchestrator_graph_input(
-            submission,
-            persisted,
-            effective_budget,
-            timeline_persisted_count,
-        )
-        return OrchestratorState.model_validate(graph_input)
+            timeline_persisted_count = TaskTimelineRepository(session).count_by_attempt(
+                task_id=task_id,
+                attempt_number=persisted.attempt_count,
+            )
+            effective_budget = _apply_execution_budget_policy(
+                channel=persisted.channel,
+                constraints=submission.constraints,
+                budget=submission.budget,
+            )
+            graph_input = build_orchestrator_graph_input(
+                submission,
+                persisted,
+                effective_budget,
+                timeline_persisted_count,
+            )
+            state = OrchestratorState.model_validate(graph_input)
+            return _rehydrate_dag_state(session, task_id, state, raw_snapshot=None)
 
     def _load_task_trace_context(self, task_id: str) -> dict[str, str]:
         with session_scope(self.service.session_factory) as session:
@@ -1652,6 +1708,7 @@ class TaskExecutionActivities:
             if snapshot is None:
                 raise RuntimeError(f"Task '{task_id}' has no Temporal state.")
             state = OrchestratorState.model_validate(snapshot.state)
+            state = _rehydrate_dag_state(session, task_id, state, raw_snapshot=snapshot)
             plan = ExecutionPlanRepository(session).get_by_task_id(task_id)
             if plan is None:
                 raise ValueError("Execution plan is missing.")
@@ -1791,6 +1848,7 @@ class TaskExecutionActivities:
                 if snapshot is None:
                     raise RuntimeError(f"Task '{task_id}' has no Temporal state.")
                 state = OrchestratorState.model_validate(snapshot.state)
+                state = _rehydrate_dag_state(session, task_id, state, raw_snapshot=snapshot)
                 result = state.result
                 if result is None or result.next_action_hint != "request_higher_permission":
                     return
@@ -1866,10 +1924,12 @@ class TaskExecutionActivities:
                         extra={"task_id": task_id},
                     )
                     return
+                state = OrchestratorState.model_validate(snapshot.state)
+                state = _rehydrate_dag_state(session, task_id, state, raw_snapshot=snapshot)
                 _persist_rejected_session_state(
                     session,
                     task,
-                    OrchestratorState.model_validate(snapshot.state),
+                    state,
                     initial_approval_rejected=True,
                 )
                 TemporalTaskStateRepository(session).delete(task_id=task_id)
