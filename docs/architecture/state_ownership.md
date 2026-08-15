@@ -154,21 +154,28 @@ It is critical to distinguish what the codebase currently supports from the targ
 
 ---
 
-### Wave 2: Gated Low/Medium Complexity Fields
+### Wave 2: Gated Low/Medium Complexity Fields (Completed)
 
 #### 2. `friction_reports`
-- **Current Behavior:** Worker friction reports accumulated in state.
-- **Why Prerequisite Needed:** Stored in `proposals` table (`type=REFLECTION`) when friction proposal extraction is enabled. Must verify that non-proposal runs do not inspect state friction reports downstream.
+- **Status:** **Completed (Wave 2 Closeout)**
+- **Architecture & Safety Policy:**
+  - `friction_reports` is excluded from intermediate `TemporalTaskState` serialization via `EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS`.
+  - **Explicit Temporal Discard Policy:** Verification-generated friction reports are intentionally ephemeral and discarded across activity handoffs. Worker-originated friction remains preserved inside `state.result.friction_reports`.
+  - Temporal terminal outcome persistence operates with `persist_friction_proposals=False`, making snapshot retention unnecessary.
 - **Risk Level:** **Low**
 - **Size Impact:** Medium
-- **Rollback Path:** Additive re-inclusion.
+- **Rollback Path:** Additive re-inclusion in `EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS`.
 
 #### 3. `memory_to_persist`
-- **Current Behavior:** Extracted memory candidates stored in `state.memory_to_persist` between `run_worker` and `persist_memory`.
-- **Why Prerequisite Needed:** `persist_memory` activity consumes `state.memory_to_persist`. Can be eliminated once candidate extraction is merged directly into `persist_memory` or backed by relational candidate tables.
-- **Risk Level:** **Medium**
+- **Status:** **Completed (Wave 2 Closeout)**
+- **Architecture & Implementation:**
+  - `memory_to_persist` is excluded from intermediate `TemporalTaskState` serialization via `EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS`.
+  - **Centralized Canonical Resolution:** `persist_memory_node` invokes `_resolve_memory_to_persist(state)` at its entry boundary. If `state.memory_to_persist` is empty, candidates are canonically mapped from the retained `state.result.memory_to_persist`.
+  - Admission (`_admit_memory_candidates`), outcome counting (`_memory_admission_outcome`), OpenInference tracing (`_memory_persistence_span_input`), timeline payloads (`_memory_persisted_payload`), and response formatting all operate consistently on the resolved state.
+  - Legacy snapshots containing `state.memory_to_persist` are prioritized directly, guaranteeing backward compatibility without double-admission.
+- **Risk Level:** **Low to Medium**
 - **Size Impact:** Low to Medium
-- **Rollback Path:** Additive re-inclusion.
+- **Rollback Path:** Additive re-inclusion in `EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS`.
 
 #### 4. `timeline_events`
 - **Status:** **Completed (Wave 2)**
@@ -182,25 +189,34 @@ It is critical to distinguish what the codebase currently supports from the targ
 - **Rollback Path:** Additive re-inclusion in `EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS`.
 
 #### 5. `scout_phase_results`
-- **Current Behavior:** Captures intermediate scout summaries across repo/research phases.
-- **Why Prerequisite Needed:** Stored in `proposals.metadata_payload["scout_phase_metadata"]` and artifact records; must verify that final scout aggregation queries proposals/artifacts directly rather than relying on state memory.
+- **Status:** **Completed (Wave 2 Closeout)**
+- **Architecture & Implementation:**
+  - `scout_phase_results` is excluded from intermediate `TemporalTaskState` serialization via `EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS`.
+  - **Explicit Temporal Contract Definition:** Deep-scout multi-phase chaining (`transition_to_research_phase`) is explicitly deferred and not part of the supported Temporal completion loop. Temporal scout tasks run as single-phase executions where `state.result` is authoritative.
+  - Terminal scout proposals and artifacts are extracted directly from `state.result.json_payload` and `state.result.artifacts` without depending on intermediate `scout_phase_results`.
 - **Risk Level:** **Low to Medium**
 - **Size Impact:** Medium to High
-- **Rollback Path:** Additive re-inclusion.
+- **Rollback Path:** Additive re-inclusion in `EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS`.
 
 #### 6. `session_state_update`
-- **Current Behavior:** Compact session state update dict stored in state.
-- **Why Prerequisite Needed:** Authoritative store is `session_states` table in Postgres. Must verify that resumed worker context queries `SessionStateRepository` directly.
+- **Status:** **Completed (Wave 2 Closeout)**
+- **Architecture & Implementation:**
+  - `session_state_update` is excluded from intermediate `TemporalTaskState` serialization via `EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS`.
+  - **Regenerated-at-Consumption Policy:** In `deliver_result`, `summarize_result` regenerates the `SessionStateUpdate` in the same activity execution immediately before `_persist_state()` writes it to `SessionStateRepository`.
+  - Initial approval and permission rejections similarly regenerate compact session state updates on-demand inside `_persist_rejected_session_state()`.
+  - No snapshot boundary exists between generation and persistence.
 - **Risk Level:** **Low**
 - **Size Impact:** Low
-- **Rollback Path:** Additive re-inclusion.
+- **Rollback Path:** Additive re-inclusion in `EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS`.
 
 #### 7. `errors`
-- **Current Behavior:** Cumulative list of string errors across workflow attempts.
-- **Why Prerequisite Needed:** Authoritative store is `tasks.last_error` and `task_timeline_events` (`TASK_FAILED`). Verify no legacy UI/API paths depend on state blob errors.
+- **Status:** **Completed (Wave 2 Closeout)**
+- **Architecture & Implementation:**
+  - `errors` is excluded from intermediate `TemporalTaskState` serialization via `EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS`.
+  - **Terminal Error Projection:** Workflow failures are authoritatively projected to `tasks.last_error` and a `TASK_FAILED` timeline event via `record_workflow_failure()`. No Temporal activities or downstream queries consume intermediate `state.errors`.
 - **Risk Level:** **Low**
 - **Size Impact:** Low
-- **Rollback Path:** Additive re-inclusion.
+- **Rollback Path:** Additive re-inclusion in `EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS`.
 
 ---
 
@@ -225,7 +241,7 @@ It is critical to distinguish what the codebase currently supports from the targ
 To guarantee zero regressions when reducing `TemporalTaskState` serialization in future PRs, each reduction slice must satisfy these five gates:
 
 1. **Temporal Replay Test:**
-   - Execute complete Temporal workflow replay tests using recorded workflow histories (e.g. `tests/integration/test_temporal_runtime.py`).
+   - Execute complete Temporal workflow replay tests using recorded workflow histories (e.g. `tests/integration/test_temporal_runtime.py`, `tests/integration/test_temporal_fanout_replay.py`).
    - Verify that workflow history replays deterministically without non-determinism errors.
 
 2. **Idempotency & Retry Guard Verification:**
@@ -252,7 +268,7 @@ To guarantee zero regressions when reducing `TemporalTaskState` serialization in
 | **Ingress & Spec** | `session`, `task`, `task_spec`, `task_kind`, `normalized_task_text`, `repo_profile`, `memory`, `route`, `approval`, `attempt_count` | `tasks`, `sessions`, `human_interactions(type=PERMISSION)` / State Checkpoint | `tasks`, `sessions`, `human_interactions(type=PERMISSION)` | Retain in Checkpoint (reference IDs where feasible) | Read-through from `tasks` table |
 | **Execution Outcomes** | `dispatch`, `result`, `verification`, `review` | `temporal_task_states.state` | `worker_runs`, `artifacts` | Retain in Checkpoint during active turn | Retain until terminal delivery; deleted on completion |
 | **Ephemeral Notifications** | `progress_updates` | Ephemeral in-memory | Ephemeral (not stored relationally) | **Wave 1 — Completed** | **Excluded from snapshot payload**; runtime accumulation only |
-| **Proposals & Friction** | `friction_reports` | `temporal_task_states.state` | `proposals` (when enabled) / Ephemeral | **Wave 2 (Gated)** | Establish projection policy, then exclude from blob |
+| **Proposals & Friction** | `friction_reports` | Ephemeral in Temporal (`persist_friction_proposals=False`) | `proposals` (when enabled) / Ephemeral | **Wave 2 Closeout — Completed** | **Excluded from snapshot payload**; ephemeral discard policy in Temporal |
 | **Timeline & Events** | `timeline_events`, `timeline_persisted_count` | `task_timeline_events` (Postgres, read-through rehydration) | `task_timeline_events` | **Wave 2 (`timeline_events` slice) — Completed** | **Excluded from snapshot payload**; authoritatively rehydrated on read-through |
-| **Memory & Ephemeral Updates** | `memory_to_persist`, `scout_phase_results`, `session_state_update`, `errors` | `temporal_task_states.state` | `memory_*`, `proposals`, `session_states`, `tasks` | **Wave 2 (Gated)** | Verify/retire legacy activity consumers, then exclude from blob |
+| **Memory & Ephemeral Updates** | `memory_to_persist`, `scout_phase_results`, `session_state_update`, `errors` | `temporal_task_states.state` (canonical resolution / regenerated) | `memory_*`, `proposals`, `session_states`, `tasks` | **Wave 2 Closeout — Completed** | **Excluded from snapshot payload**; canonical resolution & regenerated-at-consumption |
 | **DAG Plan & Nodes** | `task_plan`, `decomposed_plan`, `node_outcomes` | `temporal_task_states.state` | `execution_plans`, `execution_plan_nodes` | **Wave 3 (Planned)** | Reconstruct via `ExecutionPlanRepository` |

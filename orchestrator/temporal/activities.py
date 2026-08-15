@@ -107,7 +107,15 @@ logger = logging.getLogger(__name__)
 EXECUTION_CAPACITY_LEASE_SECONDS = 60
 
 EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS: frozenset[str] = frozenset(
-    {"progress_updates", "timeline_events"}
+    {
+        "progress_updates",
+        "timeline_events",
+        "friction_reports",
+        "errors",
+        "session_state_update",
+        "scout_phase_results",
+        "memory_to_persist",
+    }
 )
 
 

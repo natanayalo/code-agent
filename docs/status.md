@@ -22,13 +22,16 @@ M28.5B Wave 1 is complete: `progress_updates` is excluded from intermediate
 compatibility is preserved, and terminal snapshot deletion is universal across
 all exit paths including initial approval rejection.
 
-Completed slice: **M28.5B Wave 2 (`timeline_events` slice) — Relational Read-Through & Snapshot Pruning**.
+Completed slice: **M28.5B Wave 2 State Reduction Closeout — Candidate Fields Pruning & Canonical Resolution**.
 
-The `timeline_events` slice of M28.5B Wave 2 is complete: `timeline_events` is
-excluded from intermediate `TemporalTaskState` serialization, Postgres
-`task_timeline_events` is established as the single authority with read-through
-rehydration in `_get_current_state()`, deduplication uses current-attempt list-offset
-slicing, and terminal snapshot cleanup is guaranteed on crash retry.
+M28.5B Wave 2 state reduction is complete: all remaining candidate fields
+(`friction_reports`, `errors`, `session_state_update`, `scout_phase_results`,
+`memory_to_persist`, and `timeline_events`) are excluded from intermediate
+`TemporalTaskState` serialization at the persistence boundary. Canonical memory
+resolution is centralized at `persist_memory_node` from retained `WorkerResult`,
+session state is regenerated at consumption, scout single-phase contract is enforced,
+verification friction is ephemeral, and error reporting is projected directly to
+`tasks.last_error` and `TASK_FAILED` timeline events.
 
 ## Current capabilities
 
@@ -131,10 +134,9 @@ Temporal migration and rollback record is in the
 
 ## Next slices only
 
-1. Continue M28.5B Wave 2 state reduction for remaining candidate fields
-   (`friction_reports`, `memory_to_persist`, `scout_phase_results`,
-   `session_state_update`, `errors`) following the field-level state
-   ownership contract in
+1. Continue M28.5B Wave 3 state reduction for DAG plan & node outcomes
+   (`task_plan`, `decomposed_plan`, `node_outcomes`) following the field-level
+   state ownership contract in
    [`docs/architecture/state_ownership.md`](architecture/state_ownership.md).
 2. Continue M28.5 execution-architecture foundation work (M28.5A sandbox broker/threat model,
    M28.5C `AgentEvent`, M28.5D `ContextEnvelope`).
