@@ -70,7 +70,7 @@ field to:
 | `current_step` | Temporal History | `temporal_task_states.state`, `tasks.status`, `task_timeline_events` | `tasks.status`, `task_timeline_events` | `orchestrator/temporal/activities.py` (`_persist_intermediate_state`) | Workflow step dispatch, Dashboard status/timeline |
 | `session` | `tasks` & `sessions` tables | `temporal_task_states.state` | `tasks` & `sessions` tables (`session_id`, `user_id`, `channel`) | Ingress handlers (`apps/api/routes/tasks.py`, `webhooks.py`, `telegram.py`) | Session continuity, `/sessions/{id}`, `/tasks/{id}`, Dashboard |
 | `task` | `tasks` table & state constraints | `temporal_task_states.state`, `tasks.constraints` | `tasks` table (`id`, `repo_url`, `branch`, `task_text`, `constraints`, `budget_*`) | Ingress handlers, permission escalation in `activities.py` | Worker dispatch activities, API `/tasks/{id}`, Dashboard |
-| `normalized_task_text` | `temporal_task_states.state` | `temporal_task_states.state` | Ephemeral (derived from `tasks.task_text`) | `orchestrator/nodes/ingest_node.py` | Prompt generation, worker routing policy |
+| `normalized_task_text` | `temporal_task_states.state` | `temporal_task_states.state` | Ephemeral (derived from `tasks.task_text`) | `orchestrator/nodes/ingestion.py` (`ingest_task`) | Prompt generation, worker routing policy |
 | `task_kind` | `temporal_task_states.state` | `temporal_task_states.state`, `task_timeline_events` payload | `task_timeline_events` payload | `orchestrator/nodes/ingestion.py` (`_classify_task_kind`) | Internal routing, planner selection (not in `tasks.task_spec`) |
 | `task_plan` | `temporal_task_states.state` & `execution_plans` | `temporal_task_states.state`, `execution_plans`, `execution_plan_nodes` | `execution_plans`, `execution_plan_nodes` | `orchestrator/execution_outcome_service.py` (`_update_task_route_and_spec`) | DAG execution loop, Dashboard DAG view, `/tasks/{id}/plan` |
 | `task_spec` | `tasks.task_spec` & `temporal_task_states.state` | `tasks.task_spec`, `temporal_task_states.state` | `tasks.task_spec` (JSONB) | `orchestrator/execution_outcome_service.py` (`_update_task_route_and_spec`) | Capability grants, API `/tasks/{id}`, Dashboard |
@@ -170,14 +170,14 @@ flowchart TD
     Wave 1 --> Wave 2 --> Wave 3
 ```
 
-### Wave 1: Immediate Safe Exclusions (Low Risk, Zero Downstream Consumers)
+### Wave 1: Immediate Safe Exclusions (Low Risk, Zero Semantic/Control-Flow Consumers)
 
 #### 1. `progress_updates`
 - **Current Behavior:** Transient notification strings accumulated in state during execution and serialized into the blob.
-- **Why Safe to Exclude:** `progress_updates` is legacy/ephemeral accumulation in state with no downstream Temporal consumer; product progress notifications are independently constructed and emitted by `_notify_progress()` from explicit `phase`/`summary` arguments. Never read back from the snapshot by any subsequent activity.
+- **Why Safe to Exclude:** `progress_updates` has no semantic or control-flow consumers in Temporal execution. Some legacy nodes read prior values only to preserve accumulated progress history; product progress notifications are independently constructed and emitted by `_notify_progress()` from explicit `phase`/`summary` arguments.
 - **Risk Level:** **Low**
 - **Size Impact:** Low
-- **What Breaks if Wrong:** Nothing; no read consumers exist in subsequent activities.
+- **What Breaks if Wrong:** Nothing; no control-flow, persistence, notification, or behavioral dependency exists on previous progress messages.
 - **Rollback Path:** Additive re-inclusion.
 
 ---
