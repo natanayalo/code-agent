@@ -310,3 +310,57 @@ def test_15_legacy_outcome_semantic_content_parity_mismatch_fails_closed() -> No
         db_node = ExecutionPlanRepository(session).get_node(plan.id, "step-1")
         assert db_node is not None
         assert db_node.merged_logical_activity_key is None
+
+
+def test_16_legacy_outcome_attempt_count_mismatch_fails_closed() -> None:
+    """16. Same key/status/result but attempts=2 snapshot vs attempts=1 DB -> fails closed."""
+    factory = _make_db()
+    task_id = "task-3b-16"
+    node = _make_sample_node("step-1", "Step 1")
+    decomposed_plan = DecomposedTaskPlan(triggered=True, status="decomposed", nodes=[node])
+    _seed_task_and_timeline(factory, task_id, decomposed_plan=decomposed_plan)
+
+    k1 = "activity:step-1:1"
+    res = WorkerResult(status="failure", summary="Attempt 1 failed")
+    _, p1, d1 = _make_outcome_payload("step-1", "failed", res, 1, k1)
+    # Legacy snapshot has attempts=2
+    snap_outcome = NodeOutcome(
+        node_id="step-1",
+        status="failed",
+        result=res,
+        attempts=2,
+        logical_activity_key=k1,
+        result_digest=d1,
+    )
+
+    with session_scope(factory) as session:
+        plan = _seed_sql_plan_nodes(session, task_id, [node])
+        _add_attempt(session, plan.nodes[0].id, 1, k1, "failed", p1, d1)
+        ExecutionPlanRepository(session).update_node(
+            plan_id=plan.id,
+            node_id="step-1",
+            status=ExecutionPlanNodeStatus.FAILED,
+            latest_logical_activity_key=k1,
+            merged_logical_activity_key=None,
+            terminal_result_digest=d1,
+            terminal_result_payload=p1,
+        )
+        raw_state_dict = {
+            "task": {
+                "task_id": task_id,
+                "repo_url": "https://github.com/example/repo",
+                "task_text": "t",
+            },
+            "decomposed_plan": decomposed_plan.model_dump(mode="json"),
+            "node_outcomes": [snap_outcome.model_dump(mode="json")],
+        }
+        _seed_snapshot(session, task_id, raw_dict=raw_state_dict)
+
+    activities = _make_activities(factory)
+    with pytest.raises(RuntimeError, match="conflicts with durable canonical outcome evidence"):
+        activities._get_current_state(task_id)
+
+    with session_scope(factory) as session:
+        db_node = ExecutionPlanRepository(session).get_node(plan.id, "step-1")
+        assert db_node is not None
+        assert db_node.merged_logical_activity_key is None

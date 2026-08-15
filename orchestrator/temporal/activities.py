@@ -308,6 +308,7 @@ def _validate_legacy_outcome_parity(
     if (
         canonical.node_id != snap_outcome.node_id
         or canonical.status != snap_outcome.status
+        or canonical.attempts != snap_outcome.attempts
         or (
             snap_outcome.logical_activity_key
             and canonical.logical_activity_key != snap_outcome.logical_activity_key
