@@ -5,8 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+import pytest
+
 from db.enums import ExecutionPlanNodeStatus
 from orchestrator import execution_resume_service as ers
+from orchestrator.state import NodeOutcome
+from workers import WorkerResult
 
 
 @dataclass
@@ -27,6 +31,10 @@ class DummyPlanNode:
     output_artifacts: list[dict[str, Any]] | None = None
     retry_count: int = 0
     plan_id: str = "plan-1"
+    latest_logical_activity_key: str | None = None
+    merged_logical_activity_key: str | None = None
+    terminal_result_digest: str | None = None
+    terminal_result_payload: dict[str, Any] | None = None
 
 
 @dataclass
@@ -60,6 +68,16 @@ def test_restore_decomposed_execution_state_invalid_validation():
 
 
 def test_restore_decomposed_execution_state_happy_path():
+    res1 = WorkerResult(
+        status="success", summary="Inspection complete", files_changed=["README.md"]
+    )
+    out1 = NodeOutcome(
+        node_id="n1", status="completed", result=res1, attempts=1, logical_activity_key="k1"
+    )
+    p1 = {
+        "worker_result": res1.model_dump(mode="json"),
+        "node_outcome": out1.model_dump(mode="json"),
+    }
     n1 = DummyPlanNode(
         node_id="n1",
         goal="Inspect repo",
@@ -67,9 +85,21 @@ def test_restore_decomposed_execution_state_happy_path():
         task_spec={"goal": "inspect"},
         node_kind="inspect",
         status=ExecutionPlanNodeStatus.COMPLETED,
-        result_summary="Inspection complete",
-        changed_files=["README.md"],
+        latest_logical_activity_key="k1",
+        merged_logical_activity_key="k1",
+        terminal_result_payload=p1,
     )
+
+    res2 = WorkerResult(
+        status="failure", summary="Verification failed", failure_kind="test_regression"
+    )
+    out2 = NodeOutcome(
+        node_id="n2", status="failed", result=res2, attempts=2, logical_activity_key="k2"
+    )
+    p2 = {
+        "worker_result": res2.model_dump(mode="json"),
+        "node_outcome": out2.model_dump(mode="json"),
+    }
     n2 = DummyPlanNode(
         node_id="n2",
         goal="Verify code",
@@ -77,10 +107,12 @@ def test_restore_decomposed_execution_state_happy_path():
         task_spec={"goal": "verify"},
         node_kind="verify",
         status=ExecutionPlanNodeStatus.FAILED,
-        result_summary="Verification failed",
-        failure_kind="test_regression",
+        latest_logical_activity_key="k2",
+        merged_logical_activity_key="k2",
+        terminal_result_payload=p2,
         retry_count=1,
     )
+
     n3 = DummyPlanNode(
         node_id="n3",
         goal="Pending step",
@@ -112,15 +144,14 @@ def test_aggregation_role():
     assert ers._aggregation_role("other") == "mutation"
 
 
-def test_restored_node_outcome_validation_error():
-    # Pass node with invalid status type/value to trigger ValidationError inside model_validate
-    class BadStatus:
-        value = "invalid_status_value"
-
-    bad_node = DummyPlanNode(
+def test_restore_merged_node_outcomes_fails_closed_on_missing_payload():
+    node = DummyPlanNode(
         node_id="n1",
         status=ExecutionPlanNodeStatus.COMPLETED,
+        merged_logical_activity_key="k1",
+        latest_logical_activity_key="k1",
+        terminal_result_payload=None,
     )
-    bad_node.status = BadStatus()  # type: ignore
-    res = ers._restored_node_outcome(bad_node)
-    assert res is None
+    plan = DummyExecutionPlan(nodes=[node])
+    with pytest.raises(RuntimeError, match="Cannot reconstruct merged outcome"):
+        ers.restore_merged_node_outcomes(plan)

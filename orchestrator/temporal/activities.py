@@ -31,6 +31,7 @@ from orchestrator.execution_graph_input import build_orchestrator_graph_input
 from orchestrator.execution_policy import _apply_execution_budget_policy
 from orchestrator.execution_resume_service import (
     restore_decomposed_plan_from_events,
+    restore_merged_node_outcomes,
     restore_task_plan_from_events,
     validate_decomposed_plan_projection,
 )
@@ -128,6 +129,7 @@ EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS: frozenset[str] = frozenset(
         "memory_to_persist",
         "task_plan",
         "decomposed_plan",
+        "node_outcomes",
     }
 )
 
@@ -199,6 +201,17 @@ def _reject_permission_escalation(
             status=ExecutionPlanNodeStatus.FAILED,
             failure_kind="permission_denied",
         )
+    elif plan is not None:
+        blocked_sql_node = next(
+            (n for n in plan.nodes if n.status == ExecutionPlanNodeStatus.BLOCKED), None
+        )
+        if blocked_sql_node is not None:
+            ExecutionPlanRepository(session).update_node(
+                plan_id=plan.id,
+                node_id=blocked_sql_node.node_id,
+                status=ExecutionPlanNodeStatus.FAILED,
+                failure_kind="permission_denied",
+            )
     if state.completion_loop.phase == "repair_requested":
         apply_repair_rejection(state)
         task.constraints = state.task.constraints
@@ -269,11 +282,108 @@ def _approve_permission_escalation(
         )
         # Keep the terminal parent key while the node is reset for a new logical attempt.
         state.result = _aggregate_decomposed_results(state.node_outcomes)
+    elif plan is not None:
+        blocked_sql_node = next(
+            (n for n in plan.nodes if n.status == ExecutionPlanNodeStatus.BLOCKED), None
+        )
+        if blocked_sql_node is not None:
+            ExecutionPlanRepository(session).update_node(
+                plan_id=plan.id,
+                node_id=blocked_sql_node.node_id,
+                status=ExecutionPlanNodeStatus.PENDING,
+                blocker_interaction_id=None,
+                retry_count=getattr(blocked_sql_node, "retry_count", 0),
+            )
+        state.result = (
+            _aggregate_decomposed_results(state.node_outcomes) if state.node_outcomes else None
+        )
     else:
         state.result = None
     TemporalTaskStateRepository(session).upsert(
         task_id=task_id, state=_serialize_temporal_task_state(state)
     )
+
+
+def _bootstrap_single_legacy_outcome(
+    session: Any,
+    plan: Any,
+    item: dict[str, Any],
+) -> None:
+    nid = item.get("node_id")
+    key = item.get("logical_activity_key")
+    if not nid:
+        return
+    if not key:
+        raise RuntimeError(
+            f"Legacy outcome for node {nid} lacks logical_activity_key and cannot be proven"
+        )
+    db_node = ExecutionPlanRepository(session).get_node(plan.id, nid)
+    if db_node is None:
+        raise RuntimeError(f"Legacy outcome node {nid} does not exist in execution plan")
+    if db_node.merged_logical_activity_key is not None:
+        if db_node.merged_logical_activity_key != key:
+            raise RuntimeError(
+                "Conflicting relational merge marker detected during bootstrap for "
+                f"node {nid}: DB marker '{db_node.merged_logical_activity_key}' "
+                f"!= snapshot '{key}'"
+            )
+        return
+
+    has_attempt = any(
+        getattr(a, "logical_activity_key", None) == key
+        for a in getattr(db_node, "attempts", []) or []
+    )
+    if not has_attempt:
+        attempt_row = session.scalar(
+            select(ExecutionPlanNodeAttempt).where(
+                ExecutionPlanNodeAttempt.plan_node_id == db_node.id,
+                ExecutionPlanNodeAttempt.logical_activity_key == key,
+            )
+        )
+        has_attempt = attempt_row is not None
+
+    has_term = (
+        db_node.latest_logical_activity_key == key and db_node.terminal_result_payload is not None
+    )
+    if not (has_attempt or has_term):
+        raise RuntimeError(
+            f"Legacy snapshot outcome for node {nid} with key '{key}' "
+            "cannot be validated against durable attempt or terminal evidence"
+        )
+    ExecutionPlanRepository(session).update_node(
+        plan_id=plan.id,
+        node_id=nid,
+        merged_logical_activity_key=key,
+    )
+
+
+def _bootstrap_legacy_snapshot_merge_markers(
+    session: Any,
+    plan: Any,
+    raw_snapshot: Any,
+) -> None:
+    if raw_snapshot is None or not isinstance(getattr(raw_snapshot, "state", None), dict):
+        return
+    legacy_outcomes = raw_snapshot.state.get("node_outcomes")
+    if not (isinstance(legacy_outcomes, list) and legacy_outcomes and plan is not None):
+        return
+    for item in legacy_outcomes:
+        if isinstance(item, dict):
+            _bootstrap_single_legacy_outcome(session, plan, item)
+
+
+def _sync_approval_from_task(
+    task: Any,
+    state: OrchestratorState,
+) -> None:
+    approval_data = (task.constraints or {}).get("approval") if task is not None else None
+    approval_status = approval_data.get("status") if isinstance(approval_data, dict) else None
+    if (
+        approval_status in {"approved", "rejected"}
+        and state.approval is not None
+        and state.approval.required
+    ):
+        state.approval = state.approval.model_copy(update={"status": approval_status})
 
 
 def _rehydrate_dag_state(
@@ -291,14 +401,7 @@ def _rehydrate_dag_state(
     3. Operational execution_plan_nodes in Postgres are validated against restored decomposed_plan.
     """
     task = TaskRepository(session).get(task_id)
-    approval_data = (task.constraints or {}).get("approval") if task is not None else None
-    approval_status = approval_data.get("status") if isinstance(approval_data, dict) else None
-    if (
-        approval_status in {"approved", "rejected"}
-        and state.approval is not None
-        and state.approval.required
-    ):
-        state.approval = state.approval.model_copy(update={"status": approval_status})
+    _sync_approval_from_task(task, state)
 
     timeline_repo = TaskTimelineRepository(session)
     raw_events = timeline_repo.list_by_task(task_id)
@@ -351,6 +454,10 @@ def _rehydrate_dag_state(
     if state.decomposed_plan is not None and state.decomposed_plan.status == "decomposed":
         plan = ExecutionPlanRepository(session).get_by_task_id(task_id)
         validate_decomposed_plan_projection(plan, state.decomposed_plan)
+        _bootstrap_legacy_snapshot_merge_markers(session, plan, raw_snapshot)
+        state.node_outcomes = restore_merged_node_outcomes(plan, session=session)
+        if state.result is None and state.node_outcomes:
+            state.result = _aggregate_decomposed_results(state.node_outcomes)
 
     return state
 
@@ -1102,18 +1209,13 @@ class TaskExecutionActivities:
                     return NodeSelectionResult(
                         action="invalid", reason="Plan nodes do not match state."
                     )
-                merged_keys = {
-                    outcome.logical_activity_key
-                    for outcome in state.node_outcomes
-                    if outcome.logical_activity_key
-                }
                 outcomes = {outcome.node_id: outcome for outcome in state.node_outcomes}
                 has_pending_node = False
                 for node in plan.nodes:
                     if (
                         node.latest_logical_activity_key
                         and node.terminal_result_payload
-                        and node.latest_logical_activity_key not in merged_keys
+                        and node.latest_logical_activity_key != node.merged_logical_activity_key
                     ):
                         return NodeSelectionResult(
                             action="merge_terminal",
@@ -1586,6 +1688,7 @@ class TaskExecutionActivities:
                         failure_kind="dependency_failed",
                         result_summary=result.summary,
                         latest_logical_activity_key=key,
+                        merged_logical_activity_key=key,
                         terminal_result_schema_version=1,
                         terminal_result_digest=digest,
                         terminal_result_payload=skip_payload,
@@ -1622,26 +1725,13 @@ class TaskExecutionActivities:
                             "Node attempt digest does not match terminal node evidence."
                         )
                     digest = terminal_digest
-
-                outcomes: list[NodeOutcome] = []
-                for persisted_node in plan.nodes:
-                    persisted_payload = persisted_node.terminal_result_payload
-                    if not persisted_payload:
-                        continue
-                    outcome = NodeOutcome.model_validate(persisted_payload["node_outcome"])
-                    outcomes.append(
-                        outcome.model_copy(
-                            update={
-                                "dependencies": list(persisted_node.depends_on or []),
-                                "logical_activity_key": persisted_node.latest_logical_activity_key,
-                                "result_digest": persisted_node.terminal_result_digest,
-                                "replayed": (
-                                    selection.action == "merge_terminal"
-                                    and persisted_node.node_id == node.node_id
-                                ),
-                            }
-                        )
+                    ExecutionPlanRepository(session).update_node(
+                        plan_id=plan.id,
+                        node_id=node.node_id,
+                        merged_logical_activity_key=key,
                     )
+
+                outcomes = restore_merged_node_outcomes(plan, session=session)
                 state.node_outcomes = outcomes
                 state.result = _aggregate_decomposed_results(outcomes)
                 current = next(
@@ -1742,48 +1832,53 @@ class TaskExecutionActivities:
             for item in selection.items:
                 if item.node_id not in missing_evidence:
                     continue
+                worker_res = WorkerResult(
+                    status="failure",
+                    failure_kind="sandbox_infra",
+                    summary="Fan-out activity ended without durable terminal evidence.",
+                )
+                missing_node = next(
+                    (node for node in plan.nodes if node.node_id == item.node_id), None
+                )
+                missing_outcome = NodeOutcome(
+                    node_id=item.node_id,
+                    status="failed",
+                    result=worker_res,
+                    dependencies=list(missing_node.depends_on or []) if missing_node else [],
+                    attempts=item.activity_request.logical_attempt,
+                    logical_activity_key=item.activity_request.logical_activity_key,
+                )
+                missing_payload = {
+                    "schema_version": 1,
+                    "worker_result": worker_res.model_dump(mode="json"),
+                    "node_outcome": missing_outcome.model_dump(mode="json"),
+                    "continuation": "fail_task",
+                }
+                missing_digest = hashlib.sha256(
+                    json.dumps(missing_payload, sort_keys=True, separators=(",", ":")).encode()
+                ).hexdigest()
                 ExecutionPlanRepository(session).update_node(
                     plan_id=plan.id,
                     node_id=item.node_id,
                     status=ExecutionPlanNodeStatus.FAILED,
                     failure_kind="sandbox_infra",
+                    result_summary=worker_res.summary,
                     finished_at=utc_now(),
+                    latest_logical_activity_key=item.activity_request.logical_activity_key,
+                    terminal_result_schema_version=1,
+                    terminal_result_digest=missing_digest,
+                    terminal_result_payload=missing_payload,
+                    merged_logical_activity_key=item.activity_request.logical_activity_key,
                 )
-            outcomes: list[NodeOutcome] = []
-            for node in plan.nodes:
-                if node.terminal_result_payload:
-                    outcome = NodeOutcome.model_validate(
-                        node.terminal_result_payload["node_outcome"]
-                    )
-                    outcomes.append(
-                        outcome.model_copy(
-                            update={
-                                "dependencies": list(node.depends_on or []),
-                                "logical_activity_key": node.latest_logical_activity_key,
-                                "result_digest": node.terminal_result_digest,
-                            }
-                        )
-                    )
-                elif node.node_id in missing_evidence:
-                    selected = next(
-                        item for item in selection.items if item.node_id == node.node_id
-                    )
-                    outcomes.append(
-                        NodeOutcome(
-                            node_id=node.node_id,
-                            status="failed",
-                            result=WorkerResult(
-                                status="failure",
-                                failure_kind="sandbox_infra",
-                                summary=(
-                                    "Fan-out activity ended without durable terminal evidence."
-                                ),
-                            ),
-                            dependencies=list(node.depends_on or []),
-                            attempts=selected.activity_request.logical_attempt,
-                            logical_activity_key=selected.activity_request.logical_activity_key,
-                        )
-                    )
+            for item in selection.items:
+                if item.node_id in missing_evidence:
+                    continue
+                ExecutionPlanRepository(session).update_node(
+                    plan_id=plan.id,
+                    node_id=item.node_id,
+                    merged_logical_activity_key=item.activity_request.logical_activity_key,
+                )
+            outcomes = restore_merged_node_outcomes(plan, session=session)
             state.node_outcomes = outcomes
             state.result = _aggregate_decomposed_results(outcomes)
             continuation: Literal["continue", "retry_node", "await_permission", "fail_task"] = (

@@ -60,6 +60,7 @@ class ExecutionPlanRepository:
         budget: dict[str, Any] | None = None,
         validation_commands: list[str] | None = None,
         artifacts: list[str] | None = None,
+        merged_logical_activity_key: str | None = None,
     ) -> ExecutionPlanNode:
         """Add a new node to an existing execution plan."""
         node = ExecutionPlanNode(
@@ -80,6 +81,7 @@ class ExecutionPlanRepository:
             budget=budget,
             validation_commands=validation_commands,
             artifacts=artifacts,
+            merged_logical_activity_key=merged_logical_activity_key,
         )
         self.session.add(node)
         return node
@@ -118,6 +120,7 @@ class ExecutionPlanRepository:
         output_artifacts: list[dict[str, Any]] | None | Any = ...,
         last_attempt_at: datetime | None | Any = ...,
         latest_logical_activity_key: str | None | Any = ...,
+        merged_logical_activity_key: str | None | Any = ...,
         terminal_result_schema_version: int | None | Any = ...,
         terminal_result_digest: str | None | Any = ...,
         terminal_result_payload: dict[str, Any] | None | Any = ...,
@@ -171,6 +174,8 @@ class ExecutionPlanRepository:
             node.last_attempt_at = last_attempt_at
         if latest_logical_activity_key is not ...:
             node.latest_logical_activity_key = latest_logical_activity_key
+        if merged_logical_activity_key is not ...:
+            node.merged_logical_activity_key = merged_logical_activity_key
         if terminal_result_schema_version is not ...:
             node.terminal_result_schema_version = terminal_result_schema_version
         if terminal_result_digest is not ...:
@@ -179,6 +184,21 @@ class ExecutionPlanRepository:
             node.terminal_result_payload = terminal_result_payload
 
         return node
+
+    def get_attempts_by_activity_keys(
+        self,
+        *,
+        plan_node_ids: list[str],
+        logical_activity_keys: list[str],
+    ) -> list[ExecutionPlanNodeAttempt]:
+        """Retrieve attempts matching given plan_node_ids and logical_activity_keys."""
+        if not plan_node_ids or not logical_activity_keys:
+            return []
+        stmt = select(ExecutionPlanNodeAttempt).where(
+            ExecutionPlanNodeAttempt.plan_node_id.in_(plan_node_ids),
+            ExecutionPlanNodeAttempt.logical_activity_key.in_(logical_activity_keys),
+        )
+        return list(self.session.scalars(stmt).all())
 
     def start_attempt(
         self,

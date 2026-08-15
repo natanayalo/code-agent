@@ -233,6 +233,7 @@ export interface ExecutionPlanNodeSnapshot {
   output_artifacts?: Record<string, unknown>[] | null;
   last_attempt_at?: string | null;
   latest_logical_activity_key?: string | null;
+  merged_logical_activity_key?: string | null;
   terminal_result_schema_version?: number | null;
   terminal_result_digest?: string | null;
   attempts?: ExecutionPlanNodeAttemptSnapshot[];

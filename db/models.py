@@ -1082,6 +1082,7 @@ class ExecutionPlanNode(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     output_artifacts: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
     last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     latest_logical_activity_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    merged_logical_activity_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
     terminal_result_schema_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     terminal_result_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
     terminal_result_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)

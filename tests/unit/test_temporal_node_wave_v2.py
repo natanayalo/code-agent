@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from db.base import Base
 from db.enums import ExecutionPlanNodeStatus
+from orchestrator import execution_resume_service as ers
 from orchestrator.node_execution import NodeActivityResultRef
 from orchestrator.state import NodeOutcome, OrchestratorState, WorkerDispatch
 from orchestrator.temporal.activities import TaskExecutionActivities
@@ -307,10 +308,13 @@ async def test_merge_v2_wave_projects_ordered_multi_result_outcomes(
 
     assert result["continuation"] == continuation
     with session_scope(fixture.session_factory) as session:
+        plan = ExecutionPlanRepository(session).get_by_task_id(fixture.task_id)
+        outcomes = ers.restore_merged_node_outcomes(plan, session=session)
+        assert [outcome.node_id for outcome in outcomes] == ["first", "second"]
         snapshot = TemporalTaskStateRepository(session).get(task_id=fixture.task_id)
         assert snapshot is not None
+        assert "node_outcomes" not in snapshot.state
         merged = OrchestratorState.model_validate(snapshot.state)
-        assert [outcome.node_id for outcome in merged.node_outcomes] == ["first", "second"]
         assert merged.dispatch.runtime_manifest is not None
         assert merged.dispatch.runtime_manifest["worker"]["worker_profile"] == "readonly-profile"
         second = ExecutionPlanRepository(session).get_node(fixture.plan_id, "second")
@@ -359,9 +363,11 @@ async def test_merge_v2_wave_keeps_terminal_sibling_when_other_evidence_is_missi
 
     assert result["continuation"] == "fail_task"
     with session_scope(fixture.session_factory) as session:
+        plan = ExecutionPlanRepository(session).get_by_task_id(fixture.task_id)
+        outcomes = ers.restore_merged_node_outcomes(plan, session=session)
+        assert [outcome.node_id for outcome in outcomes] == ["first", "second"]
+        assert outcomes[0].status == "completed"
+        assert outcomes[1].result.failure_kind == "sandbox_infra"
         snapshot = TemporalTaskStateRepository(session).get(task_id=fixture.task_id)
         assert snapshot is not None
-        merged = OrchestratorState.model_validate(snapshot.state)
-        assert [outcome.node_id for outcome in merged.node_outcomes] == ["first", "second"]
-        assert merged.node_outcomes[0].status == "completed"
-        assert merged.node_outcomes[1].result.failure_kind == "sandbox_infra"
+        assert "node_outcomes" not in snapshot.state

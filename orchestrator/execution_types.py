@@ -487,6 +487,7 @@ class ExecutionPlanNodeSnapshot(ExecutionModel):
     output_artifacts: list[dict[str, Any]] | None = None
     last_attempt_at: datetime | None = None
     latest_logical_activity_key: str | None = None
+    merged_logical_activity_key: str | None = None
     terminal_result_schema_version: int | None = None
     terminal_result_digest: str | None = None
     attempts: list[ExecutionPlanNodeAttemptSnapshot] = Field(default_factory=list)
