@@ -278,10 +278,12 @@ Target ownership:
   and external-side-effect idempotency where needed
 
 Do not immediately remove current persistence. First document field-level
-authority, recovery/projection rules, and compatibility. New features must not
-deepen duplicate lifecycle ownership. Reduce full-state `TemporalTaskState`
-duplication only when replay, recovery, query, and rollback behavior remain
-proven.
+authority, recovery/projection rules, and compatibility. The field-level state
+ownership contract, recovery rules, and prioritized reduction plan are
+established in [`docs/architecture/state_ownership.md`](architecture/state_ownership.md).
+New features must not deepen duplicate lifecycle ownership. Reduce full-state
+`TemporalTaskState` duplication incrementally across planned waves only when replay,
+recovery, query, and rollback behavior remain proven.
 
 ### M28.5C — Provider-Neutral `AgentEvent`
 

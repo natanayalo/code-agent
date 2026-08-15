@@ -342,7 +342,8 @@ async def verify_fanout_overlap(task_id: str) -> None:
             if started_id in scheduled_ids:
                 if len(scheduled_ids) < 2:
                     raise RuntimeError(
-                        "Fan-out node execution started before both V2 wave activities were scheduled."
+                        "Fan-out node execution started before both V2 wave "
+                        "activities were scheduled."
                     )
                 started_ids.add(started_id)
                 if len(started_ids) >= 2:

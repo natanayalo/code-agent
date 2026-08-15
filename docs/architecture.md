@@ -354,7 +354,8 @@ architectural purity.
 | Native provider | Session-local reasoning and native execution stream, never product lifecycle authority |
 
 New features should not deepen duplicate lifecycle ownership in Temporal and
-Postgres. M28.5B will document field-level authority and a compatibility plan;
+Postgres. The field-level authority table, recovery rules, and prioritized
+reduction plan are documented in [`docs/architecture/state_ownership.md`](architecture/state_ownership.md);
 reducing full-state `TemporalTaskState` duplication is gradual work only after
 replay, recovery, projection, and rollback behavior remain proven.
 
@@ -468,4 +469,5 @@ For day-to-day operation and troubleshooting, pair this document with:
 
 - runbook: `docs/runbook.md`
 - current operational status: `docs/status.md`
+- state ownership contract: `docs/architecture/state_ownership.md`
 - historical cutover and rollback record: `docs/archive/temporal_cutover.md`
