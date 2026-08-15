@@ -136,12 +136,12 @@ Temporal migration and rollback record is in the
   broker remains deferred
 - lifecycle data currently overlaps across Temporal history/workflow state,
   serialized `TemporalTaskState`, task/product projections, execution-plan
-  rows, and timeline events; Wave 1, Wave 2, Wave 3A, and Wave 3B have pruned
+  rows, and timeline events; Wave 1, Wave 2, and Wave 3A have pruned
   ephemeral `progress_updates`, candidate fields (`friction_reports`, `errors`,
   `session_state_update`, `scout_phase_results`, `memory_to_persist`, `timeline_events`),
-  DAG plan models (`task_plan`, `decomposed_plan`), and DAG node outcomes (`node_outcomes`)
-  from intermediate snapshots while relational merge markers, attempt payloads, and
-  timeline authority remain intact
+  and DAG plan models (`task_plan`, `decomposed_plan`) from snapshots; Wave 3B.1
+  establishes relational merge markers and attempt-aware rehydration with dual-write
+  preservation of `node_outcomes` in snapshots (Wave 3B.2 will prune snapshot serialization)
 - the worker boundary is currently terminal `WorkerRequest -> WorkerResult`;
   provider-neutral streaming `AgentEvent` and `ContextEnvelope` contracts are
   planned rather than available today

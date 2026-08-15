@@ -313,7 +313,7 @@ async def test_merge_v2_wave_projects_ordered_multi_result_outcomes(
         assert [outcome.node_id for outcome in outcomes] == ["first", "second"]
         snapshot = TemporalTaskStateRepository(session).get(task_id=fixture.task_id)
         assert snapshot is not None
-        assert "node_outcomes" not in snapshot.state
+        assert "node_outcomes" in snapshot.state
         merged = OrchestratorState.model_validate(snapshot.state)
         assert merged.dispatch.runtime_manifest is not None
         assert merged.dispatch.runtime_manifest["worker"]["worker_profile"] == "readonly-profile"
@@ -370,4 +370,4 @@ async def test_merge_v2_wave_keeps_terminal_sibling_when_other_evidence_is_missi
         assert outcomes[1].result.failure_kind == "sandbox_infra"
         snapshot = TemporalTaskStateRepository(session).get(task_id=fixture.task_id)
         assert snapshot is not None
-        assert "node_outcomes" not in snapshot.state
+        assert "node_outcomes" in snapshot.state

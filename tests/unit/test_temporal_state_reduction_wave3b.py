@@ -6,243 +6,66 @@ Covers relational merge marker authority, dual writes, rehydration, and node_out
 from __future__ import annotations
 
 import asyncio
-import types
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
 
-from db.base import Base, utc_now
 from db.enums import (
     ExecutionPlanNodeStatus,
-    TimelineEventType,
 )
-from db.models import ExecutionPlanNodeAttempt, Task, User
-from db.models import Session as ConversationSession
-from orchestrator.execution_outcome_service import _persist_execution_outcome
-from orchestrator.execution_submission_service import _load_submission_for_task
 from orchestrator.node_execution import (
     NodeActivityRequest,
     NodeActivityResultRef,
-    _result_digest,
     logical_activity_key,
 )
 from orchestrator.state import (
-    DecomposedTaskNode,
     DecomposedTaskPlan,
     NodeOutcome,
-    OrchestratorState,
-    SessionRef,
-    TaskRequest,
-    TaskSpec,
 )
 from orchestrator.temporal.activities import (
     EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS,
-    TaskExecutionActivities,
     _resolve_permission_escalation_state,
     _serialize_temporal_task_state,
 )
 from orchestrator.temporal.node_wave import NodeWaveItem, NodeWaveSelectionV2
 from repositories import (
     ExecutionPlanRepository,
-    TaskTimelineRepository,
     TemporalTaskStateRepository,
     session_scope,
+)
+from tests.unit.wave3b_test_helpers import (
+    add_attempt as _add_attempt,
+)
+from tests.unit.wave3b_test_helpers import (
+    make_activities as _make_activities,
+)
+from tests.unit.wave3b_test_helpers import (
+    make_db as _make_db,
+)
+from tests.unit.wave3b_test_helpers import (
+    make_outcome_payload as _make_outcome_payload,
+)
+from tests.unit.wave3b_test_helpers import (
+    make_sample_node as _make_sample_node,
+)
+from tests.unit.wave3b_test_helpers import (
+    make_sample_state as _make_sample_state,
+)
+from tests.unit.wave3b_test_helpers import (
+    seed_snapshot as _seed_snapshot,
+)
+from tests.unit.wave3b_test_helpers import (
+    seed_sql_plan_nodes as _seed_sql_plan_nodes,
+)
+from tests.unit.wave3b_test_helpers import (
+    seed_task_and_timeline as _seed_task_and_timeline,
 )
 from workers import WorkerResult
 
 
-def _make_db() -> sessionmaker[Session]:
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    return sessionmaker(bind=engine, expire_on_commit=False)
-
-
-def _make_activities(factory: sessionmaker[Session]) -> TaskExecutionActivities:
-    svc = MagicMock()
-    svc.worker = MagicMock()
-    svc.worker_profiles = {}
-    svc.enable_worker_profiles = False
-    svc.enable_independent_verifier = False
-    svc.session_factory = factory
-    svc.workspace_manager = None
-    svc.retention_seconds = None
-    svc.orchestrator_brain = None
-    svc.progress_notifier = None
-    svc._persist_execution_outcome = types.MethodType(_persist_execution_outcome, svc)
-    svc._load_submission_for_task = types.MethodType(_load_submission_for_task, svc)
-
-    async def _async_run_blocking(func: Any, *args: Any, **kwargs: Any) -> Any:
-        return func(*args, **kwargs)
-
-    svc._run_blocking = _async_run_blocking
-    return TaskExecutionActivities(svc)
-
-
-def _make_sample_state(
-    task_id: str = "task-w3b-1",
-    session_id: str = "session-w3b-1",
-) -> OrchestratorState:
-    return OrchestratorState(
-        task=TaskRequest(
-            task_id=task_id,
-            repo_url="https://github.com/example/repo",
-            task_text="Run complex refactoring task",
-        ),
-        session=SessionRef(
-            session_id=session_id,
-            user_id="user-1",
-            channel="api",
-            external_thread_id="thread-1",
-        ),
-        attempt_count=0,
-    )
-
-
-def _seed_task_and_timeline(
-    factory: sessionmaker[Session],
-    task_id: str,
-    *,
-    decomposed_plan: DecomposedTaskPlan | None = None,
-) -> None:
-    with session_scope(factory) as session:
-        if session.query(User).filter_by(id="user-1").first() is None:
-            session.add(User(id="user-1", external_user_id="user-1", display_name="Test User"))
-        if session.query(ConversationSession).filter_by(id="session-1").first() is None:
-            session.add(
-                ConversationSession(
-                    id="session-1", user_id="user-1", channel="api", external_thread_id="t-1"
-                )
-            )
-        session.add(
-            Task(
-                id=task_id,
-                session_id="session-1",
-                repo_url="https://github.com/example/repo",
-                task_text="Task description",
-                constraints={},
-            )
-        )
-        if decomposed_plan is not None:
-            TaskTimelineRepository(session).create_next_for_attempt(
-                task_id=task_id,
-                attempt_number=0,
-                event_type=TimelineEventType.TASK_PLANNED,
-                message="Decomposed",
-                payload={"decomposition": decomposed_plan.model_dump(mode="json")},
-            )
-
-
-def _seed_sql_plan_nodes(
-    session: Session,
-    task_id: str,
-    nodes: list[DecomposedTaskNode],
-) -> Any:
-    plan = ExecutionPlanRepository(session).create(task_id=task_id)
-    for seq, node in enumerate(nodes):
-        ExecutionPlanRepository(session).add_node(
-            plan_id=plan.id,
-            node_id=node.node_id,
-            goal=node.title,
-            sequence_number=seq,
-            depends_on=node.depends_on,
-            task_spec=node.task_spec.model_dump(mode="json") if node.task_spec else {},
-            node_kind=node.node_kind,
-            aggregation_role=node.aggregation_role,
-            execution_mode=node.execution_mode,
-            parallel_safe=node.parallel_safe,
-        )
-    session.flush()
-    return ExecutionPlanRepository(session).get_by_task_id(task_id)
-
-
-def _make_sample_node(
-    node_id: str = "step-1",
-    title: str = "Node 1",
-    mode: str = "mutable",
-    parallel_safe: bool = False,
-) -> DecomposedTaskNode:
-    return DecomposedTaskNode(
-        node_id=node_id,
-        title=title,
-        depends_on=[],
-        task_spec=TaskSpec(goal=title, acceptance_criteria=[]),
-        node_kind="inspect" if mode == "read_only" else "implement",
-        aggregation_role="context" if mode == "read_only" else "mutation",
-        execution_mode=mode,
-        parallel_safe=parallel_safe,
-    )
-
-
-def _make_outcome_payload(
-    node_id: str,
-    status: str,
-    res: WorkerResult,
-    attempts: int = 1,
-    key: str | None = None,
-) -> tuple[NodeOutcome, dict[str, Any], str]:
-    out = NodeOutcome(
-        node_id=node_id,
-        status=status,
-        result=res,
-        attempts=attempts,
-        logical_activity_key=key,
-    )
-    payload = {
-        "worker_result": res.model_dump(mode="json"),
-        "node_outcome": out.model_dump(mode="json"),
-    }
-    digest = _result_digest(payload)
-    return out, payload, digest
-
-
-def _add_attempt(
-    session: Session,
-    plan_node_id: str,
-    attempt_number: int,
-    key: str,
-    status: str,
-    payload: dict[str, Any],
-    digest: str,
-) -> None:
-    session.add(
-        ExecutionPlanNodeAttempt(
-            id=f"att-{plan_node_id}-{attempt_number}",
-            plan_node_id=plan_node_id,
-            attempt_number=attempt_number,
-            started_at=utc_now(),
-            finished_at=utc_now(),
-            status=status,
-            effective_input_summary={},
-            effective_input_digest=f"d-{attempt_number}",
-            logical_activity_key=key,
-            result_digest=digest,
-            result_payload=payload,
-        )
-    )
-
-
-def _seed_snapshot(
-    session: Session,
-    task_id: str,
-    decomposed_plan: DecomposedTaskPlan | None = None,
-    raw_dict: dict[str, Any] | None = None,
-) -> None:
-    if raw_dict is not None:
-        TemporalTaskStateRepository(session).upsert(task_id=task_id, state=raw_dict)
-    else:
-        state = _make_sample_state(task_id=task_id)
-        state.decomposed_plan = decomposed_plan
-        TemporalTaskStateRepository(session).upsert(
-            task_id=task_id, state=_serialize_temporal_task_state(state)
-        )
-
-
 def test_wave3b_field_exclusion_and_serialization() -> None:
-    """node_outcomes must be excluded from intermediate snapshot serialization in Wave 3B."""
-    assert "node_outcomes" in EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS
+    """node_outcomes is serialized in Wave 3B.1 snapshots for rolling deployment safety."""
+    assert "node_outcomes" not in EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS
     outcome = NodeOutcome(
         node_id="step-1",
         status="completed",
@@ -251,7 +74,8 @@ def test_wave3b_field_exclusion_and_serialization() -> None:
     )
     state = _make_sample_state()
     state.node_outcomes = [outcome]
-    assert "node_outcomes" not in _serialize_temporal_task_state(state)
+    serialized = _serialize_temporal_task_state(state)
+    assert "node_outcomes" in serialized
 
 
 def test_1_k1_merged_k2_unmerged_rehydration_and_selector() -> None:
@@ -564,7 +388,7 @@ def test_7_marker_nonexistent_attempt_fails_closed() -> None:
         activities._get_current_state(task_id)
 
 
-def test_8_crash_after_marker_commit_converges_on_retry() -> None:
+def test_8_crash_after_marker_commit_converges_on_retry(monkeypatch: pytest.MonkeyPatch) -> None:
     """8. Crash after marker commit before snapshot persistence -> retry converges."""
     factory = _make_db()
     task_id = "task-3b-8"
@@ -572,32 +396,57 @@ def test_8_crash_after_marker_commit_converges_on_retry() -> None:
     decomposed_plan = DecomposedTaskPlan(triggered=True, status="decomposed", nodes=[node])
     _seed_task_and_timeline(factory, task_id, decomposed_plan=decomposed_plan)
 
-    k1 = "activity:step-1:1"
-    _, p1, d1 = _make_outcome_payload(
-        "step-1", "completed", WorkerResult(status="success", summary="Done 1"), 1, k1
-    )
-
     with session_scope(factory) as session:
         plan = _seed_sql_plan_nodes(session, task_id, [node])
+        k1 = logical_activity_key(str(plan.id), "step-1", 1)
+        _, p1, d1 = _make_outcome_payload(
+            "step-1", "completed", WorkerResult(status="success", summary="Done 1"), 1, k1
+        )
         _add_attempt(session, plan.nodes[0].id, 1, k1, "completed", p1, d1)
         ExecutionPlanRepository(session).update_node(
             plan_id=plan.id,
             node_id="step-1",
             status=ExecutionPlanNodeStatus.COMPLETED,
             latest_logical_activity_key=k1,
-            merged_logical_activity_key=k1,
+            merged_logical_activity_key=None,
             terminal_result_digest=d1,
             terminal_result_payload=p1,
         )
         _seed_snapshot(session, task_id, decomposed_plan)
 
     activities = _make_activities(factory)
+    selection = {
+        "action": "merge_terminal",
+        "node_id": "step-1",
+        "logical_activity_key": k1,
+    }
+    merge_req = {"selection": selection, "result_ref": None}
+
+    calls = []
+    real_persist = activities._persist_intermediate_state
+
+    def crashing_persist(*args: Any, **kwargs: Any) -> None:
+        if not calls:
+            calls.append(1)
+            raise RuntimeError("Simulated crash right before snapshot upsert")
+        real_persist(*args, **kwargs)
+
+    monkeypatch.setattr(activities, "_persist_intermediate_state", crashing_persist)
+
+    with pytest.raises(RuntimeError, match="Simulated crash right before snapshot upsert"):
+        asyncio.run(activities.merge_node_wave(task_id, merge_req))
+
+    with session_scope(factory) as session:
+        db_node = ExecutionPlanRepository(session).get_node(plan.id, "step-1")
+        assert db_node is not None
+        assert db_node.merged_logical_activity_key == k1
+
+    retry_result = asyncio.run(activities.merge_node_wave(task_id, merge_req))
+    assert retry_result["continuation"] == "continue"
+
     loaded = activities._get_current_state(task_id)
     assert len(loaded.node_outcomes) == 1
     assert loaded.node_outcomes[0].logical_activity_key == k1
-
-    selection = asyncio.run(activities._select_next_node(task_id, fanout_contract_enabled=False))
-    assert selection["action"] == "complete"
 
 
 def test_9_v2_sibling_terminal_before_other_sibling_failure_markers() -> None:
@@ -788,3 +637,81 @@ def test_12_legacy_outcome_without_key_raises_runtime_error() -> None:
     activities = _make_activities(factory)
     with pytest.raises(RuntimeError, match="lacks logical_activity_key"):
         activities._get_current_state(task_id)
+
+
+def test_13_legacy_outcome_payload_parity_mismatch_fails_closed() -> None:
+    """13. Legacy snapshot outcome payload conflicts with durable attempt -> fails closed."""
+    factory = _make_db()
+    task_id = "task-3b-13"
+    node = _make_sample_node("step-1", "Step 1")
+    decomposed_plan = DecomposedTaskPlan(triggered=True, status="decomposed", nodes=[node])
+    _seed_task_and_timeline(factory, task_id, decomposed_plan=decomposed_plan)
+
+    k1 = "activity:step-1:1"
+    # Durable attempt recorded failure
+    _, p1, d1 = _make_outcome_payload(
+        "step-1", "failed", WorkerResult(status="failure", summary="Durable failed"), 1, k1
+    )
+    # Legacy snapshot claimed success
+    snap_outcome, _, _ = _make_outcome_payload(
+        "step-1", "completed", WorkerResult(status="success", summary="Snapshot success"), 1, k1
+    )
+
+    with session_scope(factory) as session:
+        plan = _seed_sql_plan_nodes(session, task_id, [node])
+        _add_attempt(session, plan.nodes[0].id, 1, k1, "failed", p1, d1)
+        ExecutionPlanRepository(session).update_node(
+            plan_id=plan.id,
+            node_id="step-1",
+            status=ExecutionPlanNodeStatus.FAILED,
+            latest_logical_activity_key=k1,
+            merged_logical_activity_key=None,
+            terminal_result_digest=d1,
+            terminal_result_payload=p1,
+        )
+        raw_state_dict = {
+            "task": {
+                "task_id": task_id,
+                "repo_url": "https://github.com/example/repo",
+                "task_text": "t",
+            },
+            "decomposed_plan": decomposed_plan.model_dump(mode="json"),
+            "node_outcomes": [snap_outcome.model_dump(mode="json")],
+        }
+        _seed_snapshot(session, task_id, raw_dict=raw_state_dict)
+
+    activities = _make_activities(factory)
+    with pytest.raises(RuntimeError, match="conflicts with durable canonical outcome evidence"):
+        activities._get_current_state(task_id)
+
+    # Ensure marker was NOT written
+    with session_scope(factory) as session:
+        db_node = ExecutionPlanRepository(session).get_node(plan.id, "step-1")
+        assert db_node is not None
+        assert db_node.merged_logical_activity_key is None
+
+
+def test_14_blocked_sql_node_without_merged_outcome_fails_closed_in_permission_escalation() -> None:
+    """14. Blocked SQL node without marker outcome fails closed on permission escalation."""
+    factory = _make_db()
+    task_id = "task-3b-14"
+    node = _make_sample_node("step-1", "Blocked step")
+    decomposed_plan = DecomposedTaskPlan(triggered=True, status="decomposed", nodes=[node])
+    _seed_task_and_timeline(factory, task_id, decomposed_plan=decomposed_plan)
+
+    with session_scope(factory) as session:
+        plan = _seed_sql_plan_nodes(session, task_id, [node])
+        # SQL node is BLOCKED, but no attempt / merge marker exists
+        ExecutionPlanRepository(session).update_node(
+            plan_id=plan.id,
+            node_id="step-1",
+            status=ExecutionPlanNodeStatus.BLOCKED,
+            merged_logical_activity_key=None,
+        )
+        _seed_snapshot(session, task_id, decomposed_plan)
+
+    with pytest.raises(RuntimeError, match="has no marker-confirmed blocked outcome"):
+        _resolve_permission_escalation_state(factory, task_id, approved=True)
+
+    with pytest.raises(RuntimeError, match="has no marker-confirmed blocked outcome"):
+        _resolve_permission_escalation_state(factory, task_id, approved=False)

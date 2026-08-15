@@ -30,6 +30,7 @@ from orchestrator.decomposition import is_read_only_fanout_eligible
 from orchestrator.execution_graph_input import build_orchestrator_graph_input
 from orchestrator.execution_policy import _apply_execution_budget_policy
 from orchestrator.execution_resume_service import (
+    _reconstruct_single_node_outcome,
     restore_decomposed_plan_from_events,
     restore_merged_node_outcomes,
     restore_task_plan_from_events,
@@ -129,7 +130,6 @@ EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS: frozenset[str] = frozenset(
         "memory_to_persist",
         "task_plan",
         "decomposed_plan",
-        "node_outcomes",
     }
 )
 
@@ -206,11 +206,9 @@ def _reject_permission_escalation(
             (n for n in plan.nodes if n.status == ExecutionPlanNodeStatus.BLOCKED), None
         )
         if blocked_sql_node is not None:
-            ExecutionPlanRepository(session).update_node(
-                plan_id=plan.id,
-                node_id=blocked_sql_node.node_id,
-                status=ExecutionPlanNodeStatus.FAILED,
-                failure_kind="permission_denied",
+            raise RuntimeError(
+                f"Blocked execution plan node {blocked_sql_node.node_id} has no marker-confirmed "
+                "blocked outcome in parent state during permission escalation rejection"
             )
     if state.completion_loop.phase == "repair_requested":
         apply_repair_rejection(state)
@@ -272,36 +270,66 @@ def _approve_permission_escalation(
     task.constraints = constraints
     task.status = TaskStatus.IN_PROGRESS
     state.task = state.task.model_copy(update={"constraints": constraints})
-    if blocked is not None and plan is not None:
-        ExecutionPlanRepository(session).update_node(
-            plan_id=plan.id,
-            node_id=blocked.node_id,
-            status=ExecutionPlanNodeStatus.PENDING,
-            blocker_interaction_id=None,
-            retry_count=blocked.attempts,
-        )
-        # Keep the terminal parent key while the node is reset for a new logical attempt.
-        state.result = _aggregate_decomposed_results(state.node_outcomes)
-    elif plan is not None:
-        blocked_sql_node = next(
-            (n for n in plan.nodes if n.status == ExecutionPlanNodeStatus.BLOCKED), None
-        )
-        if blocked_sql_node is not None:
+    if plan is not None:
+        if blocked is None:
+            blocked_sql_node = next(
+                (n for n in plan.nodes if n.status == ExecutionPlanNodeStatus.BLOCKED), None
+            )
+            if blocked_sql_node is not None:
+                raise RuntimeError(
+                    f"Blocked execution plan node {blocked_sql_node.node_id} has no "
+                    "marker-confirmed blocked outcome in parent state during permission "
+                    "escalation approval"
+                )
+        else:
             ExecutionPlanRepository(session).update_node(
                 plan_id=plan.id,
-                node_id=blocked_sql_node.node_id,
+                node_id=blocked.node_id,
                 status=ExecutionPlanNodeStatus.PENDING,
                 blocker_interaction_id=None,
-                retry_count=getattr(blocked_sql_node, "retry_count", 0),
+                retry_count=blocked.attempts,
             )
-        state.result = (
-            _aggregate_decomposed_results(state.node_outcomes) if state.node_outcomes else None
-        )
+            # Keep the terminal parent key while the node is reset for a new logical attempt.
+            state.result = _aggregate_decomposed_results(state.node_outcomes)
     else:
         state.result = None
     TemporalTaskStateRepository(session).upsert(
         task_id=task_id, state=_serialize_temporal_task_state(state)
     )
+
+
+def _validate_legacy_outcome_parity(
+    canonical: NodeOutcome,
+    item: dict[str, Any],
+    nid: str,
+    key: str,
+) -> None:
+    snap_outcome = NodeOutcome.model_validate(item)
+    if canonical.node_id != snap_outcome.node_id or canonical.status != snap_outcome.status:
+        raise RuntimeError(
+            f"Legacy snapshot outcome for node {nid} with key '{key}' "
+            "conflicts with durable canonical outcome evidence"
+        )
+    can_res, snap_res = canonical.result, snap_outcome.result
+    if can_res is not None and snap_res is not None:
+        if (
+            can_res.status != snap_res.status
+            or can_res.failure_kind != snap_res.failure_kind
+            or can_res.requested_permission != snap_res.requested_permission
+        ):
+            raise RuntimeError(
+                f"Legacy snapshot outcome for node {nid} with key '{key}' "
+                "conflicts with durable canonical outcome evidence"
+            )
+    if (
+        canonical.result_digest
+        and snap_outcome.result_digest
+        and canonical.result_digest != snap_outcome.result_digest
+    ):
+        raise RuntimeError(
+            f"Legacy snapshot outcome digest for node {nid} with key '{key}' "
+            "conflicts with durable canonical outcome evidence"
+        )
 
 
 def _bootstrap_single_legacy_outcome(
@@ -329,27 +357,33 @@ def _bootstrap_single_legacy_outcome(
             )
         return
 
-    has_attempt = any(
-        getattr(a, "logical_activity_key", None) == key
-        for a in getattr(db_node, "attempts", []) or []
+    attempt = next(
+        (
+            a
+            for a in getattr(db_node, "attempts", []) or []
+            if getattr(a, "logical_activity_key", None) == key
+        ),
+        None,
     )
-    if not has_attempt:
-        attempt_row = session.scalar(
-            select(ExecutionPlanNodeAttempt).where(
-                ExecutionPlanNodeAttempt.plan_node_id == db_node.id,
-                ExecutionPlanNodeAttempt.logical_activity_key == key,
-            )
+    if attempt is None:
+        matched = ExecutionPlanRepository(session).get_attempts_by_activity_keys(
+            plan_node_ids=[db_node.id],
+            logical_activity_keys=[key],
         )
-        has_attempt = attempt_row is not None
+        attempt = matched[0] if matched else None
 
     has_term = (
         db_node.latest_logical_activity_key == key and db_node.terminal_result_payload is not None
     )
-    if not (has_attempt or has_term):
+    if attempt is None and not has_term:
         raise RuntimeError(
             f"Legacy snapshot outcome for node {nid} with key '{key}' "
             "cannot be validated against durable attempt or terminal evidence"
         )
+
+    canonical = _reconstruct_single_node_outcome(db_node, attempt, key)
+    _validate_legacy_outcome_parity(canonical, item, nid, key)
+
     ExecutionPlanRepository(session).update_node(
         plan_id=plan.id,
         node_id=nid,
@@ -392,12 +426,13 @@ def _rehydrate_dag_state(
     state: OrchestratorState,
     raw_snapshot: Any = None,
 ) -> OrchestratorState:
-    """Authoritatively rehydrate timeline, task_plan, and decomposed_plan from timeline events.
+    """Authoritatively rehydrate timeline, task_plan, decomposed_plan, and node_outcomes.
 
     Invariants:
     1. Timeline is the exact authority for task_plan and decomposed_plan and replaces any
        older SQL-synthesized models (even on no-snapshot paths).
-    2. Wave 3A MUST NEVER overwrite or derive state.node_outcomes.
+    2. Wave 3B.1 rehydrates state.node_outcomes from relational merge markers and attempts while
+       preserving serialized node_outcomes in snapshots for rolling deploy compatibility.
     3. Operational execution_plan_nodes in Postgres are validated against restored decomposed_plan.
     """
     task = TaskRepository(session).get(task_id)

@@ -75,7 +75,7 @@ field to:
 | `task_plan` | Authoritative `task_timeline_events` (`TASK_PLANNED`) | Not persisted; excluded from `temporal_task_states` under Wave 3A | `task_timeline_events`, `execution_plans`, `execution_plan_nodes` | `orchestrator/nodes/ingestion.py` (`plan_task`), timeline events | DAG execution loop, Dashboard DAG view, `/tasks/{id}/plan` |
 | `task_spec` | `tasks.task_spec` & `temporal_task_states.state` | `tasks.task_spec`, `temporal_task_states.state` | `tasks.task_spec` (JSONB) | `orchestrator/execution_outcome_service.py` (`_update_task_route_and_spec`) | Capability grants, API `/tasks/{id}`, Dashboard |
 | `decomposed_plan` | Authoritative `task_timeline_events` (`TASK_PLANNED`) & operational validation against `execution_plans` | Not persisted; excluded from `temporal_task_states` under Wave 3A | `task_timeline_events`, `execution_plans`, `execution_plan_nodes` | `orchestrator/graph.py` (`decompose_task`), timeline events | Temporal DAG scheduler (`select_next_node`, `run_decomposed_node`, `merge_node_wave`), Dashboard |
-| `node_outcomes` | `execution_plan_nodes.merged_logical_activity_key` (relational marker authority) & `execution_plan_node_attempts.result_payload` (attempt payload authority) | Not persisted; excluded from `temporal_task_states` under Wave 3B | `execution_plan_nodes`, `execution_plan_node_attempts` | `orchestrator/temporal/activities.py` (`merge_node_wave`), `ExecutionPlanRepository` | Wave merge loop, retry decisions, aggregate result generation |
+| `node_outcomes` | `execution_plan_nodes.merged_logical_activity_key` (relational marker authority) & `execution_plan_node_attempts.result_payload` (attempt payload authority) | `temporal_task_states.state` (Wave 3B.1 retained dual-write; pruned in 3B.2), `execution_plan_node_attempts` | `execution_plan_nodes`, `execution_plan_node_attempts` | `orchestrator/temporal/activities.py` (`merge_node_wave`), `ExecutionPlanRepository` | Wave merge loop, retry decisions, aggregate result generation |
 | `current_node_id` | `temporal_task_states.state` | `temporal_task_states.state` | Ephemeral in-memory/checkpoint-only state (no direct relational column) | Node selection / execution activities in `activities.py` (`run_decomposed_node`) | Node execution tracing & logs |
 | `repo_profile` | `temporal_task_states.state` | `temporal_task_states.state` | Ephemeral (recomputed if needed) | Discovery / planning activities in `orchestrator/` | Worker prompt context |
 | `memory` | `temporal_task_states.state` | `temporal_task_states.state` | `memory_personal`, `memory_project`, `session_states` (original sources) | Loaded on ingest (`build_orchestrator_graph_input`) from memory repositories | Worker dispatch prompt assembly |
@@ -237,17 +237,17 @@ It is critical to distinguish what the codebase currently supports from the targ
 - **Rollback Path:** Additive re-inclusion in `EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS`.
 
 #### 9. `node_outcomes`
-- **Status:** **Completed (Wave 3B)**
+- **Status:** **Wave 3B.1 Completed (Dual-Write); Wave 3B.2 Targeted (Pruning)**
 - **Architecture & Implementation:**
-  - `node_outcomes` is excluded from intermediate `TemporalTaskState` serialization via `EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS`.
-  - **Relational Merge Marker Authority:** `execution_plan_nodes.merged_logical_activity_key` (introduced via schema-only migration `20260816_0049`) is the relational authority for which logical attempt reached parent state.
+  - **3B.1 Dual-Write Phase:** `node_outcomes` remains serialized in `TemporalTaskState` snapshots to ensure rolling deployment safety (new snapshot -> old worker compatibility).
+  - **Relational Merge Marker Authority:** `execution_plan_nodes.merged_logical_activity_key` (introduced via schema-only migration `20260816_0049`) is established as the durable relational authority for which logical attempt reached parent state.
   - **Attempt Payload Authority:** `execution_plan_node_attempts.result_payload` is the immutable authority for worker attempts, correctly supporting retries without corruption.
-  - **Parent-Generated Outome Support:** `execution_plan_nodes.terminal_result_payload` is used only when `marker == latest_logical_activity_key` (supporting skips and fan-out synthetic missing evidence).
-  - **Strict Fail-Closed Rehydration:** `restore_merged_node_outcomes()` reconstructs marker-confirmed outcomes and fails closed with `RuntimeError` if an active marker cannot be validated against durable evidence.
+  - **Parent-Generated Outcome Support:** `execution_plan_nodes.terminal_result_payload` is used only when `marker == latest_logical_activity_key` (supporting skips and fan-out synthetic missing evidence).
+  - **Strict Fail-Closed Rehydration & Parity:** `restore_merged_node_outcomes()` reconstructs marker-confirmed outcomes and fails closed with `RuntimeError` if an active marker cannot be validated against durable evidence. Legacy snapshot bootstrapping validates full outcome and digest parity before setting markers.
   - **Crash-Gap Isolation:** `select_next_node` checks `node.latest_logical_activity_key and node.terminal_result_payload and node.latest_logical_activity_key != node.merged_logical_activity_key` to reliably distinguish unmerged worker results from parent-merged state across restarts.
-  - **Rolling Bootstrap:** `_rehydrate_dag_state()` bootstraps legacy snapshot outcomes with strict DB validation, ensuring zero data loss during rolling deployments.
+  - **Wave 3B.2 Follow-up:** Will prune `node_outcomes` from `TemporalTaskState` serialization once 3B.1 is deployed.
 - **Risk Level:** **Low**
-- **Size Impact:** High (removes cumulative worker result and outcome trees from intermediate snapshots).
+- **Size Impact:** Medium in 3B.1 (dual-write established); High in 3B.2 (removes cumulative worker result trees from snapshots).
 - **Rollback Path:** Additive re-inclusion in `EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS`.
 
 ---

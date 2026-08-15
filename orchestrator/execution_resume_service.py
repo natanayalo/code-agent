@@ -5,11 +5,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from sqlalchemy import select
-
 from db.enums import TimelineEventType
-from db.models import ExecutionPlanNodeAttempt
 from orchestrator.state import DecomposedTaskPlan, NodeOutcome, TaskPlan, TaskSpec
+from repositories.sqlalchemy_plan import ExecutionPlanRepository
 
 logger = logging.getLogger("orchestrator.execution")
 
@@ -281,12 +279,15 @@ def restore_merged_node_outcomes(
 
     attempts_by_node_and_key: dict[tuple[str, str], Any] = {}
     if session is not None and plan_node_ids and markers:
-        stmt = select(ExecutionPlanNodeAttempt).where(
-            ExecutionPlanNodeAttempt.plan_node_id.in_(plan_node_ids),
-            ExecutionPlanNodeAttempt.logical_activity_key.in_(markers),
+        attempts = ExecutionPlanRepository(session).get_attempts_by_activity_keys(
+            plan_node_ids=plan_node_ids,
+            logical_activity_keys=markers,
         )
-        for attempt in session.scalars(stmt).all():
-            attempts_by_node_and_key[(attempt.plan_node_id, attempt.logical_activity_key)] = attempt
+        for attempt in attempts:
+            if attempt.logical_activity_key:
+                attempts_by_node_and_key[(attempt.plan_node_id, attempt.logical_activity_key)] = (
+                    attempt
+                )
     else:
         for node in merged_nodes:
             node_id_val = getattr(node, "id", None)
@@ -299,8 +300,12 @@ def restore_merged_node_outcomes(
     for node in merged_nodes:
         marker = node.merged_logical_activity_key
         node_id_val = getattr(node, "id", None)
-        attempt = attempts_by_node_and_key.get((node_id_val, marker)) if node_id_val else None
-        outcomes.append(_reconstruct_single_node_outcome(node, attempt, marker))
+        attempt_match: Any = (
+            attempts_by_node_and_key.get((node_id_val, marker))
+            if (node_id_val and marker)
+            else None
+        )
+        outcomes.append(_reconstruct_single_node_outcome(node, attempt_match, marker))
 
     return outcomes
 
