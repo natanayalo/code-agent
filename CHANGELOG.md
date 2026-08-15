@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat(orchestrator): complete M28.5B wave 2 temporal state reduction closeout ([#373](https://github.com/natanayalo/code-agent/pull/373))
+
 - Feat(temporal): rehydrate timeline_events from db and prune from snapshots (M28.5B Wave 2) ([#372](https://github.com/natanayalo/code-agent/pull/372))
 
 - Feat(temporal): prune progress_updates from intermediate snapshots and ensure terminal cleanup ([#371](https://github.com/natanayalo/code-agent/pull/371))
