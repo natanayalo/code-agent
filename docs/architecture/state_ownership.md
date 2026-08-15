@@ -5,8 +5,9 @@
 This document is the authoritative field-level state ownership contract for
 `code-agent` under Phase 4A (Milestone M28.5B). It establishes:
 
-1. **Field-level authority and projection mapping** across Temporal history,
-   `TemporalTaskState`, and relational Postgres tables.
+1. **Field-level lifecycle authority and projection mapping** across Temporal
+   history, `TemporalTaskState`, and relational Postgres tables—distinguishing
+   active in-flight authority from terminal relational projections.
 2. **Lifecycle recovery rules** for activity replay, workflow restarts, and
    disaster recovery—distinguishing existing capabilities from target capabilities.
 3. **A prioritized, prerequisite-gated reduction plan** to eliminate redundant
@@ -34,66 +35,68 @@ This document is the authoritative field-level state ownership contract for
 
 3. **`TemporalTaskState` is an intermediate activity checkpoint, not a permanent record:**
    - `temporal_task_states` exists solely to pass uncommitted `OrchestratorState`
-     across activity boundaries.
+     across activity boundaries during an active workflow run.
    - At terminal workflow completion (`COMPLETED`, `FAILED`, `CANCELLED`),
-     `TemporalTaskState` is **deleted**. Relational tables are already the 100%
-     durable record of all completed work.
+     `TemporalTaskState` is deleted. Relational tables are the permanent record
+     of completed work.
 
-4. **New features must not deepen state duplication:**
-   - New orchestration fields must define their authoritative store and write
-     paths before adding fields to `TemporalTaskState`.
-   - Redundant fields must be eliminated incrementally with explicit replay,
-     idempotency, and reconstruction tests.
+4. **Lifecycle awareness prevents premature state pruning:**
+   - Many fields (e.g. `result`, `verification`, `review`) only become durable
+     in relational tables (`worker_runs`, `artifacts`) at terminal delivery.
+   - During active execution, `TemporalTaskState` remains their sole active
+     authority until terminal outcome persistence or dedicated intermediate
+     reconstructors are introduced.
 
 ---
 
-## Section 1: Field-Level Authority Table
+## Section 1: Field-Level Lifecycle Authority Table
 
-`OrchestratorState` defines 31 fields passed between workflow steps. The table
-below maps each field to its authoritative store, projection targets, write paths,
-and read consumers across all 7 state stores:
+`OrchestratorState` defines 31 fields passed between workflow steps. Because
+state authority transitions over the task lifecycle, the table below maps each
+field to:
 
-1. **Temporal Workflow History** (deterministic execution trace)
-2. **`temporal_task_states`** (encrypted JSON blob checkpoint)
-3. **`tasks`** table (top-level task status, constraints, route, spec)
-4. **`worker_runs`** table (per-attempt worker execution evidence)
-5. **`execution_plans` / `execution_plan_nodes` / `execution_plan_node_attempts`** (DAG structure and node outcomes)
-6. **`task_timeline_events`** (append-only timeline log)
-7. **`human_interactions` / `session_states` / `proposals` / `memory_*`** (domain-specific relational entities)
+- **Active Authority (In-Flight):** The store owning the authoritative data
+  while the workflow is executing between activities.
+- **Intermediate Projection / Store:** Where intermediate state is written
+  during `_persist_intermediate_state()`.
+- **Terminal Authority:** The permanent relational store after terminal
+  outcome persistence (`_persist_state()` / `_persist_execution_outcome()`).
+- **Write Path(s):** Where each store is updated in code.
+- **Read Consumers:** Which activities, APIs, or UI views consume the field.
 
-| Field | Authoritative Store | Projection Stores | Write Path(s) | Read Consumers |
-|---|---|---|---|---|
-| `current_step` | Temporal Workflow History | `temporal_task_states.state`, `tasks.status`, `task_timeline_events` | `orchestrator/temporal/activities.py` (`_persist_intermediate_state`) | Workflow step dispatch, Dashboard status/timeline |
-| `session` | `tasks` & `sessions` tables (`session_id`, `user_id`, `channel`) | `temporal_task_states.state` | Ingress handlers (`apps/api/routes/tasks.py`, `webhooks.py`, `telegram.py`) | Session continuity, `/sessions/{id}`, `/tasks/{id}`, Dashboard |
-| `task` | `tasks` table (`id`, `repo_url`, `branch`, `task_text`, `constraints`, `budget_*`) | `temporal_task_states.state` | Ingress handlers, permission escalation in `orchestrator/temporal/activities.py` | Worker dispatch activities, API `/tasks/{id}`, Dashboard |
-| `normalized_task_text` | Ingest/Planner domain stage | `temporal_task_states.state` | `orchestrator/nodes/ingest_node.py` | Prompt generation, worker routing policy |
-| `task_kind` | `tasks.task_spec["task_kind"]` / `tasks.constraints["task_type"]` | `temporal_task_states.state` | `orchestrator/execution_outcome_service.py` (`_update_task_route_and_spec`) | Workflow branching, capability generation |
-| `task_plan` | `execution_plans` & `execution_plan_nodes` | `temporal_task_states.state` | `orchestrator/execution_outcome_service.py` (`_update_task_route_and_spec`) | DAG execution loop, Dashboard DAG view, `/tasks/{id}/plan` |
-| `task_spec` | `tasks.task_spec` (JSONB) | `temporal_task_states.state` | `orchestrator/execution_outcome_service.py` (`_update_task_route_and_spec`) | Capability grants, API `/tasks/{id}`, Dashboard |
-| `decomposed_plan` | `execution_plans` & `execution_plan_nodes` | `temporal_task_states.state` | `orchestrator/execution_outcome_service.py`, `ExecutionPlanRepository` | Temporal DAG activity scheduler (`run_plan_node`, `merge_node_wave`), Dashboard |
-| `node_outcomes` | `execution_plan_nodes` & `execution_plan_node_attempts` | `temporal_task_states.state` | `orchestrator/temporal/activities.py` (`merge_node_wave`), `ExecutionPlanRepository` | Wave merge loop, retry decisions, Dashboard DAG node details |
-| `current_node_id` | Temporal Workflow History | `temporal_task_states.state` | `orchestrator/temporal/activities.py` (`run_plan_node`) | Node execution tracing & logs |
-| `repo_profile` | Ephemeral / Workspace Discovery | `temporal_task_states.state` | Discovery / planning activities in `orchestrator/` | Worker prompt context |
-| `memory` | `memory_items`, `memory_observations`, `session_states` | `temporal_task_states.state` | Loaded on ingest (`build_orchestrator_graph_input`) | Worker dispatch prompt assembly |
-| `route` | `tasks` (`chosen_worker`, `chosen_profile`, `runtime_mode`, `route_reason`) & `worker_runs` | `temporal_task_states.state` | `orchestrator/execution_outcome_service.py` (`_update_task_route_and_spec`) | Worker dispatch, `/tasks/{id}`, Dashboard |
-| `approval` | `human_interactions` (`type="approval"`) & `tasks.constraints["approval"]` | `temporal_task_states.state` | `orchestrator/execution_outcome_service.py` (`_apply_approval_constraints`), `HumanInteractionRepository` | API `/tasks/{id}/approve`, `/tasks/{id}/reject`, Dashboard HITL cards |
-| `dispatch` | `worker_runs` (`worker_type`, `worker_profile`, `runtime_mode`, `runtime_manifest`) | `temporal_task_states.state` | `orchestrator/execution_outcome_service.py` (`_create_worker_run`) | Sandbox runtime executor, Dashboard run details |
-| `result` | `worker_runs` & `artifacts` (patches, diffs, logs, outputs) | `temporal_task_states.state` | `orchestrator/execution_outcome_service.py` (`_create_worker_run`, `_persist_artifacts_for_run`) | Completion loop (repair/delivery), API `/tasks/{id}/runs`, Dashboard |
-| `verification` | `worker_runs.verifier_outcome` (JSONB) & `artifacts` | `temporal_task_states.state` | `orchestrator/execution_outcome_service.py` (`_create_worker_run`) | Completion loop repair decisions, Dashboard Verification tab |
-| `review` | `artifacts` (`type="independent_review_result"`) & `worker_runs.artifact_index` | `temporal_task_states.state` | `orchestrator/execution_outcome_service.py` (`_persist_artifacts_for_run`) | Completion loop repair decisions, Dashboard Review tab |
-| `friction_reports` | `proposals` table (`proposal_type="friction"`) | `temporal_task_states.state` | `orchestrator/execution_improvement_proposal_service.py` | API `/proposals`, Dashboard Proposals tab (never read back from state blob) |
-| `memory_to_persist` | `memory_items` & `memory_observations` | `temporal_task_states.state` | Extracted during run; persisted post-commit via `ObservationMemoryBridge` | Read by `persist_memory` activity (`persist_memory_node -> _admit_memory_candidates`) |
-| `progress_updates` | Ephemeral / Notification webhooks & `task_timeline_events` | `temporal_task_states.state` | `orchestrator/temporal/activities.py` notifier | Real-time notification receivers (never read back from state blob) |
-| `timeline_events` | `task_timeline_events` table | `temporal_task_states.state` | `orchestrator/execution_outcome_service.py` (`_persist_timeline_events`) | Dashboard/API, **and** `_has_event()` activity idempotency guards |
-| `timeline_persisted_count` | Derived cursor (`TaskTimelineRepository.count_by_attempt`) | `temporal_task_states.state` | `orchestrator/execution_outcome_service.py` (`_persist_intermediate_state`), reconciled in `_get_current_state` | Timeline batch insertion deduplication cursor |
-| `repair_handoff_requested` | `tasks.constraints["repair_handoff_requested"]` & Temporal workflow state | `temporal_task_states.state` | `orchestrator/temporal/activities.py` | Delivery activity, manual handoff notifications |
-| `completion_loop` | `tasks.constraints` (`*_repair_passes_used`) & Temporal Workflow History | `temporal_task_states.state` | `orchestrator/execution_outcome_service.py` (`_apply_completion_control_constraints`) | Workflow completion loop routing, repair budget enforcement |
-| `errors` | `tasks.last_error` & `task_timeline_events` (`TASK_FAILED`) | `temporal_task_states.state` | `orchestrator/temporal/activities.py` (`record_workflow_failure`) | API `/tasks/{id}`, Dashboard error banners |
-| `attempt_count` | `tasks.attempt_count` column | `temporal_task_states.state` | `TaskRepository.increment_attempt_count` | Timeline attempt partitioning, retry limits, Dashboard attempt history |
-| `session_state_update` | `session_states` table (`active_goal`, `decisions_made`, `identified_risks`, `files_touched`) | `temporal_task_states.state` | `orchestrator/temporal/activities.py` (`_persist_rejected_session_state`, outcome persistence) | Subsequent task memory context, API `/sessions/{id}`, Dashboard |
-| `scout_phase` | Temporal Workflow History / `tasks.constraints["scout_phase"]` | `temporal_task_states.state` | Scout activities | Scout prompt selection, proposal metadata builder |
-| `scout_phase_results` | `proposals` (in `metadata_payload`) & `artifacts` | `temporal_task_states.state` | `orchestrator/execution_outcome_service.py` (`_merge_scout_phase_result`) | Final scout proposal synthesis |
-| `fanout_disabled_for_remainder` | Temporal Workflow History | `temporal_task_states.state` | `orchestrator/temporal/activities.py` (`merge_node_wave`) | Subsequent wave scheduling (forces serial execution) |
+| Field | Active Authority (In-Flight) | Intermediate Projection / Store | Terminal Authority | Write Path(s) | Read Consumers |
+|---|---|---|---|---|---|
+| `current_step` | Temporal History | `temporal_task_states.state`, `tasks.status`, `task_timeline_events` | `tasks.status`, `task_timeline_events` | `orchestrator/temporal/activities.py` (`_persist_intermediate_state`) | Workflow step dispatch, Dashboard status/timeline |
+| `session` | `tasks` & `sessions` tables | `temporal_task_states.state` | `tasks` & `sessions` tables (`session_id`, `user_id`, `channel`) | Ingress handlers (`apps/api/routes/tasks.py`, `webhooks.py`, `telegram.py`) | Session continuity, `/sessions/{id}`, `/tasks/{id}`, Dashboard |
+| `task` | `tasks` table & state constraints | `temporal_task_states.state`, `tasks.constraints` | `tasks` table (`id`, `repo_url`, `branch`, `task_text`, `constraints`, `budget_*`) | Ingress handlers, permission escalation in `activities.py` | Worker dispatch activities, API `/tasks/{id}`, Dashboard |
+| `normalized_task_text` | `temporal_task_states.state` | `temporal_task_states.state` | Ephemeral (derived from `tasks.task_text`) | `orchestrator/nodes/ingest_node.py` | Prompt generation, worker routing policy |
+| `task_kind` | `temporal_task_states.state` | `temporal_task_states.state`, `task_timeline_events` payload | `task_timeline_events` payload | `orchestrator/nodes/ingestion.py` (`_classify_task_kind`) | Internal routing, planner selection (not in `tasks.task_spec`) |
+| `task_plan` | `temporal_task_states.state` & `execution_plans` | `temporal_task_states.state`, `execution_plans`, `execution_plan_nodes` | `execution_plans`, `execution_plan_nodes` | `orchestrator/execution_outcome_service.py` (`_update_task_route_and_spec`) | DAG execution loop, Dashboard DAG view, `/tasks/{id}/plan` |
+| `task_spec` | `tasks.task_spec` & `temporal_task_states.state` | `tasks.task_spec`, `temporal_task_states.state` | `tasks.task_spec` (JSONB) | `orchestrator/execution_outcome_service.py` (`_update_task_route_and_spec`) | Capability grants, API `/tasks/{id}`, Dashboard |
+| `decomposed_plan` | `temporal_task_states.state` | `temporal_task_states.state`, `execution_plans`, `execution_plan_nodes` | `execution_plans`, `execution_plan_nodes` | `orchestrator/execution_outcome_service.py`, `ExecutionPlanRepository` | Temporal DAG scheduler (`select_next_node`, `run_decomposed_node`, `merge_node_wave`), Dashboard |
+| `node_outcomes` | `temporal_task_states.state` | `temporal_task_states.state`, `execution_plan_node_attempts` | `execution_plan_nodes`, `execution_plan_node_attempts` | `orchestrator/temporal/activities.py` (`merge_node_wave`), `ExecutionPlanRepository` | Wave merge loop, retry decisions, aggregate result generation |
+| `current_node_id` | Temporal History & `temporal_task_states.state` | `temporal_task_states.state` | `execution_plan_nodes` | `orchestrator/temporal/activities.py` (`run_plan_node`) | Node execution tracing & logs |
+| `repo_profile` | `temporal_task_states.state` | `temporal_task_states.state` | Ephemeral (recomputed if needed) | Discovery / planning activities in `orchestrator/` | Worker prompt context |
+| `memory` | `temporal_task_states.state` | `temporal_task_states.state` | Relational `memory_items` (original source) | Loaded on ingest (`build_orchestrator_graph_input`) | Worker dispatch prompt assembly |
+| `route` | `tasks` table & `temporal_task_states.state` | `tasks` (`chosen_worker`, `chosen_profile`, `runtime_mode`, `route_reason`), `temporal_task_states.state` | `tasks`, `worker_runs` | `orchestrator/execution_outcome_service.py` (`_update_task_route_and_spec`) | Worker dispatch, `/tasks/{id}`, Dashboard |
+| `approval` | `human_interactions` (`type="approval"`) & `tasks.constraints["approval"]` | `temporal_task_states.state`, `tasks.constraints`, `human_interactions` | `human_interactions`, `tasks.constraints` | `orchestrator/execution_outcome_service.py` (`_apply_approval_constraints`), `HumanInteractionRepository` | API `/tasks/{id}/approve`, `/tasks/{id}/reject`, Dashboard HITL cards |
+| `dispatch` | `temporal_task_states.state` | `temporal_task_states.state` | `worker_runs` (`worker_type`, `worker_profile`, `runtime_mode`, `runtime_manifest`) | `orchestrator/execution_outcome_service.py` (`_create_worker_run`) | Sandbox runtime executor, Dashboard run details |
+| `result` | `temporal_task_states.state` | `temporal_task_states.state` (not in `worker_runs` mid-flight) | `worker_runs` & `artifacts` (patches, diffs, logs, outputs) | `orchestrator/execution_outcome_service.py` (`_create_worker_run`, `_persist_artifacts_for_run`) | Completion loop (repair/delivery), API `/tasks/{id}/runs`, Dashboard |
+| `verification` | `temporal_task_states.state` | `temporal_task_states.state` (not in `worker_runs` mid-flight) | `worker_runs.verifier_outcome` (JSONB) & `artifacts` | `orchestrator/execution_outcome_service.py` (`_create_worker_run`) | Completion loop repair decisions, Dashboard Verification tab |
+| `review` | `temporal_task_states.state` | `temporal_task_states.state` (not in `artifacts` mid-flight) | `artifacts` (`type="independent_review_result"`) & `worker_runs.artifact_index` | `orchestrator/execution_outcome_service.py` (`_persist_artifacts_for_run`) | Completion loop repair decisions, Dashboard Review tab |
+| `friction_reports` | `temporal_task_states.state` | `temporal_task_states.state` | Ephemeral in Temporal (`persist_friction_proposals=False`); `proposals` (`type=REFLECTION`) when enabled | `orchestrator/execution_improvement_proposal_service.py` | API `/proposals`, Dashboard Proposals tab |
+| `memory_to_persist` | `temporal_task_states.state` | `temporal_task_states.state` | `memory_items` & `memory_observations` | Extracted during run; persisted post-commit via `ObservationMemoryBridge` | Read by `persist_memory` activity (`persist_memory_node -> _admit_memory_candidates`) |
+| `progress_updates` | Ephemeral / `temporal_task_states.state` | `temporal_task_states.state` (unnecessarily buffered) | Ephemeral (dispatched to webhooks/Telegram) | `orchestrator/temporal/activities.py` notifier | Real-time notification receivers (never read back from state blob) |
+| `timeline_events` | `temporal_task_states.state` (active in-memory buffer) | `task_timeline_events` (batch inserted) & `temporal_task_states.state` | `task_timeline_events` table | `orchestrator/execution_outcome_service.py` (`_persist_timeline_events`) | Dashboard/API, **and** `_has_event()` activity idempotency guards |
+| `timeline_persisted_count` | `temporal_task_states.state` | `temporal_task_states.state` | `TaskTimelineRepository.count_by_attempt` | `orchestrator/execution_outcome_service.py` (`_persist_intermediate_state`), reconciled in `_get_current_state` | Timeline batch insertion deduplication cursor |
+| `repair_handoff_requested` | Temporal History & `temporal_task_states.state` | `temporal_task_states.state`, `tasks.constraints` | `tasks.constraints["repair_handoff_requested"]` | `orchestrator/temporal/activities.py` | Delivery activity, manual handoff notifications |
+| `completion_loop` | Temporal History & `temporal_task_states.state` | `temporal_task_states.state`, `tasks.constraints` | `tasks.constraints` (`*_repair_passes_used`) | `orchestrator/execution_outcome_service.py` (`_apply_completion_control_constraints`) | Workflow completion loop routing, repair budget enforcement |
+| `errors` | `temporal_task_states.state` | `temporal_task_states.state`, `tasks.last_error` | `tasks.last_error` & `task_timeline_events` (`TASK_FAILED`) | `orchestrator/temporal/activities.py` (`record_workflow_failure`) | API `/tasks/{id}`, Dashboard error banners |
+| `attempt_count` | `tasks.attempt_count` & `temporal_task_states.state` | `tasks.attempt_count`, `temporal_task_states.state` | `tasks.attempt_count` column | `TaskRepository.increment_attempt_count` | Timeline attempt partitioning, retry limits, Dashboard attempt history |
+| `session_state_update` | `temporal_task_states.state` | `temporal_task_states.state` | `session_states` table (`active_goal`, `decisions_made`, `identified_risks`, `files_touched`) | `orchestrator/temporal/activities.py` (`_persist_rejected_session_state`, outcome persistence) | Subsequent task memory context, API `/sessions/{id}`, Dashboard |
+| `scout_phase` | Temporal History & `temporal_task_states.state` | `temporal_task_states.state`, `tasks.constraints["scout_phase"]` | `proposals.metadata_payload` | Scout activities | Scout prompt selection, proposal metadata builder |
+| `scout_phase_results` | `temporal_task_states.state` | `temporal_task_states.state` | `proposals` (in `metadata_payload`) & `artifacts` | `orchestrator/execution_outcome_service.py` (`_merge_scout_phase_result`) | Final scout proposal synthesis |
+| `fanout_disabled_for_remainder` | Temporal History & `temporal_task_states.state` | `temporal_task_states.state` | Temporal History | `orchestrator/temporal/activities.py` (`merge_node_wave`) | Subsequent wave scheduling (forces serial execution) |
 
 ---
 
@@ -109,7 +112,7 @@ and read consumers across all 7 state stores:
 ### 2. Workflow Restart / Continue-As-New
 - When a workflow is restarted or continued-as-new, durable progress must be reconstructable without relying on deleted in-memory state.
 - Excluding fields from `TemporalTaskState` is safe only if:
-  - The field is purely ephemeral to a single activity invocation (e.g. `progress_updates`, `friction_reports`), OR
+  - The field is purely ephemeral to a single activity invocation (e.g. `progress_updates`), OR
   - The field is explicitly reconstructed from relational tables prior to downstream consumption.
 
 ### 3. Postgres-Only In-Flight Recovery: Current Reality vs. Target Architecture
@@ -117,22 +120,25 @@ and read consumers across all 7 state stores:
 It is critical to distinguish what the codebase currently supports from the target architecture:
 
 - **Current Reality (Terminal Tasks):**
-  - For completed, failed, or cancelled tasks, Postgres relational tables (`tasks`, `worker_runs`, `artifacts`, `execution_plans`, `execution_plan_nodes`, `execution_plan_node_attempts`, `task_timeline_events`, `proposals`, `session_states`, `human_interactions`) store 100% of the durable record. `TemporalTaskState` is deleted upon terminal completion.
+  - For completed, failed, or cancelled tasks, Postgres relational tables (`tasks`, `worker_runs`, `artifacts`, `execution_plans`, `execution_plan_nodes`, `execution_plan_node_attempts`, `task_timeline_events`, `proposals`, `session_states`, `human_interactions`) store 100% of the durable record. `TemporalTaskState` is deleted upon terminal completion on standard execution paths.
 
 - **Current Reality (In-Flight Tasks):**
   - The missing-snapshot fallback in `_get_current_state()` only rebuilds **initial task input**.
   - Postgres relational tables **cannot currently reconstruct mid-flight state** if `TemporalTaskState` is lost while a task is running. If the snapshot is missing mid-flight:
-    - Worker results, verification reports, and review outcomes are lost from the active workflow state.
+    - Worker results, verification reports, and review outcomes are lost from active workflow memory.
     - Completion loop repair pass counters and phase state are lost.
     - Permission escalation strictly asserts that `TemporalTaskState` exists (`assert snapshot is not None`).
     - DAG wave execution loses in-memory node outcome aggregations.
 
 - **Target Architecture (Prerequisite for Full State Pruning):**
-  - Before eliminating core execution state from `TemporalTaskState`, dedicated relational reconstructors (e.g. loading `node_outcomes` from `execution_plan_node_attempts` and worker results from `worker_runs`) must be implemented and tested.
+  - Before eliminating core execution state from `TemporalTaskState`, dedicated relational reconstructors (e.g. loading `node_outcomes` from `execution_plan_node_attempts`, `decomposed_plan` from `execution_plan_nodes`, and worker results from `worker_runs`) must be implemented and tested.
 
 ### 4. Terminal State Cleanup
-- Terminal activities (`_persist_state`, `record_workflow_failure`, permission rejection) explicitly invoke `TemporalTaskStateRepository.delete(task_id=task_id)`.
-- No lingering JSON blobs are retained in `temporal_task_states` for completed, failed, or cancelled tasks.
+
+- Standard terminal paths (`_persist_state()` upon successful delivery, `record_workflow_failure()`, and permission escalation rejection in `_reject_permission_escalation()`) explicitly invoke `TemporalTaskStateRepository.delete(task_id=task_id)`.
+- **Known Exception (Initial Approval Rejection):**
+  - In `persist_rejected_session_state` (`orchestrator/temporal/activities.py:1826-1845`), the activity reads the snapshot to persist compact session state but currently omits the `delete()` call. This leaves an uncleaned `temporal_task_states` row attached to the failed task.
+  - A follow-up code fix will add `TemporalTaskStateRepository.delete()` to `persist_rejected_session_state` to make the "no terminal snapshots remain" invariant 100% universal across all paths.
 
 ---
 
@@ -142,17 +148,17 @@ The 31 fields in `OrchestratorState` are currently serialized into `TemporalTask
 
 ```mermaid
 flowchart TD
-    subgraph Wave 1: Immediate Safe Exclusions [Wave 1: Pure Redundancy]
+    subgraph Wave 1: Immediate Safe Exclusions [Wave 1: Pure Ephemeral]
         W1A["progress_updates<br/>(ephemeral notification strings)"]
-        W1B["friction_reports<br/>(relational in proposals table)"]
     end
 
     subgraph Wave 2: Prerequisite-Gated Reductions [Wave 2: Consumer / Idempotency Gated]
-        W2A["memory_to_persist<br/>(gated by persist_memory activity refactor)"]
-        W2B["timeline_events<br/>(gated by _has_event idempotency refactor)"]
-        W2C["scout_phase_results<br/>(relational in proposals/artifacts)"]
-        W2D["session_state_update<br/>(relational in session_states)"]
-        W2E["errors<br/>(relational in tasks.last_error)"]
+        W2A["friction_reports<br/>(gated by Temporal projection policy)"]
+        W2B["memory_to_persist<br/>(gated by persist_memory activity refactor)"]
+        W2C["timeline_events<br/>(gated by _has_event idempotency refactor)"]
+        W2D["scout_phase_results<br/>(relational in proposals/artifacts)"]
+        W2E["session_state_update<br/>(relational in session_states)"]
+        W2F["errors<br/>(relational in tasks.last_error)"]
     end
 
     subgraph Wave 3: Plan & Outcomes [Wave 3: Relational Rehydrators]
@@ -173,17 +179,17 @@ flowchart TD
 - **What Breaks if Wrong:** Nothing; no read consumers exist in subsequent activities.
 - **Rollback Path:** Additive re-inclusion.
 
-#### 2. `friction_reports`
-- **Current Behavior:** Friction reports extracted by worker/evaluator are kept in state and serialized.
-- **Why Safe to Exclude:** Projected directly to the `proposals` table (`proposal_type="friction"`) in `_persist_friction_proposals_if_needed`. Subsequent workflow activities never read `friction_reports` from `TemporalTaskState`.
-- **Risk Level:** **Low**
-- **Size Impact:** Low to Medium
-- **What Breaks if Wrong:** Nothing; proposals are queried directly from the `proposals` table by the API and dashboard.
-- **Rollback Path:** Additive re-inclusion.
-
 ---
 
 ### Wave 2: Prerequisite-Gated State Reductions (Consumer / Idempotency Gated)
+
+#### 2. `friction_reports`
+- **Current Behavior:** Friction reports extracted by worker/evaluator or generated during verification are kept in state and serialized.
+- **Why Gated:** In the Temporal completion path, `_persist_state()` explicitly sets `persist_friction_proposals=False`, meaning friction reports are not currently projected to the `proposals` table (where improvement proposals are stored with `ProposalType.REFLECTION` and `reflection_kind="improvement_suggestion"`). Verification can also generate new friction reports mid-flight.
+- **Prerequisite for Exclusion:** Explicitly establish whether friction reports in Temporal tasks should be durably persisted as reflection proposals or intentionally discarded, and align the persistence path before pruning from the state blob.
+- **Risk Level:** **Low to Medium**
+- **Size Impact:** Low to Medium
+- **Rollback Path:** Additive re-inclusion.
 
 #### 3. `memory_to_persist`
 - **Current Behavior:** Memory candidates identified during task execution are serialized into the blob.
@@ -196,13 +202,13 @@ flowchart TD
 #### 4. `timeline_events`
 - **Current Behavior:** Every timeline event is appended to `state.timeline_events` and serialized into the JSON blob. Concurrently, `_persist_intermediate_state` writes new events to `task_timeline_events` in the relational database.
 - **Downstream Consumer:** `TaskExecutionActivities._has_event()` explicitly scans `state.timeline_events` as an **idempotency and retry guard** across 7 activities:
-  - `classify_and_plan` (`TASK_SPEC_AND_ROUTE_GENERATED`)
-  - `load_memory` (`MEMORY_LOADED`)
-  - `provision_workspace` (`WORKSPACE_PROVISIONED`)
-  - `execute_worker` (`WORKER_EXECUTION_STARTED`)
-  - `verify_task` (`TASK_VERIFIED`)
-  - `deliver_task` (`TASK_DELIVERED`)
-  - `persist_memory` (`MEMORY_PERSISTED`)
+  - `classify_and_plan` (`TimelineEventType.TASK_SPEC_AND_ROUTE_GENERATED`)
+  - `load_memory` (`TimelineEventType.MEMORY_LOADED`)
+  - `provision_workspace` (`TimelineEventType.WORKSPACE_PROVISIONED` / `ENVIRONMENT_INITIALIZED`)
+  - `run_worker` (`TimelineEventType.WORKER_COMPLETED` / `WORKER_FAILED` / `WORKER_ERROR`)
+  - `verify_result` (`TimelineEventType.VERIFICATION_COMPLETED` / `VERIFICATION_SKIPPED`)
+  - `deliver_result` (`TimelineEventType.TASK_COMPLETED` / `TASK_FAILED`)
+  - `persist_memory` (`TimelineEventType.MEMORY_PERSISTED`)
 - **Why Pruning Today Breaks Execution:** `_get_current_state()` reconciles the persisted event **count**, but does not reload historical events into `state.timeline_events`. If `timeline_events` is omitted from the snapshot, `_has_event()` evaluates to `False` on activity retry or resumption, causing side-effecting activities (e.g. workspace provisioning, delivery) to re-execute unexpectedly.
 - **Prerequisite for Exclusion:** Refactor `_has_event()` to query `task_timeline_events` in Postgres, reconstruct event markers into `state.timeline_events` on reload, or introduce a compact durable idempotency marker (e.g. `executed_activity_keys: set[str]`), backed by retry/resume integration tests.
 - **Risk Level:** **Medium** (high risk if pruned without prerequisite)
@@ -232,14 +238,17 @@ flowchart TD
 
 ---
 
-### Wave 3: Plan & Node Outcomes (Medium Risk, High Complexity)
+### Wave 3: Plan & Node Outcomes (Medium-High Complexity)
 
 #### 8. `task_plan`, `decomposed_plan`, `node_outcomes`
 - **Current Behavior:** The entire DAG plan, node dependencies, task specs, and execution outcomes/attempts are serialized in the JSON blob.
 - **Relational Authority:** `execution_plans`, `execution_plan_nodes`, and `execution_plan_node_attempts`.
-- **Why Deferred to Wave 3:** Temporal DAG activities (`run_plan_node`, `merge_node_wave`) currently access `state.node_outcomes` in memory to compute wave continuations and aggregate results.
-- **Prerequisite for Removal:** Implement a dedicated `ExecutionPlanRepository.load_node_outcomes(task_id)` reconstructor that populates `state.node_outcomes` directly from relational tables before removing it from the state blob.
-- **Risk Level:** **Medium**
+- **Why Deferred to Wave 3:** The Temporal DAG scheduler reads directly from `state.decomposed_plan` throughout the activity lifecycle:
+  - `select_next_node`: builds node maps from `state.decomposed_plan.nodes`.
+  - `run_decomposed_node`: retrieves executable node contracts from `state.decomposed_plan.nodes`.
+  - `merge_node_wave`: accesses `state.decomposed_plan.nodes` and `state.node_outcomes` to calculate wave completions and continuations.
+- **Prerequisite for Removal:** Implement full reconstruction / read-through for `task_plan` and `decomposed_plan` (e.g. `ExecutionPlanRepository.load_decomposed_plan()` and `load_node_outcomes()`), or refactor the DAG scheduler to operate directly on `execution_plans` and `execution_plan_nodes` relational rows before removing them from the state blob.
+- **Risk Level:** **Medium to High**
 - **Size Impact:** High on large DAG workflows.
 - **Rollback Path:** Additive re-inclusion.
 
@@ -271,12 +280,13 @@ To guarantee zero regressions when reducing `TemporalTaskState` serialization in
 
 ## Summary Matrix
 
-| State Category | Fields | Authoritative Store | Elimination Priority | Target State |
-|---|---|---|---|---|
-| **Coordination & Step** | `current_step`, `current_node_id`, `completion_loop`, `fanout_disabled_for_remainder`, `repair_handoff_requested` | Temporal History | Retain in Checkpoint | Compact activity control struct |
-| **Ingress & Spec** | `session`, `task`, `task_spec`, `task_kind`, `normalized_task_text`, `repo_profile`, `memory`, `route`, `approval`, `attempt_count` | `tasks`, `sessions`, `human_interactions` | Retain in Checkpoint (reference IDs where feasible) | Read-through from `tasks` table |
-| **Execution Outcomes** | `dispatch`, `result`, `verification`, `review` | `worker_runs`, `artifacts` | Retain in Checkpoint during active turn | Deleted on terminal completion |
-| **Notifications & Friction** | `progress_updates`, `friction_reports` | `proposals`, Notification Channels | **Wave 1 (Immediate)** | **Exclude from blob**; write direct to relational tables |
-| **Timeline & Events** | `timeline_events`, `timeline_persisted_count` | `task_timeline_events` | **Wave 2 (Gated)** | Refactor `_has_event` to DB/idempotency marker, then exclude `timeline_events` |
-| **Memory & Ephemeral Updates** | `memory_to_persist`, `scout_phase_results`, `session_state_update`, `errors` | `memory_*`, `proposals`, `session_states`, `tasks` | **Wave 2 (Gated)** | Verify/retire legacy activity consumers, then exclude from blob |
-| **DAG Plan & Nodes** | `task_plan`, `decomposed_plan`, `node_outcomes` | `execution_plans`, `execution_plan_nodes` | **Wave 3 (Planned)** | Reconstruct via `ExecutionPlanRepository` |
+| State Category | Fields | Active Authority (In-Flight) | Terminal Authority | Elimination Priority | Target State |
+|---|---|---|---|---|---|
+| **Coordination & Step** | `current_step`, `current_node_id`, `completion_loop`, `fanout_disabled_for_remainder`, `repair_handoff_requested` | Temporal History / State Checkpoint | Temporal History / `tasks.constraints` | Retain in Checkpoint | Compact activity control struct |
+| **Ingress & Spec** | `session`, `task`, `task_spec`, `task_kind`, `normalized_task_text`, `repo_profile`, `memory`, `route`, `approval`, `attempt_count` | `tasks`, `sessions`, `human_interactions` / State Checkpoint | `tasks`, `sessions`, `human_interactions` | Retain in Checkpoint (reference IDs where feasible) | Read-through from `tasks` table |
+| **Execution Outcomes** | `dispatch`, `result`, `verification`, `review` | `temporal_task_states.state` | `worker_runs`, `artifacts` | Retain in Checkpoint during active turn | Retain until terminal delivery; deleted on completion |
+| **Ephemeral Notifications** | `progress_updates` | `temporal_task_states.state` | Ephemeral (Notification Channels) | **Wave 1 (Immediate)** | **Exclude from blob**; dispatch directly to notifiers |
+| **Proposals & Friction** | `friction_reports` | `temporal_task_states.state` | `proposals` (when enabled) / Ephemeral | **Wave 2 (Gated)** | Establish projection policy, then exclude from blob |
+| **Timeline & Events** | `timeline_events`, `timeline_persisted_count` | `temporal_task_states.state` | `task_timeline_events` | **Wave 2 (Gated)** | Refactor `_has_event` to DB/idempotency marker, then exclude `timeline_events` |
+| **Memory & Ephemeral Updates** | `memory_to_persist`, `scout_phase_results`, `session_state_update`, `errors` | `temporal_task_states.state` | `memory_*`, `proposals`, `session_states`, `tasks` | **Wave 2 (Gated)** | Verify/retire legacy activity consumers, then exclude from blob |
+| **DAG Plan & Nodes** | `task_plan`, `decomposed_plan`, `node_outcomes` | `temporal_task_states.state` | `execution_plans`, `execution_plan_nodes` | **Wave 3 (Planned)** | Reconstruct via `ExecutionPlanRepository` |

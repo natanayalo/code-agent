@@ -115,8 +115,8 @@ Temporal migration and rollback record is in the
 
 ## Next slices only
 
-1. Execute M28.5B Wave 1 state reduction (`progress_updates`, `friction_reports`)
-   and prepare Wave 2 prerequisites (`memory_to_persist`, `timeline_events`)
+1. Execute M28.5B Wave 1 state reduction (`progress_updates`) and prepare
+   Wave 2 prerequisites (`friction_reports`, `memory_to_persist`, `timeline_events`)
    following the field-level state ownership contract in
    [`docs/architecture/state_ownership.md`](architecture/state_ownership.md).
 2. Continue M28.5 execution-architecture foundation work (M28.5A sandbox broker/threat model,
