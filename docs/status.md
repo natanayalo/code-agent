@@ -35,6 +35,17 @@ not schedule deep-scout multi-phase chaining (executing single-phase runs where
 is ephemeral, and error reporting is projected directly to `tasks.last_error` and
 `TASK_FAILED` timeline events.
 
+Completed slice: **M28.5B Wave 3A — DAG Plan Reconstruction & Pruning (`task_plan` & `decomposed_plan`)**.
+
+M28.5B Wave 3A is complete: `task_plan` and `decomposed_plan` are pruned from
+`TemporalTaskState` serialization, with authoritative plan contracts restored
+directly from `TASK_PLANNED` timeline event payloads. `TaskPlan` dependency semantics
+(`depends_on=None` vs `[]`) and planner metadata are preserved, pre-decomposition
+lifecycles maintain `decomposed_plan=None` cleanly, relational projection validation
+verifies immutable scheduler contracts against Postgres `execution_plans` and
+`execution_plan_nodes`, and all 5 direct snapshot readers route through `_rehydrate_dag_state()`.
+`node_outcomes` remains unexcluded until Wave 3B.
+
 ## Current capabilities
 
 - authenticated API, generic webhook, and Telegram task intake

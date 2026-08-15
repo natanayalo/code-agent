@@ -72,10 +72,10 @@ field to:
 | `task` | `tasks` table & state constraints | `temporal_task_states.state`, `tasks.constraints` | `tasks` table (`id`, `repo_url`, `branch`, `task_text`, `constraints`, `budget_*`) | Ingress handlers, permission escalation in `activities.py` | Worker dispatch activities, API `/tasks/{id}`, Dashboard |
 | `normalized_task_text` | `temporal_task_states.state` | `temporal_task_states.state` | Ephemeral (derived from `tasks.task_text`) | `orchestrator/nodes/ingestion.py` (`ingest_task`) | Prompt generation, worker routing policy |
 | `task_kind` | `temporal_task_states.state` | `temporal_task_states.state`, `task_timeline_events` payload | `task_timeline_events` payload | `orchestrator/nodes/ingestion.py` (`_classify_task_kind`) | Internal routing, planner selection (not in `tasks.task_spec`) |
-| `task_plan` | `temporal_task_states.state` & `execution_plans` | `temporal_task_states.state`, `execution_plans`, `execution_plan_nodes` | `execution_plans`, `execution_plan_nodes` | `orchestrator/execution_outcome_service.py` (`_update_task_route_and_spec`) | DAG execution loop, Dashboard DAG view, `/tasks/{id}/plan` |
+| `task_plan` | Authoritative `task_timeline_events` (`TASK_PLANNED`) | Not persisted; excluded from `temporal_task_states` under Wave 3A | `execution_plans`, `execution_plan_nodes` | `orchestrator/nodes/ingestion.py` (`plan_task`), timeline events | DAG execution loop, Dashboard DAG view, `/tasks/{id}/plan` |
 | `task_spec` | `tasks.task_spec` & `temporal_task_states.state` | `tasks.task_spec`, `temporal_task_states.state` | `tasks.task_spec` (JSONB) | `orchestrator/execution_outcome_service.py` (`_update_task_route_and_spec`) | Capability grants, API `/tasks/{id}`, Dashboard |
-| `decomposed_plan` | `temporal_task_states.state` | `temporal_task_states.state`, `execution_plans`, `execution_plan_nodes` | `execution_plans`, `execution_plan_nodes` | `orchestrator/execution_outcome_service.py`, `ExecutionPlanRepository` | Temporal DAG scheduler (`select_next_node`, `run_decomposed_node`, `merge_node_wave`), Dashboard |
-| `node_outcomes` | `temporal_task_states.state` | `temporal_task_states.state`, `execution_plan_node_attempts` | `execution_plan_nodes`, `execution_plan_node_attempts` | `orchestrator/temporal/activities.py` (`merge_node_wave`), `ExecutionPlanRepository` | Wave merge loop, retry decisions, aggregate result generation |
+| `decomposed_plan` | Authoritative `task_timeline_events` (`TASK_PLANNED`) & operational validation against `execution_plans` | Not persisted; excluded from `temporal_task_states` under Wave 3A | `execution_plans`, `execution_plan_nodes` | `orchestrator/graph.py` (`decompose_task`), timeline events | Temporal DAG scheduler (`select_next_node`, `run_decomposed_node`, `merge_node_wave`), Dashboard |
+| `node_outcomes` | `temporal_task_states.state` (Wave 3A) -> `execution_plan_nodes.merged_logical_activity_key` (Wave 3B target) | `temporal_task_states.state` (Wave 3A retained), `execution_plan_node_attempts` | `execution_plan_nodes`, `execution_plan_node_attempts` | `orchestrator/temporal/activities.py` (`merge_node_wave`), `ExecutionPlanRepository` | Wave merge loop, retry decisions, aggregate result generation |
 | `current_node_id` | `temporal_task_states.state` | `temporal_task_states.state` | Ephemeral in-memory/checkpoint-only state (no direct relational column) | Node selection / execution activities in `activities.py` (`run_decomposed_node`) | Node execution tracing & logs |
 | `repo_profile` | `temporal_task_states.state` | `temporal_task_states.state` | Ephemeral (recomputed if needed) | Discovery / planning activities in `orchestrator/` | Worker prompt context |
 | `memory` | `temporal_task_states.state` | `temporal_task_states.state` | `memory_personal`, `memory_project`, `session_states` (original sources) | Loaded on ingest (`build_orchestrator_graph_input`) from memory repositories | Worker dispatch prompt assembly |
@@ -222,18 +222,26 @@ It is critical to distinguish what the codebase currently supports from the targ
 
 ---
 
-### Wave 3: Plan & Node Outcomes (Medium-High Complexity)
+### Wave 3: Plan & Node Outcomes
 
-#### 8. `task_plan`, `decomposed_plan`, `node_outcomes`
-- **Current Behavior:** The entire DAG plan, node dependencies, task specs, and execution outcomes/attempts are serialized in the JSON blob.
-- **Relational Authority:** `execution_plans`, `execution_plan_nodes`, and `execution_plan_node_attempts`.
-- **Why Deferred to Wave 3:** The Temporal DAG scheduler reads directly from `state.decomposed_plan` throughout the activity lifecycle:
-  - `select_next_node`: builds node maps from `state.decomposed_plan.nodes`.
-  - `run_decomposed_node`: retrieves executable node contracts from `state.decomposed_plan.nodes`.
-  - `merge_node_wave`: accesses `state.decomposed_plan.nodes` and `state.node_outcomes` to calculate wave completions and continuations.
-- **Prerequisite for Removal:** Implement full reconstruction / read-through for `task_plan` and `decomposed_plan` (e.g. `ExecutionPlanRepository.load_decomposed_plan()` and `load_node_outcomes()`), or refactor the DAG scheduler to operate directly on `execution_plans` and `execution_plan_nodes` relational rows before removing them from the state blob.
-- **Risk Level:** **Medium to High**
-- **Size Impact:** High on large DAG workflows.
+#### 8. `task_plan`, `decomposed_plan`
+- **Status:** **Completed (Wave 3A)**
+- **Architecture & Implementation:**
+  - `task_plan` and `decomposed_plan` are excluded from intermediate `TemporalTaskState` serialization via `EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS`.
+  - Authoritative plan contracts are restored directly from `TASK_PLANNED` timeline event payloads via `restore_task_plan_from_events()` and `restore_decomposed_plan_from_events()`.
+  - `TaskPlan` faithfully preserves `depends_on=None` (sequential) vs `[]` (independent) semantics and planner metadata (`complexity_reason`, `node_kind`, `aggregation_role`, `execution_mode`, `parallel_safe`).
+  - Pre-decomposition lifecycles (such as initial approval checkpoints) preserve `task_plan` while `decomposed_plan` remains cleanly `None`.
+  - When decomposition is complete, relational validation against Postgres `execution_plans` and `execution_plan_nodes` validates immutable scheduler contracts (`node_id`, sequence, `goal`/`title`, `depends_on`, `task_spec`, `node_kind`, `aggregation_role`, `execution_mode`, `parallel_safe`) and fails closed on tampering or corruption.
+  - All direct snapshot readers (`_get_current_state`, `_merge_v2_wave`, `request_permission_escalation`, `resolve_permission_escalation`, `persist_rejected_session_state`) route through `_rehydrate_dag_state()`.
+- **Size Impact:** High (removes complete plan and node spec trees from snapshot).
+- **Rollback Path:** Additive re-inclusion in `EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS`.
+
+#### 9. `node_outcomes`
+- **Status:** **Targeted for Wave 3B**
+- **Architecture Scope:**
+  - `node_outcomes` remains explicitly retained in `TemporalTaskState` serialization during Wave 3A to protect crash-gap semantics (`select_next_node` distinguishing unmerged terminal evidence from merged parent state).
+  - Wave 3B will establish relational merge markers (`execution_plan_nodes.merged_logical_activity_key`) before pruning `node_outcomes` from snapshots.
+- **Risk Level:** **Medium**
 - **Rollback Path:** Additive re-inclusion.
 
 ---
