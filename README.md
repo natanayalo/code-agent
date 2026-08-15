@@ -44,8 +44,9 @@ per-task Docker containers. The trusted Temporal worker retains Docker
 authority; executor containers receive only the task workspace, scratch
 directories, staged provider auth, and a task-private public-HTTPS proxy.
 They never receive the Docker socket, control-plane credentials, or host auth
-mounts. M28 effectiveness evidence is paused until this isolation prerequisite
-has been verified.
+mounts. The M28 real-worker matrix has run through this boundary with eight
+Codex/Antigravity cold-and-assisted pairs; it establishes safe expected memory
+behavior, not a general timing-improvement claim.
 
 The platform is organized into these layers:
 
@@ -244,11 +245,11 @@ The dashboard uses HttpOnly cookies for session management. To enable it:
 ## Verification Commands
 
 The repository coverage target is 90%. During post-Temporal coverage recovery,
-Python CI temporarily enforces an 80% floor; M25.6 restores the 90% gate. Run
-the currently enforced checks from the repository virtualenv:
+Python CI enforces a 90% coverage floor. Run the currently enforced checks from
+the repository virtualenv:
 
 ```bash
-poetry run pytest tests/unit --cov=apps --cov=db --cov=memory --cov=orchestrator --cov=repositories --cov=sandbox --cov=tools --cov=workers --cov-branch --cov-report=term-missing --cov-report=xml --cov-fail-under=80
+poetry run pytest tests/unit --cov=apps --cov=db --cov=memory --cov=orchestrator --cov=repositories --cov=sandbox --cov=tools --cov=workers --cov-branch --cov-report=term-missing --cov-report=xml --cov-fail-under=90
 poetry run pytest tests/integration
 poetry run pre-commit run --all-files
 # Dashboard checks

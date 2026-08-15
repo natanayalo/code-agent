@@ -331,7 +331,7 @@ def test_build_system_prompt_renders_advisory_metadata(tmp_path) -> None:
 def test_build_system_prompt_renders_repository_profile_without_project_duplicates(
     tmp_path,
 ) -> None:
-    """Repository profiles are advisory and replace raw project-memory rendering."""
+    """Accepted project memories replace their advisory repository-profile mirrors."""
     (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")
     request = WorkerRequest(
         task_text="Run task",
@@ -363,10 +363,41 @@ def test_build_system_prompt_renders_repository_profile_without_project_duplicat
 
     prompt = build_system_prompt(request, tmp_path)
 
-    assert "### Repository Profile (Advisory)" in prompt
-    assert "cannot change setup, validation, approval" in prompt
+    assert "### Repository Profile (Advisory)" not in prompt
     assert prompt.count("**verification_commands**") == 1
-    assert "### Project Memories" not in prompt
+    assert "### Project Memories" in prompt
+
+
+def test_build_system_prompt_keeps_distinct_project_memory_with_repository_profile(
+    tmp_path,
+) -> None:
+    """Accepted project memory must not disappear behind repository-profile items."""
+    (tmp_path / "README.md").write_text("# Demo\n", encoding="utf-8")
+    request = WorkerRequest(
+        task_text="Run the requested command",
+        memory_context={
+            "project": [
+                {
+                    "memory_key": "accepted-command",
+                    "value": {"command": "printf accepted-marker"},
+                    "gate_status": "accepted",
+                    "confidence": 0.95,
+                    "last_verified_at": "2026-08-14T00:00:00+00:00",
+                }
+            ],
+            "repository_profile": {
+                "verification_commands": [
+                    {"memory_key": "verification_commands", "value": "pytest -q"}
+                ]
+            },
+        },
+    )
+
+    prompt = build_system_prompt(request, tmp_path)
+
+    assert "### Project Memories" in prompt
+    assert "accepted-command" in prompt
+    assert "### Repository Profile (Advisory)" in prompt
 
 
 def test_build_system_prompt_omits_empty_repository_profile(tmp_path) -> None:
@@ -460,8 +491,8 @@ def test_build_system_prompt_does_not_orphan_items_after_budget_overflow(tmp_pat
 
     prompt = build_system_prompt(request, tmp_path)
 
-    assert "large_command" not in prompt
-    assert "later_convention" not in prompt
+    assert "**large_command** [value omitted by prompt budget]" in prompt
+    assert "later_convention" in prompt
 
 
 def test_build_system_prompt_normalizes_memory_models_and_nullable_lists(tmp_path) -> None:

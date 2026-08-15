@@ -549,6 +549,82 @@ def test_codex_native_runtime_writes_response_schema_file(tmp_path: Path) -> Non
     assert result.status == "success"
 
 
+def test_codex_native_runtime_keeps_memory_with_system_prompt_override(tmp_path: Path) -> None:
+    workspace, worker = _setup_native_worker(tmp_path)
+    request = WorkerRequest(
+        task_text="Use the accepted memory",
+        repo_url="https://example.com/repo.git",
+        memory_context={
+            "project": [
+                {
+                    "memory_key": "accepted-command",
+                    "value": {"command": "printf marker"},
+                    "gate_status": "accepted",
+                }
+            ]
+        },
+    )
+    with patch("workers.codex_cli_worker_native.run_native_agent") as run_native:
+        run_native.return_value = NativeAgentRunResult(
+            status="success",
+            summary="done",
+            command="codex",
+            exit_code=0,
+            duration_seconds=1,
+            timed_out=False,
+        )
+        result = worker._execute_native_runtime(
+            request,
+            workspace=workspace,
+            runtime_settings=CliRuntimeSettings(),
+            runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+            system_prompt_override="override without durable memory",
+            cancel_token=None,
+        )
+
+    assert result.status == "success"
+    assert result.budget_usage["native_agent"]["memory_delivery"] == {
+        "accepted_memory_keys": ["accepted-command"],
+        "delivered_memory_keys": ["accepted-command"],
+        "missing_accepted_memory_keys": [],
+        "complete": True,
+    }
+    assert "## Durable Memories" in run_native.call_args.args[0].prompt
+
+
+def test_codex_native_runtime_blocks_undelivered_memory(tmp_path: Path) -> None:
+    workspace, worker = _setup_native_worker(tmp_path)
+    request = WorkerRequest(
+        task_text="Use the accepted memory",
+        repo_url="https://example.com/repo.git",
+        memory_context={"project": [{"memory_key": "accepted-command", "gate_status": "accepted"}]},
+    )
+    receipt = {
+        "accepted_memory_keys": ["accepted-command"],
+        "delivered_memory_keys": [],
+        "missing_accepted_memory_keys": ["accepted-command"],
+        "complete": False,
+    }
+    with (
+        patch("workers.codex_cli_worker_native.run_native_agent") as run_native,
+        patch(
+            "workers.codex_cli_worker_native.native_memory_delivery_receipt",
+            return_value=receipt,
+        ),
+    ):
+        result = worker._execute_native_runtime(
+            request,
+            workspace=workspace,
+            runtime_settings=CliRuntimeSettings(),
+            runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+            system_prompt_override="override",
+            cancel_token=None,
+        )
+
+    assert result.failure_kind == "incomplete_delivery"
+    assert not run_native.called
+
+
 def test_codex_native_runs_isolate_all_writable_output_paths_by_hashed_namespace(
     tmp_path: Path,
 ) -> None:

@@ -148,6 +148,13 @@ def _confidence_value(value: float | None) -> float:
     return 1.0 if value is None else value
 
 
+def _is_actionable_memory(entry: MemoryEntry) -> bool:
+    """Return whether a memory can directly instruct the worker to execute work."""
+    if not isinstance(entry.value, dict):
+        return False
+    return any(key in entry.value for key in ("command", "commands", "script"))
+
+
 def _as_utc(value: datetime | None) -> datetime:
     if value is None:
         return datetime.min.replace(tzinfo=UTC)
@@ -219,9 +226,15 @@ class ReadSideMemoryGateService:
         if risk == "high" and (entry.requires_verification or staleness >= 0.5):
             status = "suppressed"
             reason_codes.append("high_risk_unverified_or_stale")
+        elif staleness >= 0.5 and _is_actionable_memory(entry):
+            status = "suppressed"
+            reason_codes.append("actionable_memory_stale")
         elif risk == "medium" or entry.requires_verification or staleness >= 0.5:
             status = "advisory"
             reason_codes.append("medium_risk_or_stale")
+        else:
+            # Record explicit positive admission for auditability.
+            reason_codes.append("accepted_low_risk_fresh")
 
         return entry.model_copy(
             update={

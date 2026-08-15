@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from privacy.redaction import redact_private_tags
 from utils.serialization import to_dict
 from workers.base import WorkerRequest
 
@@ -85,30 +86,32 @@ def _format_repository_profile(profile: dict[str, Any]) -> list[str]:
 
 
 def _bounded_durable_lines(lines: list[str], *, max_characters: int) -> str:
-    """Keep complete durable-memory lines and report omitted profile items."""
+    """Bound durable memory while retaining keys for oversized entries."""
     if len("\n".join(lines)) <= max_characters:
         return "\n".join(lines)
     kept: list[str] = []
     omitted_items = 0
-    truncating = False
+    overflowed = False
     for line in lines:
-        if truncating:
-            if line.startswith("- **"):
-                omitted_items += 1
+        if overflowed and line.startswith("#"):
             continue
         candidate = "\n".join([*kept, line])
         if len(candidate) <= max_characters:
             kept.append(line)
         else:
-            truncating = True
+            overflowed = True
             if line.startswith("- **"):
                 omitted_items += 1
-    marker = f"- ... ({omitted_items} advisory memory item(s) omitted by prompt budget)"
+                key = line.split("**", maxsplit=2)[1]
+                key_marker = f"- **{key}** [value omitted by prompt budget]"
+                if len("\n".join([*kept, key_marker])) <= max_characters:
+                    kept.append(key_marker)
+    marker = f"- ... ({omitted_items} memory item(s) omitted by prompt budget)"
     while kept and len("\n".join([*kept, marker])) > max_characters:
         removed = kept.pop()
         if removed.startswith("- **"):
             omitted_items += 1
-        marker = f"- ... ({omitted_items} advisory memory item(s) omitted by prompt budget)"
+        marker = f"- ... ({omitted_items} memory item(s) omitted by prompt budget)"
     return "\n".join([*kept, marker])
 
 
@@ -148,12 +151,36 @@ def _build_durable_memory_section(memory_context: dict[str, Any]) -> str:
         "remembered_instructions",
         "general_facts",
     )
+    accepted_project_keys = {
+        _as_str(memory.get("memory_key"))
+        for memory in accepted_project
+        if _as_str(memory.get("memory_key"))
+    }
+    profile_dict = {
+        section: [
+            item
+            for item in _dict_items(profile_dict.get(section))
+            if _as_str(item.get("memory_key")) not in accepted_project_keys
+        ]
+        for section in profile_sections
+    }
+    profile_memory_keys = {
+        _as_str(item.get("memory_key"))
+        for section in profile_sections
+        for item in _dict_items(profile_dict.get(section))
+        if _as_str(item.get("memory_key"))
+    }
+    advisory_project = [
+        memory
+        for memory in advisory_project
+        if _as_str(memory.get("memory_key")) not in profile_memory_keys
+    ]
     has_profile_items = any(_dict_items(profile_dict.get(section)) for section in profile_sections)
-    if has_profile_items:
-        lines.extend(_format_repository_profile(profile_dict))
-    elif accepted_project or advisory_project:
+    if accepted_project or advisory_project:
         lines.append("### Project Memories")
         lines.extend(_format_memory_group(accepted_project + advisory_project))
+    if has_profile_items:
+        lines.extend(_format_repository_profile(profile_dict))
     if accepted_personal or advisory_personal:
         lines.append("### Personal Memories")
         lines.extend(_format_memory_group(accepted_personal + advisory_personal))
@@ -288,3 +315,37 @@ def build_memory_context_section(request: WorkerRequest) -> str:
         _build_observation_section(memory_context),
     ]
     return "\n\n".join(section for section in sections if section)
+
+
+def native_memory_delivery_receipt(
+    request: WorkerRequest,
+    *,
+    system_prompt: str,
+    native_prompt: str,
+) -> dict[str, object]:
+    """Return a value-free receipt for accepted memories delivered to a native prompt."""
+    memory_context = to_dict(request.memory_context)
+    accepted_keys = sorted(
+        {
+            _as_str(memory.get("memory_key"))
+            for category in ("project", "personal")
+            for memory in _dict_items(memory_context.get(category))
+            if memory.get("gate_status", "accepted") == "accepted"
+            and _as_str(memory.get("memory_key"))
+        }
+    )
+    memory_section, _ = redact_private_tags(build_memory_context_section(request))
+    system_has_section = bool(memory_section) and memory_section in system_prompt
+    native_has_section = bool(memory_section) and memory_section in native_prompt
+    delivered_keys = [
+        key
+        for key in accepted_keys
+        if f"**{key}**" in memory_section and system_has_section and native_has_section
+    ]
+    missing_keys = sorted(set(accepted_keys) - set(delivered_keys))
+    return {
+        "accepted_memory_keys": accepted_keys,
+        "delivered_memory_keys": delivered_keys,
+        "missing_accepted_memory_keys": missing_keys,
+        "complete": not missing_keys,
+    }

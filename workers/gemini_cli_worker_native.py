@@ -47,7 +47,8 @@ from workers.native_agent_runner import (
     run_native_agent,
 )
 from workers.native_agent_security import native_github_credentials
-from workers.prompt import build_system_prompt
+from workers.prompt import build_effective_system_prompt
+from workers.prompt_memory import native_memory_delivery_receipt
 from workers.review import ReviewResult
 
 logger = logging.getLogger(__name__)
@@ -441,17 +442,17 @@ class GeminiCliWorkerNativeMixin:
         system_prompt_override: str | None,
     ) -> tuple[NativeAgentRunRequest, dict[str, Any]]:
         """Build a provider-specific native-agent runner request."""
-        system_prompt = (
-            system_prompt_override
-            if system_prompt_override is not None
-            else build_system_prompt(
-                request,
-                workspace.repo_path,
-                tool_registry=self.tool_registry,  # type: ignore[attr-defined]
-            )
+        system_prompt = build_effective_system_prompt(
+            request,
+            workspace.repo_path,
+            system_prompt_override=system_prompt_override,
+            tool_registry=self.tool_registry,  # type: ignore[attr-defined]
         )
         prompt = self._build_native_prompt(
             system_prompt=system_prompt, request=request, runtime_mode=runtime_mode
+        )
+        memory_delivery = native_memory_delivery_receipt(
+            request, system_prompt=system_prompt, native_prompt=prompt
         )
         events_path: Path | None = None
         provider_log_path: Path | None = None
@@ -515,7 +516,7 @@ class GeminiCliWorkerNativeMixin:
                 github_credentials=native_github_credentials(request),
                 provider_auth_source=Path("/root/.gemini"),
             ),
-            provider_metadata,
+            {**provider_metadata, "memory_delivery": memory_delivery},
         )
 
     def _execute_native_runtime(
@@ -549,6 +550,23 @@ class GeminiCliWorkerNativeMixin:
             runtime_mode=runtime_mode,
             system_prompt_override=system_prompt_override,
         )
+        memory_delivery = provider_metadata["memory_delivery"]
+        if not memory_delivery["complete"]:
+            logger.error(
+                "Gemini native execution blocked because accepted memory was not delivered",
+                extra={"session_id": request.session_id, "memory_delivery": memory_delivery},
+            )
+            return WorkerResult(
+                status="error",
+                summary="Accepted memory was not delivered to the native worker prompt.",
+                failure_kind="incomplete_delivery",
+                budget_usage={
+                    "runtime_mode": runtime_mode.value,
+                    "native_agent": provider_metadata,
+                },
+                artifacts=_workspace_artifacts(workspace),
+                next_action_hint="inspect_worker_configuration",
+            )
         run_request = replace(run_request, cancel_requested=cancel_token)
         native_result = run_native_agent(run_request)
 

@@ -8,15 +8,12 @@ Completed milestone: **M26 — Review-Comment Repair**.
 
 M26 is complete: review-comment repair polling on open draft PRs, author filtering, budget capping, deduplicated reply planning, immediate per-reply DB checkpointing, and thread replies are fully implemented and verified.
 
-Active prerequisite: **M28.5A — Native-Agent Docker Isolation**.
+Completed milestone: **M28 — Memory Effectiveness and Session Continuity**.
 
-Implemented M28 slices: the paired memory-effectiveness evaluation baseline and
-typed compact-session continuity for goals, decisions, risks, and touched
-files. The milestone is not complete: paired real-worker evidence and the
-reviewed effectiveness conclusion remain outstanding.
-
-M28 live-effectiveness evidence is explicitly paused. This prerequisite must
-merge and be verified before any M28 live evidence is resumed or claimed.
+M28's required real-worker evidence is complete on the hardened native-agent
+executor boundary. The scoped matrix is effective: all eight Codex/Antigravity
+cold-and-assisted pairs passed useful-hit, irrelevant-rejection,
+stale-reverification, and conflict-handling gates.
 
 ## Current capabilities
 
@@ -80,6 +77,12 @@ Temporal migration and rollback record is in the
 - The M28.2 slice records typed task, route, approval, worker, verifier, and
   review outcomes in compact session state, then makes that bounded advisory
   context available to replayed and resumed workers.
+- The reviewed M28 real-worker matrix contains 8/8 valid Codex/Antigravity
+  pairs on the exact evaluated revision. It proves accepted project memory
+  reaches native prompts and is used where expected; irrelevant, stale, and
+  conflicting memory is rejected or suppressed as required. Questions and
+  interventions did not regress (all captures were zero); mixed completion
+  times are observations, not a timing-improvement claim.
 - The 25-case frozen evaluation remains a deterministic domain-logic regression
   suite. It uses replayed worker outcomes and is not a real-provider Temporal
   reliability baseline.
@@ -95,9 +98,8 @@ Temporal migration and rollback record is in the
   default
 - deep-scout repo-to-research chaining is deferred and is not part of the
   supported Temporal completion loop
-- M28 still needs paired real-worker evidence before claiming that memory or
-  compact session state reduces repeated questions, interventions, or time to
-  a validated result
+- M28's scoped matrix does not establish a general completion-time reduction;
+  it is evidence of correct, safe memory behavior across the defined cases
 - the trusted Temporal worker retains Docker authority, while native provider
   CLI execution is confined to one-shot task containers; a separate sandbox
   broker remains deferred
@@ -113,9 +115,10 @@ Temporal migration and rollback record is in the
 
 ## Next slices only
 
-1. Complete and verify M28.5A native-agent Docker isolation.
-2. Only then resume paired M28 real-worker evidence; do not make an
-   effectiveness claim from isolation compatibility checks.
+1. Continue M28.5 execution-architecture foundation work beyond the
+   native-agent executor boundary used by the M28 matrix.
+2. Use the M28 report as a scoped safety/effectiveness signal only; do not
+   change routing or add semantic retrieval without further evidence.
 
 ## Deferred
 

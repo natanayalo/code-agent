@@ -173,10 +173,14 @@ without allowing stale or weakly supported context to control execution.
 - compare current full-text retrieval against the observed misses before
   considering semantic retrieval infrastructure
 
-The paired evaluation baseline and typed compact-session continuity slices are
-implemented. Finish M28 with paired real-worker evidence and a reviewed
-effectiveness conclusion. The typed compact session fields remain useful and
-can later feed `ContextEnvelope`.
+M28 is complete. The paired evaluation baseline, typed compact-session
+continuity, and reviewed eight-pair real-worker matrix are implemented. The
+matrix is effective across both native read-only profiles: useful project
+memory reaches and influences the worker where expected, while irrelevant,
+stale, and conflicting memory is rejected or suppressed. Questions and
+interventions did not regress; completion times were mixed, so this is not a
+general timing-improvement claim. The typed compact session fields remain
+useful and can later feed `ContextEnvelope`.
 
 ### Boundaries
 
@@ -213,8 +217,9 @@ not a broad repo or workflow rewrite.
 
 ### M28.5A — Sandbox / Trust-Boundary Hardening
 
-Active prerequisite. M28 live evidence is paused until this isolation gate has
-merged and passed its verification suite.
+The completed M28 live matrix ran through the native-agent executor boundary.
+Continue this milestone's remaining architecture work independently of the
+completed M28 evidence.
 
 Current concern: the Temporal worker mounts the host Docker socket, launches
 native provider execution, mounts Codex/Antigravity authentication, and may

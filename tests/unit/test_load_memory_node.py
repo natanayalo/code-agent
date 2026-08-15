@@ -40,7 +40,7 @@ def session_factory():
 
 
 def _seed_memory_context(session_factory: Any) -> tuple[str, str]:
-    verified_at = datetime(2026, 7, 2, 9, 30, tzinfo=UTC)
+    verified_at = datetime.now(UTC)
     repo_url = "https://github.com/natanayalo/code-agent"
 
     with session_scope(session_factory) as session:
@@ -235,6 +235,13 @@ def test_load_memory_node_loads_memory_and_skepticism_metadata(session_factory) 
     assert event.payload["observation_ids"] == [memory["observations"][0]["id"]]
     payload_without_observation_ids = dict(event.payload)
     payload_without_observation_ids.pop("observation_ids")
+    accepted_details = payload_without_observation_ids.pop("accepted_details")
+    assert [item["memory_key"] for item in accepted_details] == [
+        "communication_style",
+        "test_command",
+    ]
+    assert all("value" not in item for item in accepted_details)
+    assert "session_context" not in payload_without_observation_ids
     assert payload_without_observation_ids == {
         "retrieval_mode": "full_text",
         "search_query": "memory-match",
@@ -599,9 +606,16 @@ def test_read_side_gate_staleness_and_advisory_strength() -> None:
         last_verified_at=None,
         requires_verification=False,
     )
+    entry_stale_command = MemoryEntry(
+        memory_key="m28-stale",
+        value={"command": "printf stale-marker"},
+        confidence=0.95,
+        last_verified_at=now - timedelta(days=365),
+        requires_verification=False,
+    )
 
     result = ReadSideMemoryGateService.process(
-        personal=[entry_pitfall, entry_deploy, entry_unverified_deploy],
+        personal=[entry_pitfall, entry_deploy, entry_unverified_deploy, entry_stale_command],
         project=[],
     )
 
@@ -619,6 +633,7 @@ def test_read_side_gate_staleness_and_advisory_strength() -> None:
     # strength = 0.8 * (1.0 - 0.357 * 0.5) = 0.657
     assert pytest.approx(deploy_ann.advisory_strength, abs=0.01) == 0.657
     assert deploy_ann.gate_status == "accepted"
+    assert "accepted_low_risk_fresh" in deploy_ann.gate_reason_codes
 
     assert not any(
         e.memory_key == "deploy_policy_without_timestamp" for e in result.accepted_personal
@@ -627,6 +642,10 @@ def test_read_side_gate_staleness_and_advisory_strength() -> None:
         e for e in result.suppressed_personal if e.memory_key == "deploy_policy_without_timestamp"
     )
     assert suppressed_deploy.reason_codes == ["high_risk_unverified_or_stale"]
+    suppressed_command = next(
+        entry for entry in result.suppressed_personal if entry.memory_key == "m28-stale"
+    )
+    assert suppressed_command.reason_codes == ["actionable_memory_stale"]
 
     assert _calculate_staleness(None, requires_verification=False, window_days=30) == 1.0
     assert _calculate_staleness(now, requires_verification=False, window_days=0) == 1.0
@@ -743,6 +762,11 @@ def test_read_side_gate_diagnostics_timeline_payload(session_factory) -> None:
     assert "project_overrides_personal" in payload["reason_counts"]
     assert "editor" in payload["accepted_keys"]
     assert "editor" in payload["suppressed_keys"]
+    accepted = payload["accepted_details"][0]
+    assert accepted["category"] == "project"
+    assert accepted["memory_key"] == "editor"
+    assert accepted["source"] is None
+    assert "value" not in accepted
     suppressed = payload["suppressed_details"][0]["memory"]
     assert suppressed["source"] == "operator"
     assert suppressed["confidence"] == 0.7

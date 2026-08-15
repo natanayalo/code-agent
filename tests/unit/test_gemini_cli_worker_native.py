@@ -18,7 +18,7 @@ from sandbox import (
 from tools import DEFAULT_TOOL_REGISTRY
 from workers import GeminiCliWorker, WorkerRequest, WorkerResult
 from workers.base import ArtifactReference
-from workers.cli_runtime import CliRuntimeMessage, CliRuntimeStep
+from workers.cli_runtime import CliRuntimeMessage, CliRuntimeSettings, CliRuntimeStep
 from workers.gemini_cli_worker import _prepare_workspace_gemini_home
 from workers.gemini_cli_worker_native import GeminiCliWorkerNativeMixin
 from workers.native_agent_runner import NativeAgentRunResult
@@ -254,6 +254,49 @@ def test_gemini_cli_worker_native_mode_honors_read_only_constraint(tmp_path: Pat
     command = run_native.call_args.args[0].command
     assert "--approval-mode" in command
     assert command[command.index("--approval-mode") + 1] == "plan"
+
+
+def test_gemini_native_runtime_keeps_memory_with_system_prompt_override(tmp_path: Path) -> None:
+    workspace = _make_workspace(tmp_path)
+    worker = GeminiCliWorker(
+        runtime_adapter=_ScriptedAdapter([]),
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(_make_container(workspace)),
+    )
+    request = WorkerRequest(
+        task_text="Use the accepted memory",
+        repo_url="https://example.com/repo.git",
+        memory_context={
+            "project": [
+                {
+                    "memory_key": "accepted-command",
+                    "value": {"command": "printf marker"},
+                    "gate_status": "accepted",
+                }
+            ]
+        },
+    )
+    with patch("workers.gemini_cli_worker_native.run_native_agent") as run_native:
+        run_native.return_value = NativeAgentRunResult(
+            status="success",
+            summary="done",
+            command="gemini",
+            exit_code=0,
+            duration_seconds=1,
+            timed_out=False,
+        )
+        result = worker._execute_native_runtime(
+            request,
+            workspace=workspace,
+            runtime_settings=CliRuntimeSettings(),
+            runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+            system_prompt_override="override without durable memory",
+            cancel_token=None,
+        )
+
+    assert result.status == "success"
+    assert result.budget_usage["native_agent"]["memory_delivery"]["complete"] is True
+    assert "## Durable Memories" in run_native.call_args.args[0].prompt
 
 
 def test_gemini_native_prompt_includes_schema_and_planner_role(tmp_path: Path) -> None:

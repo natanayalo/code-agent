@@ -145,9 +145,9 @@ def run_case_1_assertions(
                 AssertionResult(name="profile_contains_test_command", passed=injected)
             )
 
-            prompt_ok = len(prompts) > 0 and "Repository Profile (Advisory)" in prompts[0]
+            prompt_ok = len(prompts) > 0 and cmd_key in prompts[0]
             result.assertions.append(
-                AssertionResult(name="prompt_contains_profile_section", passed=prompt_ok)
+                AssertionResult(name="prompt_contains_accepted_memory", passed=prompt_ok)
             )
 
         state_ok = state.result is not None
