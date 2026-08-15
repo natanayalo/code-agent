@@ -509,6 +509,16 @@ class DockerNativeAgentExecutor:
             "container_name": container_name,
         }
         manifest_path = artifact_root / "native-isolation-manifest.json"
+        cleanup_result: str | None = None
+
+        def cleanup_network() -> str:
+            nonlocal cleanup_result
+            if cleanup_result is None:
+                cleanup_result = self._cleanup_network(
+                    network_name=network_name, proxy_name=proxy_name
+                )
+            return cleanup_result
+
         try:
             process = subprocess.Popen(
                 docker_command,
@@ -549,9 +559,7 @@ class DockerNativeAgentExecutor:
                         manifest.update(
                             {
                                 "termination_reason": "completed",
-                                "cleanup": self._cleanup_network(
-                                    network_name=network_name, proxy_name=proxy_name
-                                ),
+                                "cleanup": cleanup_network(),
                             }
                         )
                         manifest_path.write_text(
@@ -570,9 +578,7 @@ class DockerNativeAgentExecutor:
                     manifest.update(
                         {
                             "termination_reason": "cancelled",
-                            "cleanup": self._cleanup_network(
-                                network_name=network_name, proxy_name=proxy_name
-                            ),
+                            "cleanup": cleanup_network(),
                         }
                     )
                     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
@@ -589,9 +595,7 @@ class DockerNativeAgentExecutor:
                     manifest.update(
                         {
                             "termination_reason": "timeout",
-                            "cleanup": self._cleanup_network(
-                                network_name=network_name, proxy_name=proxy_name
-                            ),
+                            "cleanup": cleanup_network(),
                         }
                     )
                     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
@@ -606,15 +610,16 @@ class DockerNativeAgentExecutor:
             stdout, stderr = process.communicate(timeout=15)
         except (OSError, subprocess.SubprocessError) as exc:
             self._remove(container_name)
-            self._cleanup_network(network_name=network_name, proxy_name=proxy_name)
+            cleanup_network()
             raise NativeAgentExecutorError(f"Isolated Docker executor failed: {exc}") from exc
         finally:
+            cleanup_network()
             shutil.rmtree(agent_home, ignore_errors=True)
         self._remove(container_name)
         manifest.update(
             {
                 "termination_reason": "completed",
-                "cleanup": self._cleanup_network(network_name=network_name, proxy_name=proxy_name),
+                "cleanup": cleanup_network(),
             }
         )
         manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")

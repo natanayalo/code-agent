@@ -180,6 +180,59 @@ def test_executor_auth_staging_failure_writes_startup_manifest(tmp_path: Path, m
     assert manifest["cleanup"] == "removed"
 
 
+def test_executor_cleans_network_when_polling_is_interrupted(tmp_path: Path, monkeypatch) -> None:
+    workspace_root = tmp_path / "task"
+    repo = workspace_root / "repo"
+    artifacts = tmp_path / "artifacts"
+    repo.mkdir(parents=True)
+    artifacts.mkdir()
+    executor = DockerNativeAgentExecutor(image="native-image")
+    cleanup_calls: list[tuple[str | None, str | None]] = []
+
+    monkeypatch.setattr("sandbox.native_agent_executor.stage_provider_auth", lambda **_kwargs: None)
+    monkeypatch.setattr(executor, "_start_proxy", lambda **_kwargs: "native-egress-test")
+    monkeypatch.setattr(
+        executor,
+        "_cleanup_network",
+        lambda *, network_name, proxy_name: cleanup_calls.append((network_name, proxy_name))
+        or "removed",
+    )
+    monkeypatch.setattr(
+        "sandbox.native_agent_executor.subprocess.Popen",
+        lambda *_args, **_kwargs: type(
+            "Process", (), {"poll": lambda _self: None, "stdin": None}
+        )(),
+    )
+    monkeypatch.setattr(
+        "sandbox.native_agent_executor.time.sleep",
+        lambda _seconds: (_ for _ in ()).throw(KeyboardInterrupt()),
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        executor.run(
+            command=["codex", "exec"],
+            prompt=None,
+            workspace=native_executor_workspace_handle(
+                workspace_path=workspace_root, repo_path=repo, task_id="task-1"
+            ),
+            artifact_root=artifacts,
+            environment={},
+            timeout_seconds=60,
+            read_only_workspace=True,
+            scratch_namespace="node-1",
+            cancel_requested=None,
+            redactor=None,
+            network_enabled=True,
+            github_credentials={},
+            provider_auth_source=tmp_path / ".codex",
+        )
+
+    assert len(cleanup_calls) == 1
+    network_name, proxy_name = cleanup_calls[0]
+    assert network_name and network_name.startswith("native-agent-net-")
+    assert proxy_name == "native-egress-test"
+
+
 def test_proxy_audit_is_identity_only_and_redacts_request_content(
     tmp_path: Path, monkeypatch
 ) -> None:
