@@ -114,6 +114,20 @@ def _fixture_source(delivery_namespace: str, case: RealWorkerPairCase) -> str:
     return f"{PRIVATE_PREFIX}{digest}"
 
 
+def _legacy_fixture_source(delivery_namespace: str, case: RealWorkerPairCase) -> str:
+    """Return the pre-batch per-case source used by earlier private bundles."""
+    digest = hashlib.sha256(f"{delivery_namespace}:{case.case_id}".encode()).hexdigest()[:16]
+    return f"{PRIVATE_PREFIX}{digest}"
+
+
+def _owned_fixture_sources(delivery_namespace: str, case: RealWorkerPairCase) -> set[str]:
+    """Allow cleanup to remove only current or legacy fixtures from this bundle."""
+    return {
+        _fixture_source(delivery_namespace, case),
+        _legacy_fixture_source(delivery_namespace, case),
+    }
+
+
 def _fixture_key(case: RealWorkerPairCase) -> str:
     return f"m28-{case.scenario.replace('_', '-')}-{case.worker_profile.split('-')[0]}"
 
@@ -510,7 +524,9 @@ def cleanup(args: argparse.Namespace) -> int:
                 row = next(
                     (item for item in rows if item.get("memory_key") == payload["memory_key"]), None
                 )
-                if row and str(row.get("source") or "") == fixture_source:
+                if row and str(row.get("source") or "") in _owned_fixture_sources(
+                    delivery_namespace, case
+                ):
                     if category == "project":
                         params["repo_url"] = args.repo_url
                     response = client.delete(f"/knowledge-base/{category}", params=params)

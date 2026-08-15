@@ -29,6 +29,8 @@ from scripts.e2e.run_m28_real_worker_eval import (
     _assert_fixture_safe,
     _external_thread_id,
     _fixture_source,
+    _legacy_fixture_source,
+    _owned_fixture_sources,
     _parser,
     _task_text,
 )
@@ -299,6 +301,8 @@ def test_provider_pairs_share_scenario_scoped_fixture_ownership() -> None:
 
     assert _fixture_source("bundle", codex) == _fixture_source("bundle", antigravity)
     assert _fixture_source("bundle", codex) != _fixture_source("bundle", useful)
+    assert _legacy_fixture_source("bundle", codex) != _fixture_source("bundle", codex)
+    assert _legacy_fixture_source("bundle", codex) in _owned_fixture_sources("bundle", codex)
 
 
 def test_cli_accepts_batch_collection_arguments(tmp_path: Path) -> None:
