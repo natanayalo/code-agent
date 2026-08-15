@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat(orchestrator): implement wave 3a plan reconstruction and pruning ([#374](https://github.com/natanayalo/code-agent/pull/374))
+
 - Feat(orchestrator): complete M28.5B wave 2 temporal state reduction closeout ([#373](https://github.com/natanayalo/code-agent/pull/373))
 
 - Feat(temporal): rehydrate timeline_events from db and prune from snapshots (M28.5B Wave 2) ([#372](https://github.com/natanayalo/code-agent/pull/372))
