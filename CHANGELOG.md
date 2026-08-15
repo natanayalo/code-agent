@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat(temporal): rehydrate timeline_events from db and prune from snapshots (M28.5B Wave 2) ([#372](https://github.com/natanayalo/code-agent/pull/372))
+
 - Feat(temporal): prune progress_updates from intermediate snapshots and ensure terminal cleanup ([#371](https://github.com/natanayalo/code-agent/pull/371))
 
 - Feat: isolate native agents in Docker ([#369](https://github.com/natanayalo/code-agent/pull/369))
