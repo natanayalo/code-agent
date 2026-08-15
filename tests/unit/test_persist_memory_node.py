@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from contextlib import nullcontext
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 from sqlalchemy.pool import StaticPool
@@ -23,6 +24,7 @@ from repositories import (
     create_session_factory,
     session_scope,
 )
+from workers import WorkerMemoryEntry
 
 
 @pytest.fixture
@@ -233,3 +235,87 @@ def test_persist_memory_node_records_span_input_output(
     assert captured[0][1]["persisted_count"] == 1
     assert captured[0][1]["proposal_count"] == 1
     assert statuses == ["success"]
+
+
+def _assert_admission_results(
+    result: dict[str, Any],
+    captured: list[tuple[dict[str, object], dict[str, object]]],
+    statuses: list[str],
+    session_factory,
+    repo_url: str,
+) -> None:
+    """Helper asserting timeline payload, tracing spans, and persisted rows."""
+    assert result["timeline_events"][0].event_type == TimelineEventType.MEMORY_PERSISTED
+    assert result["timeline_events"][0].payload == {
+        "requested_count": 2,
+        "persisted_count": 1,
+        "proposal_count": 1,
+        "rejected_count": 0,
+        "decision_counts": {"needs_human_review": 1, "create": 1},
+        "risk_counts": {"medium": 1, "low": 1},
+    }
+    assert result["progress_updates"] == [
+        "admitted 2 memory candidates: 1 direct writes, 1 proposals, 0 rejected"
+    ]
+    assert len(result["memory_to_persist"]) == 2
+    assert isinstance(result["memory_to_persist"][0]["last_verified_at"], str)
+
+    assert captured[0][0]["source"] == "database"
+    assert captured[0][0]["requested_count"] == 2
+    assert captured[0][0]["memory_keys"] == ["communication_style", "test_command"]
+    assert captured[0][1]["requested_count"] == 2
+    assert captured[0][1]["persisted_count"] == 1
+    assert captured[0][1]["proposal_count"] == 1
+    assert statuses == ["success"]
+
+    with session_scope(session_factory) as session:
+        personal = PersonalMemoryRepository(session).get(memory_key="communication_style")
+        project = ProjectMemoryRepository(session).get(repo_url=repo_url, memory_key="test_command")
+        proposals = MemoryProposalRepository(session).list(task_id="task-1")
+        decisions = MemoryAdmissionDecisionRepository(session).list(task_id="task-1")
+
+    assert personal is None
+    assert proposals[0].memory_key == "communication_style"
+    assert project is not None
+    assert project.value == {"command": ".venv/bin/pytest tests/unit"}
+    assert {decision.decision for decision in decisions} == {"create", "needs_human_review"}
+
+
+def test_persist_memory_node_derives_candidates_from_result_when_state_list_empty(
+    session_factory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When state.memory_to_persist is empty, persist_memory derives from result with tracing."""
+    captured: list[tuple[dict[str, object], dict[str, object]]] = []
+    statuses: list[str] = []
+    monkeypatch.setattr(graph_module, "start_optional_span", lambda **_kwargs: nullcontext())
+    monkeypatch.setattr(
+        graph_module,
+        "set_span_input_output",
+        lambda input_data, output_data=None: captured.append((input_data, output_data)),
+    )
+    monkeypatch.setattr(
+        graph_module,
+        "set_span_status_from_outcome",
+        lambda status, *_args, **_kwargs: statuses.append(status),
+    )
+
+    repo_url = "https://github.com/natanayalo/code-agent"
+    state = _admission_state(repo_url, datetime(2026, 7, 2, 10, 15, tzinfo=UTC))
+    state.result.memory_to_persist = [
+        WorkerMemoryEntry(
+            category=m.category,
+            memory_key=m.memory_key,
+            value=m.value,
+            source=m.source,
+            confidence=m.confidence,
+            scope=m.scope,
+            last_verified_at=m.last_verified_at,
+            requires_verification=m.requires_verification,
+        )
+        for m in state.memory_to_persist
+    ]
+    state.memory_to_persist = []
+
+    result = build_persist_memory_node(session_factory)(state)
+    _assert_admission_results(result, captured, statuses, session_factory, repo_url)

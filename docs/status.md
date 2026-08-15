@@ -29,9 +29,11 @@ M28.5B Wave 2 state reduction is complete: all remaining candidate fields
 `memory_to_persist`, and `timeline_events`) are excluded from intermediate
 `TemporalTaskState` serialization at the persistence boundary. Canonical memory
 resolution is centralized at `persist_memory_node` from retained `WorkerResult`,
-session state is regenerated at consumption, scout single-phase contract is enforced,
-verification friction is ephemeral, and error reporting is projected directly to
-`tasks.last_error` and `TASK_FAILED` timeline events.
+session state is regenerated at consumption, the current Temporal workflow does
+not schedule deep-scout multi-phase chaining (executing single-phase runs where
+`state.result` is authoritative for proposals and artifacts), verification friction
+is ephemeral, and error reporting is projected directly to `tasks.last_error` and
+`TASK_FAILED` timeline events.
 
 ## Current capabilities
 

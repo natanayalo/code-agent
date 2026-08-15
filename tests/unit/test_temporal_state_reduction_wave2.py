@@ -17,6 +17,7 @@ from unittest.mock import MagicMock
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
+from temporalio import workflow
 
 from db.base import Base
 from db.enums import TimelineEventType
@@ -37,6 +38,7 @@ from orchestrator.temporal.activities import (
     TaskExecutionActivities,
     _serialize_temporal_task_state,
 )
+from orchestrator.temporal.workflows import TaskExecutionWorkflow
 from repositories import (
     ProjectMemoryRepository,
     ProposalRepository,
@@ -447,3 +449,39 @@ async def test_wave_2_scout_deep_mode_temporal_behavioral_equivalence() -> None:
         proposals = ProposalRepository(session).list_proposals(task_id=task_id)
         assert len(proposals) == 1
         assert proposals[0].title == "Refactor Architecture"
+
+
+@pytest.mark.anyio
+async def test_wave_2_scout_deep_mode_workflow_executes_single_worker_phase(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Deep scout in Temporal executes exactly one worker phase without research chaining."""
+    activity_names: list[str] = []
+
+    async def execute_activity(name: str, *args: Any, **kwargs: Any) -> Any:
+        activity_names.append(name)
+        if name == "classify_and_plan":
+            return {}
+        if name == "decompose_task":
+            return {"execution_shape": "monolithic"}
+        if name == "run_worker":
+            return {}
+        return None
+
+    monkeypatch.setattr(workflow, "patched", lambda _patch_id: False)
+    monkeypatch.setattr(workflow, "execute_activity", execute_activity)
+
+    await TaskExecutionWorkflow()._run_lifecycle("task-scout-deep-1")
+
+    assert activity_names.count("run_worker") == 1
+    assert "transition_to_research_phase" not in activity_names
+    assert activity_names == [
+        "classify_and_plan",
+        "decompose_task",
+        "load_memory",
+        "provision_workspace",
+        "run_worker",
+        "verify_result",
+        "persist_memory",
+        "deliver_result",
+    ]
