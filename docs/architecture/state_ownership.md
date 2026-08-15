@@ -8,10 +8,10 @@ This document is the authoritative field-level state ownership contract for
 1. **Field-level authority and projection mapping** across Temporal history,
    `TemporalTaskState`, and relational Postgres tables.
 2. **Lifecycle recovery rules** for activity replay, workflow restarts, and
-   disaster recovery.
-3. **A prioritized, risk-rated reduction plan** to eliminate redundant
-   serialization in `TemporalTaskState` without breaking replay or query
-   consumers.
+   disaster recovery—distinguishing existing capabilities from target capabilities.
+3. **A prioritized, prerequisite-gated reduction plan** to eliminate redundant
+   serialization in `TemporalTaskState` without breaking activity idempotency,
+   replay, or query consumers.
 4. **Verification prerequisites and rollback safety** for all future state
    reduction slices.
 
@@ -42,8 +42,8 @@ This document is the authoritative field-level state ownership contract for
 4. **New features must not deepen state duplication:**
    - New orchestration fields must define their authoritative store and write
      paths before adding fields to `TemporalTaskState`.
-   - Redundant fields must be eliminated incrementally with explicit replay
-     and reconstruction tests.
+   - Redundant fields must be eliminated incrementally with explicit replay,
+     idempotency, and reconstruction tests.
 
 ---
 
@@ -82,9 +82,9 @@ and read consumers across all 7 state stores:
 | `verification` | `worker_runs.verifier_outcome` (JSONB) & `artifacts` | `temporal_task_states.state` | `orchestrator/execution_outcome_service.py` (`_create_worker_run`) | Completion loop repair decisions, Dashboard Verification tab |
 | `review` | `artifacts` (`type="independent_review_result"`) & `worker_runs.artifact_index` | `temporal_task_states.state` | `orchestrator/execution_outcome_service.py` (`_persist_artifacts_for_run`) | Completion loop repair decisions, Dashboard Review tab |
 | `friction_reports` | `proposals` table (`proposal_type="friction"`) | `temporal_task_states.state` | `orchestrator/execution_improvement_proposal_service.py` | API `/proposals`, Dashboard Proposals tab (never read back from state blob) |
-| `memory_to_persist` | `memory_items` & `memory_observations` | `temporal_task_states.state` | Post-commit `ObservationMemoryBridge.bridge_observations` | Memory repositories (never read back from state blob) |
+| `memory_to_persist` | `memory_items` & `memory_observations` | `temporal_task_states.state` | Extracted during run; persisted post-commit via `ObservationMemoryBridge` | Read by `persist_memory` activity (`persist_memory_node -> _admit_memory_candidates`) |
 | `progress_updates` | Ephemeral / Notification webhooks & `task_timeline_events` | `temporal_task_states.state` | `orchestrator/temporal/activities.py` notifier | Real-time notification receivers (never read back from state blob) |
-| `timeline_events` | `task_timeline_events` table | `temporal_task_states.state` | `orchestrator/execution_outcome_service.py` (`_persist_timeline_events`) | Dashboard Timeline, API `/tasks/{id}/timeline` |
+| `timeline_events` | `task_timeline_events` table | `temporal_task_states.state` | `orchestrator/execution_outcome_service.py` (`_persist_timeline_events`) | Dashboard/API, **and** `_has_event()` activity idempotency guards |
 | `timeline_persisted_count` | Derived cursor (`TaskTimelineRepository.count_by_attempt`) | `temporal_task_states.state` | `orchestrator/execution_outcome_service.py` (`_persist_intermediate_state`), reconciled in `_get_current_state` | Timeline batch insertion deduplication cursor |
 | `repair_handoff_requested` | `tasks.constraints["repair_handoff_requested"]` & Temporal workflow state | `temporal_task_states.state` | `orchestrator/temporal/activities.py` | Delivery activity, manual handoff notifications |
 | `completion_loop` | `tasks.constraints` (`*_repair_passes_used`) & Temporal Workflow History | `temporal_task_states.state` | `orchestrator/execution_outcome_service.py` (`_apply_completion_control_constraints`) | Workflow completion loop routing, repair budget enforcement |
@@ -104,18 +104,31 @@ and read consumers across all 7 state stores:
 - Completed activities are **not re-executed**; their recorded outputs are replayed deterministically from Temporal history.
 - When an in-flight activity begins or retries, it calls `_get_current_state(task_id)`:
   - If a snapshot exists in `TemporalTaskState`, it parses the state and reconciles approval status (`task.constraints["approval"]`) and timeline event count (`TaskTimelineRepository.count_by_attempt`).
-  - If no snapshot exists (e.g. initial workflow start), it reconstructs the initial state from `tasks` and `task_submissions` via `_load_submission_for_task` and `build_orchestrator_graph_input`.
+  - If no snapshot exists (e.g. initial workflow start), it falls back to `_load_submission_for_task` + `build_orchestrator_graph_input()`, which reconstructs the **initial task input**, not mid-flight state.
 
 ### 2. Workflow Restart / Continue-As-New
 - When a workflow is restarted or continued-as-new, durable progress must be reconstructable without relying on deleted in-memory state.
-- Relational tables (`tasks`, `worker_runs`, `execution_plans`, `human_interactions`, `session_states`) contain all historical attempts and decisions.
-- Excluding fields from `TemporalTaskState` is safe if and only if:
-  - The field is ephemeral to a single activity invocation (e.g. `progress_updates`, `friction_reports`, `memory_to_persist`), OR
-  - The field is reconstructable from relational tables (e.g. `timeline_events` loaded from `task_timeline_events`).
+- Excluding fields from `TemporalTaskState` is safe only if:
+  - The field is purely ephemeral to a single activity invocation (e.g. `progress_updates`, `friction_reports`), OR
+  - The field is explicitly reconstructed from relational tables prior to downstream consumption.
 
-### 3. Postgres-Only Recovery (Disaster Recovery / Temporal Reset)
-- If Temporal history is completely lost, all completed tasks are already 100% intact because `TemporalTaskState` is deleted upon terminal completion.
-- In-flight tasks can be reconstructed up to the last committed activity boundary from `tasks`, `worker_runs`, `execution_plan_nodes`, and `task_timeline_events`.
+### 3. Postgres-Only In-Flight Recovery: Current Reality vs. Target Architecture
+
+It is critical to distinguish what the codebase currently supports from the target architecture:
+
+- **Current Reality (Terminal Tasks):**
+  - For completed, failed, or cancelled tasks, Postgres relational tables (`tasks`, `worker_runs`, `artifacts`, `execution_plans`, `execution_plan_nodes`, `execution_plan_node_attempts`, `task_timeline_events`, `proposals`, `session_states`, `human_interactions`) store 100% of the durable record. `TemporalTaskState` is deleted upon terminal completion.
+
+- **Current Reality (In-Flight Tasks):**
+  - The missing-snapshot fallback in `_get_current_state()` only rebuilds **initial task input**.
+  - Postgres relational tables **cannot currently reconstruct mid-flight state** if `TemporalTaskState` is lost while a task is running. If the snapshot is missing mid-flight:
+    - Worker results, verification reports, and review outcomes are lost from the active workflow state.
+    - Completion loop repair pass counters and phase state are lost.
+    - Permission escalation strictly asserts that `TemporalTaskState` exists (`assert snapshot is not None`).
+    - DAG wave execution loses in-memory node outcome aggregations.
+
+- **Target Architecture (Prerequisite for Full State Pruning):**
+  - Before eliminating core execution state from `TemporalTaskState`, dedicated relational reconstructors (e.g. loading `node_outcomes` from `execution_plan_node_attempts` and worker results from `worker_runs`) must be implemented and tested.
 
 ### 4. Terminal State Cleanup
 - Terminal activities (`_persist_state`, `record_workflow_failure`, permission rejection) explicitly invoke `TemporalTaskStateRepository.delete(task_id=task_id)`.
@@ -125,24 +138,24 @@ and read consumers across all 7 state stores:
 
 ## Section 3: Prioritized Reduction Candidates
 
-The 31 fields in `OrchestratorState` are currently serialized into `TemporalTaskState` at every activity boundary. The following candidates have been evaluated for safe exclusion or pruning from `TemporalTaskState`:
+The 31 fields in `OrchestratorState` are currently serialized into `TemporalTaskState` at every activity boundary. Reduction must follow a strictly prerequisite-gated wave sequence:
 
 ```mermaid
 flowchart TD
     subgraph Wave 1: Immediate Safe Exclusions [Wave 1: Pure Redundancy]
-        W1A["timeline_events<br/>(relational in task_timeline_events)"]
-        W1B["progress_updates<br/>(ephemeral notifications)"]
-        W1C["friction_reports<br/>(relational in proposals)"]
-        W1D["memory_to_persist<br/>(relational in memory_items)"]
+        W1A["progress_updates<br/>(ephemeral notification strings)"]
+        W1B["friction_reports<br/>(relational in proposals table)"]
     end
 
-    subgraph Wave 2: Semi-Static Context [Wave 2: Reconstructable from DB]
-        W2A["scout_phase_results<br/>(relational in proposals/artifacts)"]
-        W2B["session_state_update<br/>(relational in session_states)"]
-        W2C["errors<br/>(relational in tasks.last_error)"]
+    subgraph Wave 2: Prerequisite-Gated Reductions [Wave 2: Consumer / Idempotency Gated]
+        W2A["memory_to_persist<br/>(gated by persist_memory activity refactor)"]
+        W2B["timeline_events<br/>(gated by _has_event idempotency refactor)"]
+        W2C["scout_phase_results<br/>(relational in proposals/artifacts)"]
+        W2D["session_state_update<br/>(relational in session_states)"]
+        W2E["errors<br/>(relational in tasks.last_error)"]
     end
 
-    subgraph Wave 3: Plan & Outcomes [Wave 3: Plan Relational Alignment]
+    subgraph Wave 3: Plan & Outcomes [Wave 3: Relational Rehydrators]
         W3A["task_plan / decomposed_plan<br/>(relational in execution_plans/nodes)"]
         W3B["node_outcomes<br/>(relational in execution_plan_node_attempts)"]
     end
@@ -150,66 +163,71 @@ flowchart TD
     Wave 1 --> Wave 2 --> Wave 3
 ```
 
-### Wave 1: Immediate Safe Exclusions (Low Risk, High Size Impact)
+### Wave 1: Immediate Safe Exclusions (Low Risk, Zero Downstream Consumers)
 
-#### 1. `timeline_events`
-- **Current Behavior:** Every timeline event is appended to `state.timeline_events` and serialized into the JSON blob. Concurrently, `_persist_intermediate_state` writes new events to `task_timeline_events` in the relational database.
-- **Why Safe to Exclude:** The relational table `task_timeline_events` is written in the exact same transaction before snapshotting. On state reload, `_get_current_state` already counts persisted events via `TaskTimelineRepository.count_by_attempt()`.
-- **Risk Level:** **Low**
-- **Size Impact:** **Very High** (reduces state blob size by 50–80% on multi-step and repair runs).
-- **What Breaks if Wrong:** If an activity expects `state.timeline_events` to contain the full history rather than relying on `task_timeline_events`, it would see an empty list. (Audit confirms activities only append new events and read `timeline_persisted_count`).
-- **Rollback Path:** Re-add `timeline_events` to serialization.
-
-#### 2. `progress_updates`
+#### 1. `progress_updates`
 - **Current Behavior:** Transient notification strings collected during execution and serialized into the blob.
-- **Why Safe to Exclude:** Ephemeral; passed directly to external webhook / Telegram notifiers during activity execution. Never read back from the snapshot by any downstream activity.
+- **Why Safe to Exclude:** Ephemeral; passed directly to external webhook / Telegram notifiers during activity execution. Never read back from the snapshot by any subsequent activity.
 - **Risk Level:** **Low**
 - **Size Impact:** Low
 - **What Breaks if Wrong:** Nothing; no read consumers exist in subsequent activities.
 - **Rollback Path:** Additive re-inclusion.
 
-#### 3. `friction_reports`
+#### 2. `friction_reports`
 - **Current Behavior:** Friction reports extracted by worker/evaluator are kept in state and serialized.
-- **Why Safe to Exclude:** Projected to the `proposals` table (`proposal_type="friction"`) in `_persist_friction_proposals_if_needed`. Downstream activities and workflows never read `friction_reports` from `TemporalTaskState`.
+- **Why Safe to Exclude:** Projected directly to the `proposals` table (`proposal_type="friction"`) in `_persist_friction_proposals_if_needed`. Subsequent workflow activities never read `friction_reports` from `TemporalTaskState`.
 - **Risk Level:** **Low**
 - **Size Impact:** Low to Medium
-- **What Breaks if Wrong:** Nothing; proposals are queried from the `proposals` table by the API and dashboard.
-- **Rollback Path:** Additive re-inclusion.
-
-#### 4. `memory_to_persist`
-- **Current Behavior:** Memory candidates identified during task execution are serialized into the blob.
-- **Why Safe to Exclude:** Consumed immediately post-commit by `ObservationMemoryBridge.bridge_observations` and written to `memory_items` and `memory_observations`. Never read back from the snapshot.
-- **Risk Level:** **Low**
-- **Size Impact:** Medium
-- **What Breaks if Wrong:** Nothing; memory query systems query `memory_items` directly.
+- **What Breaks if Wrong:** Nothing; proposals are queried directly from the `proposals` table by the API and dashboard.
 - **Rollback Path:** Additive re-inclusion.
 
 ---
 
-### Wave 2: Semi-Static & Derived Context (Low-to-Medium Risk)
+### Wave 2: Prerequisite-Gated State Reductions (Consumer / Idempotency Gated)
+
+#### 3. `memory_to_persist`
+- **Current Behavior:** Memory candidates identified during task execution are serialized into the blob.
+- **Downstream Consumer:** The Temporal `persist_memory` activity explicitly reloads state and executes `self.persist_memory_node` -> `_admit_memory_candidates`, which iterates over `state.memory_to_persist`.
+- **Prerequisite for Exclusion:** Prove and test that `ObservationMemoryBridge` fully supersedes `persist_memory_node`, or decouple `persist_memory_node` from `state.memory_to_persist` so that memory candidates are passed directly or loaded from observation records.
+- **Risk Level:** **Medium** (blocked by active consumer)
+- **Size Impact:** Medium
+- **Rollback Path:** Additive re-inclusion.
+
+#### 4. `timeline_events`
+- **Current Behavior:** Every timeline event is appended to `state.timeline_events` and serialized into the JSON blob. Concurrently, `_persist_intermediate_state` writes new events to `task_timeline_events` in the relational database.
+- **Downstream Consumer:** `TaskExecutionActivities._has_event()` explicitly scans `state.timeline_events` as an **idempotency and retry guard** across 7 activities:
+  - `classify_and_plan` (`TASK_SPEC_AND_ROUTE_GENERATED`)
+  - `load_memory` (`MEMORY_LOADED`)
+  - `provision_workspace` (`WORKSPACE_PROVISIONED`)
+  - `execute_worker` (`WORKER_EXECUTION_STARTED`)
+  - `verify_task` (`TASK_VERIFIED`)
+  - `deliver_task` (`TASK_DELIVERED`)
+  - `persist_memory` (`MEMORY_PERSISTED`)
+- **Why Pruning Today Breaks Execution:** `_get_current_state()` reconciles the persisted event **count**, but does not reload historical events into `state.timeline_events`. If `timeline_events` is omitted from the snapshot, `_has_event()` evaluates to `False` on activity retry or resumption, causing side-effecting activities (e.g. workspace provisioning, delivery) to re-execute unexpectedly.
+- **Prerequisite for Exclusion:** Refactor `_has_event()` to query `task_timeline_events` in Postgres, reconstruct event markers into `state.timeline_events` on reload, or introduce a compact durable idempotency marker (e.g. `executed_activity_keys: set[str]`), backed by retry/resume integration tests.
+- **Risk Level:** **Medium** (high risk if pruned without prerequisite)
+- **Size Impact:** **Very High** (reduces state blob size by 50–80% on multi-step and repair runs).
+- **Rollback Path:** Additive re-inclusion.
 
 #### 5. `scout_phase_results`
 - **Current Behavior:** Captures intermediate scout summaries across repo/research phases.
-- **Why Safe to Exclude:** Already stored in `proposals.metadata_payload["scout_phase_metadata"]` and as artifact records.
-- **Risk Level:** **Low**
+- **Why Prerequisite Needed:** Already stored in `proposals.metadata_payload["scout_phase_metadata"]` and artifact records; must verify that final scout aggregation queries proposals/artifacts directly rather than relying on state memory.
+- **Risk Level:** **Low to Medium**
 - **Size Impact:** Medium to High
-- **What Breaks if Wrong:** Final scout aggregation activity if it does not query artifacts/proposals.
 - **Rollback Path:** Additive re-inclusion.
 
 #### 6. `session_state_update`
-- **Current Behavior:** Compact session state update dict (`active_goal`, `decisions_made`, `identified_risks`, `files_touched`) stored in state.
-- **Why Safe to Exclude:** Authoritative store is `session_states` table in Postgres, updated via `SessionStateRepository.upsert`.
+- **Current Behavior:** Compact session state update dict stored in state.
+- **Why Prerequisite Needed:** Authoritative store is `session_states` table in Postgres. Must verify that resumed worker context queries `SessionStateRepository` directly.
 - **Risk Level:** **Low**
 - **Size Impact:** Low
-- **What Breaks if Wrong:** Resumed worker context if it reads from state object instead of `SessionStateRepository`.
 - **Rollback Path:** Additive re-inclusion.
 
 #### 7. `errors`
 - **Current Behavior:** Cumulative list of string errors across workflow attempts.
-- **Why Safe to Exclude:** Authoritative store is `tasks.last_error` and `task_timeline_events` (`TASK_FAILED`).
+- **Why Prerequisite Needed:** Authoritative store is `tasks.last_error` and `task_timeline_events` (`TASK_FAILED`). Verify no legacy UI/API paths depend on state blob errors.
 - **Risk Level:** **Low**
 - **Size Impact:** Low
-- **What Breaks if Wrong:** Error display in legacy code paths if any read `state.errors`.
 - **Rollback Path:** Additive re-inclusion.
 
 ---
@@ -220,7 +238,7 @@ flowchart TD
 - **Current Behavior:** The entire DAG plan, node dependencies, task specs, and execution outcomes/attempts are serialized in the JSON blob.
 - **Relational Authority:** `execution_plans`, `execution_plan_nodes`, and `execution_plan_node_attempts`.
 - **Why Deferred to Wave 3:** Temporal DAG activities (`run_plan_node`, `merge_node_wave`) currently access `state.node_outcomes` in memory to compute wave continuations and aggregate results.
-- **Prerequisite for Removal:** Implement a dedicated `ExecutionPlanRepository.load_node_outcomes(task_id)` reconstructor that populates `state.node_outcomes` directly from the relational tables before removing it from the state blob.
+- **Prerequisite for Removal:** Implement a dedicated `ExecutionPlanRepository.load_node_outcomes(task_id)` reconstructor that populates `state.node_outcomes` directly from relational tables before removing it from the state blob.
 - **Risk Level:** **Medium**
 - **Size Impact:** High on large DAG workflows.
 - **Rollback Path:** Additive re-inclusion.
@@ -229,22 +247,25 @@ flowchart TD
 
 ## Section 4: Prerequisites per Reduction Slice
 
-To guarantee zero regressions when reducing `TemporalTaskState` serialization in future PRs, each reduction slice must satisfy these four gates:
+To guarantee zero regressions when reducing `TemporalTaskState` serialization in future PRs, each reduction slice must satisfy these five gates:
 
 1. **Temporal Replay Test:**
-   - Execute a complete Temporal workflow replay test using recorded workflow histories (e.g. `tests/integration/test_temporal_runtime.py`).
-   - Verify that the workflow history replays deterministically without non-determinism errors.
+   - Execute complete Temporal workflow replay tests using recorded workflow histories (e.g. `tests/integration/test_temporal_runtime.py`).
+   - Verify that workflow history replays deterministically without non-determinism errors.
 
-2. **Projection Verification:**
-   - Assert that the authoritative relational table (e.g. `task_timeline_events`, `proposals`, `session_states`) receives complete, well-formed rows during normal execution.
-   - Assert that the corresponding API endpoints and dashboard queries continue returning expected data.
+2. **Idempotency & Retry Guard Verification:**
+   - Explicitly verify that activity retry/resume guards (`_has_event` or its replacement) remain fully functional on activity restarts and worker crash simulations.
 
-3. **Reconstruction Test:**
-   - Add unit/integration tests verifying that `_get_current_state` properly reconstructs any required state fields from relational tables if an activity is restarted mid-workflow.
+3. **Projection Verification:**
+   - Assert that authoritative relational tables (e.g. `task_timeline_events`, `proposals`, `session_states`) receive complete, well-formed rows during normal execution.
+   - Assert that API endpoints and dashboard queries continue returning expected data.
 
-4. **Additive Rollback Guarantee:**
-   - Serialization pruning changes must be backward-compatible: deserialization logic should use default values (`Field(default_factory=...)`) when reading older snapshots that still contain or omit the pruned fields.
-   - Re-adding any pruned field to `model_dump()` remains a safe, instant rollback.
+4. **Reconstruction Test:**
+   - Add unit/integration tests verifying that `_get_current_state` (or dedicated repository reconstructors) properly reconstructs any required state fields from relational tables if an activity is restarted mid-workflow.
+
+5. **Additive Rollback Guarantee:**
+   - Serialization pruning changes must be backward-compatible: deserialization logic must use default values (`Field(default_factory=...)`) when reading older snapshots that still contain or omit the pruned fields.
+   - Re-adding any pruned field to serialization remains a safe, instant rollback.
 
 ---
 
@@ -255,6 +276,7 @@ To guarantee zero regressions when reducing `TemporalTaskState` serialization in
 | **Coordination & Step** | `current_step`, `current_node_id`, `completion_loop`, `fanout_disabled_for_remainder`, `repair_handoff_requested` | Temporal History | Retain in Checkpoint | Compact activity control struct |
 | **Ingress & Spec** | `session`, `task`, `task_spec`, `task_kind`, `normalized_task_text`, `repo_profile`, `memory`, `route`, `approval`, `attempt_count` | `tasks`, `sessions`, `human_interactions` | Retain in Checkpoint (reference IDs where feasible) | Read-through from `tasks` table |
 | **Execution Outcomes** | `dispatch`, `result`, `verification`, `review` | `worker_runs`, `artifacts` | Retain in Checkpoint during active turn | Deleted on terminal completion |
-| **Timeline & Events** | `timeline_events`, `timeline_persisted_count`, `progress_updates` | `task_timeline_events` | **Wave 1 (Immediate)** | **Exclude `timeline_events` from blob**; use cursor count only |
-| **Proposals & Memory** | `friction_reports`, `memory_to_persist`, `scout_phase_results`, `session_state_update` | `proposals`, `memory_*`, `session_states` | **Wave 1 & 2** | **Exclude from blob**; write direct to relational tables |
+| **Notifications & Friction** | `progress_updates`, `friction_reports` | `proposals`, Notification Channels | **Wave 1 (Immediate)** | **Exclude from blob**; write direct to relational tables |
+| **Timeline & Events** | `timeline_events`, `timeline_persisted_count` | `task_timeline_events` | **Wave 2 (Gated)** | Refactor `_has_event` to DB/idempotency marker, then exclude `timeline_events` |
+| **Memory & Ephemeral Updates** | `memory_to_persist`, `scout_phase_results`, `session_state_update`, `errors` | `memory_*`, `proposals`, `session_states`, `tasks` | **Wave 2 (Gated)** | Verify/retire legacy activity consumers, then exclude from blob |
 | **DAG Plan & Nodes** | `task_plan`, `decomposed_plan`, `node_outcomes` | `execution_plans`, `execution_plan_nodes` | **Wave 3 (Planned)** | Reconstruct via `ExecutionPlanRepository` |
