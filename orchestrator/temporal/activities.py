@@ -72,7 +72,7 @@ from orchestrator.nodes.provisioning import (
 )
 from orchestrator.nodes.utils import _available_workers
 from orchestrator.nodes.verification import build_verify_result_node
-from orchestrator.state import NodeOutcome, OrchestratorState
+from orchestrator.state import NodeOutcome, OrchestratorState, TaskTimelineEventState
 from orchestrator.temporal.completion_loop import (
     CompletionLoopDecision,
     apply_repair_rejection,
@@ -106,7 +106,9 @@ logger = logging.getLogger(__name__)
 
 EXECUTION_CAPACITY_LEASE_SECONDS = 60
 
-EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS: frozenset[str] = frozenset({"progress_updates"})
+EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS: frozenset[str] = frozenset(
+    {"progress_updates", "timeline_events"}
+)
 
 
 def _serialize_temporal_task_state(state: OrchestratorState) -> dict[str, Any]:
@@ -545,16 +547,26 @@ class TaskExecutionActivities:
                     and state.approval.required
                 ):
                     state.approval = state.approval.model_copy(update={"status": approval_status})
-                persisted_count = TaskTimelineRepository(session).count_by_attempt(
+                timeline_repo = TaskTimelineRepository(session)
+                raw_events = timeline_repo.list_by_task(task_id)
+                state.timeline_events = [
+                    TaskTimelineEventState(
+                        event_type=(
+                            event.event_type.value
+                            if hasattr(event.event_type, "value")
+                            else str(event.event_type)
+                        ),
+                        attempt_number=event.attempt_number,
+                        sequence_number=event.sequence_number,
+                        message=event.message,
+                        payload=event.payload,
+                        created_at=event.created_at,
+                    )
+                    for event in raw_events
+                ]
+                state.timeline_persisted_count = timeline_repo.count_by_attempt(
                     task_id=task_id,
                     attempt_number=state.attempt_count,
-                )
-                # Operator actions can append timeline events while a workflow is
-                # paused. Reconcile the durable snapshot with that product-side
-                # event before a resumed activity emits its next event.
-                state.timeline_persisted_count = max(
-                    state.timeline_persisted_count,
-                    persisted_count,
                 )
                 return state
 
@@ -589,6 +601,10 @@ class TaskExecutionActivities:
             task = TaskRepository(session).get(task_id)
             return dict(task.trace_context or {}) if task is not None else {}
 
+    def _delete_temporal_snapshot(self, task_id: str) -> None:
+        with session_scope(self.service.session_factory) as session:
+            TemporalTaskStateRepository(session).delete(task_id=task_id)
+
     def _persist_state(
         self,
         task_id: str,
@@ -605,8 +621,7 @@ class TaskExecutionActivities:
             force_task_status=force_status,
             persist_friction_proposals=False,
         )
-        with session_scope(self.service.session_factory) as session:
-            TemporalTaskStateRepository(session).delete(task_id=task_id)
+        self._delete_temporal_snapshot(task_id)
 
     def _persist_intermediate_state(
         self,
@@ -646,10 +661,6 @@ class TaskExecutionActivities:
             ):
                 task.status = force_status or TaskStatus.IN_PROGRESS
             _persist_timeline_events(session, task_id, state)
-            # Snapshot the cursor together with the events. The next activity
-            # restores this state and must not try to insert the same timeline
-            # rows again.
-            state.timeline_persisted_count = len(state.timeline_events)
             if clear_snapshot:
                 TemporalTaskStateRepository(session).delete(task_id=task_id)
             else:
@@ -746,7 +757,6 @@ class TaskExecutionActivities:
             started_at=started_at,
             finished_at=finished_at,
         )
-        state.timeline_persisted_count = len(state.timeline_events)
         await self._notify_progress(task_id, phase="started")
         await self._notify_progress(
             task_id,
@@ -787,7 +797,6 @@ class TaskExecutionActivities:
             started_at=started_at,
             finished_at=finished_at,
         )
-        state.timeline_persisted_count = len(state.timeline_events)
         return self._decompose_result(state).model_dump(mode="json")
 
     @staticmethod
@@ -826,7 +835,6 @@ class TaskExecutionActivities:
             started_at=started_at,
             finished_at=finished_at,
         )
-        state.timeline_persisted_count = len(state.timeline_events)
 
     @activity.defn(name="provision_workspace")
     @_restore_task_trace_context
@@ -861,7 +869,6 @@ class TaskExecutionActivities:
             started_at=started_at,
             finished_at=finished_at,
         )
-        state.timeline_persisted_count = len(state.timeline_events)
 
     @activity.defn(name="run_worker")
     @_restore_task_trace_context
@@ -927,7 +934,6 @@ class TaskExecutionActivities:
                 started_at=started_at,
                 finished_at=finished_at,
             )
-            state.timeline_persisted_count = len(state.timeline_events)
             return {"requires_permission_escalation": requires_permission}
         except asyncio.CancelledError:
             await self._persist_cancelled_worker_activity(
@@ -981,7 +987,13 @@ class TaskExecutionActivities:
         # The operator cancellation is already the authoritative terminal timeline
         # event. The worker update was produced from the pre-cancellation snapshot,
         # so do not let its stale sequence collide with that durable event.
-        cancelled_state.timeline_persisted_count = len(cancelled_state.timeline_events)
+        cancelled_state.timeline_persisted_count = len(
+            [
+                e
+                for e in cancelled_state.timeline_events
+                if e.attempt_number == cancelled_state.attempt_count
+            ]
+        )
         await self.service._run_blocking(
             self._persist_state,
             task_id=task_id,
@@ -1972,7 +1984,6 @@ class TaskExecutionActivities:
             started_at=started_at,
             finished_at=finished_at,
         )
-        state.timeline_persisted_count = len(state.timeline_events)
         return decision.model_dump(mode="json")
 
     @activity.defn(name="deliver_result")
@@ -1984,6 +1995,7 @@ class TaskExecutionActivities:
             TimelineEventType.TASK_COMPLETED,
             TimelineEventType.TASK_FAILED,
         ):
+            await self.service._run_blocking(self._delete_temporal_snapshot, task_id)
             logger.info("deliver_result already executed for task %s, skipping", task_id)
             return
 
@@ -2014,7 +2026,6 @@ class TaskExecutionActivities:
             finished_at=finished_at,
             force_status=force_status,
         )
-        state.timeline_persisted_count = len(state.timeline_events)
         phase: ProgressPhase = (
             "completed"
             if state.result is not None and state.result.status == "success"
@@ -2049,4 +2060,3 @@ class TaskExecutionActivities:
             started_at=started_at,
             finished_at=finished_at,
         )
-        state.timeline_persisted_count = len(state.timeline_events)

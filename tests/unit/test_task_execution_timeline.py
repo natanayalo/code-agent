@@ -241,3 +241,59 @@ def test_persist_execution_outcome_deduplicates_retry_attempts(session_factory, 
     assert snapshot.timeline[1].attempt_number == 1
     assert snapshot.timeline[2].message == "A1-2"
     assert snapshot.timeline[2].attempt_number == 1
+
+
+def test_persist_execution_outcome_with_offset_sequence_numbers(session_factory, service) -> None:
+    """The execution service must slice new events by persisted count offset."""
+    now = utc_now()
+    task_id = _setup_task(session_factory, text="offset seq", thread_id="thread-offset")
+
+    # Simulate attempt 1 with legacy sequence numbers (e.g. 6, 7 from previous attempt)
+    event_6 = TaskTimelineEventState(
+        event_type=TimelineEventType.TASK_INGESTED,
+        message="A1-seq6",
+        attempt_number=1,
+        sequence_number=6,
+        created_at=now,
+    )
+    event_7 = TaskTimelineEventState(
+        event_type=TimelineEventType.WORKER_SELECTED,
+        message="A1-seq7",
+        attempt_number=1,
+        sequence_number=7,
+        created_at=now,
+    )
+
+    state = _make_timeline_state(
+        task_id,
+        now,
+        [event_6, event_7],
+        attempt=1,
+        text="offset seq",
+    )
+    # First persist writes events 6 and 7
+    service._persist_execution_outcome(
+        task_id=task_id, state=state, started_at=now, finished_at=now
+    )
+    assert state.timeline_persisted_count == 2
+
+    # Resume: state has rehydrated events 6, 7, and a new event seq=8 is appended
+    event_8 = TaskTimelineEventState(
+        event_type=TimelineEventType.WORKSPACE_PROVISIONED,
+        message="A1-seq8",
+        attempt_number=1,
+        sequence_number=8,
+        created_at=now,
+    )
+    state.timeline_events.append(event_8)
+
+    # Persist with count=2: should insert ONLY event_8 without duplicate key error on 6 or 7
+    service._persist_execution_outcome(
+        task_id=task_id, state=state, started_at=now, finished_at=now
+    )
+    assert state.timeline_persisted_count == 3
+
+    snapshot = service.get_task(task_id)
+    assert len(snapshot.timeline) == 3
+    assert [e.message for e in snapshot.timeline] == ["A1-seq6", "A1-seq7", "A1-seq8"]
+    assert [e.sequence_number for e in snapshot.timeline] == [6, 7, 8]

@@ -241,22 +241,21 @@ def _persist_timeline_events(
     task_id: str,
     state: OrchestratorState,
 ) -> None:
+    timeline_repo = TaskTimelineRepository(session)
     persisted_count = state.timeline_persisted_count
-    current_attempt_events = []
-    for event in reversed(state.timeline_events):
-        if event.attempt_number != state.attempt_count:
-            break
-        current_attempt_events.append(event)
-    current_attempt_events.reverse()
-    new_events = [
-        event for event in current_attempt_events if event.sequence_number >= persisted_count
+    current_attempt_events = [
+        event for event in state.timeline_events if event.attempt_number == state.attempt_count
     ]
+    new_events = current_attempt_events[persisted_count:]
     if new_events:
-        timeline_repo = TaskTimelineRepository(session)
         timeline_repo.create_batch(
             task_id=task_id,
             events=[event.model_dump() for event in new_events],
         )
+    state.timeline_persisted_count = timeline_repo.count_by_attempt(
+        task_id=task_id,
+        attempt_number=state.attempt_count,
+    )
 
 
 def _persist_artifacts_for_run(

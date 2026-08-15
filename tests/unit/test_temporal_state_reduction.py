@@ -10,7 +10,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from db.base import Base, utc_now
-from db.enums import ExecutionPlanNodeStatus
+from db.enums import ExecutionPlanNodeStatus, TimelineEventType
+from orchestrator.graph import _get_previously_failed_workers
 from orchestrator.nodes.utils import _progress_update
 from orchestrator.state import (
     ApprovalCheckpoint,
@@ -22,6 +23,7 @@ from orchestrator.state import (
     SessionRef,
     TaskRequest,
     TaskSpec,
+    TaskTimelineEventState,
 )
 from orchestrator.temporal.activities import (
     EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS,
@@ -35,6 +37,7 @@ from repositories import (
     ExecutionPlanRepository,
     SessionStateRepository,
     TaskRepository,
+    TaskTimelineRepository,
     TemporalTaskStateRepository,
     session_scope,
 )
@@ -456,3 +459,141 @@ async def test_persist_rejected_session_state_deletes_snapshot_and_idempotent() 
     with session_scope(factory) as session:
         snapshot = TemporalTaskStateRepository(session).get(task_id=task_id)
         assert snapshot is None
+
+
+# ---------------------------------------------------------------------------
+# 7. Wave 2: Timeline Events Pruning, Rehydration & Semantic Continuity
+# ---------------------------------------------------------------------------
+
+
+def test_wave_2_serialize_excludes_timeline_events() -> None:
+    """_serialize_temporal_task_state must strip timeline_events and retain persisted count."""
+    assert "timeline_events" in EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS
+
+    state = _make_sample_state()
+    state.timeline_events = [
+        TaskTimelineEventState(
+            event_type=TimelineEventType.TASK_INGESTED.value,
+            attempt_number=0,
+            sequence_number=0,
+        )
+    ]
+    state.timeline_persisted_count = 10
+    serialized = _serialize_temporal_task_state(state)
+
+    assert "timeline_events" not in serialized
+    assert serialized["timeline_persisted_count"] == 10
+
+
+def test_wave_2_deserialization_defaults_timeline_events_to_empty() -> None:
+    """Deserializing a pruned snapshot defaults timeline_events to empty list."""
+    state = _make_sample_state()
+    state.timeline_events = [
+        TaskTimelineEventState(
+            event_type=TimelineEventType.TASK_INGESTED.value,
+            attempt_number=0,
+            sequence_number=0,
+        )
+    ]
+    serialized = _serialize_temporal_task_state(state)
+    assert "timeline_events" not in serialized
+
+    reloaded = OrchestratorState.model_validate(serialized)
+    assert reloaded.timeline_events == []
+
+
+def test_wave_2_read_through_rehydrates_authoritative_timeline_and_repairs_cursor() -> None:
+    """_get_current_state must rehydrate timeline from DB and repair stale snapshot cursors."""
+    factory = _make_db()
+    activities = _make_activities(factory)
+
+    with session_scope(factory) as session:
+        task = TaskRepository(session).create(
+            session_id="session-w2-1",
+            task_text="Test rehydration",
+        )
+        task_id = task.id
+        timeline_repo = TaskTimelineRepository(session)
+        timeline_repo.create(
+            task_id=task_id,
+            attempt_number=0,
+            sequence_number=0,
+            event_type=TimelineEventType.TASK_INGESTED,
+            message="ingested",
+        )
+        timeline_repo.create(
+            task_id=task_id,
+            attempt_number=0,
+            sequence_number=1,
+            event_type=TimelineEventType.WORKSPACE_PROVISIONED,
+            message="provisioned",
+        )
+
+    # Create snapshot with legacy in-blob events and stale count
+    state = _make_sample_state(task_id=task_id, session_id="session-w2-1")
+    state.attempt_count = 0
+    state.timeline_events = [
+        TaskTimelineEventState(
+            event_type="stale_legacy_event",
+            attempt_number=0,
+            sequence_number=99,
+        )
+    ]
+    state.timeline_persisted_count = 50
+
+    with session_scope(factory) as session:
+        TemporalTaskStateRepository(session).upsert(
+            task_id=task_id,
+            state=state.model_dump(mode="json"),
+        )
+
+    rehydrated = activities._get_current_state(task_id)
+
+    # 1. Authoritative DB events replace any legacy/empty in-blob events
+    assert len(rehydrated.timeline_events) == 2
+    assert rehydrated.timeline_events[0].event_type == TimelineEventType.TASK_INGESTED.value
+    assert rehydrated.timeline_events[1].event_type == TimelineEventType.WORKSPACE_PROVISIONED.value
+
+    # 2. Persisted count cursor is repaired from DB count (2)
+    assert rehydrated.timeline_persisted_count == 2
+
+
+def test_wave_2_semantic_continuity_failed_worker_routing() -> None:
+    """_get_previously_failed_workers correctly extracts failed workers from rehydrated state."""
+    factory = _make_db()
+    activities = _make_activities(factory)
+
+    with session_scope(factory) as session:
+        task = TaskRepository(session).create(
+            session_id="session-w2-2",
+            task_text="Test failed worker routing",
+        )
+        task_id = task.id
+        timeline_repo = TaskTimelineRepository(session)
+        timeline_repo.create(
+            task_id=task_id,
+            attempt_number=0,
+            sequence_number=0,
+            event_type="worker_dispatched",
+            payload={"worker_type": "gemini"},
+        )
+        timeline_repo.create(
+            task_id=task_id,
+            attempt_number=0,
+            sequence_number=1,
+            event_type="worker_failed",
+        )
+
+    state = _make_sample_state(task_id=task_id, session_id="session-w2-2")
+    state.attempt_count = 1
+
+    with session_scope(factory) as session:
+        TemporalTaskStateRepository(session).upsert(
+            task_id=task_id,
+            state=_serialize_temporal_task_state(state),
+        )
+
+    rehydrated = activities._get_current_state(task_id)
+    failed_workers = _get_previously_failed_workers(rehydrated)
+
+    assert "gemini" in failed_workers
