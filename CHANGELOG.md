@@ -28,6 +28,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Changed
 
+- WIP: M28 real-worker effectiveness evidence framework ([#368](https://github.com/natanayalo/code-agent/pull/368))
+
 - M25.6: publish pinned real-worker Temporal baseline ([#361](https://github.com/natanayalo/code-agent/pull/361))
 
 - Refactor(db): remove legacy lease schema ([#341](https://github.com/natanayalo/code-agent/pull/341))
