@@ -26,20 +26,40 @@ def restore_task_plan_from_events(timeline_events: list[Any]) -> TaskPlan | None
             continue
         payload = getattr(event, "payload", None)
         if not isinstance(payload, dict):
+            raise RuntimeError(
+                "Malformed TASK_PLANNED timeline event payload: payload must be a dictionary."
+            )
+        # Skip decomposition events when searching for planning event
+        if (
+            "decomposition" in payload
+            and payload.get("planning") != "generated"
+            and "steps" not in payload
+        ):
             continue
-        if "steps" in payload:
+
+        if payload.get("planning") == "generated" or "steps" in payload:
+            if not isinstance(payload.get("steps"), list):
+                raise RuntimeError("Malformed TASK_PLANNED steps payload: 'steps' must be a list.")
+            if "triggered" not in payload:
+                raise RuntimeError(
+                    "Malformed TASK_PLANNED steps payload: 'triggered' field is required."
+                )
             try:
                 return TaskPlan.model_validate(
                     {
-                        "triggered": payload.get("triggered", True),
+                        "triggered": payload["triggered"],
                         "complexity_reason": payload.get("complexity_reason"),
-                        "steps": payload.get("steps", []),
+                        "steps": payload["steps"],
                     }
                 )
             except Exception as exc:
                 raise RuntimeError(
                     f"Malformed TASK_PLANNED steps payload in timeline event: {exc}"
                 ) from exc
+
+        raise RuntimeError(
+            "Malformed TASK_PLANNED timeline event payload: missing planning or decomposition data."
+        )
     return None
 
 
@@ -58,7 +78,13 @@ def restore_decomposed_plan_from_events(timeline_events: list[Any]) -> Decompose
             continue
         payload = getattr(event, "payload", None)
         if not isinstance(payload, dict):
+            raise RuntimeError(
+                "Malformed TASK_PLANNED timeline event payload: payload must be a dictionary."
+            )
+        # Skip planning events when searching for decomposition event
+        if ("planning" in payload or "steps" in payload) and "decomposition" not in payload:
             continue
+
         if "decomposition" in payload:
             decomp_payload = payload.get("decomposition")
             if not isinstance(decomp_payload, dict):
@@ -71,6 +97,10 @@ def restore_decomposed_plan_from_events(timeline_events: list[Any]) -> Decompose
                 raise RuntimeError(
                     f"Malformed TASK_PLANNED decomposition payload in timeline event: {exc}"
                 ) from exc
+
+        raise RuntimeError(
+            "Malformed TASK_PLANNED timeline event payload: missing planning or decomposition data."
+        )
     return None
 
 

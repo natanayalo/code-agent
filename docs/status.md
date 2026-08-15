@@ -136,8 +136,11 @@ Temporal migration and rollback record is in the
   broker remains deferred
 - lifecycle data currently overlaps across Temporal history/workflow state,
   serialized `TemporalTaskState`, task/product projections, execution-plan
-  rows, and timeline events; Wave 1 has pruned ephemeral `progress_updates`
-  from intermediate snapshots while relational projections remain intact
+  rows, and timeline events; Wave 1, Wave 2, and Wave 3A have pruned ephemeral
+  `progress_updates`, candidate fields (`friction_reports`, `errors`, `session_state_update`,
+  `scout_phase_results`, `memory_to_persist`, `timeline_events`), and DAG plan models
+  (`task_plan`, `decomposed_plan`) from intermediate snapshots while relational projections
+  and timeline authority remain intact
 - the worker boundary is currently terminal `WorkerRequest -> WorkerResult`;
   provider-neutral streaming `AgentEvent` and `ContextEnvelope` contracts are
   planned rather than available today
@@ -147,10 +150,10 @@ Temporal migration and rollback record is in the
 
 ## Next slices only
 
-1. Continue M28.5B Wave 3 state reduction for DAG plan & node outcomes
-   (`task_plan`, `decomposed_plan`, `node_outcomes`) following the field-level
-   state ownership contract in
-   [`docs/architecture/state_ownership.md`](architecture/state_ownership.md).
+1. Continue M28.5B Wave 3B state reduction for node outcomes (`node_outcomes`)
+   establishing relational merge markers (`execution_plan_nodes.merged_logical_activity_key`)
+   before pruning `node_outcomes` from snapshots, following the field-level state ownership
+   contract in [`docs/architecture/state_ownership.md`](architecture/state_ownership.md).
 2. Continue M28.5 execution-architecture foundation work (M28.5A sandbox broker/threat model,
    M28.5C `AgentEvent`, M28.5D `ContextEnvelope`).
 3. Use the M28 report as a scoped safety/effectiveness signal only; do not
