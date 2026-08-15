@@ -39,6 +39,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Documentation
 
+- Docs(architecture): add M28.5B field-level state ownership contract and reduction plan ([#370](https://github.com/natanayalo/code-agent/pull/370))
+
 - Docs: define execution architecture foundation ([#367](https://github.com/natanayalo/code-agent/pull/367))
 
 - Docs: prioritize post-baseline milestones ([#349](https://github.com/natanayalo/code-agent/pull/349))
