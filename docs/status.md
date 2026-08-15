@@ -151,9 +151,10 @@ Temporal migration and rollback record is in the
 
 ## Next slices only
 
-1. Continue M28.5 execution-architecture foundation work (M28.5A sandbox broker/threat model,
+1. Execute Milestone M28.5B Wave 3B.2 to safely prune `node_outcomes` snapshot serialization following the Wave 3B.1 relational authority deployment.
+2. Continue M28.5 execution-architecture foundation work (M28.5A sandbox broker/threat model,
    M28.5C `AgentEvent`, M28.5D `ContextEnvelope`).
-2. Use the M28 report as a scoped safety/effectiveness signal only; do not
+3. Use the M28 report as a scoped safety/effectiveness signal only; do not
    change routing or add semantic retrieval without further evidence.
 
 ## Deferred

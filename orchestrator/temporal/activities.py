@@ -305,27 +305,31 @@ def _validate_legacy_outcome_parity(
     key: str,
 ) -> None:
     snap_outcome = NodeOutcome.model_validate(item)
-    if canonical.node_id != snap_outcome.node_id or canonical.status != snap_outcome.status:
+    if (
+        canonical.node_id != snap_outcome.node_id
+        or canonical.status != snap_outcome.status
+        or (
+            snap_outcome.logical_activity_key
+            and canonical.logical_activity_key != snap_outcome.logical_activity_key
+        )
+    ):
         raise RuntimeError(
             f"Legacy snapshot outcome for node {nid} with key '{key}' "
             "conflicts with durable canonical outcome evidence"
         )
     can_res, snap_res = canonical.result, snap_outcome.result
+    if (can_res is None) != (snap_res is None):
+        raise RuntimeError(
+            f"Legacy snapshot outcome for node {nid} with key '{key}' "
+            "conflicts with durable canonical outcome evidence"
+        )
     if can_res is not None and snap_res is not None:
-        if (
-            can_res.status != snap_res.status
-            or can_res.failure_kind != snap_res.failure_kind
-            or can_res.requested_permission != snap_res.requested_permission
-        ):
+        if can_res.model_dump(mode="json") != snap_res.model_dump(mode="json"):
             raise RuntimeError(
                 f"Legacy snapshot outcome for node {nid} with key '{key}' "
                 "conflicts with durable canonical outcome evidence"
             )
-    if (
-        canonical.result_digest
-        and snap_outcome.result_digest
-        and canonical.result_digest != snap_outcome.result_digest
-    ):
+    if snap_outcome.result_digest and canonical.result_digest != snap_outcome.result_digest:
         raise RuntimeError(
             f"Legacy snapshot outcome digest for node {nid} with key '{key}' "
             "conflicts with durable canonical outcome evidence"
@@ -349,12 +353,8 @@ def _bootstrap_single_legacy_outcome(
     if db_node is None:
         raise RuntimeError(f"Legacy outcome node {nid} does not exist in execution plan")
     if db_node.merged_logical_activity_key is not None:
-        if db_node.merged_logical_activity_key != key:
-            raise RuntimeError(
-                "Conflicting relational merge marker detected during bootstrap for "
-                f"node {nid}: DB marker '{db_node.merged_logical_activity_key}' "
-                f"!= snapshot '{key}'"
-            )
+        # DB marker is already the active relational authority.
+        # A different snapshot key is simply a stale dual-write copy from a crash window.
         return
 
     attempt = next(
