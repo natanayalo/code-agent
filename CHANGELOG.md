@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat(temporal): prune progress_updates from intermediate snapshots and ensure terminal cleanup ([#371](https://github.com/natanayalo/code-agent/pull/371))
+
 - Feat: isolate native agents in Docker ([#369](https://github.com/natanayalo/code-agent/pull/369))
 
 - Feat: populate compact session decisions and risks ([#366](https://github.com/natanayalo/code-agent/pull/366))
