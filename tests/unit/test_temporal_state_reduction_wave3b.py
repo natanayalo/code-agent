@@ -64,7 +64,7 @@ from workers import WorkerResult
 
 
 def test_wave3b_field_exclusion_and_serialization() -> None:
-    """node_outcomes is excluded from Wave 3B.2 snapshots."""
+    """node_outcomes is excluded from state snapshot serialization."""
     assert "node_outcomes" in EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS
     outcome = NodeOutcome(
         node_id="step-1",
@@ -81,7 +81,7 @@ def test_wave3b_field_exclusion_and_serialization() -> None:
 def test_1_k1_merged_k2_unmerged_rehydration_and_selector() -> None:
     """1. K1 merged -> K2 unmerged -> rehydrate returns K1; selector returns merge_terminal(K2).
 
-    Snapshot has NO serialized node_outcomes (Wave 3B.2 pruned).
+    Snapshot has NO serialized node_outcomes (pruned).
     """
     factory = _make_db()
     task_id = "task-3b-1"

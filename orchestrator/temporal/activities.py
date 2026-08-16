@@ -479,8 +479,8 @@ def _rehydrate_dag_state(
     Invariants:
     1. Timeline is the exact authority for task_plan and decomposed_plan and replaces any
        older SQL-synthesized models (even on no-snapshot paths).
-    2. Wave 3B rehydrates state.node_outcomes from relational merge markers and attempts.
-       Wave 3B.2 prunes node_outcomes from snapshot serialization.
+    2. Rehydrates state.node_outcomes from relational merge markers and attempts.
+       Intermediate snapshot serialization excludes node_outcomes.
     3. Operational execution_plan_nodes in Postgres are validated against restored decomposed_plan.
     """
     task = TaskRepository(session).get(task_id)
