@@ -130,6 +130,7 @@ EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS: frozenset[str] = frozenset(
         "memory_to_persist",
         "task_plan",
         "decomposed_plan",
+        "node_outcomes",
     }
 )
 
@@ -478,8 +479,8 @@ def _rehydrate_dag_state(
     Invariants:
     1. Timeline is the exact authority for task_plan and decomposed_plan and replaces any
        older SQL-synthesized models (even on no-snapshot paths).
-    2. Wave 3B.1 rehydrates state.node_outcomes from relational merge markers and attempts while
-       preserving serialized node_outcomes in snapshots for rolling deploy compatibility.
+    2. Wave 3B rehydrates state.node_outcomes from relational merge markers and attempts.
+       Wave 3B.2 prunes node_outcomes from snapshot serialization.
     3. Operational execution_plan_nodes in Postgres are validated against restored decomposed_plan.
     """
     task = TaskRepository(session).get(task_id)

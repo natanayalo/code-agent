@@ -135,8 +135,12 @@ def test_11_sequential_retry_crash_with_stale_snapshot_converges(
         assert db_node.merged_logical_activity_key == k2
         raw_snap = TemporalTaskStateRepository(session).get(task_id=task_id)
         assert raw_snap is not None
-        assert raw_snap.state["node_outcomes"][0]["logical_activity_key"] == k2
-        assert raw_snap.state["node_outcomes"][0]["status"] == "completed"
+        assert "node_outcomes" not in raw_snap.state
+
+    loaded = activities._get_current_state(task_id)
+    assert len(loaded.node_outcomes) == 1
+    assert loaded.node_outcomes[0].logical_activity_key == k2
+    assert loaded.node_outcomes[0].status == "completed"
 
 
 def test_12_legacy_outcome_without_key_raises_runtime_error() -> None:
