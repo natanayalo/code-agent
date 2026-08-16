@@ -124,13 +124,15 @@ class WorkerRequest(WorkerModel):
             legacy_secrets = data.get("secrets")
             if isinstance(legacy_secrets, dict) and legacy_secrets:
                 existing_refs = list(data.get("secret_refs", ()))
-                sanitized_secrets = {}
                 for key in legacy_secrets:
-                    if isinstance(key, str) and key:
+                    if (
+                        isinstance(key, str)
+                        and key
+                        and not any(r.name == key for r in existing_refs)
+                    ):
                         existing_refs.append(SecretRef(name=key))
-                        sanitized_secrets[key] = key
                 data["secret_refs"] = tuple(existing_refs)
-                data["secrets"] = sanitized_secrets
+                data["secrets"] = dict(legacy_secrets)
             else:
                 data["secrets"] = {}
         return data

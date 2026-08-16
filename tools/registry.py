@@ -214,10 +214,7 @@ EXECUTE_GIT_TOOL = ToolDefinition(
     required_permission=ToolPermissionLevel.WORKSPACE_WRITE,
     timeout_seconds=DEFAULT_EXECUTE_GIT_TIMEOUT_SECONDS,
     network_required=False,
-    capability_tags=(
-        ToolCapabilityTag.WORKSPACE_WRITE,
-        ToolCapabilityTag.AUTOMATED_EXTERNAL_PUBLICATION,
-    ),
+    capability_tags=(ToolCapabilityTag.WORKSPACE_WRITE,),
     expected_artifacts=(
         ToolExpectedArtifact.STDOUT,
         ToolExpectedArtifact.STDERR,

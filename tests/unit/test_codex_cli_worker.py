@@ -499,7 +499,7 @@ def test_codex_cli_worker_scopes_and_injects_secrets(tmp_path: Path) -> None:
     start_request = container_manager.start_requests[0]
     # execute_github is in DEFAULT_TOOL_REGISTRY and requires GITHUB_TOKEN
     assert "GITHUB_TOKEN" in start_request.environment
-    assert start_request.environment["GITHUB_TOKEN"] == "GITHUB_TOKEN"
+    assert start_request.environment["GITHUB_TOKEN"] == "gh_secret"
     # OTHER_SECRET should NOT be in the container environment
     assert "OTHER_SECRET" not in start_request.environment
 

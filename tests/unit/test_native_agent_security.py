@@ -1,4 +1,3 @@
-from sandbox.capability import SecretRef
 from sandbox.native_agent_executor import is_public_egress_host
 from tools import ToolPermissionLevel
 from workers.base import WorkerRequest
@@ -11,7 +10,7 @@ def _request(*, tools: list[str], permission: str) -> WorkerRequest:
         repo_url="https://example.test/repo.git",
         tools=tools,
         constraints={"granted_permission": permission},
-        secret_refs=(SecretRef(name="GH_TOKEN"), SecretRef(name="GITHUB_TOKEN")),
+        secrets={"GH_TOKEN": "real-gh-token", "GITHUB_TOKEN": "real-github-token"},
     )
 
 
@@ -23,8 +22,8 @@ def test_github_credentials_need_tool_and_explicit_write_grant() -> None:
     assert native_github_credentials(denied) == {}
     assert native_github_credentials(absent_tool) == {}
     assert native_github_credentials(allowed) == {
-        "GH_TOKEN": "GH_TOKEN",
-        "GITHUB_TOKEN": "GITHUB_TOKEN",
+        "GH_TOKEN": "real-gh-token",
+        "GITHUB_TOKEN": "real-github-token",
     }
 
 

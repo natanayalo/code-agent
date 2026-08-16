@@ -32,6 +32,7 @@ from sandbox.capability import (
     UnauthorizedSecretError,
     normalize_fqdn,
     parse_memory_bytes,
+    sanitize_legacy_ingress_payload,
 )
 from sandbox.redact import SecretRedactor
 from workers.base import WorkerRequest
@@ -363,13 +364,13 @@ def test_capability_grant_factory_real_tools_dual_key_and_publication_coupling()
             allowed_secret_defs=(sandbox_sec,),
             granted_secret_scopes=(SecretScope.PROVIDER_AUTH,),
         )
-    # execute_git rejected when sandbox secret present
-    with pytest.raises(CapabilityViolationError, match="automated external publication"):
-        CapabilityGrantFactory.create_grant(
-            allowed_tools=("execute_git", "view_file"),
-            allowed_secret_defs=(sandbox_sec,),
-            granted_secret_scopes=(SecretScope.PROVIDER_AUTH,),
-        )
+    # execute_git allowed with sandbox secret (local workspace write, not external publication)
+    grant_git = CapabilityGrantFactory.create_grant(
+        allowed_tools=("execute_git", "view_file"),
+        allowed_secret_defs=(sandbox_sec,),
+        granted_secret_scopes=(SecretScope.PROVIDER_AUTH,),
+    )
+    assert grant_git.allowed_tools == ("execute_git", "view_file")
     # read-only view_file allowed with sandbox secret
     grant_read_only = CapabilityGrantFactory.create_grant(
         allowed_tools=("view_file",),
@@ -396,6 +397,23 @@ def test_scratch_only_and_mandatory_denied_paths() -> None:
             filesystem=FileSystemAccessPolicy.SCRATCH_ONLY,
             allowed_paths=("/workspace",),
             denied_paths=MANDATORY_DENIED_PATHS,
+        )
+
+    # Hostile grant: SCRATCH_ONLY with lexical path traversal ..
+    with pytest.raises(CapabilityViolationError, match="forbidden|traversal|SCRATCH_ONLY"):
+        CapabilityGrantFactory.create_grant(
+            filesystem=FileSystemAccessPolicy.SCRATCH_ONLY,
+            allowed_paths=("/workspace/.code-agent/scratch/../../etc",),
+        )
+    with pytest.raises(CapabilityViolationError, match="forbidden|traversal|SCRATCH_ONLY"):
+        CapabilityGrantFactory.create_grant(
+            filesystem=FileSystemAccessPolicy.SCRATCH_ONLY,
+            allowed_paths=("/workspace/.code-agent/scratch/foo/../../../src/x",),
+        )
+    with pytest.raises(CapabilityViolationError, match="forbidden|traversal|SCRATCH_ONLY"):
+        CapabilityGrantFactory.create_grant(
+            filesystem=FileSystemAccessPolicy.SCRATCH_ONLY,
+            allowed_paths=("/workspace/.code-agent/scratch/./foo",),
         )
 
     # Direct model validation for SCRATCH_ONLY
@@ -462,10 +480,12 @@ def test_secret_resolver_dual_key_and_broker_resolution() -> None:
     with pytest.raises(BrokerOnlySecretExposureError, match="BROKER_ONLY"):
         resolver.resolve_for_sandbox(SecretRef(name="github_token"), grant_broker)
 
-    # Valid broker resolution via SecretRef and str name through authoritative registry
-    resolved_broker_ref = resolver.resolve_for_broker(SecretRef(name="github_token"), grant_broker)
-    assert resolved_broker_ref.reveal_secret_value() == "gh-secret-token"
+    # Valid broker resolution
+    resolved_broker = resolver.resolve_for_broker(SecretRef(name="github_token"), grant_broker)
+    assert isinstance(resolved_broker, ResolvedSecret)
+    assert resolved_broker.reveal_secret_value() == "gh-secret-token"
 
+    # String name broker resolution (canonical registry lookup)
     resolved_broker_str = resolver.resolve_for_broker("github_token", grant_broker)
     assert resolved_broker_str.reveal_secret_value() == "gh-secret-token"
 
@@ -493,32 +513,32 @@ def test_secret_resolver_dual_key_and_broker_resolution() -> None:
 def test_legacy_ingress_task_request_malformed_input_sanitization() -> None:
     sentinel_secret = "super-secret-token-xyz-123"
 
-    # 1. String malformed secrets input
-    with pytest.raises(ValidationError) as exc_str:
-        LegacyIngressTaskRequest(
-            task_text="Run task",
-            secrets=sentinel_secret,  # type: ignore[arg-type]
-        )
+    # 1. Plain ingress sanitizer rejects non-dict payload without echoing secret
+    with pytest.raises(ValueError) as exc_non_dict:
+        sanitize_legacy_ingress_payload(sentinel_secret)
+    assert sentinel_secret not in str(exc_non_dict.value)
+    assert sentinel_secret not in repr(exc_non_dict.value)
+
+    # 2. Plain ingress sanitizer rejects non-dict secrets payload without echoing secret
+    with pytest.raises(ValueError) as exc_str:
+        sanitize_legacy_ingress_payload({"task_text": "Run task", "secrets": sentinel_secret})
     assert sentinel_secret not in str(exc_str.value)
     assert sentinel_secret not in repr(exc_str.value)
 
-    # 2. List malformed secrets input
-    with pytest.raises(ValidationError) as exc_list:
-        LegacyIngressTaskRequest(
-            task_text="Run task",
-            secrets=[sentinel_secret],  # type: ignore[arg-type]
+    # 3. from_raw_payload with non-dict secrets
+    with pytest.raises(ValueError) as exc_raw:
+        LegacyIngressTaskRequest.from_raw_payload(
+            {"task_text": "Run task", "secrets": [sentinel_secret]}
         )
-    assert sentinel_secret not in str(exc_list.value)
-    assert sentinel_secret not in repr(exc_list.value)
+    assert sentinel_secret not in str(exc_raw.value)
+    assert sentinel_secret not in repr(exc_raw.value)
 
-    # 3. Invalid key dict secrets input
-    with pytest.raises(ValidationError) as exc_dict:
-        LegacyIngressTaskRequest(
-            task_text="Run task",
-            secrets={"invalid/key/name": sentinel_secret},
-        )
-    assert sentinel_secret not in str(exc_dict.value)
-    assert sentinel_secret not in repr(exc_dict.value)
+    # 4. Valid ingress payload sanitizes values
+    valid_req = LegacyIngressTaskRequest.from_raw_payload(
+        {"task_text": "Run task", "secrets": {"github_token": sentinel_secret}}
+    )
+    assert valid_req.secrets == {"github_token": "[REDACTED_AT_INGRESS]"}
+    assert sentinel_secret not in valid_req.model_dump_json()
 
 
 def test_ingress_migration_adapter_and_worker_request_migration() -> None:
@@ -549,18 +569,39 @@ def test_ingress_migration_adapter_and_worker_request_migration() -> None:
     with pytest.raises(DeprecatedLegacySecretsError, match="no longer accepted"):
         IngressMigrationAdapter.adapt(legacy_req, reject_legacy_secrets=True)
 
-    # WorkerRequest legacy stripping
+    # WorkerRequest legacy migration: populates secret_refs while
+    # retaining in-memory secrets for execution
     worker_req = WorkerRequest(
         task_text="Run worker task",
-        secrets={"github_token": secret_value},  # type: ignore[call-arg]
+        secrets={"github_token": secret_value},
     )
     assert worker_req.secret_refs == (SecretRef(name="github_token"),)
-    assert worker_req.secrets == {"github_token": "github_token"}
+    assert worker_req.secrets == {"github_token": secret_value}
     assert secret_value not in worker_req.model_dump_json()
     assert secret_value not in repr(worker_req)
 
 
 def test_secret_resolver_file_source_and_registry_edge_cases() -> None:
+    # FILE source key traversal rejection
+    with pytest.raises(ValidationError, match="traversal|relative path"):
+        RegisteredSecretDefinition(
+            name="bad_file_sec",
+            source=SecretSource.FILE,
+            source_key="../../etc/passwd",
+            required_scope=SecretScope.CUSTOM,
+            exposure_policy=SecretExposurePolicy.SANDBOX_FILE,
+            destination_mount_path="bad.pem",
+        )
+    with pytest.raises(ValidationError, match="relative path"):
+        RegisteredSecretDefinition(
+            name="abs_file_sec",
+            source=SecretSource.FILE,
+            source_key="/etc/passwd",
+            required_scope=SecretScope.CUSTOM,
+            exposure_policy=SecretExposurePolicy.SANDBOX_FILE,
+            destination_mount_path="bad.pem",
+        )
+
     file_sec = RegisteredSecretDefinition(
         name="ca_cert",
         source=SecretSource.FILE,

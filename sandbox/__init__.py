@@ -30,6 +30,7 @@ from sandbox.capability import (
     UnauthorizedSecretError,
     normalize_fqdn,
     parse_memory_bytes,
+    sanitize_legacy_ingress_payload,
 )
 from sandbox.container import (
     DockerSandboxContainer,
@@ -108,4 +109,5 @@ __all__ = [
     "WorkspaceRequest",
     "normalize_fqdn",
     "parse_memory_bytes",
+    "sanitize_legacy_ingress_payload",
 ]

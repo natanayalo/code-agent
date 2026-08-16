@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import enum
 import math
+import posixpath
 from collections.abc import Iterable, Sequence
 from typing import Any, Final
 
@@ -29,6 +30,7 @@ from sandbox.secrets import (
     SecretSource,
     UnauthorizedSecretError,
     normalize_fqdn,
+    sanitize_legacy_ingress_payload,
 )
 from tools.registry import (
     DEFAULT_TOOL_REGISTRY,
@@ -155,6 +157,26 @@ class ResourceLimits(BaseModel):
         return v
 
 
+def _validate_scratch_path(path: str) -> None:
+    """Validate that path is a normalized POSIX subpath of SCRATCH_PATH_PREFIX with no traversal."""
+    if not path or not isinstance(path, str):
+        raise ValueError(f"Invalid path: {path!r}")
+
+    parts = path.split("/")
+    if ".." in parts or "." in parts:
+        raise ValueError(f"Relative path traversal components ('.', '..') forbidden: {path!r}")
+
+    normalized = posixpath.normpath(path)
+    if ".." in normalized.split("/"):
+        raise ValueError(f"Path traversal detected: {path!r}")
+
+    if not (normalized == SCRATCH_PATH_PREFIX or normalized.startswith(SCRATCH_PATH_PREFIX + "/")):
+        raise ValueError(
+            f"SCRATCH_ONLY filesystem policy only permits paths under "
+            f"{SCRATCH_PATH_PREFIX}, got {path!r}"
+        )
+
+
 class SandboxCapabilityGrant(BaseModel):
     """Immutable, broker-issued capability grant governing sandbox execution."""
 
@@ -187,11 +209,7 @@ class SandboxCapabilityGrant(BaseModel):
         # 2. Filesystem path invariants
         if self.filesystem == FileSystemAccessPolicy.SCRATCH_ONLY:
             for path in self.allowed_paths:
-                if not (path == SCRATCH_PATH_PREFIX or path.startswith(SCRATCH_PATH_PREFIX + "/")):
-                    raise ValueError(
-                        f"SCRATCH_ONLY filesystem policy only permits paths under "
-                        f"{SCRATCH_PATH_PREFIX}, got {path!r}"
-                    )
+                _validate_scratch_path(path)
 
         # 3. Network egress invariants
         if self.network == NetworkEgressPolicy.DISABLED:
@@ -267,11 +285,10 @@ class CapabilityGrantFactory:
             )
         if filesystem == FileSystemAccessPolicy.SCRATCH_ONLY:
             for p in allowed_paths:
-                if not (p == SCRATCH_PATH_PREFIX or p.startswith(SCRATCH_PATH_PREFIX + "/")):
-                    raise CapabilityViolationError(
-                        f"SCRATCH_ONLY filesystem policy only permits paths under "
-                        f"{SCRATCH_PATH_PREFIX}, got {p!r}"
-                    )
+                try:
+                    _validate_scratch_path(p)
+                except ValueError as err:
+                    raise CapabilityViolationError(str(err)) from err
 
     @classmethod
     def _validate_network_and_audience(
@@ -386,4 +403,5 @@ __all__ = [
     "UnauthorizedSecretError",
     "normalize_fqdn",
     "parse_memory_bytes",
+    "sanitize_legacy_ingress_payload",
 ]

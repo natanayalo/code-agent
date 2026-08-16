@@ -173,6 +173,15 @@ class RegisteredSecretDefinition(BaseModel):
 
     @model_validator(mode="after")
     def _validate_destination_consistency(self) -> RegisteredSecretDefinition:
+        if self.source == SecretSource.FILE:
+            if not self.source_key or self.source_key.startswith("/"):
+                raise ValueError("FILE secret source_key must be a relative path")
+            parts = self.source_key.split("/")
+            if ".." in parts or "." in parts or "" in parts:
+                raise ValueError(
+                    f"FILE secret source_key cannot contain traversal components: "
+                    f"{self.source_key!r}"
+                )
         if self.exposure_policy == SecretExposurePolicy.BROKER_ONLY:
             if self.destination_env_var is not None or self.destination_mount_path is not None:
                 raise ValueError(
@@ -358,14 +367,45 @@ class SecretResolver:
         )
 
 
+def sanitize_legacy_ingress_payload(payload: Any) -> dict[str, Any]:
+    """Sanitize raw transport payload before Pydantic model validation.
+
+    Ensures that any non-dict secrets payload or raw secret values are safely
+    scrubbed from the input dictionary so Pydantic ValidationError can never
+    capture or echo raw secret material in error contexts.
+    """
+    if not isinstance(payload, dict):
+        raise ValueError("Ingress task payload must be a JSON object / dictionary")
+
+    sanitized = dict(payload)
+    if "secrets" in sanitized:
+        raw_secrets = sanitized["secrets"]
+        if isinstance(raw_secrets, dict):
+            # Scrub values to placeholders, preserving keys for reference extraction
+            sanitized["secrets"] = {str(k): "[REDACTED_AT_INGRESS]" for k in raw_secrets}
+        else:
+            # Replace malformed non-dict secrets with empty dict and reject
+            sanitized["secrets"] = {}
+            raise ValueError(
+                "Invalid secrets payload: secrets must be a dictionary of key-value pairs"
+            )
+    return sanitized
+
+
 class LegacyIngressTaskRequest(BaseModel):
     """Ingress-only task request DTO for legacy raw-secret intake."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
 
     task_text: str = Field(min_length=1)
     secret_refs: tuple[SecretRef, ...] = ()
     secrets: dict[str, str] = Field(default_factory=dict, repr=False)
+
+    @classmethod
+    def from_raw_payload(cls, raw_payload: Any) -> LegacyIngressTaskRequest:
+        """Construct request from raw transport payload after pre-validation sanitization."""
+        sanitized = sanitize_legacy_ingress_payload(raw_payload)
+        return cls.model_validate(sanitized)
 
     @model_validator(mode="before")
     @classmethod
