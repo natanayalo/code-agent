@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat(orchestrator): implement wave 3b.1 relational merge markers and attempt rehydration ([#375](https://github.com/natanayalo/code-agent/pull/375))
+
 - Feat(orchestrator): implement wave 3a plan reconstruction and pruning ([#374](https://github.com/natanayalo/code-agent/pull/374))
 
 - Feat(orchestrator): complete M28.5B wave 2 temporal state reduction closeout ([#373](https://github.com/natanayalo/code-agent/pull/373))
