@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import enum
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from typing import Any, Final
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -61,32 +61,61 @@ class SecretSource(enum.StrEnum):
     EPHEMERAL = "ephemeral"
 
 
+class EphemeralSecretHandle(BaseModel):
+    """Opaque reference to an ephemeral secret stored outside durable workflow history."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    handle_id: str = Field(min_length=1)
+
+
 class EphemeralSecretStore:
-    """Task-scoped in-memory store for ephemeral legacy secrets during migration."""
+    """Storage interface for ephemeral legacy secrets outside durable workflow history.
+
+    Provides the base interface and in-memory reference implementation for
+    single-process execution and tests. In distributed production (M28.5A.2), a shared
+    out-of-history encrypted backend (e.g. Redis TTL or Vault KV) implements this contract.
+    """
 
     def __init__(self, initial_secrets: Mapping[str, str] | None = None) -> None:
         self._store: dict[str, str] = dict(initial_secrets) if initial_secrets is not None else {}
 
-    def get(self, key: str) -> str | None:
-        return self._store.get(key)
+    def get(self, handle_or_key: str) -> str | None:
+        """Retrieve secret material for an opaque handle or key."""
+        return self._store.get(handle_or_key)
 
-    def store(self, key: str, value: str) -> None:
+    def store(
+        self,
+        key: str,
+        value: str,
+        *,
+        ttl_seconds: int = 3600,
+    ) -> str:
+        """Store secret material under a key/handle and return the handle identifier."""
         self._store[key] = value
+        return key
 
-    def has(self, key: str) -> bool:
-        return key in self._store
+    def has(self, handle_or_key: str) -> bool:
+        """Check if an ephemeral secret exists in the store."""
+        return handle_or_key in self._store
 
-    def remove(self, key: str) -> None:
-        self._store.pop(key, None)
+    def remove(self, handle_or_key: str) -> None:
+        """Delete an ephemeral secret from the store."""
+        self._store.pop(handle_or_key, None)
 
     def clear(self) -> None:
+        """Clear all stored ephemeral secrets."""
         self._store.clear()
 
-    def __contains__(self, key: str) -> bool:
-        return key in self._store
+    def __contains__(self, handle_or_key: str) -> bool:
+        return handle_or_key in self._store
 
     def __len__(self) -> int:
         return len(self._store)
+
+
+class InMemoryEphemeralSecretStore(EphemeralSecretStore):
+    """In-memory ephemeral secret store implementation for testing and local runtime."""
 
 
 class SecretScope(enum.StrEnum):
@@ -312,6 +341,15 @@ class SecretRegistry:
             raise SecretNotFoundError(f"Secret {name!r} not found in registry")
         return definition
 
+    def __len__(self) -> int:
+        return len(self._definitions)
+
+    def __contains__(self, name: str) -> bool:
+        return name in self._definitions
+
+    def __iter__(self) -> Iterator[RegisteredSecretDefinition]:
+        return iter(self._definitions.values())
+
 
 DEFAULT_SECRET_REGISTRY: Final[SecretRegistry] = SecretRegistry()
 
@@ -489,7 +527,9 @@ __all__ = [
     "DEFAULT_SECRET_REGISTRY",
     "BrokerOnlySecretExposureError",
     "CapabilityViolationError",
+    "EphemeralSecretHandle",
     "EphemeralSecretStore",
+    "InMemoryEphemeralSecretStore",
     "MissingSecretScopeError",
     "RegisteredSecretDefinition",
     "ResolvedSecret",

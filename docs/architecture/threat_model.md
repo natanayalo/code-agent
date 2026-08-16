@@ -134,29 +134,33 @@ Any code granted a plaintext secret and permitted network egress can intentional
 [1. Broker Registration]
     RegisteredSecretDefinition configured with source (ENV, SECRET_STORE, FILE, EPHEMERAL), scope, exposure policy, and permitted egress hosts.
         ↓
-[2. Ingress Intake & Migration]
-    LegacyIngressTaskRequest receives task; values placed into task-scoped EphemeralSecretStore (outside durable history);
-    durable request preserves only SecretRef(name).
+[2. Ingress Intake & Ephemeral Migration]
+    Raw transport payload is transactionally validated via sanitize_legacy_ingress_payload and LegacyIngressTaskRequest.
+    Raw values are stored in EphemeralSecretStore (outside Temporal workflow history / PostgreSQL) under opaque handles (ephem_<key>_<token>).
+    Opaque RegisteredSecretDefinitions are registered to decouple secret identity from container injection destinations (destination_env_var / destination_mount_path).
+    Durable request records contain only opaque SecretRef(name) instances.
         ↓
 [3. Capability Grant Issuance]
-    CapabilityGrantFactory evaluates deterministic policy, checks audience intersection, and issues grant.
+    CapabilityGrantFactory evaluates deterministic policy against authoritative SecretRegistry, checks audience intersection, and issues grant.
         ↓
 [4. Runtime Resolution & Consumption Validation]
     SecretResolver and validate_grant_for_execution validate dual-key authorization, network audience, and publication coupling.
-    Rejects BROKER_ONLY secrets from sandbox resolution; retrieves ephemeral values from task-scoped EphemeralSecretStore.
+    Rejects BROKER_ONLY secrets from sandbox resolution; retrieves ephemeral values from out-of-history EphemeralSecretStore backend.
         ↓
 [5. Staging & Execution]
     Secret values registered with task-scoped SecretRedactor.
-    Files staged under /run/secrets/code-agent/ (mode 0o400) or env vars prefixed CODE_AGENT_SECRET_.
+    Files staged under /run/secrets/code-agent/ (mode 0o400) or env vars prefixed CODE_AGENT_SECRET_ (or allowlisted names like GITHUB_TOKEN).
         ↓
 [6. Termination & Cleanup]
-    Task container destroyed; temporary secret mounts unmounted and removed; EphemeralSecretStore and SecretRedactor discarded.
+    Task container destroyed; temporary secret mounts unmounted and removed; EphemeralSecretStore handles expired/deleted; SecretRedactor discarded.
 ```
+
+In production deployments (M28.5A.2), `EphemeralSecretStore` uses a dedicated out-of-history encrypted backend with TTL (e.g., Redis with encryption-at-rest or Vault KV) shared by trusted ingress and trusted Temporal workers without serializing secret material into workflow execution history. `InMemoryEphemeralSecretStore` provides the in-memory reference implementation for single-process runners and test fixtures.
 
 ---
 
 ## 6. Migration and Deprecation Schedule
 
-- **M28.5A (Current):** Typed contracts, threat model, immutable capability grants, ingress DTO separation, ephemeral secret store interfaces, and consumption-side audience/network validation.
-- **M28.5A.2 (Follow-On):** Runtime wiring into `DockerNativeAgentExecutor`, production ingress endpoint plumbing (sanitizer execution before Temporal/PostgreSQL persistence), OS-level `.git` isolation, proxy TLS SNI validation, and live container security verification.
+- **M28.5A (Current):** Typed contracts, threat model, immutable capability grants, ingress DTO separation, ephemeral secret store backend interfaces (`EphemeralSecretStore`, `EphemeralSecretHandle`, `InMemoryEphemeralSecretStore`), opaque ephemeral registry mapping, and consumption-side audience/network validation.
+- **M28.5A.2 (Follow-On):** Runtime wiring into `DockerNativeAgentExecutor`, production ingress endpoint plumbing (sanitizer execution and out-of-history `EphemeralSecretStore` integration before Temporal/PostgreSQL persistence), OS-level `.git` isolation, proxy TLS SNI validation, and live container security verification.
 - **M29 (Target Cutoff):** Complete removal of `LegacyIngressTaskRequest` and raw secret ingress. Unregistered or raw secret payloads are rejected fail-closed with `DeprecatedLegacySecretsError`.

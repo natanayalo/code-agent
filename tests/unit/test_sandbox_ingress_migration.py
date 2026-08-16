@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from sandbox.capability import (
     CapabilityGrantFactory,
     ConflictingSecretDeclarationError,
     DeprecatedLegacySecretsError,
+    EphemeralSecretHandle,
     EphemeralSecretStore,
     IngressMigrationAdapter,
+    InMemoryEphemeralSecretStore,
     LegacyIngressTaskRequest,
+    RegisteredSecretDefinition,
     SecretExposurePolicy,
     SecretRef,
     SecretRegistry,
@@ -106,8 +110,8 @@ def test_ingress_migration_adapter_and_worker_request_migration() -> None:
 
 
 def test_ephemeral_secret_store_and_ingress_migration_lifecycle() -> None:
-    # 1. EphemeralSecretStore basic operations
-    store = EphemeralSecretStore({"initial_key": "val1"})
+    # 1. EphemeralSecretStore / InMemoryEphemeralSecretStore basic operations
+    store = InMemoryEphemeralSecretStore({"initial_key": "val1"})
     assert len(store) == 1
     assert "initial_key" in store
     assert store.get("initial_key") == "val1"
@@ -117,34 +121,134 @@ def test_ephemeral_secret_store_and_ingress_migration_lifecycle() -> None:
     store.remove("initial_key")
     assert "initial_key" not in store
 
-    # 2. Ingress migration preserves raw value in ephemeral store while request only carries ref
+    handle = EphemeralSecretHandle(handle_id="ephem_handle_123")
+    assert handle.handle_id == "ephem_handle_123"
+
+    # 2. Transactional validation: invalid request does not commit secrets
+    ephem_store = EphemeralSecretStore()
+    registry = SecretRegistry()
+    with pytest.raises(ValidationError):
+        IngressMigrationAdapter.adapt_and_register_ephemeral(
+            {"task_text": "", "secrets": {"ORPHAN_SECRET": "secret_abc"}},
+            registry=registry,
+            ephemeral_store=ephem_store,
+        )
+    assert len(ephem_store) == 0
+    assert len(registry) == 0
+
+    # 3. Adapt and register ephemeral creates opaque references and preserves destination
     raw_payload = {
         "task_text": "Run ephemeral secret task",
-        "secrets": {"CUSTOM_TOKEN": "caller_secret_xyz_999"},
+        "secrets": {"CUSTOM-TOKEN": "caller_secret_xyz_999"},
     }
-    ephem_store = EphemeralSecretStore()
-    refs = IngressMigrationAdapter.adapt(raw_payload, ephemeral_store=ephem_store)
-    assert refs == (SecretRef(name="CUSTOM_TOKEN"),)
-    assert ephem_store.get("CUSTOM_TOKEN") == "caller_secret_xyz_999"
-
-    # 3. Adapt and register ephemeral in registry for end-to-end resolution
-    registry = SecretRegistry()
-    IngressMigrationAdapter.adapt_and_register_ephemeral(
+    refs = IngressMigrationAdapter.adapt_and_register_ephemeral(
         raw_payload,
         registry=registry,
         ephemeral_store=ephem_store,
         scope=SecretScope.CUSTOM,
         exposure_policy=SecretExposurePolicy.SANDBOX_ENV,
     )
-    assert registry.get("CUSTOM_TOKEN") is not None
-    assert registry.require("CUSTOM_TOKEN").source == SecretSource.EPHEMERAL
+    assert len(refs) == 1
+    opaque_ref = refs[0]
+    assert opaque_ref.name.startswith("ephem_CUSTOM_TOKEN_")
+    assert ephem_store.get(opaque_ref.name) == "caller_secret_xyz_999"
+
+    sec_def = registry.require(opaque_ref.name)
+    assert sec_def.source == SecretSource.EPHEMERAL
+    assert sec_def.source_key == opaque_ref.name
+    assert sec_def.destination_env_var == "CODE_AGENT_SECRET_CUSTOM_TOKEN"
 
     factory = CapabilityGrantFactory(secret_registry=registry)
     grant = factory.create_grant(
-        allowed_secret_refs=("CUSTOM_TOKEN",),
+        allowed_secret_refs=(opaque_ref.name,),
         granted_secret_scopes=(SecretScope.CUSTOM,),
     )
     resolver = SecretResolver(registry, ephemeral_store=ephem_store)
-    resolved = resolver.resolve_for_sandbox(SecretRef(name="CUSTOM_TOKEN"), grant)
-    assert resolved.name == "CUSTOM_TOKEN"
+    resolved = resolver.resolve_for_sandbox(opaque_ref, grant)
+    assert resolved.name == opaque_ref.name
+    assert resolved.destination_env_var == "CODE_AGENT_SECRET_CUSTOM_TOKEN"
     assert resolved.reveal_secret_value() == "caller_secret_xyz_999"
+
+
+def test_ephemeral_migration_prevents_shadowing_authoritative_broker_secrets() -> None:
+    # 1. Pre-populate authoritative broker secret
+    registry = SecretRegistry()
+    registry.register(
+        RegisteredSecretDefinition(
+            name="openai_key",
+            source=SecretSource.ENV,
+            source_key="OPENAI_API_KEY",
+            required_scope=SecretScope.PROVIDER_AUTH,
+            exposure_policy=SecretExposurePolicy.SANDBOX_ENV,
+            destination_env_var="OPENAI_API_KEY",
+        )
+    )
+
+    # 2. Legacy caller passes secrets with same name
+    raw_payload = {
+        "task_text": "Run task with custom openai key",
+        "secrets": {"openai_api_key": "caller_provided_openai_key_val"},
+    }
+    ephem_store = EphemeralSecretStore()
+    refs = IngressMigrationAdapter.adapt_and_register_ephemeral(
+        raw_payload,
+        registry=registry,
+        ephemeral_store=ephem_store,
+        scope=SecretScope.PROVIDER_AUTH,
+        exposure_policy=SecretExposurePolicy.SANDBOX_ENV,
+    )
+
+    # 3. Opaque ref is distinct from authoritative name
+    assert len(refs) == 1
+    opaque_ref = refs[0]
+    assert opaque_ref.name != "openai_key"
+    assert opaque_ref.name.startswith("ephem_openai_api_key_")
+
+    # 4. Authoritative broker secret is preserved untouched
+    auth_def = registry.require("openai_key")
+    assert auth_def.source == SecretSource.ENV
+    assert auth_def.source_key == "OPENAI_API_KEY"
+
+    # 5. Resolving opaque ref resolves caller's ephemeral material
+    resolver = SecretResolver(
+        registry,
+        env={"OPENAI_API_KEY": "broker_system_key_123"},
+        ephemeral_store=ephem_store,
+    )
+    grant_caller = CapabilityGrantFactory(secret_registry=registry).create_grant(
+        allowed_secret_refs=(opaque_ref.name,),
+        granted_secret_scopes=(SecretScope.PROVIDER_AUTH,),
+    )
+    res_caller = resolver.resolve_for_sandbox(opaque_ref, grant_caller)
+    assert res_caller.destination_env_var == "OPENAI_API_KEY"
+    assert res_caller.reveal_secret_value() == "caller_provided_openai_key_val"
+
+    # 6. Resolving broker ref resolves broker's env key
+    grant_broker = CapabilityGrantFactory(secret_registry=registry).create_grant(
+        allowed_secret_refs=("openai_key",),
+        granted_secret_scopes=(SecretScope.PROVIDER_AUTH,),
+    )
+    res_broker = resolver.resolve_for_sandbox(SecretRef(name="openai_key"), grant_broker)
+    assert res_broker.reveal_secret_value() == "broker_system_key_123"
+
+
+def test_ephemeral_migration_sandbox_file_destination_mount_path() -> None:
+    registry = SecretRegistry()
+    ephem_store = EphemeralSecretStore()
+    raw_payload = {
+        "task_text": "Run file secret task",
+        "secrets": {"custom_cert": "-----BEGIN CERTIFICATE-----..."},
+    }
+    refs = IngressMigrationAdapter.adapt_and_register_ephemeral(
+        raw_payload,
+        registry=registry,
+        ephemeral_store=ephem_store,
+        scope=SecretScope.CUSTOM,
+        exposure_policy=SecretExposurePolicy.SANDBOX_FILE,
+    )
+    assert len(refs) == 1
+    sec_def = registry.require(refs[0].name)
+    assert sec_def.exposure_policy == SecretExposurePolicy.SANDBOX_FILE
+    assert sec_def.destination_mount_path == "/run/secrets/code-agent/ephemeral_custom_cert.secret"
+    assert sec_def.destination_mount_name == "ephemeral_custom_cert.secret"
+    assert sec_def.destination_env_var is None
