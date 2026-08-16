@@ -168,9 +168,14 @@ class TaskExecutionService:
     _delete_retained_workspace_path = execution_retention_service._delete_retained_workspace_path
     _prune_retained_runs = execution_retention_service._prune_retained_runs
 
-    def create_task(self, submission: TaskSubmission) -> tuple[TaskSnapshot, _PersistedTaskContext]:
+    def create_task(
+        self,
+        submission: TaskSubmission,
+        *,
+        raw_secrets: dict[str, str] | None = None,
+    ) -> tuple[TaskSnapshot, _PersistedTaskContext]:
         """Persist a new task request and return the initial pollable snapshot."""
-        outcome = self.create_task_outcome(submission)
+        outcome = self.create_task_outcome(submission, raw_secrets=raw_secrets)
         if outcome.persisted is None:
             raise RuntimeError("Expected a fresh task, but a duplicate delivery was returned.")
         return outcome.task_snapshot, outcome.persisted
@@ -180,6 +185,7 @@ class TaskExecutionService:
         submission: TaskSubmission,
         *,
         delivery_key: DeliveryKey | None = None,
+        raw_secrets: dict[str, str] | None = None,
     ) -> CreateTaskOutcome:
         """Persist a task request or return the previously created task for a duplicate delivery."""
         submission = self._normalize_and_validate_submission(submission)
@@ -214,6 +220,7 @@ class TaskExecutionService:
             status=TaskStatus.PENDING,
             max_attempts=self.default_task_max_attempts,
             delivery_key=delivery_key,
+            raw_secrets=raw_secrets,
         )
         task_id = duplicate_task_id or (persisted.task_id if persisted is not None else None)
         if task_id is None:

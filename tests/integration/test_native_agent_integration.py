@@ -57,6 +57,13 @@ sys.exit(0)
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(native_agent_runner, "DockerNativeAgentExecutor", LocalNativeAgentRunner)
+
+        from sandbox.provider_bootstrap import ProviderBootstrap
+
+        mp.setattr(
+            "sandbox.provider_bootstrap.ProviderBootstrapLoader.load",
+            MagicMock(return_value=ProviderBootstrap([], {}, {}, ())),
+        )
         current_path = os.environ.get("PATH", "")
         new_path = f"{bin_dir}{os.pathsep}{tmp_path}"
         if current_path:
@@ -116,6 +123,13 @@ sys.exit(1)
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(native_agent_runner, "DockerNativeAgentExecutor", LocalNativeAgentRunner)
+
+        from sandbox.provider_bootstrap import ProviderBootstrap
+
+        mp.setattr(
+            "sandbox.provider_bootstrap.ProviderBootstrapLoader.load",
+            MagicMock(return_value=ProviderBootstrap([], {}, {}, ())),
+        )
         current_path = os.environ.get("PATH", "")
         new_path = f"{bin_dir}{os.pathsep}{tmp_path}"
         if current_path:

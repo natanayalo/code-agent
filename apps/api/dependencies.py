@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import hmac
 import logging
-from typing import cast
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from apps.api.task_schemas import SanitizedCreateTaskIngress, SanitizedTaskReplayIngress
 from urllib.parse import urlparse
 
 from fastapi import HTTPException, Request, status
@@ -204,3 +207,110 @@ def require_telegram_webhook_auth(request: Request) -> None:
         missing_detail=f"Missing {TELEGRAM_WEBHOOK_SECRET_HEADER} header.",
         invalid_detail="Invalid Telegram webhook secret.",
     )
+
+
+async def get_sanitized_task_ingress(request: Request) -> SanitizedCreateTaskIngress:
+    from fastapi.exceptions import RequestValidationError
+    from pydantic import ValidationError
+
+    from apps.api.task_schemas import CreateTaskRequest, SanitizedCreateTaskIngress
+    from sandbox.ingress import sanitize_legacy_ingress_payload
+
+    try:
+        raw_body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    raw_secrets = raw_body.get("secrets", {})
+    if not isinstance(raw_secrets, dict):
+        raise RequestValidationError(
+            [
+                {
+                    "loc": ("body", "secrets"),
+                    "msg": "secrets must be a dictionary of strings",
+                    "type": "type_error.dict",
+                }
+            ]
+        )
+    for k, v in raw_secrets.items():
+        if not isinstance(k, str) or not isinstance(v, str):
+            raise RequestValidationError(
+                [
+                    {
+                        "loc": ("body", "secrets", str(k)),
+                        "msg": "secret keys and values must be strings",
+                        "type": "type_error.str",
+                    }
+                ]
+            )
+
+    try:
+        sanitized_copy = sanitize_legacy_ingress_payload(raw_body)
+    except ValueError as e:
+        raise RequestValidationError(
+            [{"loc": ("body", "secrets"), "msg": str(e), "type": "value_error"}]
+        )
+
+    try:
+        validated = CreateTaskRequest.model_validate(sanitized_copy)
+    except ValidationError as e:
+        raise RequestValidationError(e.errors())
+
+    validated.secrets = {}
+    return SanitizedCreateTaskIngress(request=validated, raw_secrets=raw_secrets)
+
+
+async def get_sanitized_task_replay_ingress(request: Request) -> SanitizedTaskReplayIngress:
+    from fastapi.exceptions import RequestValidationError
+    from pydantic import ValidationError
+
+    from apps.api.task_schemas import SanitizedTaskReplayIngress
+    from orchestrator.execution_types import TaskReplayRequest
+    from sandbox.ingress import sanitize_legacy_ingress_payload
+
+    try:
+        body_bytes = await request.body()
+        if not body_bytes:
+            return SanitizedTaskReplayIngress(request=None, raw_secrets={})
+        raw_body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    raw_secrets = raw_body.get("secrets", {})
+    if not isinstance(raw_secrets, dict):
+        raise RequestValidationError(
+            [
+                {
+                    "loc": ("body", "secrets"),
+                    "msg": "secrets must be a dictionary of strings",
+                    "type": "type_error.dict",
+                }
+            ]
+        )
+    for k, v in raw_secrets.items():
+        if not isinstance(k, str) or not isinstance(v, str):
+            raise RequestValidationError(
+                [
+                    {
+                        "loc": ("body", "secrets", str(k)),
+                        "msg": "secret keys and values must be strings",
+                        "type": "type_error.str",
+                    }
+                ]
+            )
+
+    try:
+        sanitized_copy = sanitize_legacy_ingress_payload(raw_body)
+    except ValueError as e:
+        raise RequestValidationError(
+            [{"loc": ("body", "secrets"), "msg": str(e), "type": "value_error"}]
+        )
+
+    try:
+        validated = TaskReplayRequest.model_validate(sanitized_copy)
+    except ValidationError as e:
+        raise RequestValidationError(e.errors())
+
+    if validated.secrets is not None:
+        validated.secrets = {}
+    return SanitizedTaskReplayIngress(request=validated, raw_secrets=raw_secrets)

@@ -48,7 +48,6 @@ from workers.native_agent_runner import (
     NativeAgentRunRequest,
     run_native_agent,
 )
-from workers.native_agent_security import native_github_credentials
 from workers.prompt import build_effective_system_prompt
 from workers.prompt_memory import native_memory_delivery_receipt
 from workers.review import ReviewResult
@@ -420,6 +419,74 @@ class CodexCliWorkerNativeMixin:
             request, system_prompt=system_prompt, native_prompt=native_prompt
         )
         sandbox_metadata["memory_delivery"] = memory_delivery
+        task_id = request.task_id or request.session_id or "local"
+        if hasattr(self, "ephemeral_store") and self.ephemeral_store is not None:
+            self.ephemeral_store.refresh_task_ttl(task_id)
+
+        import os
+
+        from sandbox.capability import (
+            CapabilityGrantFactory,
+            NetworkEgressPolicy,
+            validate_grant_for_execution,
+        )
+        from sandbox.provider_bootstrap import ProviderBootstrapLoader
+        from sandbox.provider_hosts import CODEX_RUNTIME_HOSTS
+        from sandbox.secrets import (
+            SecretExposurePolicy,
+            SecretRef,
+            SecretRegistry,
+            SecretResolver,
+            SecretScope,
+        )
+        from sandbox.trusted_context import TrustedSandboxExecutionContext
+
+        provider_dir = Path(os.environ.get("CODE_AGENT_CODEX_AUTH_DIR", Path.home() / ".codex"))
+        if not provider_dir.exists() and Path("/root/.codex").exists():
+            provider_dir = Path("/root/.codex")
+
+        bootstrap = ProviderBootstrapLoader.load(provider_dir)
+        registry = SecretRegistry(ephemeral_store=getattr(self, "ephemeral_store", None))
+        for d in bootstrap.definitions:
+            registry.register(d)
+
+        sandbox_refs: list[SecretRef] = []
+        for ref in request.secret_refs or ():
+            definition = registry.get(ref.name, task_id=task_id)
+            if definition and definition.exposure_policy in (
+                SecretExposurePolicy.SANDBOX_ENV,
+                SecretExposurePolicy.SANDBOX_FILE,
+            ):
+                sandbox_refs.append(ref)
+
+        for d in bootstrap.definitions:
+            sandbox_refs.append(SecretRef(name=d.name))
+
+        grant = CapabilityGrantFactory(registry).create_grant(
+            network=NetworkEgressPolicy.ALLOWLISTED_HOSTS,
+            allowed_secret_refs=tuple(sandbox_refs),
+            granted_secret_scopes=frozenset([SecretScope.PROVIDER_AUTH, SecretScope.GIT_PUSH]),
+            allowed_egress_hosts=CODEX_RUNTIME_HOSTS,
+        )
+
+        validate_grant_for_execution(grant, secret_registry=registry)
+
+        resolver = SecretResolver(
+            registry,
+            file_store=bootstrap.file_store,
+            ephemeral_store=getattr(self, "ephemeral_store", None),
+            task_id=task_id,
+        )
+
+        redactor = SecretRedactor(list((request.secrets or {}).values()))
+        for ref in sandbox_refs:
+            resolved = resolver.resolve_for_sandbox(ref, grant)
+            redactor.register(resolved.reveal_secret_value())
+
+        context = TrustedSandboxExecutionContext(
+            grant=grant, task_id=task_id, secret_resolver=resolver, provider_bootstrap=bootstrap
+        )
+
         run_request = NativeAgentRunRequest(
             command=command,
             prompt=native_prompt,
@@ -437,17 +504,13 @@ class CodexCliWorkerNativeMixin:
             events_path=events_path,
             collect_diff=True,
             collect_changed_files=True,
-            task_id=request.task_id,
+            task_id=task_id,
             session_id=request.session_id,
-            redactor=SecretRedactor(list((request.secrets or {}).values())),
+            redactor=redactor,
             response_format=request.response_format,
             response_schema=request.response_schema,
             read_only_workspace=request.read_only or bool(request.constraints.get("read_only")),
-            # Provider transport is always constrained to the executor's HTTPS
-            # proxy. This is distinct from generic tool-network capability.
-            network_enabled=True,
-            github_credentials=native_github_credentials(request),
-            provider_auth_source=Path("/root/.codex"),
+            context=context,
         )
         return run_request, sandbox_metadata
 

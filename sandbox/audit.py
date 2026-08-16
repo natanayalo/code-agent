@@ -56,15 +56,28 @@ def _should_ignore_path(path: str) -> bool:
 def run_git_command(
     command: list[str],
     *,
-    cwd: Path,
+    workspace: WorkspaceHandle,
     timeout: int = 30,
 ) -> subprocess.CompletedProcess[bytes]:
-    """Run a git inspection command against the workspace repo."""
+    """Run a git inspection command against the workspace repo using trusted GIT_DIR if available."""  # noqa: E501
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
+
+    cmd = ["git"]
+    if workspace.trusted_git_dir:
+        cmd.extend(
+            [
+                f"--git-dir={workspace.trusted_git_dir}",
+                f"--work-tree={workspace.workspace_path}",
+                "-c",
+                "core.hooksPath=/dev/null",
+            ]
+        )
+    cmd.extend(command[1:] if command[0] == "git" else command)
+
     return subprocess.run(
-        command,
-        cwd=cwd,
+        cmd,
+        cwd=workspace.workspace_path if not workspace.trusted_git_dir else None,
         env=env,
         check=False,
         capture_output=True,
@@ -129,17 +142,17 @@ def format_changed_files(files_changed: list[str]) -> str:
 
 
 def build_diff_summary(
-    repo_path: Path,
+    workspace: WorkspaceHandle,
     *,
     untracked_files: list[str],
 ) -> str | None:
     """Build an optional diff summary artifact for tracked and untracked changes."""
     sections: list[str] = []
-    head_check = run_git_command(["git", "rev-parse", "--verify", "HEAD"], cwd=repo_path)
+    head_check = run_git_command(["git", "rev-parse", "--verify", "HEAD"], workspace=workspace)
     if head_check.returncode == 0:
         tracked_diff = run_git_command(
             ["git", "diff", "--stat", "--summary", "HEAD", "--"],
-            cwd=repo_path,
+            workspace=workspace,
         )
         if tracked_diff.returncode == 0:
             tracked_summary = tracked_diff.stdout.decode("utf-8", errors="replace").strip()
@@ -149,7 +162,7 @@ def build_diff_summary(
             logger.warning(
                 "Failed to collect sandbox diff summary",
                 extra={
-                    "repo_path": str(repo_path),
+                    "workspace_id": workspace.workspace_id,
                     "stderr": tracked_diff.stderr.decode("utf-8", errors="replace").strip(),
                 },
             )
@@ -163,11 +176,11 @@ def build_diff_summary(
     return summary or None
 
 
-def _get_git_status_changes(repo_path: Path) -> tuple[list[str], list[str]]:
+def _get_git_status_changes(workspace: WorkspaceHandle) -> tuple[list[str], list[str]]:
     """Return tracked and untracked changes from git status."""
     status_result = run_git_command(
         ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"],
-        cwd=repo_path,
+        workspace=workspace,
     )
     if status_result.returncode != 0:
         raise RuntimeError(
@@ -197,7 +210,7 @@ def _snapshot_workspace_changes(
     artifacts: list[SandboxArtifact] = []
     files_changed: list[str] = []
     try:
-        files_changed, untracked_files = _get_git_status_changes(workspace.repo_path)
+        files_changed, untracked_files = _get_git_status_changes(workspace)
 
         changed_files_content = (
             redactor.redact(format_changed_files(files_changed))
@@ -219,7 +232,7 @@ def _snapshot_workspace_changes(
         )
 
         diff_summary = build_diff_summary(
-            workspace.repo_path,
+            workspace,
             untracked_files=untracked_files,
         )
         if diff_summary:

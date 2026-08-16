@@ -16,6 +16,7 @@ from db.enums import (
     WorkerType,
 )
 from db.models import HumanInteraction, Task, WorkerRun
+from sandbox.secrets import SecretRef
 
 
 class TaskRepository:
@@ -27,6 +28,7 @@ class TaskRepository:
     def create(
         self,
         *,
+        task_id: str | None = None,
         session_id: str,
         task_text: str,
         repo_url: str | None = None,
@@ -37,6 +39,7 @@ class TaskRepository:
         task_spec: dict[str, Any] | None = None,
         budget: dict[str, Any] | None = None,
         secrets: dict[str, str] | None = None,
+        secret_refs: tuple[SecretRef, ...] | None = None,
         secrets_encrypted: bool = False,
         status: str = "pending",
         priority: int = 0,
@@ -50,7 +53,9 @@ class TaskRepository:
         trace_context: dict[str, str] | None = None,
         repair_for_task_id: str | None = None,
     ) -> Task:
+        kwargs = {"id": task_id} if task_id is not None else {}
         task = Task(
+            **kwargs,
             session_id=session_id,
             task_text=task_text,
             repo_url=repo_url,
@@ -61,6 +66,7 @@ class TaskRepository:
             task_spec=task_spec,
             budget=budget or {},
             secrets=secrets or {},
+            secret_refs=[ref.model_dump(mode="json") for ref in (secret_refs or ())],
             secrets_encrypted=secrets_encrypted,
             status=status,
             priority=priority,

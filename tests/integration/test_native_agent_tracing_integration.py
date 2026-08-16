@@ -65,9 +65,15 @@ async def test_codex_worker_propagates_redactor_to_native_runner(
         secrets={"API_KEY": "secret-123", "DB_PASS": "secret-456"},
     )
 
+    from sandbox.provider_bootstrap import ProviderBootstrap
+
     with patch.object(worker, "_provision_workspace", return_value=workspace):
         with patch.object(worker, "_cleanup_workspace", return_value=True):
-            await worker.run(request)
+            with patch(
+                "sandbox.provider_bootstrap.ProviderBootstrapLoader.load",
+                return_value=ProviderBootstrap([], {}, {}, ()),
+            ):
+                await worker.run(request)
 
     # Check the call to run_native_agent
     mock_runner.assert_called_once()

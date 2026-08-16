@@ -38,6 +38,50 @@ class SecretRedactor:
         return self._pattern.sub("[REDACTED]", text)
 
 
+class StreamingRedactor:
+    """Stateful redactor for streaming output, avoiding partial secret leaks."""
+
+    def __init__(self, redactor: SecretRedactor | None) -> None:
+        self._redactor = redactor
+        self._buffer = ""
+        self._max_secret_len = (
+            max((len(s) for s in redactor._secrets), default=0)
+            if redactor and redactor._secrets
+            else 0
+        )
+
+    def push(self, chunk: str) -> str:
+        """Process a chunk of text, returning safe redacted output and buffering the rest."""
+        if not self._redactor or not self._max_secret_len:
+            return mask_url_credentials(chunk)
+
+        self._buffer += chunk
+
+        # We must hold back max_secret_len - 1 characters to ensure we don't
+        # emit the prefix of a secret that spans chunk boundaries.
+        # We also hold back an extra 128 chars to allow mask_url_credentials regex to match.
+        hold_back = self._max_secret_len + 128
+
+        safe_len = len(self._buffer) - hold_back
+        if safe_len <= 0:
+            return ""
+
+        safe_part = self._buffer[:safe_len]
+        self._buffer = self._buffer[safe_len:]
+
+        sanitized = mask_url_credentials(safe_part)
+        return self._redactor.redact(sanitized)
+
+    def flush(self) -> str:
+        """Process remaining buffered text."""
+        if not self._buffer:
+            return ""
+        sanitized = mask_url_credentials(self._buffer)
+        result = self._redactor.redact(sanitized) if self._redactor else sanitized
+        self._buffer = ""
+        return result
+
+
 def mask_url_credentials(text: str) -> str:
     """Mask credentials in repository URLs to prevent leaking secrets."""
     return re.sub(r"://[^/ ]+@", "://****@", text)

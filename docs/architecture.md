@@ -192,11 +192,25 @@ environment, and a private HTTPS CONNECT proxy. It has a read-only root,
 dropped capabilities, `no-new-privileges`, default Docker seccomp, private
 IPC, bounded tmpfs, and resource limits. It never receives the Docker socket,
 workspace parent/siblings, database/Temporal/API credentials, or a host auth
-mount. The proxy validates DNS results and rejects loopback, private,
-link-local, metadata, control-plane, and rebinding destinations; audit records
-identity, time, host/IP, method, and outcome only. Provider auth remains a
-residual risk inside its own task-scoped process. Cleanup failure is
-`sandbox_infra`; rollback is revert/redeploy, never host execution.
+mount.
+
+The proxy validates DNS results and rejects loopback, private, link-local,
+metadata, control-plane, and rebinding destinations; audit records identity,
+time, host/IP, method, and outcome only. The proxy now enforces a bounded TLS
+ClientHello reassembly to verify the Server Name Indication (SNI) against the
+CONNECT authority, preventing domain fronting and IP-proxying. If the worker
+policy restricts network to allowlisted hosts, the proxy applies this filtering
+based on the SNI.
+
+Provider processes execute as a non-root user (UID `65532`). Sensitive files such
+as `.git/config` and `.git/hooks` inside the task workspace are masked via
+`/dev/null` and `tmpfs` mounts to prevent untrusted execution from exploiting
+Git hooks during broker-side operations. Host secrets are strictly resolved and
+delivered via ephemeral stores (Postgres `ephemeral_secrets` table) exclusively
+during runtime, ensuring credentials remain decoupled from the durable task
+record. Output from the untrusted process is continuously piped through a streaming
+redactor to prevent secret leakage in logs. Cleanup failure is `sandbox_infra`;
+rollback is revert/redeploy, never host execution.
 
 ## 4) Memory Layer
 

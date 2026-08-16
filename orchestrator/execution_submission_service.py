@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import uuid
 from datetime import datetime
 from typing import Any
 
@@ -50,6 +51,9 @@ from repositories import (
     WorkerRunRepository,
     session_scope,
 )
+from sandbox.ephemeral_store_postgres import PostgresEphemeralSecretStore
+from sandbox.ingress import IngressMigrationAdapter
+from sandbox.secrets import DEFAULT_SECRET_REGISTRY
 
 logger = logging.getLogger("orchestrator.execution")
 
@@ -85,6 +89,7 @@ def replay_task(
     *,
     source_task_id: str,
     replay_request: TaskReplayRequest | None = None,
+    raw_secrets: dict[str, str] | None = None,
 ) -> TaskReplayResult:
     """Create a new task by replaying a prior terminal task with optional overrides."""
     source_snapshot = self.get_task(source_task_id)
@@ -136,6 +141,8 @@ def replay_task(
             )
         if replay_request.secrets is not None:
             updates["secrets"] = dict(replay_request.secrets)
+        if replay_request.secret_refs is not None:
+            updates["secret_refs"] = tuple(replay_request.secret_refs)
 
     if "constraints" in updates:
         updates["constraints"] = _sanitize_submission_constraints(
@@ -164,7 +171,7 @@ def replay_task(
     updates["constraints"]["replayed_from"] = [source_task_id, *existing_chain]
 
     submission = submission.model_copy(update=updates)
-    task_snapshot, _ = self.create_task(submission)
+    task_snapshot, _ = self.create_task(submission, raw_secrets=raw_secrets)
     logger.info(
         "Replayed task created from source",
         extra={
@@ -188,6 +195,7 @@ def _persist_submission(
     status: TaskStatus,
     max_attempts: int,
     delivery_key: DeliveryKey | None = None,
+    raw_secrets: dict[str, str] | None = None,
 ) -> tuple[_PersistedTaskContext | None, str | None]:
     """Create or restore the session scaffolding for a submitted task."""
     now = utc_now()
@@ -244,8 +252,22 @@ def _persist_submission(
             )
         session_repo.touch(session_id=conversation_session.id, seen_at=now)
 
+        task_id = str(uuid.uuid4())
         trace_context = capture_trace_context()
+
+        effective_secret_refs = list(submission.secret_refs)
+        if raw_secrets:
+            store = PostgresEphemeralSecretStore(session)
+            adapted_refs = IngressMigrationAdapter.adapt_and_register_ephemeral(
+                {"secrets": raw_secrets},
+                registry=DEFAULT_SECRET_REGISTRY,
+                ephemeral_store=store,
+                task_id=task_id,
+            )
+            effective_secret_refs.extend(adapted_refs)
+
         task = task_repo.create(
+            task_id=task_id,
             session_id=conversation_session.id,
             task_text=persisted_task_text,
             repo_url=submission.repo_url,
@@ -254,6 +276,7 @@ def _persist_submission(
             worker_override=submission.worker_override,
             budget=submission.budget,
             secrets=dict(submission.secrets),
+            secret_refs=tuple(effective_secret_refs),
             task_spec=task_spec,
             trace_context=trace_context,
             constraints=persisted_constraints,

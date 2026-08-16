@@ -9,6 +9,7 @@ from typing import Any, Literal
 
 from apps.observability import SPAN_KIND_LLM
 from sandbox.redact import SecretRedactor
+from sandbox.trusted_context import TrustedSandboxExecutionContext
 from workers.base import ArtifactReference
 from workers.constants import (
     DEFAULT_CHANGED_FILES_TIMEOUT_SECONDS as DEFAULT_NATIVE_AGENT_CHANGED_FILES_TIMEOUT_SECONDS,
@@ -73,6 +74,9 @@ class NativeAgentRunRequest:
     read_only_workspace: bool = False
     cancel_requested: Callable[[], bool] | None = None
     process_runner: Any | None = None
-    network_enabled: bool = True
-    github_credentials: dict[str, str] = field(default_factory=dict)
-    provider_auth_source: Path | None = None
+
+    # Phase 3 Hardening: The context replaces legacy booleans/dicts with a
+    # trusted capability grant and a deterministic secret resolver.
+    context: TrustedSandboxExecutionContext | None = field(default=None, repr=False)
+
+    # Deprecated fields removed.

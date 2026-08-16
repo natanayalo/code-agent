@@ -21,6 +21,7 @@ file_exceptions:
   tests/unit/test_native_agent_runner.py: Comprehensive native-agent runner contract coverage shares isolated environment and artifact fixtures.
   orchestrator/temporal/activities.py: Temporal activity adapters keep the product projection and worker handoff contract together.
   tests/unit/test_memory_observation.py: Contains comprehensive unit tests for all memory observation, candidate extraction, and trace-bridging rules.
+  sandbox/secrets.py: Consolidated secret resolution and typing logic to keep policy boundary cohesive.
 function_exceptions:
   orchestrator/nodes/verification_result.py:
     _check_file_changes: Checks file changes against repo profile constraints; cohesive rule application.
@@ -84,8 +85,12 @@ function_exceptions:
     run_native_agent: Preserves the existing worker-facing result contract while applying artifact and read-only validation.
   workers/gemini_cli_worker_native.py:
     _build_native_agent_run_request: Builds provider-specific native invocation, auth, artifact, and permission inputs as one compatibility boundary.
+  workers/codex_cli_worker_native.py:
+    _prepare_native_agent_run_request: Consolidated generation of provider environment, network isolation, and permissions.
   sandbox/native_agent_executor.py:
     run: Maintains the complete one-shot container, proxy, cancellation, manifest, and cleanup lifecycle as an auditable security operation.
+  sandbox/native_agent_proxy.py:
+    handle: TCP/TLS stream handling and multiplexing loop is difficult to split safely without obscuring socket state.
   orchestrator/execution_interaction_service.py:
     record_interaction_response: Persists operator interaction state and coordinates Temporal resumption as one transaction boundary.
   orchestrator/node_execution.py:

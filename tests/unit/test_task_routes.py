@@ -64,8 +64,13 @@ class _FakeTaskService:
         self.interaction_result: TaskSnapshot | None = None
         self.interaction_calls: list[dict[str, Any]] = []
 
-    def create_task(self, payload: TaskSubmission) -> tuple[TaskSnapshot, object]:
-        self.create_calls.append(payload)
+    def create_task(
+        self,
+        submission: TaskSubmission,
+        *,
+        raw_secrets: dict[str, str] | None = None,
+    ) -> tuple[TaskSnapshot, object]:
+        self.create_calls.append(submission)
         if self.create_error is not None:
             raise self.create_error
         return self.created_snapshot, object()
@@ -113,7 +118,8 @@ class _FakeTaskService:
         self,
         *,
         source_task_id: str,
-        replay_request: TaskReplayRequest | None,
+        replay_request: TaskReplayRequest | None = None,
+        raw_secrets: dict[str, str] | None = None,
     ) -> TaskReplayResult:
         self.replay_calls.append(
             {
@@ -385,6 +391,7 @@ def test_replay_task_returns_422_for_submission_validation_errors() -> None:
         *,
         source_task_id: str,
         replay_request: TaskReplayRequest | None,
+        raw_secrets: dict[str, str] | None = None,
     ) -> TaskReplayResult:
         raise TaskSubmissionValidationError("replay payload is invalid")
 
