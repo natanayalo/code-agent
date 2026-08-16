@@ -265,11 +265,13 @@ def test_capability_grant_factory_network_and_secret_audience() -> None:
         permitted_egress_hosts=("api.github.com", "internal.service.com"),
         destination_env_var="CODE_AGENT_SECRET_INT_TOKEN",
     )
+    registry = SecretRegistry([sec_github, sec_internal])
+    factory = CapabilityGrantFactory(secret_registry=registry)
 
     # 1. DISABLED network with sandbox secrets is valid
-    grant_disabled = CapabilityGrantFactory.create_grant(
+    grant_disabled = factory.create_grant(
         network=NetworkEgressPolicy.DISABLED,
-        allowed_secret_defs=(sec_github,),
+        allowed_secret_refs=(SecretRef(name="github_token"),),
         granted_secret_scopes=(SecretScope.GIT_PUSH,),
     )
     assert grant_disabled.network == NetworkEgressPolicy.DISABLED
@@ -277,16 +279,16 @@ def test_capability_grant_factory_network_and_secret_audience() -> None:
 
     # 2. PUBLIC_HTTPS_PROXY with sandbox secrets is rejected
     with pytest.raises(CapabilityViolationError, match="PUBLIC_HTTPS_PROXY is forbidden"):
-        CapabilityGrantFactory.create_grant(
+        factory.create_grant(
             network=NetworkEgressPolicy.PUBLIC_HTTPS_PROXY,
-            allowed_secret_defs=(sec_github,),
+            allowed_secret_refs=("github_token",),
             granted_secret_scopes=(SecretScope.GIT_PUSH,),
         )
 
     # 3. ALLOWLISTED_HOSTS with single secret
-    grant_allowed = CapabilityGrantFactory.create_grant(
+    grant_allowed = factory.create_grant(
         network=NetworkEgressPolicy.ALLOWLISTED_HOSTS,
-        allowed_secret_defs=(sec_github,),
+        allowed_secret_refs=("github_token",),
         granted_secret_scopes=(SecretScope.GIT_PUSH,),
         allowed_egress_hosts=("api.github.com",),
     )
@@ -294,61 +296,60 @@ def test_capability_grant_factory_network_and_secret_audience() -> None:
 
     # Exceeding audience rejected
     with pytest.raises(CapabilityViolationError, match="exceeds sandbox secret audience"):
-        CapabilityGrantFactory.create_grant(
+        factory.create_grant(
             network=NetworkEgressPolicy.ALLOWLISTED_HOSTS,
-            allowed_secret_defs=(sec_github,),
+            allowed_secret_refs=("github_token",),
             granted_secret_scopes=(SecretScope.GIT_PUSH,),
             allowed_egress_hosts=("api.github.com", "evil.attacker.com"),
         )
 
     # 4. Multi-secret audience intersection:
-    grant_multi = CapabilityGrantFactory.create_grant(
+    grant_multi = factory.create_grant(
         network=NetworkEgressPolicy.ALLOWLISTED_HOSTS,
-        allowed_secret_defs=(sec_github, sec_internal),
+        allowed_secret_refs=("github_token", "internal_token"),
         granted_secret_scopes=(SecretScope.GIT_PUSH, SecretScope.API_INGRESS),
         allowed_egress_hosts=("api.github.com",),
     )
     assert grant_multi.allowed_egress_hosts == ("api.github.com",)
 
     with pytest.raises(CapabilityViolationError, match="exceeds sandbox secret audience"):
-        CapabilityGrantFactory.create_grant(
+        factory.create_grant(
             network=NetworkEgressPolicy.ALLOWLISTED_HOSTS,
-            allowed_secret_defs=(sec_github, sec_internal),
+            allowed_secret_refs=("github_token", "internal_token"),
             granted_secret_scopes=(SecretScope.GIT_PUSH, SecretScope.API_INGRESS),
             allowed_egress_hosts=("github.com",),  # not in internal_token's audience
         )
 
 
-def test_capability_grant_factory_real_tools_dual_key_and_publication_coupling() -> None:
-    # 1. Dual-key dangerous shell check with real execute_bash tool
-    with pytest.raises(CapabilityViolationError, match="Dangerous shell tool requested without"):
-        CapabilityGrantFactory.create_grant(
-            allowed_tools=("execute_bash", "view_file"),
-            allow_dangerous_shell=False,
-        )
-
-    with pytest.raises(
-        CapabilityViolationError, match="allow_dangerous_shell=True granted without"
-    ):
-        CapabilityGrantFactory.create_grant(
-            allowed_tools=("view_file",),
-            allow_dangerous_shell=True,
-        )
-
-    grant_shell = CapabilityGrantFactory.create_grant(
-        allowed_tools=("execute_bash", "view_file"),
-        allow_dangerous_shell=True,
+def test_capability_grant_factory_registry_provenance_and_scope_enforcement() -> None:
+    sec_github = RegisteredSecretDefinition(
+        name="github_token",
+        source=SecretSource.ENV,
+        source_key="GH_TOKEN",
+        required_scope=SecretScope.GIT_PUSH,
+        exposure_policy=SecretExposurePolicy.SANDBOX_ENV,
+        permitted_egress_hosts=("api.github.com", "github.com"),
+        destination_env_var="GH_TOKEN",
     )
-    assert grant_shell.allow_dangerous_shell is True
+    registry = SecretRegistry([sec_github])
+    factory = CapabilityGrantFactory(secret_registry=registry)
 
-    grant_safe = CapabilityGrantFactory.create_grant(allowed_tools=("view_file",))
-    assert grant_safe.allow_dangerous_shell is False
+    # 1. Authoritative registry provenance: Unregistered secret rejected
+    with pytest.raises(CapabilityViolationError, match="is not registered in authoritative"):
+        factory.create_grant(
+            allowed_secret_refs=("unregistered_secret",),
+            granted_secret_scopes=(SecretScope.GIT_PUSH,),
+        )
 
-    # 2. Unknown tool rejection
-    with pytest.raises(CapabilityViolationError, match="is not registered in ToolRegistry"):
-        CapabilityGrantFactory.create_grant(allowed_tools=("unknown_custom_tool",))
+    # 2. Factory enforces required_scope presence in granted_secret_scopes
+    with pytest.raises(CapabilityViolationError, match="requires scope 'git_push'"):
+        factory.create_grant(
+            allowed_secret_refs=("github_token",),
+            granted_secret_scopes=(SecretScope.API_INGRESS,),  # missing GIT_PUSH
+        )
 
-    # 3. Publication coupling check with real execute_github and execute_git tools
+
+def test_capability_grant_factory_real_tools_dual_key_and_publication_coupling() -> None:
     sandbox_sec = RegisteredSecretDefinition(
         name="env_secret",
         source=SecretSource.ENV,
@@ -357,33 +358,67 @@ def test_capability_grant_factory_real_tools_dual_key_and_publication_coupling()
         exposure_policy=SecretExposurePolicy.SANDBOX_ENV,
         destination_env_var="OPENAI_API_KEY",
     )
+    registry = SecretRegistry([sandbox_sec])
+    factory = CapabilityGrantFactory(secret_registry=registry)
+
+    # 1. Dual-key dangerous shell check with real execute_bash tool
+    with pytest.raises(CapabilityViolationError, match="Dangerous shell tool requested without"):
+        factory.create_grant(
+            allowed_tools=("execute_bash", "view_file"),
+            allow_dangerous_shell=False,
+        )
+
+    with pytest.raises(
+        CapabilityViolationError, match="allow_dangerous_shell=True granted without"
+    ):
+        factory.create_grant(
+            allowed_tools=("view_file",),
+            allow_dangerous_shell=True,
+        )
+
+    grant_shell = factory.create_grant(
+        allowed_tools=("execute_bash", "view_file"),
+        allow_dangerous_shell=True,
+    )
+    assert grant_shell.allow_dangerous_shell is True
+
+    grant_safe = factory.create_grant(allowed_tools=("view_file",))
+    assert grant_safe.allow_dangerous_shell is False
+
+    # 2. Unknown tool rejection
+    with pytest.raises(CapabilityViolationError, match="is not registered in ToolRegistry"):
+        factory.create_grant(allowed_tools=("unknown_custom_tool",))
+
+    # 3. Publication coupling check with real execute_github and execute_git tools
     # execute_github rejected when sandbox secret present
     with pytest.raises(CapabilityViolationError, match="automated external publication"):
-        CapabilityGrantFactory.create_grant(
+        factory.create_grant(
             allowed_tools=("execute_github", "view_file"),
-            allowed_secret_defs=(sandbox_sec,),
+            allowed_secret_refs=("env_secret",),
             granted_secret_scopes=(SecretScope.PROVIDER_AUTH,),
         )
     # execute_git allowed with sandbox secret (local workspace write, not external publication)
-    grant_git = CapabilityGrantFactory.create_grant(
+    grant_git = factory.create_grant(
         allowed_tools=("execute_git", "view_file"),
-        allowed_secret_defs=(sandbox_sec,),
+        allowed_secret_refs=("env_secret",),
         granted_secret_scopes=(SecretScope.PROVIDER_AUTH,),
     )
     assert grant_git.allowed_tools == ("execute_git", "view_file")
     # read-only view_file allowed with sandbox secret
-    grant_read_only = CapabilityGrantFactory.create_grant(
+    grant_read_only = factory.create_grant(
         allowed_tools=("view_file",),
-        allowed_secret_defs=(sandbox_sec,),
+        allowed_secret_refs=("env_secret",),
         granted_secret_scopes=(SecretScope.PROVIDER_AUTH,),
     )
     assert grant_read_only.allowed_tools == ("view_file",)
 
 
 def test_scratch_only_and_mandatory_denied_paths() -> None:
+    factory = CapabilityGrantFactory()
+
     # Hostile grant: SCRATCH_ONLY with /workspace and empty denied_paths
     with pytest.raises(CapabilityViolationError, match="denied_paths must include mandatory"):
-        CapabilityGrantFactory.create_grant(
+        factory.create_grant(
             filesystem=FileSystemAccessPolicy.SCRATCH_ONLY,
             allowed_paths=("/workspace",),
             denied_paths=(),
@@ -393,7 +428,7 @@ def test_scratch_only_and_mandatory_denied_paths() -> None:
     with pytest.raises(
         CapabilityViolationError, match="SCRATCH_ONLY filesystem policy only permits"
     ):
-        CapabilityGrantFactory.create_grant(
+        factory.create_grant(
             filesystem=FileSystemAccessPolicy.SCRATCH_ONLY,
             allowed_paths=("/workspace",),
             denied_paths=MANDATORY_DENIED_PATHS,
@@ -401,17 +436,17 @@ def test_scratch_only_and_mandatory_denied_paths() -> None:
 
     # Hostile grant: SCRATCH_ONLY with lexical path traversal ..
     with pytest.raises(CapabilityViolationError, match="forbidden|traversal|SCRATCH_ONLY"):
-        CapabilityGrantFactory.create_grant(
+        factory.create_grant(
             filesystem=FileSystemAccessPolicy.SCRATCH_ONLY,
             allowed_paths=("/workspace/.code-agent/scratch/../../etc",),
         )
     with pytest.raises(CapabilityViolationError, match="forbidden|traversal|SCRATCH_ONLY"):
-        CapabilityGrantFactory.create_grant(
+        factory.create_grant(
             filesystem=FileSystemAccessPolicy.SCRATCH_ONLY,
             allowed_paths=("/workspace/.code-agent/scratch/foo/../../../src/x",),
         )
     with pytest.raises(CapabilityViolationError, match="forbidden|traversal|SCRATCH_ONLY"):
-        CapabilityGrantFactory.create_grant(
+        factory.create_grant(
             filesystem=FileSystemAccessPolicy.SCRATCH_ONLY,
             allowed_paths=("/workspace/.code-agent/scratch/./foo",),
         )
@@ -425,7 +460,7 @@ def test_scratch_only_and_mandatory_denied_paths() -> None:
         )
 
     # Valid scratch paths
-    grant_scratch = CapabilityGrantFactory.create_grant(
+    grant_scratch = factory.create_grant(
         filesystem=FileSystemAccessPolicy.SCRATCH_ONLY,
         allowed_paths=(SCRATCH_PATH_PREFIX, f"{SCRATCH_PATH_PREFIX}/temp"),
     )
@@ -450,6 +485,7 @@ def test_secret_resolver_dual_key_and_broker_resolution() -> None:
         destination_env_var="OPENAI_API_KEY",
     )
     registry = SecretRegistry([broker_sec, sandbox_sec])
+    factory = CapabilityGrantFactory(secret_registry=registry)
 
     env = {"GH_TOKEN": "gh-secret-token"}
     store = {"openai_key_store": "sk-openai-token"}
@@ -458,8 +494,8 @@ def test_secret_resolver_dual_key_and_broker_resolution() -> None:
     redactor = SecretRedactor()
 
     # Valid sandbox resolution
-    grant_sandbox = CapabilityGrantFactory.create_grant(
-        allowed_secret_defs=(sandbox_sec,),
+    grant_sandbox = factory.create_grant(
+        allowed_secret_refs=(SecretRef(name="openai_key"),),
         granted_secret_scopes=(SecretScope.PROVIDER_AUTH,),
     )
     resolved_sandbox = resolver.resolve_for_sandbox(
@@ -473,8 +509,8 @@ def test_secret_resolver_dual_key_and_broker_resolution() -> None:
     assert "[REDACTED]" in redacted_output
 
     # BROKER_ONLY secret rejected from sandbox resolution
-    grant_broker = CapabilityGrantFactory.create_grant(
-        allowed_secret_defs=(broker_sec,),
+    grant_broker = factory.create_grant(
+        allowed_secret_refs=("github_token",),
         granted_secret_scopes=(SecretScope.GIT_PUSH,),
     )
     with pytest.raises(BrokerOnlySecretExposureError, match="BROKER_ONLY"):
@@ -494,17 +530,17 @@ def test_secret_resolver_dual_key_and_broker_resolution() -> None:
 
     # Dual-key authorization failures
     # 1. Missing name in allowed_secret_refs
-    grant_no_name = CapabilityGrantFactory.create_grant(
-        allowed_secret_defs=(),
+    grant_no_name = factory.create_grant(
+        allowed_secret_refs=(),
         granted_secret_scopes=(SecretScope.PROVIDER_AUTH,),
     )
     with pytest.raises(UnauthorizedSecretError, match="not in grant.allowed_secret_refs"):
         resolver.resolve_for_sandbox(SecretRef(name="openai_key"), grant_no_name)
 
-    # 2. Missing scope in granted_secret_scopes
-    grant_no_scope = CapabilityGrantFactory.create_grant(
-        allowed_secret_defs=(sandbox_sec,),
-        granted_secret_scopes=(SecretScope.GIT_PUSH,),  # wrong scope
+    # 2. Direct grant lacking scope
+    grant_no_scope = SandboxCapabilityGrant(
+        allowed_secret_refs=("openai_key",),
+        granted_secret_scopes=frozenset([SecretScope.GIT_PUSH]),
     )
     with pytest.raises(MissingSecretScopeError, match="Grant lacks required scope"):
         resolver.resolve_for_sandbox(SecretRef(name="openai_key"), grant_no_scope)
@@ -580,6 +616,18 @@ def test_ingress_migration_adapter_and_worker_request_migration() -> None:
     assert secret_value not in worker_req.model_dump_json()
     assert secret_value not in repr(worker_req)
 
+    # Raw JSON dictionary secret_refs mixed with legacy secrets
+    mixed_req = WorkerRequest.model_validate(
+        {
+            "task_text": "Run task",
+            "secret_refs": [{"name": "modern_token"}],
+            "secrets": {"legacy_token": "legacy_val"},
+        }
+    )
+    assert len(mixed_req.secret_refs) == 2
+    assert {r.name for r in mixed_req.secret_refs} == {"modern_token", "legacy_token"}
+    assert mixed_req.secrets == {"legacy_token": "legacy_val"}
+
 
 def test_secret_resolver_file_source_and_registry_edge_cases() -> None:
     # FILE source key traversal rejection
@@ -610,7 +658,14 @@ def test_secret_resolver_file_source_and_registry_edge_cases() -> None:
         exposure_policy=SecretExposurePolicy.SANDBOX_FILE,
         destination_mount_path="custom_ca.pem",
     )
+    # Serialization round-trip test
+    dumped = file_sec.model_dump(mode="json")
+    reloaded = RegisteredSecretDefinition.model_validate(dumped)
+    assert reloaded.destination_mount_path == "/run/secrets/code-agent/custom_ca.pem"
+    assert reloaded.name == "ca_cert"
+
     registry = SecretRegistry([file_sec])
+    factory = CapabilityGrantFactory(secret_registry=registry)
 
     # Registry duplicate
     with pytest.raises(ValueError, match="already registered"):
@@ -623,8 +678,8 @@ def test_secret_resolver_file_source_and_registry_edge_cases() -> None:
 
     # File store resolution
     resolver = SecretResolver(registry, file_store={"custom_ca.pem": "CERT-CONTENT-XYZ"})
-    grant = CapabilityGrantFactory.create_grant(
-        allowed_secret_defs=(file_sec,),
+    grant = factory.create_grant(
+        allowed_secret_refs=("ca_cert",),
         granted_secret_scopes=(SecretScope.CUSTOM,),
     )
     resolved = resolver.resolve_for_sandbox(SecretRef(name="ca_cert"), grant)
@@ -660,18 +715,19 @@ def test_resource_limits_and_factory_edge_cases() -> None:
         permitted_egress_hosts=("api.github.com",),
         destination_env_var="GH_TOKEN",
     )
+    factory = CapabilityGrantFactory(secret_registry=SecretRegistry([sec]))
     with pytest.raises(CapabilityViolationError, match="requires non-empty allowed_egress_hosts"):
-        CapabilityGrantFactory.create_grant(
+        factory.create_grant(
             network=NetworkEgressPolicy.ALLOWLISTED_HOSTS,
-            allowed_secret_defs=(sec,),
+            allowed_secret_refs=("github_token",),
             granted_secret_scopes=(SecretScope.GIT_PUSH,),
             allowed_egress_hosts=(),
         )
 
     with pytest.raises(CapabilityViolationError, match="DISABLED network cannot specify"):
-        CapabilityGrantFactory.create_grant(
+        factory.create_grant(
             network=NetworkEgressPolicy.DISABLED,
-            allowed_secret_defs=(sec,),
+            allowed_secret_refs=("github_token",),
             granted_secret_scopes=(SecretScope.GIT_PUSH,),
             allowed_egress_hosts=("api.github.com",),
         )

@@ -2,6 +2,7 @@
 
 from sandbox.capability import (
     ALLOWED_SECRET_ENV_VARS,
+    DEFAULT_SECRET_REGISTRY,
     MANDATORY_DENIED_PATHS,
     SCRATCH_PATH_PREFIX,
     BrokerOnlySecretExposureError,
@@ -60,6 +61,7 @@ from sandbox.workspace import (
 
 __all__ = [
     "ALLOWED_SECRET_ENV_VARS",
+    "DEFAULT_SECRET_REGISTRY",
     "MANDATORY_DENIED_PATHS",
     "SCRATCH_PATH_PREFIX",
     "BrokerOnlySecretExposureError",

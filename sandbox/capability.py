@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from sandbox.secrets import (
     ALLOWED_SECRET_ENV_VARS,
+    DEFAULT_SECRET_REGISTRY,
     BrokerOnlySecretExposureError,
     ConflictingSecretDeclarationError,
     DeprecatedLegacySecretsError,
@@ -226,17 +227,55 @@ class SandboxCapabilityGrant(BaseModel):
 class CapabilityGrantFactory:
     """Server-side deterministic factory that derives and issues SandboxCapabilityGrant."""
 
-    @classmethod
+    def __init__(
+        self,
+        secret_registry: SecretRegistry | None = None,
+        tool_registry: ToolRegistry | None = None,
+    ) -> None:
+        self._secret_registry = (
+            secret_registry if secret_registry is not None else DEFAULT_SECRET_REGISTRY
+        )
+        self._tool_registry = tool_registry if tool_registry is not None else DEFAULT_TOOL_REGISTRY
+
+    def _resolve_and_validate_secrets(
+        self,
+        allowed_secret_refs: Sequence[SecretRef | str],
+        scopes_set: frozenset[SecretScope],
+    ) -> tuple[tuple[str, ...], list[RegisteredSecretDefinition]]:
+        ref_names: list[str] = []
+        canonical_defs: list[RegisteredSecretDefinition] = []
+        for ref in allowed_secret_refs:
+            name = ref.name if isinstance(ref, SecretRef) else ref
+            if not isinstance(name, str) or not name:
+                raise CapabilityViolationError(f"Invalid secret reference: {ref!r}")
+            try:
+                sec_def = self._secret_registry.require(name)
+            except (SecretNotFoundError, LookupError) as err:
+                raise CapabilityViolationError(
+                    f"Secret {name!r} is not registered in authoritative SecretRegistry"
+                ) from err
+
+            if sec_def.required_scope not in scopes_set:
+                raise CapabilityViolationError(
+                    f"Secret {name!r} requires scope {sec_def.required_scope.value!r}, "
+                    f"which is not present in granted_secret_scopes: "
+                    f"{sorted(s.value for s in scopes_set)}"
+                )
+
+            ref_names.append(name)
+            canonical_defs.append(sec_def)
+
+        return tuple(ref_names), canonical_defs
+
     def _validate_tools_and_dangerous_shell(
-        cls,
+        self,
         tools_tuple: tuple[str, ...],
-        tool_registry: ToolRegistry,
         allow_dangerous_shell: bool,
     ) -> list[Any]:
         registered_tools = []
         for tool_name in tools_tuple:
             try:
-                registered_tools.append(tool_registry.require_tool(tool_name))
+                registered_tools.append(self._tool_registry.require_tool(tool_name))
             except (UnknownToolError, LookupError) as err:
                 raise CapabilityViolationError(
                     f"Tool {tool_name!r} is not registered in ToolRegistry"
@@ -322,42 +361,42 @@ class CapabilityGrantFactory:
                     "DISABLED network cannot specify allowed_egress_hosts"
                 )
 
-    @classmethod
     def create_grant(
-        cls,
+        self,
         *,
         network: NetworkEgressPolicy = NetworkEgressPolicy.DISABLED,
         filesystem: FileSystemAccessPolicy = FileSystemAccessPolicy.SCRATCH_ONLY,
         allow_dangerous_shell: bool = False,
+        allowed_paths: Sequence[str] = (),
         allowed_tools: Sequence[str] = (),
-        allowed_secret_defs: Sequence[RegisteredSecretDefinition] = (),
+        allowed_secret_refs: Sequence[SecretRef | str] = (),
         granted_secret_scopes: Iterable[SecretScope] = (),
         allowed_egress_hosts: Sequence[str] = (),
-        allowed_paths: Sequence[str] = (),
         denied_paths: Sequence[str] = MANDATORY_DENIED_PATHS,
         resource_limits: ResourceLimits | None = None,
-        tool_registry: ToolRegistry = DEFAULT_TOOL_REGISTRY,
     ) -> SandboxCapabilityGrant:
         """Create and validate a broker-issued capability grant."""
         tools_tuple = tuple(allowed_tools)
         scopes_set = frozenset(granted_secret_scopes)
-        secret_names_tuple = tuple(s.name for s in allowed_secret_defs)
         normalized_hosts = tuple(normalize_fqdn(h) for h in allowed_egress_hosts)
 
-        registered_tools = cls._validate_tools_and_dangerous_shell(
-            tools_tuple, tool_registry, allow_dangerous_shell
+        ref_names, canonical_defs = self._resolve_and_validate_secrets(
+            allowed_secret_refs, scopes_set
+        )
+        registered_tools = self._validate_tools_and_dangerous_shell(
+            tools_tuple, allow_dangerous_shell
         )
 
         sandbox_secrets = [
             s
-            for s in allowed_secret_defs
+            for s in canonical_defs
             if s.exposure_policy
             in (SecretExposurePolicy.SANDBOX_ENV, SecretExposurePolicy.SANDBOX_FILE)
         ]
 
-        cls._validate_publication_coupling(sandbox_secrets, registered_tools)
-        cls._validate_filesystem_paths(filesystem, allowed_paths, denied_paths)
-        cls._validate_network_and_audience(network, sandbox_secrets, normalized_hosts)
+        self._validate_publication_coupling(sandbox_secrets, registered_tools)
+        self._validate_filesystem_paths(filesystem, allowed_paths, denied_paths)
+        self._validate_network_and_audience(network, sandbox_secrets, normalized_hosts)
 
         return SandboxCapabilityGrant(
             network=network,
@@ -366,7 +405,7 @@ class CapabilityGrantFactory:
             allowed_paths=tuple(allowed_paths),
             denied_paths=tuple(denied_paths),
             allowed_tools=tools_tuple,
-            allowed_secret_refs=secret_names_tuple,
+            allowed_secret_refs=ref_names,
             granted_secret_scopes=scopes_set,
             allowed_egress_hosts=normalized_hosts,
             resource_limits=resource_limits or ResourceLimits(),
@@ -375,6 +414,7 @@ class CapabilityGrantFactory:
 
 __all__ = [
     "ALLOWED_SECRET_ENV_VARS",
+    "DEFAULT_SECRET_REGISTRY",
     "MANDATORY_DENIED_PATHS",
     "SCRATCH_PATH_PREFIX",
     "BrokerOnlySecretExposureError",

@@ -8,8 +8,8 @@ The primary goal of `code-agent` is to safely execute untrusted and semi-trusted
 
 ### Milestone Framing: M28.5A vs. M28.5A.2
 
-- **M28.5A (This Milestone — Foundation & Migration Contracts):** Defines and formalizes the threat boundaries, STRIDE attack analysis, residual risk posture, broker-owned secret registry (`RegisteredSecretDefinition`), broker-issued capability grants (`SandboxCapabilityGrant`), fail-closed resolution engine (`SecretResolver`, `CapabilityGrantFactory`), and migration/deprecation policies for legacy raw credentials.
-- **M28.5A.2 (Follow-On Milestone — Runtime Enforcement):** Wires the capability contracts directly into `DockerNativeAgentExecutor` and `WorkerRequest`, proving live OS-level and Docker runtime containment through integration tests (direct socket bypass denial, TLS ClientHello SNI inspection, OS mount masking for `.git`, and `/run/secrets` lifecycle).
+- **M28.5A (This Milestone — Foundation & Migration Contracts):** Defines and formalizes the threat boundaries, STRIDE attack analysis, residual risk posture, broker-owned secret registry (`RegisteredSecretDefinition`), broker-issued capability grants (`SandboxCapabilityGrant`), fail-closed resolution engine (`SecretResolver`, `CapabilityGrantFactory`), and migration/deprecation policies and sanitization contracts (`sanitize_legacy_ingress_payload`, `LegacyIngressTaskRequest`, `IngressMigrationAdapter`) for legacy raw credentials.
+- **M28.5A.2 (Follow-On Milestone — Runtime Enforcement):** Wires the capability contracts directly into `DockerNativeAgentExecutor` and `WorkerRequest`, wires all production ingress endpoints (API, webhooks, CLI) to drop raw values before persistence, and proves live OS-level and Docker runtime containment through integration tests (direct socket bypass denial, TLS ClientHello SNI inspection, OS mount masking for `.git`, and `/run/secrets` lifecycle).
 
 ---
 
@@ -58,7 +58,7 @@ The primary goal of `code-agent` is to safely execute untrusted and semi-trusted
 1. **Boundary 1: Control Plane**
    - **Components:** FastAPI gateway, Telegram bot ingress, Webhook intake, Temporal workflows, PostgreSQL persistence.
    - **Trust Level:** Highest. Owns authentication keys, database connection strings, and capability issuance.
-   - **Protection:** Task-supplied requests are untrusted input. Ingress adapters strip all raw secret values immediately upon intake into `SecretRef(name=...)`. `SandboxCapabilityGrant` instances are derived strictly by server-side orchestrator policy via `CapabilityGrantFactory` and are never accepted or deserialized from user payloads.
+   - **Protection:** Task-supplied requests are untrusted input. Ingress sanitization contracts (`sanitize_legacy_ingress_payload`, `LegacyIngressTaskRequest`, `IngressMigrationAdapter`) strip all raw secret values into `SecretRef(name=...)` before persistence (with full endpoint wiring in M28.5A.2). `SandboxCapabilityGrant` instances are derived strictly by server-side orchestrator policy via `CapabilityGrantFactory` (bound to authoritative registries) and are never accepted or deserialized from user payloads.
 
 2. **Boundary 2: Sandbox Infrastructure Host**
    - **Components:** Host Linux system, Docker daemon socket (`/var/run/docker.sock`), Temporal worker process.

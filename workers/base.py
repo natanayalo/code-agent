@@ -124,13 +124,19 @@ class WorkerRequest(WorkerModel):
             legacy_secrets = data.get("secrets")
             if isinstance(legacy_secrets, dict) and legacy_secrets:
                 existing_refs = list(data.get("secret_refs", ()))
+                existing_names: set[str] = set()
+                for r in existing_refs:
+                    if isinstance(r, SecretRef):
+                        existing_names.add(r.name)
+                    elif isinstance(r, dict) and "name" in r and isinstance(r["name"], str):
+                        existing_names.add(r["name"])
+                    elif isinstance(r, str):
+                        existing_names.add(r)
+
                 for key in legacy_secrets:
-                    if (
-                        isinstance(key, str)
-                        and key
-                        and not any(r.name == key for r in existing_refs)
-                    ):
+                    if isinstance(key, str) and key and key not in existing_names:
                         existing_refs.append(SecretRef(name=key))
+                        existing_names.add(key)
                 data["secret_refs"] = tuple(existing_refs)
                 data["secrets"] = dict(legacy_secrets)
             else:

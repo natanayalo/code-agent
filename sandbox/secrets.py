@@ -124,7 +124,7 @@ class SecretRef(BaseModel):
 class RegisteredSecretDefinition(BaseModel):
     """Broker-owned, authoritative definition of a secret."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", populate_by_name=True)
 
     name: str = Field(min_length=1)
     source: SecretSource
@@ -133,7 +133,7 @@ class RegisteredSecretDefinition(BaseModel):
     exposure_policy: SecretExposurePolicy = SecretExposurePolicy.BROKER_ONLY
     permitted_egress_hosts: tuple[str, ...] = ()
     destination_env_var: str | None = None
-    destination_mount_path: str | None = None
+    destination_mount_name: str | None = Field(default=None, alias="destination_mount_path")
 
     @field_validator("name")
     @classmethod
@@ -162,14 +162,27 @@ class RegisteredSecretDefinition(BaseModel):
             )
         return v
 
-    @field_validator("destination_mount_path")
+    @field_validator("destination_mount_name", mode="before")
     @classmethod
-    def _validate_mount_path(cls, v: str | None) -> str | None:
+    def _validate_mount_name(cls, v: str | None) -> str | None:
         if v is None:
             return None
-        if not _RE_SAFE_FILENAME.match(v) or ".." in v or v.startswith(("/", ".")):
+        if isinstance(v, str) and v.startswith("/run/secrets/code-agent/"):
+            v = v.removeprefix("/run/secrets/code-agent/")
+        if (
+            not isinstance(v, str)
+            or not _RE_SAFE_FILENAME.match(v)
+            or ".." in v
+            or v.startswith(("/", "."))
+        ):
             raise ValueError(f"Invalid destination mount path safe name: {v!r}")
-        return f"/run/secrets/code-agent/{v}"
+        return v
+
+    @property
+    def destination_mount_path(self) -> str | None:
+        if self.destination_mount_name is None:
+            return None
+        return f"/run/secrets/code-agent/{self.destination_mount_name}"
 
     @model_validator(mode="after")
     def _validate_destination_consistency(self) -> RegisteredSecretDefinition:
@@ -183,17 +196,17 @@ class RegisteredSecretDefinition(BaseModel):
                     f"{self.source_key!r}"
                 )
         if self.exposure_policy == SecretExposurePolicy.BROKER_ONLY:
-            if self.destination_env_var is not None or self.destination_mount_path is not None:
+            if self.destination_env_var is not None or self.destination_mount_name is not None:
                 raise ValueError(
                     "BROKER_ONLY secrets cannot specify sandbox injection destinations"
                 )
         elif self.exposure_policy == SecretExposurePolicy.SANDBOX_ENV:
             if self.destination_env_var is None:
                 raise ValueError("SANDBOX_ENV secrets must specify destination_env_var")
-            if self.destination_mount_path is not None:
+            if self.destination_mount_name is not None:
                 raise ValueError("SANDBOX_ENV secrets cannot specify destination_mount_path")
         elif self.exposure_policy == SecretExposurePolicy.SANDBOX_FILE:
-            if self.destination_mount_path is None:
+            if self.destination_mount_name is None:
                 raise ValueError("SANDBOX_FILE secrets must specify destination_mount_path")
             if self.destination_env_var is not None:
                 raise ValueError("SANDBOX_FILE secrets cannot specify destination_env_var")
@@ -216,9 +229,9 @@ class ResolvedSecret:
     ) -> None:
         self._name = name
         self._scope = scope
-        self._value = value
         self._destination_env_var = destination_env_var
         self._destination_mount_path = destination_mount_path
+        self._value = value
 
     @property
     def name(self) -> str:
@@ -268,6 +281,9 @@ class SecretRegistry:
         if definition is None:
             raise SecretNotFoundError(f"Secret {name!r} not found in registry")
         return definition
+
+
+DEFAULT_SECRET_REGISTRY: Final[SecretRegistry] = SecretRegistry()
 
 
 class SecretResolver:
