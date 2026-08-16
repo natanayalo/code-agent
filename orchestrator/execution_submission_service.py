@@ -386,7 +386,9 @@ def _load_submission_for_task(
         )
         runs = WorkerRunRepository(session).list_by_task(task_id)
         execution_plan = ExecutionPlanRepository(session).get_by_task_id(task_id)
-        decomposed_plan, node_outcomes = restore_decomposed_execution_state(execution_plan)
+        decomposed_plan, node_outcomes = restore_decomposed_execution_state(
+            execution_plan, session=session
+        )
         last_run_dispatch = None
         last_run_result = None
         if runs:

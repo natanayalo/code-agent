@@ -539,6 +539,7 @@ def _map_execution_plan_to_snapshot(execution_plan: Any) -> ExecutionPlanSnapsho
                 output_artifacts=node.output_artifacts,
                 last_attempt_at=node.last_attempt_at,
                 latest_logical_activity_key=getattr(node, "latest_logical_activity_key", None),
+                merged_logical_activity_key=getattr(node, "merged_logical_activity_key", None),
                 terminal_result_schema_version=getattr(
                     node, "terminal_result_schema_version", None
                 ),

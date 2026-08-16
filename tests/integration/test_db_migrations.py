@@ -1174,3 +1174,21 @@ def test_source_observation_id_and_partial_unique_index(tmp_path: Path) -> None:
     assert "memory_observations" not in inspector.get_table_names()
     assert "source_observation_id" not in _column_names(inspector, "memory_admission_decisions")
     assert "source_observation_id" not in _column_names(inspector, "memory_proposals")
+
+
+def test_execution_plan_node_merged_marker_migration(tmp_path: Path) -> None:
+    """Verify that 20260816_0049 adds merged_logical_activity_key and downgrade drops it."""
+    database_path = tmp_path / "merged_marker.db"
+    config = Config(str(Path("alembic.ini").resolve()))
+    config.set_main_option("script_location", str(Path("db/migrations").resolve()))
+    config.set_main_option("sqlalchemy.url", f"sqlite:///{database_path}")
+
+    command.upgrade(config, "head")
+
+    engine = create_engine(f"sqlite:///{database_path}")
+    inspector = inspect(engine)
+    assert "merged_logical_activity_key" in _column_names(inspector, "execution_plan_nodes")
+
+    command.downgrade(config, "20260728_0048")
+    inspector = inspect(engine)
+    assert "merged_logical_activity_key" not in _column_names(inspector, "execution_plan_nodes")

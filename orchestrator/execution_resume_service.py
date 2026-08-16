@@ -5,8 +5,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from db.enums import ExecutionPlanNodeStatus, TimelineEventType
+from db.enums import TimelineEventType
 from orchestrator.state import DecomposedTaskPlan, NodeOutcome, TaskPlan, TaskSpec
+from repositories.sqlalchemy_plan import ExecutionPlanRepository
 
 logger = logging.getLogger("orchestrator.execution")
 
@@ -200,8 +201,118 @@ def validate_decomposed_plan_projection(
         _validate_single_node_projection(sql_node, model_node, seq_idx)
 
 
+def _reconstruct_single_node_outcome(
+    node: Any,
+    attempt: Any,
+    marker: str,
+) -> NodeOutcome:
+    if attempt is not None and attempt.result_payload and isinstance(attempt.result_payload, dict):
+        node_outcome_data = attempt.result_payload.get("node_outcome")
+        if not isinstance(node_outcome_data, dict):
+            raise RuntimeError(
+                f"Malformed result_payload for node {node.node_id} attempt with key '{marker}'"
+            )
+        outcome = NodeOutcome.model_validate(node_outcome_data)
+        return outcome.model_copy(
+            update={
+                "dependencies": list(node.depends_on or []),
+                "logical_activity_key": marker,
+                "result_digest": attempt.result_digest,
+                "replayed": False,
+            }
+        )
+    if (
+        marker == getattr(node, "latest_logical_activity_key", None)
+        and getattr(node, "terminal_result_payload", None)
+        and isinstance(node.terminal_result_payload, dict)
+    ):
+        node_outcome_data = node.terminal_result_payload.get("node_outcome")
+        if not isinstance(node_outcome_data, dict):
+            raise RuntimeError(
+                f"Malformed terminal_result_payload for node {node.node_id} with key '{marker}'"
+            )
+        outcome = NodeOutcome.model_validate(node_outcome_data)
+        return outcome.model_copy(
+            update={
+                "dependencies": list(node.depends_on or []),
+                "logical_activity_key": marker,
+                "result_digest": getattr(node, "terminal_result_digest", None),
+                "replayed": False,
+            }
+        )
+    raise RuntimeError(
+        f"Cannot reconstruct merged outcome for node {node.node_id}: marker '{marker}' "
+        "has no durable attempt or terminal payload."
+    )
+
+
+def restore_merged_node_outcomes(
+    execution_plan: Any,
+    session: Any = None,
+) -> list[NodeOutcome]:
+    """Restore marker-confirmed merged node outcomes from durable relational state.
+
+    Authority contract:
+    - merged_logical_activity_key on ExecutionPlanNode identifies which attempt reached parent
+      state.
+    - ExecutionPlanNodeAttempt.result_payload is the immutable authority for worker attempts.
+    - ExecutionPlanNode.terminal_result_payload is used only when
+      marker == latest_logical_activity_key (supporting parent-generated terminal outcomes such
+      as skips or synthetic missing evidence).
+    - If a marker cannot be matched to a durable attempt or terminal payload, fails closed.
+    """
+    if execution_plan is None or not getattr(execution_plan, "nodes", None):
+        return []
+
+    merged_nodes = [
+        node for node in execution_plan.nodes if getattr(node, "merged_logical_activity_key", None)
+    ]
+    if not merged_nodes:
+        return []
+
+    plan_node_ids = [node.id for node in merged_nodes if getattr(node, "id", None)]
+    markers = [
+        node.merged_logical_activity_key
+        for node in merged_nodes
+        if node.merged_logical_activity_key
+    ]
+
+    attempts_by_node_and_key: dict[tuple[str, str], Any] = {}
+    if session is not None and plan_node_ids and markers:
+        attempts = ExecutionPlanRepository(session).get_attempts_by_activity_keys(
+            plan_node_ids=plan_node_ids,
+            logical_activity_keys=markers,
+        )
+        for attempt in attempts:
+            if attempt.logical_activity_key:
+                attempts_by_node_and_key[(attempt.plan_node_id, attempt.logical_activity_key)] = (
+                    attempt
+                )
+    else:
+        for node in merged_nodes:
+            node_id_val = getattr(node, "id", None)
+            for attempt in getattr(node, "attempts", []) or []:
+                key = getattr(attempt, "logical_activity_key", None)
+                if node_id_val and key:
+                    attempts_by_node_and_key[(node_id_val, key)] = attempt
+
+    outcomes: list[NodeOutcome] = []
+    for node in merged_nodes:
+        marker = node.merged_logical_activity_key
+        node_id_val = getattr(node, "id", None)
+        attempt_match: Any = (
+            attempts_by_node_and_key.get((node_id_val, marker))
+            if (node_id_val and marker)
+            else None
+        )
+        outcomes.append(_reconstruct_single_node_outcome(node, attempt_match, marker))
+
+    return outcomes
+
+
 def restore_decomposed_execution_state(
     execution_plan: Any,
+    session: Any = None,
 ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
     """Rebuild durable DAG state from persisted execution-plan nodes."""
     if execution_plan is None or not execution_plan.nodes:
@@ -233,11 +344,8 @@ def restore_decomposed_execution_state(
         )
         return None, []
 
-    outcomes = [
-        outcome.model_dump(mode="json")
-        for node in execution_plan.nodes
-        if (outcome := _restored_node_outcome(node)) is not None
-    ]
+    merged_outcomes = restore_merged_node_outcomes(execution_plan, session=session)
+    outcomes = [outcome.model_dump(mode="json") for outcome in merged_outcomes]
     return decomposed_plan.model_dump(mode="json"), outcomes
 
 
@@ -263,45 +371,3 @@ def _aggregation_role(node_kind: str) -> str:
     if node_kind == "verify":
         return "validation"
     return "mutation"
-
-
-def _restored_node_outcome(node: Any) -> NodeOutcome | None:
-    if node.status not in _TERMINAL_NODE_STATUSES:
-        return None
-    try:
-        return NodeOutcome.model_validate(
-            {
-                "node_id": node.node_id,
-                "status": node.status.value,
-                "result": {
-                    "status": (
-                        "success" if node.status is ExecutionPlanNodeStatus.COMPLETED else "failure"
-                    ),
-                    "summary": node.result_summary,
-                    "failure_kind": node.failure_kind,
-                    "commands_run": [],
-                    "files_changed": list(node.changed_files or []),
-                    "test_results": (node.verification_outcome or {}).get("test_results", []),
-                    "artifacts": list(node.output_artifacts or []),
-                },
-                "dependencies": list(node.depends_on or []),
-                "attempts": max(node.retry_count + 1, 1),
-            }
-        )
-    except ValueError:
-        logger.warning(
-            "Skipping invalid persisted node outcome during DAG restore.",
-            extra={"plan_id": node.plan_id, "node_id": node.node_id},
-            exc_info=True,
-        )
-        return None
-
-
-_TERMINAL_NODE_STATUSES = frozenset(
-    {
-        ExecutionPlanNodeStatus.BLOCKED,
-        ExecutionPlanNodeStatus.COMPLETED,
-        ExecutionPlanNodeStatus.FAILED,
-        ExecutionPlanNodeStatus.SKIPPED,
-    }
-)

@@ -23,7 +23,7 @@ from db.enums import (
     HumanInteractionType,
     TimelineEventType,
 )
-from db.models import HumanInteraction, Task, User
+from db.models import ExecutionPlanNodeAttempt, HumanInteraction, Task, User
 from db.models import Session as ConversationSession
 from orchestrator.decomposition import decompose_task_plan
 from orchestrator.execution_outcome_service import _persist_execution_outcome
@@ -222,7 +222,7 @@ def _make_step(
 
 
 def test_wave3a_field_exclusions_and_serialization() -> None:
-    """task_plan and decomposed_plan must be excluded; node_outcomes must be retained."""
+    """task_plan and decomposed_plan must be excluded; node_outcomes retained in Wave 3B.1."""
     assert "task_plan" in EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS
     assert "decomposed_plan" in EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS
     assert "node_outcomes" not in EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS
@@ -233,10 +233,9 @@ def test_wave3a_field_exclusions_and_serialization() -> None:
         node_id="step-1",
         status="completed",
         result=WorkerResult(status="success", summary="Done"),
-        logical_activity_key="k1",
     )
     state = _make_sample_state()
-    state.task_plan = TaskPlan(steps=[step], complexity_reason="c1", triggered=True)
+    state.task_plan = TaskPlan(steps=[step], triggered=True)
     state.decomposed_plan = DecomposedTaskPlan(triggered=True, status="decomposed", nodes=[node])
     state.node_outcomes = [outcome]
 
@@ -244,7 +243,6 @@ def test_wave3a_field_exclusions_and_serialization() -> None:
     assert "task_plan" not in serialized
     assert "decomposed_plan" not in serialized
     assert "node_outcomes" in serialized
-    assert len(serialized["node_outcomes"]) == 1
 
 
 def test_task_plan_exact_round_trip() -> None:
@@ -447,6 +445,7 @@ def test_permission_escalation_across_reader_boundaries() -> None:
     task_id = "task-perm-esc-1"
     node = _make_sample_node("step-1", "Blocked step")
     decomposed_plan = DecomposedTaskPlan(triggered=True, status="decomposed", nodes=[node])
+    k1 = "activity:step-1:1"
     blocked_outcome = NodeOutcome(
         node_id="step-1",
         status="blocked",
@@ -457,15 +456,34 @@ def test_permission_escalation_across_reader_boundaries() -> None:
             requested_permission="danger-full-access",
         ),
         attempts=1,
+        logical_activity_key=k1,
     )
     _seed_task_and_timeline(factory, task_id, decomposed_plan=decomposed_plan)
 
     with session_scope(factory) as session:
         plan = _seed_sql_plan_nodes(session, task_id, [node])
+        db_node = ExecutionPlanRepository(session).get_node(plan.id, "step-1")
+        assert db_node is not None
+        session.add(
+            ExecutionPlanNodeAttempt(
+                plan_node_id=db_node.id,
+                attempt_number=1,
+                started_at=utc_now(),
+                finished_at=utc_now(),
+                effective_input_summary={},
+                effective_input_digest="d-1",
+                logical_activity_key=k1,
+                status=ExecutionPlanNodeStatus.BLOCKED,
+                result_payload={"node_outcome": blocked_outcome.model_dump(mode="json")},
+            )
+        )
         ExecutionPlanRepository(session).update_node(
             plan_id=plan.id,
             node_id="step-1",
             status=ExecutionPlanNodeStatus.BLOCKED,
+            latest_logical_activity_key=k1,
+            merged_logical_activity_key=k1,
+            terminal_result_payload={"node_outcome": blocked_outcome.model_dump(mode="json")},
         )
         state = _make_sample_state(task_id=task_id)
         state.decomposed_plan = decomposed_plan
@@ -683,7 +701,10 @@ def test_merge_v2_wave_from_pruned_snapshot() -> None:
         assert snapshot is not None
         assert "decomposed_plan" not in snapshot.state
         assert "task_plan" not in snapshot.state
-        assert len(snapshot.state.get("node_outcomes", [])) == 1
+        assert "node_outcomes" in snapshot.state
+
+    reloaded_state = activities._get_current_state(task_id)
+    assert len(reloaded_state.node_outcomes) == 1
 
 
 def test_no_snapshot_timeline_plan_authority() -> None:

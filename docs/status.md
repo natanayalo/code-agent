@@ -136,11 +136,12 @@ Temporal migration and rollback record is in the
   broker remains deferred
 - lifecycle data currently overlaps across Temporal history/workflow state,
   serialized `TemporalTaskState`, task/product projections, execution-plan
-  rows, and timeline events; Wave 1, Wave 2, and Wave 3A have pruned ephemeral
-  `progress_updates`, candidate fields (`friction_reports`, `errors`, `session_state_update`,
-  `scout_phase_results`, `memory_to_persist`, `timeline_events`), and DAG plan models
-  (`task_plan`, `decomposed_plan`) from intermediate snapshots while relational projections
-  and timeline authority remain intact
+  rows, and timeline events; Wave 1, Wave 2, and Wave 3A have pruned
+  ephemeral `progress_updates`, candidate fields (`friction_reports`, `errors`,
+  `session_state_update`, `scout_phase_results`, `memory_to_persist`, `timeline_events`),
+  and DAG plan models (`task_plan`, `decomposed_plan`) from snapshots; Wave 3B.1
+  establishes relational merge markers and attempt-aware rehydration with dual-write
+  preservation of `node_outcomes` in snapshots (Wave 3B.2 will prune snapshot serialization)
 - the worker boundary is currently terminal `WorkerRequest -> WorkerResult`;
   provider-neutral streaming `AgentEvent` and `ContextEnvelope` contracts are
   planned rather than available today
@@ -150,10 +151,7 @@ Temporal migration and rollback record is in the
 
 ## Next slices only
 
-1. Continue M28.5B Wave 3B state reduction for node outcomes (`node_outcomes`)
-   establishing relational merge markers (`execution_plan_nodes.merged_logical_activity_key`)
-   before pruning `node_outcomes` from snapshots, following the field-level state ownership
-   contract in [`docs/architecture/state_ownership.md`](architecture/state_ownership.md).
+1. Execute Milestone M28.5B Wave 3B.2 to safely prune `node_outcomes` snapshot serialization following the Wave 3B.1 relational authority deployment.
 2. Continue M28.5 execution-architecture foundation work (M28.5A sandbox broker/threat model,
    M28.5C `AgentEvent`, M28.5D `ContextEnvelope`).
 3. Use the M28 report as a scoped safety/effectiveness signal only; do not
