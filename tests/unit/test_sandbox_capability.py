@@ -6,6 +6,8 @@ import pytest
 from pydantic import ValidationError
 
 from sandbox.capability import (
+    MANDATORY_DENIED_PATHS,
+    SCRATCH_PATH_PREFIX,
     BrokerOnlySecretExposureError,
     CapabilityGrantFactory,
     CapabilityViolationError,
@@ -32,6 +34,7 @@ from sandbox.capability import (
     parse_memory_bytes,
 )
 from sandbox.redact import SecretRedactor
+from workers.base import WorkerRequest
 
 
 def test_resource_limits_parsing_and_bounds() -> None:
@@ -42,9 +45,11 @@ def test_resource_limits_parsing_and_bounds() -> None:
     assert limits.pids_limit == 256
     assert limits.timeout_seconds == 600
 
-    # String memory parsing
+    # String memory parsing (integral and fractional)
     parsed_1g = ResourceLimits(memory_bytes="1g")  # type: ignore[arg-type]
     assert parsed_1g.memory_bytes == 1073741824
+    parsed_1_5g = ResourceLimits(memory_bytes="1.5g")  # type: ignore[arg-type]
+    assert parsed_1_5g.memory_bytes == int(1.5 * 1024 * 1024 * 1024)
     parsed_512m = ResourceLimits(memory_bytes="512MiB")  # type: ignore[arg-type]
     assert parsed_512m.memory_bytes == 512 * 1024 * 1024
 
@@ -75,6 +80,7 @@ def test_resource_limits_parsing_and_bounds() -> None:
 
 def test_parse_memory_bytes_edge_cases() -> None:
     assert parse_memory_bytes(100 * 1024 * 1024) == 100 * 1024 * 1024
+    assert parse_memory_bytes("1.5gb") == int(1.5 * 1000 * 1000 * 1000)
     with pytest.raises(ValueError, match="cannot be empty"):
         parse_memory_bytes("")
     with pytest.raises(ValueError, match="Unsupported memory limit type"):
@@ -108,13 +114,11 @@ def test_secret_ref_validation_and_immutability() -> None:
 
     # Metadata bounds and duplicate keys
     with pytest.raises(ValidationError):
-        SecretRef(name="github_token", metadata=(("k", "v1"), ("k", "v2")))  # duplicate key
+        SecretRef(name="github_token", metadata=(("k", "v1"), ("k", "v2")))
     with pytest.raises(ValidationError):
-        SecretRef(
-            name="github_token", metadata=tuple((f"k{i}", "v") for i in range(10))
-        )  # > 8 entries
+        SecretRef(name="github_token", metadata=tuple((f"k{i}", "v") for i in range(10)))
     with pytest.raises(ValidationError):
-        SecretRef(name="github_token", metadata=(("k", "v\nwith_control_char"),))  # control char
+        SecretRef(name="github_token", metadata=(("k", "v\nwith_control_char"),))
 
 
 def test_registered_secret_definition_consistency() -> None:
@@ -220,6 +224,7 @@ def test_sandbox_capability_grant_defaults_and_cross_field() -> None:
     assert grant.allowed_secret_refs == ()
     assert grant.granted_secret_scopes == frozenset()
     assert grant.allowed_egress_hosts == ()
+    assert grant.denied_paths == MANDATORY_DENIED_PATHS
 
     # Immutability
     with pytest.raises(ValidationError):
@@ -234,6 +239,10 @@ def test_sandbox_capability_grant_defaults_and_cross_field() -> None:
         SandboxCapabilityGrant(
             network=NetworkEgressPolicy.DISABLED, allowed_egress_hosts=("api.github.com",)
         )
+
+    # Mandatory denied paths cannot be removed
+    with pytest.raises(ValidationError, match="denied_paths must include mandatory"):
+        SandboxCapabilityGrant(denied_paths=("/custom",))
 
 
 def test_capability_grant_factory_network_and_secret_audience() -> None:
@@ -292,8 +301,6 @@ def test_capability_grant_factory_network_and_secret_audience() -> None:
         )
 
     # 4. Multi-secret audience intersection:
-    # Intersection of ("api.github.com", "github.com") and
-    # ("api.github.com", "internal.service.com") is ("api.github.com",)
     grant_multi = CapabilityGrantFactory.create_grant(
         network=NetworkEgressPolicy.ALLOWLISTED_HOSTS,
         allowed_secret_defs=(sec_github, sec_internal),
@@ -311,17 +318,36 @@ def test_capability_grant_factory_network_and_secret_audience() -> None:
         )
 
 
-def test_capability_grant_factory_dangerous_shell_and_publication_coupling() -> None:
-    # Dangerous shell bidirectional check
+def test_capability_grant_factory_real_tools_dual_key_and_publication_coupling() -> None:
+    # 1. Dual-key dangerous shell check with real execute_bash tool
+    with pytest.raises(CapabilityViolationError, match="Dangerous shell tool requested without"):
+        CapabilityGrantFactory.create_grant(
+            allowed_tools=("execute_bash", "view_file"),
+            allow_dangerous_shell=False,
+        )
+
+    with pytest.raises(
+        CapabilityViolationError, match="allow_dangerous_shell=True granted without"
+    ):
+        CapabilityGrantFactory.create_grant(
+            allowed_tools=("view_file",),
+            allow_dangerous_shell=True,
+        )
+
     grant_shell = CapabilityGrantFactory.create_grant(
-        allowed_tools=("execute_shell", "file_editor")
+        allowed_tools=("execute_bash", "view_file"),
+        allow_dangerous_shell=True,
     )
     assert grant_shell.allow_dangerous_shell is True
 
-    grant_safe = CapabilityGrantFactory.create_grant(allowed_tools=("file_editor",))
+    grant_safe = CapabilityGrantFactory.create_grant(allowed_tools=("view_file",))
     assert grant_safe.allow_dangerous_shell is False
 
-    # Publication coupling check: sandbox secrets cannot combine with automated publication tools
+    # 2. Unknown tool rejection
+    with pytest.raises(CapabilityViolationError, match="is not registered in ToolRegistry"):
+        CapabilityGrantFactory.create_grant(allowed_tools=("unknown_custom_tool",))
+
+    # 3. Publication coupling check with real execute_github and execute_git tools
     sandbox_sec = RegisteredSecretDefinition(
         name="env_secret",
         source=SecretSource.ENV,
@@ -330,23 +356,66 @@ def test_capability_grant_factory_dangerous_shell_and_publication_coupling() -> 
         exposure_policy=SecretExposurePolicy.SANDBOX_ENV,
         destination_env_var="OPENAI_API_KEY",
     )
-    # Git publication tool rejected
+    # execute_github rejected when sandbox secret present
     with pytest.raises(CapabilityViolationError, match="automated external publication"):
         CapabilityGrantFactory.create_grant(
-            allowed_tools=("execute_git", "file_editor"),
+            allowed_tools=("execute_github", "view_file"),
             allowed_secret_defs=(sandbox_sec,),
             granted_secret_scopes=(SecretScope.PROVIDER_AUTH,),
         )
-    # Non-Git publication tool rejected
+    # execute_git rejected when sandbox secret present
     with pytest.raises(CapabilityViolationError, match="automated external publication"):
         CapabilityGrantFactory.create_grant(
-            allowed_tools=("upload_artifact", "file_editor"),
+            allowed_tools=("execute_git", "view_file"),
             allowed_secret_defs=(sandbox_sec,),
             granted_secret_scopes=(SecretScope.PROVIDER_AUTH,),
         )
+    # read-only view_file allowed with sandbox secret
+    grant_read_only = CapabilityGrantFactory.create_grant(
+        allowed_tools=("view_file",),
+        allowed_secret_defs=(sandbox_sec,),
+        granted_secret_scopes=(SecretScope.PROVIDER_AUTH,),
+    )
+    assert grant_read_only.allowed_tools == ("view_file",)
 
 
-def test_secret_resolver_dual_key_authorization_and_exposure() -> None:
+def test_scratch_only_and_mandatory_denied_paths() -> None:
+    # Hostile grant: SCRATCH_ONLY with /workspace and empty denied_paths
+    with pytest.raises(CapabilityViolationError, match="denied_paths must include mandatory"):
+        CapabilityGrantFactory.create_grant(
+            filesystem=FileSystemAccessPolicy.SCRATCH_ONLY,
+            allowed_paths=("/workspace",),
+            denied_paths=(),
+        )
+
+    # Hostile grant: SCRATCH_ONLY with /workspace even with valid denied_paths
+    with pytest.raises(
+        CapabilityViolationError, match="SCRATCH_ONLY filesystem policy only permits"
+    ):
+        CapabilityGrantFactory.create_grant(
+            filesystem=FileSystemAccessPolicy.SCRATCH_ONLY,
+            allowed_paths=("/workspace",),
+            denied_paths=MANDATORY_DENIED_PATHS,
+        )
+
+    # Direct model validation for SCRATCH_ONLY
+    with pytest.raises(ValidationError, match="SCRATCH_ONLY filesystem policy only permits"):
+        SandboxCapabilityGrant(
+            filesystem=FileSystemAccessPolicy.SCRATCH_ONLY,
+            allowed_paths=("/workspace/src",),
+            denied_paths=MANDATORY_DENIED_PATHS,
+        )
+
+    # Valid scratch paths
+    grant_scratch = CapabilityGrantFactory.create_grant(
+        filesystem=FileSystemAccessPolicy.SCRATCH_ONLY,
+        allowed_paths=(SCRATCH_PATH_PREFIX, f"{SCRATCH_PATH_PREFIX}/temp"),
+    )
+    assert grant_scratch.filesystem == FileSystemAccessPolicy.SCRATCH_ONLY
+    assert len(grant_scratch.allowed_paths) == 2
+
+
+def test_secret_resolver_dual_key_and_broker_resolution() -> None:
     broker_sec = RegisteredSecretDefinition(
         name="github_token",
         source=SecretSource.ENV,
@@ -393,9 +462,15 @@ def test_secret_resolver_dual_key_authorization_and_exposure() -> None:
     with pytest.raises(BrokerOnlySecretExposureError, match="BROKER_ONLY"):
         resolver.resolve_for_sandbox(SecretRef(name="github_token"), grant_broker)
 
-    # Valid broker resolution
-    resolved_broker = resolver.resolve_for_broker(broker_sec, grant_broker)
-    assert resolved_broker.reveal_secret_value() == "gh-secret-token"
+    # Valid broker resolution via SecretRef and str name through authoritative registry
+    resolved_broker_ref = resolver.resolve_for_broker(SecretRef(name="github_token"), grant_broker)
+    assert resolved_broker_ref.reveal_secret_value() == "gh-secret-token"
+
+    resolved_broker_str = resolver.resolve_for_broker("github_token", grant_broker)
+    assert resolved_broker_str.reveal_secret_value() == "gh-secret-token"
+
+    with pytest.raises(SecretNotFoundError, match="not found in registry"):
+        resolver.resolve_for_broker("unregistered_token", grant_broker)
 
     # Dual-key authorization failures
     # 1. Missing name in allowed_secret_refs
@@ -414,13 +489,39 @@ def test_secret_resolver_dual_key_authorization_and_exposure() -> None:
     with pytest.raises(MissingSecretScopeError, match="Grant lacks required scope"):
         resolver.resolve_for_sandbox(SecretRef(name="openai_key"), grant_no_scope)
 
-    # 3. Missing secret in store
-    empty_resolver = SecretResolver(registry, env={}, secret_store={})
-    with pytest.raises(SecretNotFoundError):
-        empty_resolver.resolve_for_sandbox(SecretRef(name="openai_key"), grant_sandbox)
+
+def test_legacy_ingress_task_request_malformed_input_sanitization() -> None:
+    sentinel_secret = "super-secret-token-xyz-123"
+
+    # 1. String malformed secrets input
+    with pytest.raises(ValidationError) as exc_str:
+        LegacyIngressTaskRequest(
+            task_text="Run task",
+            secrets=sentinel_secret,  # type: ignore[arg-type]
+        )
+    assert sentinel_secret not in str(exc_str.value)
+    assert sentinel_secret not in repr(exc_str.value)
+
+    # 2. List malformed secrets input
+    with pytest.raises(ValidationError) as exc_list:
+        LegacyIngressTaskRequest(
+            task_text="Run task",
+            secrets=[sentinel_secret],  # type: ignore[arg-type]
+        )
+    assert sentinel_secret not in str(exc_list.value)
+    assert sentinel_secret not in repr(exc_list.value)
+
+    # 3. Invalid key dict secrets input
+    with pytest.raises(ValidationError) as exc_dict:
+        LegacyIngressTaskRequest(
+            task_text="Run task",
+            secrets={"invalid/key/name": sentinel_secret},
+        )
+    assert sentinel_secret not in str(exc_dict.value)
+    assert sentinel_secret not in repr(exc_dict.value)
 
 
-def test_ingress_migration_adapter_and_error_sanitization() -> None:
+def test_ingress_migration_adapter_and_worker_request_migration() -> None:
     secret_value = "super-secret-token-xyz"
     legacy_req = LegacyIngressTaskRequest(
         task_text="Run task",
@@ -448,14 +549,15 @@ def test_ingress_migration_adapter_and_error_sanitization() -> None:
     with pytest.raises(DeprecatedLegacySecretsError, match="no longer accepted"):
         IngressMigrationAdapter.adapt(legacy_req, reject_legacy_secrets=True)
 
-    # Malformed legacy input error sanitization test
-    with pytest.raises(ValidationError) as exc_info:
-        LegacyIngressTaskRequest(
-            task_text="Run task",
-            secrets={"invalid/key/name": secret_value},
-        )
-    # The error message should not leak the secret value
-    assert secret_value not in str(exc_info.value)
+    # WorkerRequest legacy stripping
+    worker_req = WorkerRequest(
+        task_text="Run worker task",
+        secrets={"github_token": secret_value},  # type: ignore[call-arg]
+    )
+    assert worker_req.secret_refs == (SecretRef(name="github_token"),)
+    assert worker_req.secrets == {"github_token": "github_token"}
+    assert secret_value not in worker_req.model_dump_json()
+    assert secret_value not in repr(worker_req)
 
 
 def test_secret_resolver_file_source_and_registry_edge_cases() -> None:

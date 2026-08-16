@@ -30,34 +30,22 @@ from sandbox.secrets import (
     UnauthorizedSecretError,
     normalize_fqdn,
 )
+from tools.registry import (
+    DEFAULT_TOOL_REGISTRY,
+    ToolCapabilityTag,
+    ToolRegistry,
+    UnknownToolError,
+)
 
-DANGEROUS_SHELL_TOOLS: Final[frozenset[str]] = frozenset(
-    {"execute_shell", "run_shell_command", "bash", "sh"}
+MANDATORY_DENIED_PATHS: Final[tuple[str, ...]] = (
+    "/workspace/.git/hooks",
+    "/workspace/.git/config",
 )
-DEFAULT_AUTOMATED_PUBLICATION_TOOLS: Final[frozenset[str]] = frozenset(
-    {
-        "execute_git",
-        "git_push",
-        "create_pr",
-        "upload_artifact",
-        "publish_release",
-        "send_external_message",
-    }
-)
+SCRATCH_PATH_PREFIX: Final[str] = "/workspace/.code-agent/scratch"
 
 
 class CapabilityViolationError(RuntimeError):
     """Raised when a capability grant or execution request violates security policy."""
-
-
-class ToolCapabilityTag(enum.StrEnum):
-    """Semantic capability tags for tools."""
-
-    READ_ONLY = "read_only"
-    WORKSPACE_WRITE = "workspace_write"
-    DANGEROUS_SHELL = "dangerous_shell"
-    AUTOMATED_EXTERNAL_PUBLICATION = "automated_external_publication"
-    NETWORK_EGRESS = "network_egress"
 
 
 class NetworkEgressPolicy(enum.StrEnum):
@@ -77,7 +65,10 @@ class FileSystemAccessPolicy(enum.StrEnum):
 
 
 def parse_memory_bytes(value: str | int) -> int:
-    """Parse human-readable memory string or integer into exact bytes with bounds checking."""
+    """Parse human-readable memory string or integer into exact bytes with bounds checking.
+
+    Supports integral numbers as well as fractional units (e.g. '1.5g' -> 1610612736 bytes).
+    """
     if isinstance(value, int):
         bytes_val = value
     elif isinstance(value, str):
@@ -173,7 +164,7 @@ class SandboxCapabilityGrant(BaseModel):
     filesystem: FileSystemAccessPolicy = FileSystemAccessPolicy.SCRATCH_ONLY
     allow_dangerous_shell: bool = False
     allowed_paths: tuple[str, ...] = ()
-    denied_paths: tuple[str, ...] = ("/workspace/.git/hooks", "/workspace/.git/config")
+    denied_paths: tuple[str, ...] = MANDATORY_DENIED_PATHS
     allowed_tools: tuple[str, ...] = ()
     allowed_secret_refs: tuple[str, ...] = ()
     granted_secret_scopes: frozenset[SecretScope] = frozenset()
@@ -187,6 +178,22 @@ class SandboxCapabilityGrant(BaseModel):
 
     @model_validator(mode="after")
     def _validate_cross_fields(self) -> SandboxCapabilityGrant:
+        # 1. Mandatory denied paths invariant
+        if not set(MANDATORY_DENIED_PATHS).issubset(set(self.denied_paths)):
+            raise ValueError(
+                f"denied_paths must include mandatory denied paths {MANDATORY_DENIED_PATHS}"
+            )
+
+        # 2. Filesystem path invariants
+        if self.filesystem == FileSystemAccessPolicy.SCRATCH_ONLY:
+            for path in self.allowed_paths:
+                if not (path == SCRATCH_PATH_PREFIX or path.startswith(SCRATCH_PATH_PREFIX + "/")):
+                    raise ValueError(
+                        f"SCRATCH_ONLY filesystem policy only permits paths under "
+                        f"{SCRATCH_PATH_PREFIX}, got {path!r}"
+                    )
+
+        # 3. Network egress invariants
         if self.network == NetworkEgressPolicy.DISABLED:
             if self.allowed_egress_hosts:
                 raise ValueError("DISABLED network cannot specify allowed_egress_hosts")
@@ -202,19 +209,117 @@ class CapabilityGrantFactory:
     """Server-side deterministic factory that derives and issues SandboxCapabilityGrant."""
 
     @classmethod
+    def _validate_tools_and_dangerous_shell(
+        cls,
+        tools_tuple: tuple[str, ...],
+        tool_registry: ToolRegistry,
+        allow_dangerous_shell: bool,
+    ) -> list[Any]:
+        registered_tools = []
+        for tool_name in tools_tuple:
+            try:
+                registered_tools.append(tool_registry.require_tool(tool_name))
+            except (UnknownToolError, LookupError) as err:
+                raise CapabilityViolationError(
+                    f"Tool {tool_name!r} is not registered in ToolRegistry"
+                ) from err
+
+        has_dangerous_tool = any(
+            ToolCapabilityTag.DANGEROUS_SHELL in tool.capability_tags for tool in registered_tools
+        )
+        if has_dangerous_tool and not allow_dangerous_shell:
+            raise CapabilityViolationError(
+                "Dangerous shell tool requested without explicit allow_dangerous_shell=True grant"
+            )
+        if allow_dangerous_shell and not has_dangerous_tool:
+            raise CapabilityViolationError(
+                "allow_dangerous_shell=True granted without dangerous shell tools in allowed_tools"
+            )
+        return registered_tools
+
+    @classmethod
+    def _validate_publication_coupling(
+        cls,
+        sandbox_secrets: list[RegisteredSecretDefinition],
+        registered_tools: list[Any],
+    ) -> None:
+        if sandbox_secrets:
+            has_pub_tool = any(
+                ToolCapabilityTag.AUTOMATED_EXTERNAL_PUBLICATION in tool.capability_tags
+                for tool in registered_tools
+            )
+            if has_pub_tool:
+                raise CapabilityViolationError(
+                    "Sandbox-exposed secrets cannot be combined with "
+                    "automated external publication capabilities"
+                )
+
+    @classmethod
+    def _validate_filesystem_paths(
+        cls,
+        filesystem: FileSystemAccessPolicy,
+        allowed_paths: Sequence[str],
+        denied_paths: Sequence[str],
+    ) -> None:
+        if not set(MANDATORY_DENIED_PATHS).issubset(set(denied_paths)):
+            raise CapabilityViolationError(
+                f"denied_paths must include mandatory denied paths {MANDATORY_DENIED_PATHS}"
+            )
+        if filesystem == FileSystemAccessPolicy.SCRATCH_ONLY:
+            for p in allowed_paths:
+                if not (p == SCRATCH_PATH_PREFIX or p.startswith(SCRATCH_PATH_PREFIX + "/")):
+                    raise CapabilityViolationError(
+                        f"SCRATCH_ONLY filesystem policy only permits paths under "
+                        f"{SCRATCH_PATH_PREFIX}, got {p!r}"
+                    )
+
+    @classmethod
+    def _validate_network_and_audience(
+        cls,
+        network: NetworkEgressPolicy,
+        sandbox_secrets: list[RegisteredSecretDefinition],
+        normalized_hosts: tuple[str, ...],
+    ) -> None:
+        if not sandbox_secrets:
+            return
+
+        if network == NetworkEgressPolicy.PUBLIC_HTTPS_PROXY:
+            raise CapabilityViolationError(
+                "PUBLIC_HTTPS_PROXY is forbidden when sandbox secrets are granted"
+            )
+        if network == NetworkEgressPolicy.ALLOWLISTED_HOSTS:
+            if not normalized_hosts:
+                raise CapabilityViolationError(
+                    "ALLOWLISTED_HOSTS requires non-empty allowed_egress_hosts"
+                )
+            permitted_sets = [set(s.permitted_egress_hosts) for s in sandbox_secrets]
+            intersection = set.intersection(*permitted_sets) if permitted_sets else set()
+            if not set(normalized_hosts).issubset(intersection):
+                raise CapabilityViolationError(
+                    f"allowed_egress_hosts {normalized_hosts} exceeds "
+                    f"sandbox secret audience intersection {intersection}"
+                )
+        elif network == NetworkEgressPolicy.DISABLED:
+            if normalized_hosts:
+                raise CapabilityViolationError(
+                    "DISABLED network cannot specify allowed_egress_hosts"
+                )
+
+    @classmethod
     def create_grant(
         cls,
         *,
         network: NetworkEgressPolicy = NetworkEgressPolicy.DISABLED,
         filesystem: FileSystemAccessPolicy = FileSystemAccessPolicy.SCRATCH_ONLY,
+        allow_dangerous_shell: bool = False,
         allowed_tools: Sequence[str] = (),
         allowed_secret_defs: Sequence[RegisteredSecretDefinition] = (),
         granted_secret_scopes: Iterable[SecretScope] = (),
         allowed_egress_hosts: Sequence[str] = (),
         allowed_paths: Sequence[str] = (),
-        denied_paths: Sequence[str] = ("/workspace/.git/hooks", "/workspace/.git/config"),
+        denied_paths: Sequence[str] = MANDATORY_DENIED_PATHS,
         resource_limits: ResourceLimits | None = None,
-        publication_tools: frozenset[str] = DEFAULT_AUTOMATED_PUBLICATION_TOOLS,
+        tool_registry: ToolRegistry = DEFAULT_TOOL_REGISTRY,
     ) -> SandboxCapabilityGrant:
         """Create and validate a broker-issued capability grant."""
         tools_tuple = tuple(allowed_tools)
@@ -222,11 +327,10 @@ class CapabilityGrantFactory:
         secret_names_tuple = tuple(s.name for s in allowed_secret_defs)
         normalized_hosts = tuple(normalize_fqdn(h) for h in allowed_egress_hosts)
 
-        # 1. Dangerous shell bidirectional check
-        has_dangerous_tool = bool(set(tools_tuple) & DANGEROUS_SHELL_TOOLS)
-        allow_dangerous_shell = has_dangerous_tool
+        registered_tools = cls._validate_tools_and_dangerous_shell(
+            tools_tuple, tool_registry, allow_dangerous_shell
+        )
 
-        # 2. Separate sandbox-exposed vs broker-only secrets
         sandbox_secrets = [
             s
             for s in allowed_secret_defs
@@ -234,38 +338,9 @@ class CapabilityGrantFactory:
             in (SecretExposurePolicy.SANDBOX_ENV, SecretExposurePolicy.SANDBOX_FILE)
         ]
 
-        # 3. Publication capability coupling check
-        if sandbox_secrets:
-            has_pub_tool = bool(set(tools_tuple) & publication_tools)
-            if has_pub_tool:
-                raise CapabilityViolationError(
-                    "Sandbox-exposed secrets cannot be combined with "
-                    "automated external publication capabilities"
-                )
-
-        # 4. Network and secret audience validation
-        if sandbox_secrets:
-            if network == NetworkEgressPolicy.PUBLIC_HTTPS_PROXY:
-                raise CapabilityViolationError(
-                    "PUBLIC_HTTPS_PROXY is forbidden when sandbox secrets are granted"
-                )
-            elif network == NetworkEgressPolicy.ALLOWLISTED_HOSTS:
-                if not normalized_hosts:
-                    raise CapabilityViolationError(
-                        "ALLOWLISTED_HOSTS requires non-empty allowed_egress_hosts"
-                    )
-                permitted_sets = [set(s.permitted_egress_hosts) for s in sandbox_secrets]
-                intersection = set.intersection(*permitted_sets) if permitted_sets else set()
-                if not set(normalized_hosts).issubset(intersection):
-                    raise CapabilityViolationError(
-                        f"allowed_egress_hosts {normalized_hosts} exceeds "
-                        f"sandbox secret audience intersection {intersection}"
-                    )
-            elif network == NetworkEgressPolicy.DISABLED:
-                if normalized_hosts:
-                    raise CapabilityViolationError(
-                        "DISABLED network cannot specify allowed_egress_hosts"
-                    )
+        cls._validate_publication_coupling(sandbox_secrets, registered_tools)
+        cls._validate_filesystem_paths(filesystem, allowed_paths, denied_paths)
+        cls._validate_network_and_audience(network, sandbox_secrets, normalized_hosts)
 
         return SandboxCapabilityGrant(
             network=network,
@@ -283,8 +358,8 @@ class CapabilityGrantFactory:
 
 __all__ = [
     "ALLOWED_SECRET_ENV_VARS",
-    "DANGEROUS_SHELL_TOOLS",
-    "DEFAULT_AUTOMATED_PUBLICATION_TOOLS",
+    "MANDATORY_DENIED_PATHS",
+    "SCRATCH_PATH_PREFIX",
     "BrokerOnlySecretExposureError",
     "CapabilityGrantFactory",
     "CapabilityViolationError",

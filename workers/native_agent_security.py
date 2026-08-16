@@ -15,8 +15,5 @@ def native_github_credentials(request: WorkerRequest) -> dict[str, str]:
         ToolPermissionLevel.GIT_PUSH_OR_DEPLOY,
     }:
         return {}
-    return {
-        key: value
-        for key, value in request.secrets.items()
-        if key in {"GH_TOKEN", "GITHUB_TOKEN"} and value
-    }
+    ref_names = {ref.name for ref in request.secret_refs}
+    return {key: key for key in ref_names if key in {"GH_TOKEN", "GITHUB_TOKEN"}}

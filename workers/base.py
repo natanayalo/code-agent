@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from db.enums import WorkerRuntimeMode
 from db.enums import coerce_worker_type as _coerce_persisted_worker_type
+from sandbox.secrets import SecretRef
 from workers.review import ReviewResult
 
 logger = logging.getLogger(__name__)
@@ -100,7 +101,7 @@ class WorkerRequest(WorkerModel):
     memory_context: dict[str, Any] = Field(default_factory=dict)
     task_plan: dict[str, Any] | None = None
     task_spec: dict[str, Any] | None = None
-    secrets: dict[str, str] = Field(default_factory=dict)
+    secret_refs: tuple[SecretRef, ...] = Field(default_factory=tuple)
     tools: list[str] | None = None
     constraints: dict[str, Any] = Field(default_factory=dict)
     budget: dict[str, Any] = Field(default_factory=dict)
@@ -114,6 +115,24 @@ class WorkerRequest(WorkerModel):
     image: str | None = None
     # Internal per-node writable namespace for read-only fan-out containers.
     scratch_namespace: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_secrets(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "secrets" in data:
+            legacy_secrets = data.pop("secrets")
+            if isinstance(legacy_secrets, dict) and legacy_secrets:
+                existing_refs = list(data.get("secret_refs", ()))
+                for key in legacy_secrets:
+                    if isinstance(key, str) and key:
+                        existing_refs.append(SecretRef(name=key))
+                data["secret_refs"] = tuple(existing_refs)
+        return data
+
+    @property
+    def secrets(self) -> dict[str, str]:
+        """Deprecated legacy secrets accessor returning logical secret references."""
+        return {ref.name: ref.name for ref in self.secret_refs}
 
     @field_validator("worker_type", mode="before")
     @classmethod

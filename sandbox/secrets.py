@@ -296,12 +296,14 @@ class SecretResolver:
 
     def resolve_for_broker(
         self,
-        definition: RegisteredSecretDefinition,
+        ref_or_name: SecretRef | str,
         grant: Any,
         *,
         redactor: SecretRedactor | None = None,
     ) -> ResolvedSecret:
         """Resolve a secret for broker-side execution only."""
+        name = ref_or_name.name if isinstance(ref_or_name, SecretRef) else ref_or_name
+        definition = self._registry.require(name)
         return self._resolve_internal(definition, grant, redactor=redactor)
 
     def _resolve_internal(
@@ -368,12 +370,20 @@ class LegacyIngressTaskRequest(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _scrub_raw_secret_values(cls, data: Any) -> Any:
-        if isinstance(data, dict) and "secrets" in data and isinstance(data["secrets"], dict):
-            scrubbed_secrets = {}
-            for k in data["secrets"]:
-                scrubbed_secrets[k] = "[REDACTED_AT_INGRESS]"
-            data = dict(data)
-            data["secrets"] = scrubbed_secrets
+        if isinstance(data, dict) and "secrets" in data:
+            raw_secrets = data["secrets"]
+            if isinstance(raw_secrets, dict):
+                scrubbed_secrets = {}
+                for k in raw_secrets:
+                    scrubbed_secrets[str(k)] = "[REDACTED_AT_INGRESS]"
+                data = dict(data)
+                data["secrets"] = scrubbed_secrets
+            else:
+                data = dict(data)
+                data["secrets"] = {}
+                raise ValueError(
+                    "Invalid secrets payload: secrets must be a dictionary of key-value pairs"
+                )
         return data
 
     @field_validator("secrets")

@@ -2,8 +2,8 @@
 
 from sandbox.capability import (
     ALLOWED_SECRET_ENV_VARS,
-    DANGEROUS_SHELL_TOOLS,
-    DEFAULT_AUTOMATED_PUBLICATION_TOOLS,
+    MANDATORY_DENIED_PATHS,
+    SCRATCH_PATH_PREFIX,
     BrokerOnlySecretExposureError,
     CapabilityGrantFactory,
     CapabilityViolationError,
@@ -59,8 +59,8 @@ from sandbox.workspace import (
 
 __all__ = [
     "ALLOWED_SECRET_ENV_VARS",
-    "DANGEROUS_SHELL_TOOLS",
-    "DEFAULT_AUTOMATED_PUBLICATION_TOOLS",
+    "MANDATORY_DENIED_PATHS",
+    "SCRATCH_PATH_PREFIX",
     "BrokerOnlySecretExposureError",
     "CapabilityGrantFactory",
     "CapabilityViolationError",

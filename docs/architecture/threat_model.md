@@ -88,7 +88,7 @@ The primary goal of `code-agent` is to safely execute untrusted and semi-trusted
 7. **Boundary 7: Artifacts & Observability**
    - **Components:** Captured stdout/stderr, execution manifests, OpenInference tracing spans, Postgres timeline events.
    - **Trust Level:** Public/operator-visible audit record.
-   - **Protection:** Chunk-aware `SecretRedactor` scrubs known secret patterns before writing logs, manifests, or timeline events. `ResolvedSecret` uses `__slots__` and redacted string representations to prevent accidental serialization.
+   - **Protection:** In-process `SecretRedactor` scrubs known secret patterns before writing logs, manifests, or timeline events. `ResolvedSecret` uses `__slots__` and redacted string representations to prevent accidental serialization. (Note: chunk-aware streaming redaction across raw container output buffer boundaries is scheduled as an M28.5A.2 runtime enforcement requirement).
 
 ---
 
