@@ -10,14 +10,19 @@ from typing import Any, Final
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from sandbox.secrets import (
-    ALLOWED_SECRET_ENV_VARS,
-    DEFAULT_SECRET_REGISTRY,
-    BrokerOnlySecretExposureError,
+from sandbox.ingress import (
     ConflictingSecretDeclarationError,
     DeprecatedLegacySecretsError,
     IngressMigrationAdapter,
     LegacyIngressTaskRequest,
+    sanitize_legacy_ingress_payload,
+)
+from sandbox.secrets import (
+    ALLOWED_SECRET_ENV_VARS,
+    DEFAULT_SECRET_REGISTRY,
+    BrokerOnlySecretExposureError,
+    CapabilityViolationError,
+    EphemeralSecretStore,
     MissingSecretScopeError,
     RegisteredSecretDefinition,
     ResolvedSecret,
@@ -31,7 +36,6 @@ from sandbox.secrets import (
     SecretSource,
     UnauthorizedSecretError,
     normalize_fqdn,
-    sanitize_legacy_ingress_payload,
 )
 from tools.registry import (
     DEFAULT_TOOL_REGISTRY,
@@ -45,10 +49,6 @@ MANDATORY_DENIED_PATHS: Final[tuple[str, ...]] = (
     "/workspace/.git/config",
 )
 SCRATCH_PATH_PREFIX: Final[str] = "/workspace/.code-agent/scratch"
-
-
-class CapabilityViolationError(RuntimeError):
-    """Raised when a capability grant or execution request violates security policy."""
 
 
 class NetworkEgressPolicy(enum.StrEnum):
@@ -412,6 +412,37 @@ class CapabilityGrantFactory:
         )
 
 
+def validate_grant_for_execution(
+    grant: SandboxCapabilityGrant,
+    *,
+    secret_registry: SecretRegistry | None = None,
+    tool_registry: ToolRegistry | None = None,
+) -> None:
+    """Validate a SandboxCapabilityGrant at consumption time against authoritative registries.
+
+    Fails closed with CapabilityViolationError if the grant violates security invariants,
+    protecting against direct manual instantiation or deserialization of forbidden grants.
+    """
+    factory = CapabilityGrantFactory(secret_registry=secret_registry, tool_registry=tool_registry)
+    registered_tools = factory._validate_tools_and_dangerous_shell(
+        grant.allowed_tools, grant.allow_dangerous_shell
+    )
+    _, canonical_defs = factory._resolve_and_validate_secrets(
+        grant.allowed_secret_refs, grant.granted_secret_scopes
+    )
+    sandbox_secrets = [
+        s
+        for s in canonical_defs
+        if s.exposure_policy
+        in (SecretExposurePolicy.SANDBOX_ENV, SecretExposurePolicy.SANDBOX_FILE)
+    ]
+    factory._validate_publication_coupling(sandbox_secrets, registered_tools)
+    factory._validate_filesystem_paths(grant.filesystem, grant.allowed_paths, grant.denied_paths)
+    factory._validate_network_and_audience(
+        grant.network, sandbox_secrets, grant.allowed_egress_hosts
+    )
+
+
 __all__ = [
     "ALLOWED_SECRET_ENV_VARS",
     "DEFAULT_SECRET_REGISTRY",
@@ -422,6 +453,7 @@ __all__ = [
     "CapabilityViolationError",
     "ConflictingSecretDeclarationError",
     "DeprecatedLegacySecretsError",
+    "EphemeralSecretStore",
     "FileSystemAccessPolicy",
     "IngressMigrationAdapter",
     "LegacyIngressTaskRequest",
@@ -444,4 +476,5 @@ __all__ = [
     "normalize_fqdn",
     "parse_memory_bytes",
     "sanitize_legacy_ingress_payload",
+    "validate_grant_for_execution",
 ]

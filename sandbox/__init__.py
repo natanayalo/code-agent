@@ -10,6 +10,7 @@ from sandbox.capability import (
     CapabilityViolationError,
     ConflictingSecretDeclarationError,
     DeprecatedLegacySecretsError,
+    EphemeralSecretStore,
     FileSystemAccessPolicy,
     IngressMigrationAdapter,
     LegacyIngressTaskRequest,
@@ -32,6 +33,7 @@ from sandbox.capability import (
     normalize_fqdn,
     parse_memory_bytes,
     sanitize_legacy_ingress_payload,
+    validate_grant_for_execution,
 )
 from sandbox.container import (
     DockerSandboxContainer,
@@ -80,6 +82,7 @@ __all__ = [
     "DockerShellCommandResult",
     "DockerShellSession",
     "DockerShellSessionError",
+    "EphemeralSecretStore",
     "FileSystemAccessPolicy",
     "IngressMigrationAdapter",
     "LegacyIngressTaskRequest",
@@ -112,4 +115,5 @@ __all__ = [
     "normalize_fqdn",
     "parse_memory_bytes",
     "sanitize_legacy_ingress_payload",
+    "validate_grant_for_execution",
 ]

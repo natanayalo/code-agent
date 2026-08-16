@@ -8,8 +8,8 @@ The primary goal of `code-agent` is to safely execute untrusted and semi-trusted
 
 ### Milestone Framing: M28.5A vs. M28.5A.2
 
-- **M28.5A (This Milestone — Foundation & Migration Contracts):** Defines and formalizes the threat boundaries, STRIDE attack analysis, residual risk posture, broker-owned secret registry (`RegisteredSecretDefinition`), broker-issued capability grants (`SandboxCapabilityGrant`), fail-closed resolution engine (`SecretResolver`, `CapabilityGrantFactory`), and migration/deprecation policies and sanitization contracts (`sanitize_legacy_ingress_payload`, `LegacyIngressTaskRequest`, `IngressMigrationAdapter`) for legacy raw credentials.
-- **M28.5A.2 (Follow-On Milestone — Runtime Enforcement):** Wires the capability contracts directly into `DockerNativeAgentExecutor` and `WorkerRequest`, wires all production ingress endpoints (API, webhooks, CLI) to drop raw values before persistence, and proves live OS-level and Docker runtime containment through integration tests (direct socket bypass denial, TLS ClientHello SNI inspection, OS mount masking for `.git`, and `/run/secrets` lifecycle).
+- **M28.5A (This Milestone — Foundation & Migration Contracts):** Defines and formalizes the threat boundaries, STRIDE attack analysis, residual risk posture, broker-owned secret registry (`RegisteredSecretDefinition`), broker-issued capability grants (`SandboxCapabilityGrant`), fail-closed resolution engine (`SecretResolver`, `CapabilityGrantFactory`, `validate_grant_for_execution`), and migration/deprecation policies, ephemeral store contracts (`EphemeralSecretStore`), and sanitization contracts (`sanitize_legacy_ingress_payload`, `LegacyIngressTaskRequest`, `IngressMigrationAdapter`) for legacy raw credentials.
+- **M28.5A.2 (Follow-On Milestone — Runtime Enforcement):** Wires the capability contracts directly into `DockerNativeAgentExecutor` and `WorkerRequest`, wires all production ingress endpoints (API, webhooks, CLI) to drop raw values before persistence, routes legacy raw values through `EphemeralSecretStore` outside durable history, and proves live OS-level and Docker runtime containment through integration tests (direct socket bypass denial, TLS ClientHello SNI inspection, OS mount masking for `.git`, and `/run/secrets` lifecycle).
 
 ---
 
@@ -23,7 +23,7 @@ The primary goal of `code-agent` is to safely execute untrusted and semi-trusted
 │ - API Server / Telegram Ingress / Webhook Receivers                     │
 │ - Orchestrator (Temporal Workflow Coordinator)                          │
 │ - PostgreSQL Database (Relational Projections & Memory)                 │
-│ - Secret Registry & CapabilityGrantFactory                              │
+│ - Secret Registry, CapabilityGrantFactory & validate_grant_for_execution│
 └───────────────────────────────────┬─────────────────────────────────────┘
                                     │ Broker Task Dispatch
                                     ▼
@@ -48,8 +48,9 @@ The primary goal of `code-agent` is to safely execute untrusted and semi-trusted
 ├───────────────────────────────────┼─────────────────────────────────────┤
 │ Secrets & Credentials (Boundary 6)│ Observability & Artifacts (B. 7)    │
 │ - Ingress value stripping         │ - Chunk-aware SecretRedactor        │
-│ - /run/secrets/code-agent (RO)    │ - Execution manifest scrubbing      │
-│ - BROKER_ONLY vs SANDBOX exposure │ - Redacted timeline & trace logs    │
+│ - EphemeralSecretStore (in-memory)│ - Execution manifest scrubbing      │
+│ - /run/secrets/code-agent (RO)    │ - Redacted timeline & trace logs    │
+│ - BROKER_ONLY vs SANDBOX exposure │                                     │
 └───────────────────────────────────┴─────────────────────────────────────┘
 ```
 
@@ -58,7 +59,7 @@ The primary goal of `code-agent` is to safely execute untrusted and semi-trusted
 1. **Boundary 1: Control Plane**
    - **Components:** FastAPI gateway, Telegram bot ingress, Webhook intake, Temporal workflows, PostgreSQL persistence.
    - **Trust Level:** Highest. Owns authentication keys, database connection strings, and capability issuance.
-   - **Protection:** Task-supplied requests are untrusted input. Ingress sanitization contracts (`sanitize_legacy_ingress_payload`, `LegacyIngressTaskRequest`, `IngressMigrationAdapter`) strip all raw secret values into `SecretRef(name=...)` before persistence (with full endpoint wiring in M28.5A.2). `SandboxCapabilityGrant` instances are derived strictly by server-side orchestrator policy via `CapabilityGrantFactory` (bound to authoritative registries) and are never accepted or deserialized from user payloads.
+   - **Protection:** Task-supplied requests are untrusted input. Ingress sanitization contracts (`sanitize_legacy_ingress_payload`, `LegacyIngressTaskRequest`, `IngressMigrationAdapter`) define value stripping into `SecretRef(name=...)` before persistence. In M28.5A.2, production ingress endpoints MUST run the sanitizer before any durable boundary (Temporal workflow history or PostgreSQL). `SandboxCapabilityGrant` instances are derived strictly by server-side orchestrator policy via `CapabilityGrantFactory` (bound to authoritative registries). Furthermore, `validate_grant_for_execution` and `SecretResolver` perform consumption-side validation against authoritative registries, ensuring manually instantiated grants cannot bypass factory security invariants.
 
 2. **Boundary 2: Sandbox Infrastructure Host**
    - **Components:** Host Linux system, Docker daemon socket (`/var/run/docker.sock`), Temporal worker process.
@@ -81,9 +82,9 @@ The primary goal of `code-agent` is to safely execute untrusted and semi-trusted
    - **Protection:** Direct internet access is structurally impossible (`--network none` by default; when proxy egress is enabled, container joins an internal bridge with no default gateway). All egress routes via the broker CONNECT proxy over port 443 with broker-side DNS pinning, TLS ClientHello SNI inspection, and blocking of all non-global addresses (IPv4 RFC1918, link-local, loopback, CGNAT, and full IPv6 ULA `fc00::/7`).
 
 6. **Boundary 6: Secrets & Credentials**
-   - **Components:** OAuth tokens, GitHub tokens, API keys, `SecretRef`, `RegisteredSecretDefinition`, `ResolvedSecret`.
+   - **Components:** OAuth tokens, GitHub tokens, API keys, `SecretRef`, `RegisteredSecretDefinition`, `ResolvedSecret`, `EphemeralSecretStore`.
    - **Trust Level:** Least-privilege, ephemeral.
-   - **Protection:** Dual-key authorization (`name` in `allowed_secret_refs` AND `scope` in `granted_secret_scopes`). Exposure policy separates `BROKER_ONLY` (tokens kept broker-side) from `SANDBOX_ENV` / `SANDBOX_FILE`. Injected files are mounted read-only under `/run/secrets/code-agent/` (mode `0o400`).
+   - **Protection:** Dual-key authorization (`name` in `allowed_secret_refs` AND `scope` in `granted_secret_scopes`). Exposure policy separates `BROKER_ONLY` (tokens kept broker-side) from `SANDBOX_ENV` / `SANDBOX_FILE`. Injected files are mounted read-only under `/run/secrets/code-agent/` (mode `0o400`). Legacy raw credentials are held in-memory in task-scoped `EphemeralSecretStore` outside durable history.
 
 7. **Boundary 7: Artifacts & Observability**
    - **Components:** Captured stdout/stderr, execution manifests, OpenInference tracing spans, Postgres timeline events.
@@ -96,13 +97,13 @@ The primary goal of `code-agent` is to safely execute untrusted and semi-trusted
 
 | Threat Category (STRIDE) | Attack Vector / Scenario | Architectural Mitigation | Enforcement Layer |
 |---|---|---|---|
-| **Spoofing** | Untrusted task self-asserts capability grant or bypasses worker routing | Grants are issued solely by `CapabilityGrantFactory` from server-side policy; `WorkerRequest` rejects self-asserted grant fields. | Control Plane / Ingress |
+| **Spoofing** | Untrusted task self-asserts capability grant or bypasses worker routing | Grants are issued solely by `CapabilityGrantFactory` from server-side policy; `validate_grant_for_execution` and `SecretResolver` enforce invariants at consumption time. | Control Plane / Ingress / Runtime |
 | **Tampering** | Sandbox modifies `.git/config` (e.g. `core.sshCommand`) or `.git/hooks` to hijack broker Git operations | Broker uses detached `GIT_DIR` outside sandbox namespace; container `.git` is read-only / masked; broker passes `-c core.hooksPath=/dev/null`. | Sandbox Host / Git Boundary |
 | **Tampering** | Task alters injected environment variables to hijack runtime loaders | `destination_env_var` is strictly allowlisted or prefixed `CODE_AGENT_SECRET_`; reserved loader vars (`LD_PRELOAD`, `PYTHONPATH`) rejected. | Secret Registry / Broker |
 | **Repudiation** | Malicious agent suppresses command audit or alters timeline records | Execution manifests and timeline events are generated broker-side from container exit code and stdout/stderr capture. | Broker Observability |
 | **Information Disclosure** | Untrusted prompt prints injected secret to stdout/logs | `SecretRedactor` scrubs stdout/stderr; `ResolvedSecret` uses `__slots__` and redacted `__repr__`; values never entered in database or tracing. | Observability / Redactor |
 | **Information Disclosure** | Untrusted code exfiltrates source code or credentials over public egress | `network=DISABLED` by default; sandbox secrets forbid `PUBLIC_HTTPS_PROXY`; allowed hosts restricted to audience intersection; direct sockets blocked. | Network / CONNECT Proxy |
-| **Information Disclosure** | Untrusted code encodes secret into workspace file or commit to exfiltrate via Git push | Sandbox-exposed secrets cannot be combined with `AUTOMATED_EXTERNAL_PUBLICATION` capabilities; publication requires broker-only secrets or human review. | CapabilityGrantFactory |
+| **Information Disclosure** | Untrusted code encodes secret into workspace file or commit to exfiltrate via Git push | Sandbox-exposed secrets cannot be combined with `AUTOMATED_EXTERNAL_PUBLICATION` capabilities; publication requires broker-only secrets or human review. | Factory & Consumption Validation |
 | **Denial of Service** | Fork bomb, CPU pegging, or memory ballooning crashes worker host | Mandatory finite `ResourceLimits` (CPU <= 4.0, memory <= 8GiB, PIDs <= 1024, timeout <= 3600s) mapped to Docker cgroups. | Docker Container Runtime |
 | **Elevation of Privilege** | Container breakout to host via Docker daemon socket | Docker daemon socket is never mounted into container; container runs with `--cap-drop ALL`, `--security-opt no-new-privileges`. | Container Engine / Kernel |
 
@@ -131,30 +132,31 @@ Any code granted a plaintext secret and permitted network egress can intentional
 
 ```text
 [1. Broker Registration]
-    RegisteredSecretDefinition configured with source, scope, exposure policy, and permitted egress hosts.
+    RegisteredSecretDefinition configured with source (ENV, SECRET_STORE, FILE, EPHEMERAL), scope, exposure policy, and permitted egress hosts.
         ↓
-[2. Ingress Intake]
-    LegacyIngressTaskRequest receives task; values stripped immediately; only SecretRef(name) preserved.
+[2. Ingress Intake & Migration]
+    LegacyIngressTaskRequest receives task; values placed into task-scoped EphemeralSecretStore (outside durable history);
+    durable request preserves only SecretRef(name).
         ↓
 [3. Capability Grant Issuance]
     CapabilityGrantFactory evaluates deterministic policy, checks audience intersection, and issues grant.
         ↓
-[4. Runtime Resolution]
-    SecretResolver validates dual-key authorization (name in allowed_refs AND scope in granted_scopes).
-    Rejects BROKER_ONLY secrets from sandbox resolution.
+[4. Runtime Resolution & Consumption Validation]
+    SecretResolver and validate_grant_for_execution validate dual-key authorization, network audience, and publication coupling.
+    Rejects BROKER_ONLY secrets from sandbox resolution; retrieves ephemeral values from task-scoped EphemeralSecretStore.
         ↓
 [5. Staging & Execution]
     Secret values registered with task-scoped SecretRedactor.
     Files staged under /run/secrets/code-agent/ (mode 0o400) or env vars prefixed CODE_AGENT_SECRET_.
         ↓
 [6. Termination & Cleanup]
-    Task container destroyed; temporary secret mounts unmounted and removed; SecretRedactor discarded.
+    Task container destroyed; temporary secret mounts unmounted and removed; EphemeralSecretStore and SecretRedactor discarded.
 ```
 
 ---
 
 ## 6. Migration and Deprecation Schedule
 
-- **M28.5A (Current):** Typed contracts, threat model, immutable capability grants, ingress DTO separation, and audience intersection.
-- **M28.5A.2 (Follow-On):** Runtime wiring into `DockerNativeAgentExecutor`, OS-level `.git` isolation, proxy TLS SNI validation, and live container security verification.
+- **M28.5A (Current):** Typed contracts, threat model, immutable capability grants, ingress DTO separation, ephemeral secret store interfaces, and consumption-side audience/network validation.
+- **M28.5A.2 (Follow-On):** Runtime wiring into `DockerNativeAgentExecutor`, production ingress endpoint plumbing (sanitizer execution before Temporal/PostgreSQL persistence), OS-level `.git` isolation, proxy TLS SNI validation, and live container security verification.
 - **M29 (Target Cutoff):** Complete removal of `LegacyIngressTaskRequest` and raw secret ingress. Unregistered or raw secret payloads are rejected fail-closed with `DeprecatedLegacySecretsError`.

@@ -10,6 +10,11 @@ from typing import Any, Final
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from sandbox.redact import SecretRedactor
+from tools.registry import (
+    DEFAULT_TOOL_REGISTRY,
+    ToolCapabilityTag,
+    ToolRegistry,
+)
 
 ALLOWED_SECRET_ENV_VARS: Final[frozenset[str]] = frozenset(
     {"GH_TOKEN", "GITHUB_TOKEN", "OPENAI_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY"}
@@ -23,7 +28,11 @@ _RE_FQDN: Final[re.Pattern[str]] = re.compile(
 )
 
 
-class SecretResolutionError(RuntimeError):
+class CapabilityViolationError(RuntimeError):
+    """Raised when a capability grant or execution request violates security policy."""
+
+
+class SecretResolutionError(CapabilityViolationError):
     """Base exception for secret resolution failures."""
 
 
@@ -43,20 +52,41 @@ class BrokerOnlySecretExposureError(SecretResolutionError):
     """Raised when attempting to resolve a broker-only secret for sandbox injection."""
 
 
-class ConflictingSecretDeclarationError(SecretResolutionError):
-    """Raised when legacy secrets and modern secret_refs declare conflicting keys."""
-
-
-class DeprecatedLegacySecretsError(SecretResolutionError):
-    """Raised when legacy raw secrets are used after the deprecation cutoff."""
-
-
 class SecretSource(enum.StrEnum):
     """Supported backing sources for registered secrets."""
 
     ENV = "env"
     SECRET_STORE = "secret_store"
     FILE = "file"
+    EPHEMERAL = "ephemeral"
+
+
+class EphemeralSecretStore:
+    """Task-scoped in-memory store for ephemeral legacy secrets during migration."""
+
+    def __init__(self, initial_secrets: Mapping[str, str] | None = None) -> None:
+        self._store: dict[str, str] = dict(initial_secrets) if initial_secrets is not None else {}
+
+    def get(self, key: str) -> str | None:
+        return self._store.get(key)
+
+    def store(self, key: str, value: str) -> None:
+        self._store[key] = value
+
+    def has(self, key: str) -> bool:
+        return key in self._store
+
+    def remove(self, key: str) -> None:
+        self._store.pop(key, None)
+
+    def clear(self) -> None:
+        self._store.clear()
+
+    def __contains__(self, key: str) -> bool:
+        return key in self._store
+
+    def __len__(self) -> int:
+        return len(self._store)
 
 
 class SecretScope(enum.StrEnum):
@@ -296,11 +326,71 @@ class SecretResolver:
         env: Mapping[str, str] | None = None,
         secret_store: Mapping[str, str] | None = None,
         file_store: Mapping[str, str] | None = None,
+        ephemeral_store: EphemeralSecretStore | Mapping[str, str] | None = None,
+        tool_registry: ToolRegistry | None = None,
     ) -> None:
         self._registry = registry
         self._env = env if env is not None else {}
         self._secret_store = secret_store if secret_store is not None else {}
         self._file_store = file_store if file_store is not None else {}
+        self._ephemeral_store = (
+            ephemeral_store
+            if isinstance(ephemeral_store, EphemeralSecretStore)
+            else EphemeralSecretStore(ephemeral_store)
+            if ephemeral_store is not None
+            else EphemeralSecretStore()
+        )
+        self._tool_registry = tool_registry if tool_registry is not None else DEFAULT_TOOL_REGISTRY
+
+    def _validate_sandbox_grant_invariants(
+        self,
+        definition: RegisteredSecretDefinition,
+        grant: Any,
+    ) -> None:
+        """Enforce sandbox secret network audience and publication invariants on the grant."""
+        network = getattr(grant, "network", None)
+        allowed_egress_hosts = tuple(getattr(grant, "allowed_egress_hosts", ()))
+        allowed_tools = tuple(getattr(grant, "allowed_tools", ()))
+
+        # 1. Network policy checks
+        net_val = (
+            network.value if (network is not None and hasattr(network, "value")) else str(network)
+        )
+        if net_val == "public_https_proxy":
+            raise CapabilityViolationError(
+                f"PUBLIC_HTTPS_PROXY network is forbidden when resolving sandbox secret "
+                f"{definition.name!r}"
+            )
+        if net_val == "allowlisted_hosts":
+            if not allowed_egress_hosts:
+                raise CapabilityViolationError(
+                    f"ALLOWLISTED_HOSTS network requires non-empty allowed_egress_hosts "
+                    f"when resolving {definition.name!r}"
+                )
+            if not set(allowed_egress_hosts).issubset(set(definition.permitted_egress_hosts)):
+                raise CapabilityViolationError(
+                    f"Grant allowed_egress_hosts {allowed_egress_hosts} exceeds permitted "
+                    f"egress hosts {definition.permitted_egress_hosts} for secret "
+                    f"{definition.name!r}"
+                )
+        elif net_val == "disabled":
+            if allowed_egress_hosts:
+                raise CapabilityViolationError(
+                    "DISABLED network cannot specify allowed_egress_hosts"
+                )
+
+        # 2. Publication coupling check
+        if self._tool_registry is not None and allowed_tools:
+            has_pub_tool = any(
+                (tool := self._tool_registry.get_tool(t)) is not None
+                and ToolCapabilityTag.AUTOMATED_EXTERNAL_PUBLICATION in tool.capability_tags
+                for t in allowed_tools
+            )
+            if has_pub_tool:
+                raise CapabilityViolationError(
+                    f"Cannot resolve sandbox secret {definition.name!r} when grant permits "
+                    f"automated external publication tools"
+                )
 
     def resolve_for_sandbox(
         self,
@@ -317,6 +407,7 @@ class SecretResolver:
                 f"Secret {ref.name!r} is BROKER_ONLY and cannot be resolved for sandbox injection"
             )
 
+        self._validate_sandbox_grant_invariants(definition, grant)
         return self._resolve_internal(definition, grant, redactor=redactor)
 
     def resolve_for_broker(
@@ -339,11 +430,13 @@ class SecretResolver:
         redactor: SecretRedactor | None = None,
     ) -> ResolvedSecret:
         # Dual-key authorization check
-        if definition.name not in grant.allowed_secret_refs:
+        allowed_secret_refs = getattr(grant, "allowed_secret_refs", ())
+        granted_secret_scopes = getattr(grant, "granted_secret_scopes", ())
+        if definition.name not in allowed_secret_refs:
             raise UnauthorizedSecretError(
                 f"Secret {definition.name!r} is not in grant.allowed_secret_refs"
             )
-        if definition.required_scope not in grant.granted_secret_scopes:
+        if definition.required_scope not in granted_secret_scopes:
             scope_val = definition.required_scope.value
             raise MissingSecretScopeError(
                 f"Grant lacks required scope {scope_val!r} for secret {definition.name!r}"
@@ -368,6 +461,14 @@ class SecretResolver:
                     f"File key {definition.source_key!r} not in file store for {definition.name!r}"
                 )
             value = self._file_store[definition.source_key]
+        elif definition.source == SecretSource.EPHEMERAL:
+            val = self._ephemeral_store.get(definition.source_key)
+            if val is None:
+                raise SecretNotFoundError(
+                    f"Key {definition.source_key!r} not found in ephemeral secret store "
+                    f"for {definition.name!r}"
+                )
+            value = val
         else:
             raise SecretResolutionError(f"Unsupported secret source: {definition.source!r}")
 
@@ -383,99 +484,23 @@ class SecretResolver:
         )
 
 
-def sanitize_legacy_ingress_payload(payload: Any) -> dict[str, Any]:
-    """Sanitize raw transport payload before Pydantic model validation.
-
-    Ensures that any non-dict secrets payload or raw secret values are safely
-    scrubbed from the input dictionary so Pydantic ValidationError can never
-    capture or echo raw secret material in error contexts.
-    """
-    if not isinstance(payload, dict):
-        raise ValueError("Ingress task payload must be a JSON object / dictionary")
-
-    sanitized = dict(payload)
-    if "secrets" in sanitized:
-        raw_secrets = sanitized["secrets"]
-        if isinstance(raw_secrets, dict):
-            # Scrub values to placeholders, preserving keys for reference extraction
-            sanitized["secrets"] = {str(k): "[REDACTED_AT_INGRESS]" for k in raw_secrets}
-        else:
-            # Replace malformed non-dict secrets with empty dict and reject
-            sanitized["secrets"] = {}
-            raise ValueError(
-                "Invalid secrets payload: secrets must be a dictionary of key-value pairs"
-            )
-    return sanitized
-
-
-class LegacyIngressTaskRequest(BaseModel):
-    """Ingress-only task request DTO for legacy raw-secret intake."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
-
-    task_text: str = Field(min_length=1)
-    secret_refs: tuple[SecretRef, ...] = ()
-    secrets: dict[str, str] = Field(default_factory=dict, repr=False)
-
-    @classmethod
-    def from_raw_payload(cls, raw_payload: Any) -> LegacyIngressTaskRequest:
-        """Construct request from raw transport payload after pre-validation sanitization."""
-        sanitized = sanitize_legacy_ingress_payload(raw_payload)
-        return cls.model_validate(sanitized)
-
-    @model_validator(mode="before")
-    @classmethod
-    def _scrub_raw_secret_values(cls, data: Any) -> Any:
-        if isinstance(data, dict) and "secrets" in data:
-            raw_secrets = data["secrets"]
-            if isinstance(raw_secrets, dict):
-                scrubbed_secrets = {}
-                for k in raw_secrets:
-                    scrubbed_secrets[str(k)] = "[REDACTED_AT_INGRESS]"
-                data = dict(data)
-                data["secrets"] = scrubbed_secrets
-            else:
-                data = dict(data)
-                data["secrets"] = {}
-                raise ValueError(
-                    "Invalid secrets payload: secrets must be a dictionary of key-value pairs"
-                )
-        return data
-
-    @field_validator("secrets")
-    @classmethod
-    def _sanitize_legacy_secrets(cls, v: dict[str, str]) -> dict[str, str]:
-        for key in v:
-            if not _RE_SAFE_NAME.match(key):
-                raise ValueError("Invalid secret key format in legacy secrets")
-        return v
-
-
-class IngressMigrationAdapter:
-    """Adapts legacy ingress requests by stripping raw values and producing clean SecretRefs."""
-
-    @classmethod
-    def adapt(
-        cls,
-        request: LegacyIngressTaskRequest,
-        *,
-        reject_legacy_secrets: bool = False,
-    ) -> tuple[SecretRef, ...]:
-        """Extract logical secret names, discarding raw values immediately."""
-        if reject_legacy_secrets and request.secrets:
-            raise DeprecatedLegacySecretsError(
-                "Legacy raw secrets are no longer accepted. Use secret_refs instead."
-            )
-
-        ref_names = {ref.name for ref in request.secret_refs}
-        conflicts = ref_names.intersection(request.secrets.keys())
-        if conflicts:
-            raise ConflictingSecretDeclarationError(
-                f"Conflicting secret declarations for keys: {sorted(conflicts)}"
-            )
-
-        adapted_refs = list(request.secret_refs)
-        for name in request.secrets:
-            adapted_refs.append(SecretRef(name=name))
-
-        return tuple(adapted_refs)
+__all__ = [
+    "ALLOWED_SECRET_ENV_VARS",
+    "DEFAULT_SECRET_REGISTRY",
+    "BrokerOnlySecretExposureError",
+    "CapabilityViolationError",
+    "EphemeralSecretStore",
+    "MissingSecretScopeError",
+    "RegisteredSecretDefinition",
+    "ResolvedSecret",
+    "SecretExposurePolicy",
+    "SecretNotFoundError",
+    "SecretRef",
+    "SecretRegistry",
+    "SecretResolutionError",
+    "SecretResolver",
+    "SecretScope",
+    "SecretSource",
+    "UnauthorizedSecretError",
+    "normalize_fqdn",
+]
