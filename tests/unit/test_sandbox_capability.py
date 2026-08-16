@@ -603,7 +603,7 @@ def test_secret_resolver_file_source_and_registry_edge_cases() -> None:
 
     # File not found
     empty_file_resolver = SecretResolver(registry, file_store={})
-    with pytest.raises(SecretNotFoundError, match="not in file store"):
+    with pytest.raises(SecretNotFoundError, match="not found in source"):
         empty_file_resolver.resolve_for_sandbox(SecretRef(name="ca_cert"), grant)
 
 
@@ -674,7 +674,7 @@ def test_consumption_side_grant_validation_and_resolver_invariants() -> None:
         granted_secret_scopes=frozenset([SecretScope.PROVIDER_AUTH]),
         allowed_egress_hosts=("evil.attacker.com",),
     )
-    with pytest.raises(CapabilityViolationError, match="exceeds permitted egress hosts"):
+    with pytest.raises(CapabilityViolationError, match="exceed.*permitted"):
         resolver.resolve_for_sandbox(SecretRef(name="openai_key"), grant_bad_hosts)
 
     # 3. Hand-crafted grant combining sandbox secret with publication tool is rejected
@@ -683,7 +683,7 @@ def test_consumption_side_grant_validation_and_resolver_invariants() -> None:
         allowed_secret_refs=("openai_key",),
         granted_secret_scopes=frozenset([SecretScope.PROVIDER_AUTH]),
     )
-    with pytest.raises(CapabilityViolationError, match="automated external publication tools"):
+    with pytest.raises(CapabilityViolationError, match="publication tools"):
         resolver.resolve_for_sandbox(SecretRef(name="openai_key"), grant_pub)
 
     # 4. validate_grant_for_execution rejects hand-crafted invalid grants

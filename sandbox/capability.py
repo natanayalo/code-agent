@@ -23,6 +23,7 @@ from sandbox.secrets import (
     BrokerOnlySecretExposureError,
     CapabilityViolationError,
     EphemeralSecretHandle,
+    EphemeralSecretRecord,
     EphemeralSecretStore,
     InMemoryEphemeralSecretStore,
     MissingSecretScopeError,
@@ -363,6 +364,33 @@ class CapabilityGrantFactory:
                     "DISABLED network cannot specify allowed_egress_hosts"
                 )
 
+    @classmethod
+    def _validate_destination_uniqueness(
+        cls,
+        sandbox_secrets: list[RegisteredSecretDefinition],
+    ) -> None:
+        seen_env: dict[str, str] = {}
+        seen_mount: dict[str, str] = {}
+        for s in sandbox_secrets:
+            if s.exposure_policy == SecretExposurePolicy.SANDBOX_ENV and s.destination_env_var:
+                if s.destination_env_var in seen_env:
+                    prior = seen_env[s.destination_env_var]
+                    raise CapabilityViolationError(
+                        f"Conflicting sandbox env destination {s.destination_env_var!r} "
+                        f"between {prior!r} and {s.name!r}"
+                    )
+                seen_env[s.destination_env_var] = s.name
+            elif (
+                s.exposure_policy == SecretExposurePolicy.SANDBOX_FILE and s.destination_mount_path
+            ):
+                if s.destination_mount_path in seen_mount:
+                    prior = seen_mount[s.destination_mount_path]
+                    raise CapabilityViolationError(
+                        f"Conflicting sandbox file destination {s.destination_mount_path!r} "
+                        f"between {prior!r} and {s.name!r}"
+                    )
+                seen_mount[s.destination_mount_path] = s.name
+
     def create_grant(
         self,
         *,
@@ -396,6 +424,7 @@ class CapabilityGrantFactory:
             in (SecretExposurePolicy.SANDBOX_ENV, SecretExposurePolicy.SANDBOX_FILE)
         ]
 
+        self._validate_destination_uniqueness(sandbox_secrets)
         self._validate_publication_coupling(sandbox_secrets, registered_tools)
         self._validate_filesystem_paths(filesystem, allowed_paths, denied_paths)
         self._validate_network_and_audience(network, sandbox_secrets, normalized_hosts)
@@ -438,6 +467,7 @@ def validate_grant_for_execution(
         if s.exposure_policy
         in (SecretExposurePolicy.SANDBOX_ENV, SecretExposurePolicy.SANDBOX_FILE)
     ]
+    factory._validate_destination_uniqueness(sandbox_secrets)
     factory._validate_publication_coupling(sandbox_secrets, registered_tools)
     factory._validate_filesystem_paths(grant.filesystem, grant.allowed_paths, grant.denied_paths)
     factory._validate_network_and_audience(
@@ -456,6 +486,7 @@ __all__ = [
     "ConflictingSecretDeclarationError",
     "DeprecatedLegacySecretsError",
     "EphemeralSecretHandle",
+    "EphemeralSecretRecord",
     "EphemeralSecretStore",
     "FileSystemAccessPolicy",
     "InMemoryEphemeralSecretStore",

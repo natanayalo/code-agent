@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import re
-import uuid
+import secrets
 from collections.abc import Mapping, Sequence
 from typing import Any, Final
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from sandbox.secrets import (
-    ALLOWED_SECRET_ENV_VARS,
     CapabilityViolationError,
+    EphemeralSecretRecord,
     EphemeralSecretStore,
     RegisteredSecretDefinition,
     SecretExposurePolicy,
@@ -22,6 +22,29 @@ from sandbox.secrets import (
 )
 
 _RE_SAFE_NAME: Final[re.Pattern[str]] = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+
+RESERVED_LEGACY_SECRET_POLICIES: Final[
+    dict[str, tuple[SecretScope, SecretExposurePolicy, str | None]]
+] = {
+    "github_token": (SecretScope.GIT_PUSH, SecretExposurePolicy.BROKER_ONLY, None),
+    "gh_token": (SecretScope.GIT_PUSH, SecretExposurePolicy.BROKER_ONLY, None),
+    "openai_api_key": (
+        SecretScope.PROVIDER_AUTH,
+        SecretExposurePolicy.SANDBOX_ENV,
+        "OPENAI_API_KEY",
+    ),
+    "openai_key": (SecretScope.PROVIDER_AUTH, SecretExposurePolicy.SANDBOX_ENV, "OPENAI_API_KEY"),
+    "gemini_api_key": (
+        SecretScope.PROVIDER_AUTH,
+        SecretExposurePolicy.SANDBOX_ENV,
+        "GEMINI_API_KEY",
+    ),
+    "openrouter_api_key": (
+        SecretScope.PROVIDER_AUTH,
+        SecretExposurePolicy.SANDBOX_ENV,
+        "OPENROUTER_API_KEY",
+    ),
+}
 
 
 class ConflictingSecretDeclarationError(CapabilityViolationError):
@@ -138,27 +161,31 @@ class IngressMigrationAdapter:
         return temp_raw_secrets
 
     @staticmethod
-    def _compute_destinations(
+    def _compute_destinations_and_policy(
         legacy_key: str,
-        exposure_policy: SecretExposurePolicy,
-    ) -> tuple[str | None, str | None]:
-        if exposure_policy == SecretExposurePolicy.SANDBOX_ENV:
-            if legacy_key in ALLOWED_SECRET_ENV_VARS:
-                dest_env = legacy_key
-            elif legacy_key.upper() in ALLOWED_SECRET_ENV_VARS:
-                dest_env = legacy_key.upper()
-            else:
-                clean_env = re.sub(r"[^A-Z0-9_]", "_", legacy_key.upper())
-                dest_env = (
-                    clean_env
-                    if clean_env.startswith("CODE_AGENT_SECRET_")
-                    else f"CODE_AGENT_SECRET_{clean_env}"
-                )
-            return dest_env, None
-        if exposure_policy == SecretExposurePolicy.SANDBOX_FILE:
-            clean_file = re.sub(r"[^a-zA-Z0-9_.-]", "_", legacy_key)
-            return None, f"ephemeral_{clean_file}.secret"
-        return None, None
+        default_scope: SecretScope,
+        default_exposure: SecretExposurePolicy,
+    ) -> tuple[SecretScope, SecretExposurePolicy, str | None, str | None]:
+        norm = legacy_key.lower().replace("-", "_")
+        if norm in RESERVED_LEGACY_SECRET_POLICIES:
+            res_scope, res_exposure, res_dest = RESERVED_LEGACY_SECRET_POLICIES[norm]
+            if res_exposure == SecretExposurePolicy.BROKER_ONLY:
+                return res_scope, res_exposure, None, None
+            if res_exposure == SecretExposurePolicy.SANDBOX_ENV:
+                return res_scope, res_exposure, res_dest, None
+
+        if default_exposure == SecretExposurePolicy.SANDBOX_ENV:
+            clean_env = re.sub(r"[^A-Z0-9_]", "_", legacy_key.upper())[:44]
+            dest_env = (
+                clean_env
+                if clean_env.startswith("CODE_AGENT_SECRET_")
+                else f"CODE_AGENT_SECRET_{clean_env}"
+            )
+            return default_scope, default_exposure, dest_env, None
+        if default_exposure == SecretExposurePolicy.SANDBOX_FILE:
+            clean_file = re.sub(r"[^a-zA-Z0-9_.-]", "_", legacy_key)[:48]
+            return default_scope, default_exposure, None, f"ephemeral_{clean_file}.secret"
+        return default_scope, default_exposure, None, None
 
     @classmethod
     def adapt_and_register_ephemeral(
@@ -167,6 +194,7 @@ class IngressMigrationAdapter:
         *,
         registry: SecretRegistry,
         ephemeral_store: EphemeralSecretStore,
+        task_id: str = "default_task",
         scope: SecretScope = SecretScope.CUSTOM,
         exposure_policy: SecretExposurePolicy = SecretExposurePolicy.SANDBOX_ENV,
         permitted_egress_hosts: Sequence[str] = (),
@@ -181,7 +209,6 @@ class IngressMigrationAdapter:
         sanitized_dict = sanitize_legacy_ingress_payload(raw_payload)
         validated_req = LegacyIngressTaskRequest.model_validate(sanitized_dict)
 
-        # Check for conflict between explicit secret_refs and legacy secrets
         ref_names = {ref.name for ref in validated_req.secret_refs}
         conflicts = ref_names.intersection(temp_raw_secrets.keys())
         if conflicts:
@@ -189,35 +216,53 @@ class IngressMigrationAdapter:
                 f"Conflicting secret declarations for keys: {sorted(conflicts)}"
             )
 
+        definitions_to_register: list[RegisteredSecretDefinition] = []
+        records_to_commit: list[EphemeralSecretRecord] = []
         adapted_refs = list(validated_req.secret_refs)
 
-        # Commit secrets to ephemeral store and register opaque definitions
+        # Pre-build and validate all definitions and records in memory
         for legacy_key, raw_val in temp_raw_secrets.items():
-            clean_key = re.sub(r"[^a-zA-Z0-9_]", "_", legacy_key)[:32]
-            token = uuid.uuid4().hex[:8]
+            clean_key = re.sub(r"[^a-zA-Z0-9_]", "_", legacy_key)[:24]
+            token = secrets.token_hex(16)
             opaque_name = f"ephem_{clean_key}_{token}"[:64]
 
-            if registry.get(opaque_name) is not None:
+            if registry.get(opaque_name, task_id=task_id) is not None:
                 raise ConflictingSecretDeclarationError(
                     f"Ephemeral secret definition {opaque_name!r} already exists in registry"
                 )
 
-            dest_env, dest_mount = cls._compute_destinations(legacy_key, exposure_policy)
-            ephemeral_store.store(opaque_name, raw_val)
-
-            registry.register(
-                RegisteredSecretDefinition(
-                    name=opaque_name,
-                    source=SecretSource.EPHEMERAL,
-                    source_key=opaque_name,
-                    required_scope=scope,
-                    exposure_policy=exposure_policy,
-                    permitted_egress_hosts=tuple(permitted_egress_hosts),
-                    destination_env_var=dest_env,
-                    destination_mount_path=dest_mount,
-                )
+            sec_scope, sec_exposure, dest_env, dest_mount = cls._compute_destinations_and_policy(
+                legacy_key, default_scope=scope, default_exposure=exposure_policy
             )
+
+            definition = RegisteredSecretDefinition(
+                name=opaque_name,
+                source=SecretSource.EPHEMERAL,
+                source_key=opaque_name,
+                required_scope=sec_scope,
+                exposure_policy=sec_exposure,
+                permitted_egress_hosts=tuple(permitted_egress_hosts),
+                destination_env_var=dest_env,
+                destination_mount_path=dest_mount,
+            )
+            record = EphemeralSecretRecord(
+                handle_id=opaque_name,
+                task_id=task_id,
+                value=raw_val,
+                required_scope=sec_scope,
+                exposure_policy=sec_exposure,
+                permitted_egress_hosts=tuple(permitted_egress_hosts),
+                destination_env_var=dest_env,
+                destination_mount_path=dest_mount,
+            )
+            definitions_to_register.append(definition)
+            records_to_commit.append(record)
             adapted_refs.append(SecretRef(name=opaque_name))
+
+        # Commit all records and definitions transactionally
+        for record, definition in zip(records_to_commit, definitions_to_register):
+            ephemeral_store.store_record(record)
+            registry.register(definition)
 
         return tuple(adapted_refs)
 

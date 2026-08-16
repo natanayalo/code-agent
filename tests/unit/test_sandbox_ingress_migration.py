@@ -6,7 +6,9 @@ import pytest
 from pydantic import ValidationError
 
 from sandbox.capability import (
+    BrokerOnlySecretExposureError,
     CapabilityGrantFactory,
+    CapabilityViolationError,
     ConflictingSecretDeclarationError,
     DeprecatedLegacySecretsError,
     EphemeralSecretHandle,
@@ -252,3 +254,119 @@ def test_ephemeral_migration_sandbox_file_destination_mount_path() -> None:
     assert sec_def.destination_mount_path == "/run/secrets/code-agent/ephemeral_custom_cert.secret"
     assert sec_def.destination_mount_name == "ephemeral_custom_cert.secret"
     assert sec_def.destination_env_var is None
+
+
+def test_ephemeral_migration_reserved_github_token_enforces_broker_only() -> None:
+    registry = SecretRegistry()
+    ephem_store = EphemeralSecretStore()
+    raw_payload = {
+        "task_text": "Run github task",
+        "secrets": {"github_token": "ghp_caller_custom_token_12345"},
+    }
+    refs = IngressMigrationAdapter.adapt_and_register_ephemeral(
+        raw_payload,
+        registry=registry,
+        ephemeral_store=ephem_store,
+        # Even if caller passes sandbox_env and custom scope, broker-owned policy takes precedence
+        scope=SecretScope.CUSTOM,
+        exposure_policy=SecretExposurePolicy.SANDBOX_ENV,
+    )
+    assert len(refs) == 1
+    opaque_ref = refs[0]
+    sec_def = registry.require(opaque_ref.name)
+
+    # 1. Enforces BROKER_ONLY and GIT_PUSH scope
+    assert sec_def.exposure_policy == SecretExposurePolicy.BROKER_ONLY
+    assert sec_def.required_scope == SecretScope.GIT_PUSH
+    assert sec_def.destination_env_var is None
+
+    # 2. Resolving for sandbox fails closed
+    factory = CapabilityGrantFactory(secret_registry=registry)
+    grant = factory.create_grant(
+        allowed_secret_refs=(opaque_ref.name,),
+        granted_secret_scopes=(SecretScope.GIT_PUSH,),
+    )
+    resolver = SecretResolver(registry, ephemeral_store=ephem_store)
+    with pytest.raises(BrokerOnlySecretExposureError, match="BROKER_ONLY"):
+        resolver.resolve_for_sandbox(opaque_ref, grant)
+
+    # 3. Resolving for broker succeeds
+    broker_res = resolver.resolve_for_broker(opaque_ref, grant)
+    assert broker_res.reveal_secret_value() == "ghp_caller_custom_token_12345"
+
+
+def test_distributed_secret_definition_resolution_across_processes() -> None:
+    # 1. Ingress process adapts and registers record into shared store
+    shared_store = InMemoryEphemeralSecretStore()
+    ingress_registry = SecretRegistry(ephemeral_store=shared_store)
+    raw_payload = {
+        "task_text": "Distributed execution task",
+        "secrets": {"custom_api_key": "caller_secret_val_999"},
+    }
+    refs = IngressMigrationAdapter.adapt_and_register_ephemeral(
+        raw_payload,
+        registry=ingress_registry,
+        ephemeral_store=shared_store,
+        task_id="task_abc_123",
+        scope=SecretScope.CUSTOM,
+        exposure_policy=SecretExposurePolicy.SANDBOX_ENV,
+    )
+    assert len(refs) == 1
+    opaque_ref = refs[0]
+
+    # 2. Worker process in separate memory space with fresh SecretRegistry
+    worker_registry = SecretRegistry(ephemeral_store=shared_store, task_id="task_abc_123")
+    assert opaque_ref.name not in worker_registry._definitions
+
+    # Dynamic lookup retrieves authoritative definition from shared store
+    def_on_worker = worker_registry.require(opaque_ref.name)
+    assert def_on_worker.name == opaque_ref.name
+    assert def_on_worker.required_scope == SecretScope.CUSTOM
+    assert def_on_worker.destination_env_var == "CODE_AGENT_SECRET_CUSTOM_API_KEY"
+
+    # Worker factory and resolver execute successfully
+    worker_factory = CapabilityGrantFactory(secret_registry=worker_registry)
+    grant = worker_factory.create_grant(
+        allowed_secret_refs=(opaque_ref.name,),
+        granted_secret_scopes=(SecretScope.CUSTOM,),
+    )
+    worker_resolver = SecretResolver(
+        worker_registry, task_id="task_abc_123", ephemeral_store=shared_store
+    )
+    res = worker_resolver.resolve_for_sandbox(opaque_ref, grant)
+    assert res.reveal_secret_value() == "caller_secret_val_999"
+
+    # 3. Wrong task_id cannot resolve the record
+    wrong_task_registry = SecretRegistry(ephemeral_store=shared_store, task_id="wrong_task_999")
+    assert wrong_task_registry.get(opaque_ref.name) is None
+
+
+def test_destination_collision_validation_fails_closed() -> None:
+    registry = SecretRegistry()
+    registry.register(
+        RegisteredSecretDefinition(
+            name="openai_key_sys",
+            source=SecretSource.ENV,
+            source_key="OPENAI_API_KEY",
+            required_scope=SecretScope.PROVIDER_AUTH,
+            exposure_policy=SecretExposurePolicy.SANDBOX_ENV,
+            destination_env_var="OPENAI_API_KEY",
+        )
+    )
+    registry.register(
+        RegisteredSecretDefinition(
+            name="openai_key_user",
+            source=SecretSource.ENV,
+            source_key="USER_OPENAI_KEY",
+            required_scope=SecretScope.PROVIDER_AUTH,
+            exposure_policy=SecretExposurePolicy.SANDBOX_ENV,
+            destination_env_var="OPENAI_API_KEY",  # Duplicate destination
+        )
+    )
+
+    factory = CapabilityGrantFactory(secret_registry=registry)
+    with pytest.raises(CapabilityViolationError, match="Conflicting sandbox env destination"):
+        factory.create_grant(
+            allowed_secret_refs=("openai_key_sys", "openai_key_user"),
+            granted_secret_scopes=(SecretScope.PROVIDER_AUTH,),
+        )

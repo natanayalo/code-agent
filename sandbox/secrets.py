@@ -33,23 +33,23 @@ class CapabilityViolationError(RuntimeError):
 
 
 class SecretResolutionError(CapabilityViolationError):
-    """Base exception for secret resolution failures."""
+    pass
 
 
 class UnauthorizedSecretError(SecretResolutionError):
-    """Raised when access to a secret is not authorized by the capability grant."""
+    pass
 
 
 class MissingSecretScopeError(SecretResolutionError):
-    """Raised when a capability grant lacks the scope required by a secret."""
+    pass
 
 
 class SecretNotFoundError(SecretResolutionError):
-    """Raised when a requested secret is not found in the registry or source."""
+    pass
 
 
 class BrokerOnlySecretExposureError(SecretResolutionError):
-    """Raised when attempting to resolve a broker-only secret for sandbox injection."""
+    pass
 
 
 class SecretSource(enum.StrEnum):
@@ -69,55 +69,6 @@ class EphemeralSecretHandle(BaseModel):
     handle_id: str = Field(min_length=1)
 
 
-class EphemeralSecretStore:
-    """Storage interface for ephemeral legacy secrets outside durable workflow history.
-
-    Provides the base interface and in-memory reference implementation for
-    single-process execution and tests. In distributed production (M28.5A.2), a shared
-    out-of-history encrypted backend (e.g. Redis TTL or Vault KV) implements this contract.
-    """
-
-    def __init__(self, initial_secrets: Mapping[str, str] | None = None) -> None:
-        self._store: dict[str, str] = dict(initial_secrets) if initial_secrets is not None else {}
-
-    def get(self, handle_or_key: str) -> str | None:
-        """Retrieve secret material for an opaque handle or key."""
-        return self._store.get(handle_or_key)
-
-    def store(
-        self,
-        key: str,
-        value: str,
-        *,
-        ttl_seconds: int = 3600,
-    ) -> str:
-        """Store secret material under a key/handle and return the handle identifier."""
-        self._store[key] = value
-        return key
-
-    def has(self, handle_or_key: str) -> bool:
-        """Check if an ephemeral secret exists in the store."""
-        return handle_or_key in self._store
-
-    def remove(self, handle_or_key: str) -> None:
-        """Delete an ephemeral secret from the store."""
-        self._store.pop(handle_or_key, None)
-
-    def clear(self) -> None:
-        """Clear all stored ephemeral secrets."""
-        self._store.clear()
-
-    def __contains__(self, handle_or_key: str) -> bool:
-        return handle_or_key in self._store
-
-    def __len__(self) -> int:
-        return len(self._store)
-
-
-class InMemoryEphemeralSecretStore(EphemeralSecretStore):
-    """In-memory ephemeral secret store implementation for testing and local runtime."""
-
-
 class SecretScope(enum.StrEnum):
     """Privilege scopes required to access a registered secret."""
 
@@ -133,6 +84,113 @@ class SecretExposurePolicy(enum.StrEnum):
     BROKER_ONLY = "broker_only"
     SANDBOX_ENV = "sandbox_env"
     SANDBOX_FILE = "sandbox_file"
+
+
+class EphemeralSecretRecord(BaseModel):
+    """Complete metadata and secret material stored in the out-of-history ephemeral store."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    handle_id: str = Field(min_length=1)
+    task_id: str = Field(min_length=1)
+    value: str = Field(min_length=1, repr=False)
+    required_scope: SecretScope
+    exposure_policy: SecretExposurePolicy = SecretExposurePolicy.SANDBOX_ENV
+    permitted_egress_hosts: tuple[str, ...] = ()
+    destination_env_var: str | None = None
+    destination_mount_path: str | None = None
+
+    def to_registered_definition(self) -> RegisteredSecretDefinition:
+        return RegisteredSecretDefinition(
+            name=self.handle_id,
+            source=SecretSource.EPHEMERAL,
+            source_key=self.handle_id,
+            required_scope=self.required_scope,
+            exposure_policy=self.exposure_policy,
+            permitted_egress_hosts=self.permitted_egress_hosts,
+            destination_env_var=self.destination_env_var,
+            destination_mount_path=self.destination_mount_path,
+        )
+
+
+class EphemeralSecretStore:
+    """Storage interface for ephemeral legacy secrets outside durable workflow history."""
+
+    def __init__(
+        self, initial_records: Mapping[str, EphemeralSecretRecord | str] | None = None
+    ) -> None:
+        self._records: dict[str, EphemeralSecretRecord] = {}
+        for k, v in (initial_records or {}).items():
+            self._records[k] = (
+                v
+                if isinstance(v, EphemeralSecretRecord)
+                else EphemeralSecretRecord(
+                    handle_id=k,
+                    task_id="default_task",
+                    value=v,
+                    required_scope=SecretScope.CUSTOM,
+                    exposure_policy=SecretExposurePolicy.SANDBOX_ENV,
+                )
+            )
+
+    def store_record(self, record: EphemeralSecretRecord, *, ttl_seconds: int = 3600) -> str:
+        self._records[record.handle_id] = record
+        return record.handle_id
+
+    def store(
+        self,
+        key: str,
+        value: str,
+        *,
+        task_id: str = "default_task",
+        scope: SecretScope = SecretScope.CUSTOM,
+        exposure_policy: SecretExposurePolicy = SecretExposurePolicy.SANDBOX_ENV,
+        ttl_seconds: int = 3600,
+    ) -> str:
+        record = EphemeralSecretRecord(
+            handle_id=key,
+            task_id=task_id,
+            value=value,
+            required_scope=scope,
+            exposure_policy=exposure_policy,
+        )
+        return self.store_record(record, ttl_seconds=ttl_seconds)
+
+    def get_record(
+        self, handle_id: str, *, task_id: str | None = None
+    ) -> EphemeralSecretRecord | None:
+        rec = self._records.get(handle_id)
+        if rec is None or (task_id is not None and rec.task_id != task_id):
+            return None
+        return rec
+
+    def get(self, handle_or_key: str, *, task_id: str | None = None) -> str | None:
+        rec = self.get_record(handle_or_key, task_id=task_id)
+        return rec.value if rec is not None else None
+
+    def has(self, handle_or_key: str, *, task_id: str | None = None) -> bool:
+        return self.get_record(handle_or_key, task_id=task_id) is not None
+
+    def remove(self, handle_or_key: str, *, task_id: str | None = None) -> None:
+        if task_id is not None:
+            rec = self._records.get(handle_or_key)
+            if rec is not None and rec.task_id == task_id:
+                self._records.pop(handle_or_key, None)
+        else:
+            self._records.pop(handle_or_key, None)
+
+    def clear(self) -> None:
+        self._records.clear()
+
+    def __contains__(self, handle_or_key: str) -> bool:
+        return handle_or_key in self._records
+
+    def __len__(self) -> int:
+        return len(self._records)
+
+
+class InMemoryEphemeralSecretStore(EphemeralSecretStore):
+    """In-memory ephemeral secret store implementation for testing and local runtime."""
 
 
 def normalize_fqdn(host: str) -> str:
@@ -170,10 +228,8 @@ class SecretRef(BaseModel):
             raise ValueError("SecretRef metadata cannot exceed 8 key-value entries")
         seen_keys: set[str] = set()
         for key, val in v:
-            if not _RE_SAFE_NAME.match(key):
-                raise ValueError(f"Invalid metadata key: {key!r}")
-            if key in seen_keys:
-                raise ValueError(f"Duplicate metadata key: {key!r}")
+            if not _RE_SAFE_NAME.match(key) or key in seen_keys:
+                raise ValueError(f"Invalid or duplicate metadata key: {key!r}")
             seen_keys.add(key)
             if len(val) > 128 or any(ord(c) < 32 for c in val):
                 raise ValueError(f"Invalid metadata value for key {key!r}")
@@ -214,9 +270,8 @@ class RegisteredSecretDefinition(BaseModel):
         if not _RE_SAFE_ENV_VAR.match(v):
             raise ValueError(f"Invalid destination environment variable name: {v!r}")
         if not (v in ALLOWED_SECRET_ENV_VARS or v.startswith(_SECRET_ENV_VAR_PREFIX)):
-            allowed_str = sorted(ALLOWED_SECRET_ENV_VARS)
             raise ValueError(
-                f"destination_env_var must be in {allowed_str} "
+                f"destination_env_var must be in {sorted(ALLOWED_SECRET_ENV_VARS)} "
                 f"or prefixed with '{_SECRET_ENV_VAR_PREFIX}', got {v!r}"
             )
         return v
@@ -251,24 +306,19 @@ class RegisteredSecretDefinition(BaseModel):
             parts = self.source_key.split("/")
             if ".." in parts or "." in parts or "" in parts:
                 raise ValueError(
-                    f"FILE secret source_key cannot contain traversal components: "
-                    f"{self.source_key!r}"
+                    f"FILE secret source_key cannot contain traversal: {self.source_key!r}"
                 )
         if self.exposure_policy == SecretExposurePolicy.BROKER_ONLY:
-            if self.destination_env_var is not None or self.destination_mount_name is not None:
+            if self.destination_env_var or self.destination_mount_name:
                 raise ValueError(
                     "BROKER_ONLY secrets cannot specify sandbox injection destinations"
                 )
         elif self.exposure_policy == SecretExposurePolicy.SANDBOX_ENV:
-            if self.destination_env_var is None:
-                raise ValueError("SANDBOX_ENV secrets must specify destination_env_var")
-            if self.destination_mount_name is not None:
-                raise ValueError("SANDBOX_ENV secrets cannot specify destination_mount_path")
+            if self.destination_env_var is None or self.destination_mount_name is not None:
+                raise ValueError("SANDBOX_ENV secrets require destination_env_var only")
         elif self.exposure_policy == SecretExposurePolicy.SANDBOX_FILE:
-            if self.destination_mount_name is None:
-                raise ValueError("SANDBOX_FILE secrets must specify destination_mount_path")
-            if self.destination_env_var is not None:
-                raise ValueError("SANDBOX_FILE secrets cannot specify destination_env_var")
+            if self.destination_mount_name is None or self.destination_env_var is not None:
+                raise ValueError("SANDBOX_FILE secrets require destination_mount_path only")
         return self
 
 
@@ -322,8 +372,16 @@ class ResolvedSecret:
 class SecretRegistry:
     """Authoritative server-side registry of registered secret definitions."""
 
-    def __init__(self, definitions: Sequence[RegisteredSecretDefinition] = ()) -> None:
+    def __init__(
+        self,
+        definitions: Sequence[RegisteredSecretDefinition] = (),
+        *,
+        ephemeral_store: EphemeralSecretStore | None = None,
+        task_id: str | None = None,
+    ) -> None:
         self._definitions: dict[str, RegisteredSecretDefinition] = {}
+        self._ephemeral_store = ephemeral_store
+        self._task_id = task_id
         for d in definitions:
             self.register(d)
 
@@ -332,11 +390,18 @@ class SecretRegistry:
             raise ValueError(f"Secret {definition.name!r} already registered")
         self._definitions[definition.name] = definition
 
-    def get(self, name: str) -> RegisteredSecretDefinition | None:
-        return self._definitions.get(name)
+    def get(self, name: str, *, task_id: str | None = None) -> RegisteredSecretDefinition | None:
+        if name in self._definitions:
+            return self._definitions[name]
+        effective_task_id = task_id if task_id is not None else self._task_id
+        if self._ephemeral_store is not None and name.startswith("ephem_"):
+            record = self._ephemeral_store.get_record(name, task_id=effective_task_id)
+            if record is not None:
+                return record.to_registered_definition()
+        return None
 
-    def require(self, name: str) -> RegisteredSecretDefinition:
-        definition = self.get(name)
+    def require(self, name: str, *, task_id: str | None = None) -> RegisteredSecretDefinition:
+        definition = self.get(name, task_id=task_id)
         if definition is None:
             raise SecretNotFoundError(f"Secret {name!r} not found in registry")
         return definition
@@ -345,7 +410,7 @@ class SecretRegistry:
         return len(self._definitions)
 
     def __contains__(self, name: str) -> bool:
-        return name in self._definitions
+        return self.get(name) is not None
 
     def __iter__(self) -> Iterator[RegisteredSecretDefinition]:
         return iter(self._definitions.values())
@@ -361,6 +426,7 @@ class SecretResolver:
         self,
         registry: SecretRegistry,
         *,
+        task_id: str | None = None,
         env: Mapping[str, str] | None = None,
         secret_store: Mapping[str, str] | None = None,
         file_store: Mapping[str, str] | None = None,
@@ -368,6 +434,7 @@ class SecretResolver:
         tool_registry: ToolRegistry | None = None,
     ) -> None:
         self._registry = registry
+        self._task_id = task_id
         self._env = env if env is not None else {}
         self._secret_store = secret_store if secret_store is not None else {}
         self._file_store = file_store if file_store is not None else {}
@@ -379,6 +446,10 @@ class SecretResolver:
             else EphemeralSecretStore()
         )
         self._tool_registry = tool_registry if tool_registry is not None else DEFAULT_TOOL_REGISTRY
+        if self._registry._ephemeral_store is None:
+            self._registry._ephemeral_store = self._ephemeral_store
+        if self._registry._task_id is None:
+            self._registry._task_id = self._task_id
 
     def _validate_sandbox_grant_invariants(
         self,
@@ -390,44 +461,32 @@ class SecretResolver:
         allowed_egress_hosts = tuple(getattr(grant, "allowed_egress_hosts", ()))
         allowed_tools = tuple(getattr(grant, "allowed_tools", ()))
 
-        # 1. Network policy checks
         net_val = (
             network.value if (network is not None and hasattr(network, "value")) else str(network)
         )
         if net_val == "public_https_proxy":
             raise CapabilityViolationError(
-                f"PUBLIC_HTTPS_PROXY network is forbidden when resolving sandbox secret "
-                f"{definition.name!r}"
+                f"PUBLIC_HTTPS_PROXY network is forbidden when resolving {definition.name!r}"
             )
         if net_val == "allowlisted_hosts":
             if not allowed_egress_hosts:
-                raise CapabilityViolationError(
-                    f"ALLOWLISTED_HOSTS network requires non-empty allowed_egress_hosts "
-                    f"when resolving {definition.name!r}"
-                )
+                raise CapabilityViolationError("ALLOWLISTED_HOSTS requires allowed_egress_hosts")
             if not set(allowed_egress_hosts).issubset(set(definition.permitted_egress_hosts)):
                 raise CapabilityViolationError(
-                    f"Grant allowed_egress_hosts {allowed_egress_hosts} exceeds permitted "
-                    f"egress hosts {definition.permitted_egress_hosts} for secret "
-                    f"{definition.name!r}"
+                    f"Egress hosts {allowed_egress_hosts} exceed permitted for {definition.name!r}"
                 )
-        elif net_val == "disabled":
-            if allowed_egress_hosts:
-                raise CapabilityViolationError(
-                    "DISABLED network cannot specify allowed_egress_hosts"
-                )
+        elif net_val == "disabled" and allowed_egress_hosts:
+            raise CapabilityViolationError("DISABLED network cannot specify allowed_egress_hosts")
 
-        # 2. Publication coupling check
         if self._tool_registry is not None and allowed_tools:
-            has_pub_tool = any(
-                (tool := self._tool_registry.get_tool(t)) is not None
-                and ToolCapabilityTag.AUTOMATED_EXTERNAL_PUBLICATION in tool.capability_tags
+            has_pub = any(
+                (t_obj := self._tool_registry.get_tool(t)) is not None
+                and ToolCapabilityTag.AUTOMATED_EXTERNAL_PUBLICATION in t_obj.capability_tags
                 for t in allowed_tools
             )
-            if has_pub_tool:
+            if has_pub:
                 raise CapabilityViolationError(
-                    f"Cannot resolve sandbox secret {definition.name!r} when grant permits "
-                    f"automated external publication tools"
+                    f"Cannot resolve sandbox secret {definition.name!r} with publication tools"
                 )
 
     def resolve_for_sandbox(
@@ -438,7 +497,7 @@ class SecretResolver:
         redactor: SecretRedactor | None = None,
     ) -> ResolvedSecret:
         """Resolve a secret for container injection, failing closed if unauthorized."""
-        definition = self._registry.require(ref.name)
+        definition = self._registry.require(ref.name, task_id=self._task_id)
 
         if definition.exposure_policy == SecretExposurePolicy.BROKER_ONLY:
             raise BrokerOnlySecretExposureError(
@@ -457,7 +516,7 @@ class SecretResolver:
     ) -> ResolvedSecret:
         """Resolve a secret for broker-side execution only."""
         name = ref_or_name.name if isinstance(ref_or_name, SecretRef) else ref_or_name
-        definition = self._registry.require(name)
+        definition = self._registry.require(name, task_id=self._task_id)
         return self._resolve_internal(definition, grant, redactor=redactor)
 
     def _resolve_internal(
@@ -467,7 +526,6 @@ class SecretResolver:
         *,
         redactor: SecretRedactor | None = None,
     ) -> ResolvedSecret:
-        # Dual-key authorization check
         allowed_secret_refs = getattr(grant, "allowed_secret_refs", ())
         granted_secret_scopes = getattr(grant, "granted_secret_scopes", ())
         if definition.name not in allowed_secret_refs:
@@ -480,35 +538,21 @@ class SecretResolver:
                 f"Grant lacks required scope {scope_val!r} for secret {definition.name!r}"
             )
 
-        # Lookup secret material from source
         if definition.source == SecretSource.ENV:
-            if definition.source_key not in self._env:
-                raise SecretNotFoundError(
-                    f"Env var {definition.source_key!r} not set for secret {definition.name!r}"
-                )
-            value = self._env[definition.source_key]
+            value = self._env.get(definition.source_key)
         elif definition.source == SecretSource.SECRET_STORE:
-            if definition.source_key not in self._secret_store:
-                raise SecretNotFoundError(
-                    f"Key {definition.source_key!r} not in secret store for {definition.name!r}"
-                )
-            value = self._secret_store[definition.source_key]
+            value = self._secret_store.get(definition.source_key)
         elif definition.source == SecretSource.FILE:
-            if definition.source_key not in self._file_store:
-                raise SecretNotFoundError(
-                    f"File key {definition.source_key!r} not in file store for {definition.name!r}"
-                )
-            value = self._file_store[definition.source_key]
+            value = self._file_store.get(definition.source_key)
         elif definition.source == SecretSource.EPHEMERAL:
-            val = self._ephemeral_store.get(definition.source_key)
-            if val is None:
-                raise SecretNotFoundError(
-                    f"Key {definition.source_key!r} not found in ephemeral secret store "
-                    f"for {definition.name!r}"
-                )
-            value = val
+            value = self._ephemeral_store.get(definition.source_key, task_id=self._task_id)
         else:
             raise SecretResolutionError(f"Unsupported secret source: {definition.source!r}")
+
+        if value is None:
+            raise SecretNotFoundError(
+                f"Secret material for {definition.name!r} not found in source"
+            )
 
         if redactor is not None:
             redactor.register(value)
@@ -528,6 +572,7 @@ __all__ = [
     "BrokerOnlySecretExposureError",
     "CapabilityViolationError",
     "EphemeralSecretHandle",
+    "EphemeralSecretRecord",
     "EphemeralSecretStore",
     "InMemoryEphemeralSecretStore",
     "MissingSecretScopeError",
