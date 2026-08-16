@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat(orchestrator): prune node_outcomes from temporal state snapshots (m28.5b wave 3b.2) ([#376](https://github.com/natanayalo/code-agent/pull/376))
+
 - Feat(orchestrator): implement wave 3b.1 relational merge markers and attempt rehydration ([#375](https://github.com/natanayalo/code-agent/pull/375))
 
 - Feat(orchestrator): implement wave 3a plan reconstruction and pruning ([#374](https://github.com/natanayalo/code-agent/pull/374))
