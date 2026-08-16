@@ -53,6 +53,16 @@ class ToolExpectedArtifact(StrEnum):
     CHANGED_FILES = "changed_files"
 
 
+class ToolCapabilityTag(StrEnum):
+    """Semantic capability tags for runtime capability grants and enforcement."""
+
+    READ_ONLY = "read_only"
+    WORKSPACE_WRITE = "workspace_write"
+    DANGEROUS_SHELL = "dangerous_shell"
+    AUTOMATED_EXTERNAL_PUBLICATION = "automated_external_publication"
+    NETWORK_EGRESS = "network_egress"
+
+
 class ToolDefinition(ToolModel):
     """One explicit worker tool definition."""
 
@@ -63,6 +73,7 @@ class ToolDefinition(ToolModel):
     required_permission: ToolPermissionLevel
     timeout_seconds: int = Field(ge=1)
     network_required: bool = False
+    capability_tags: tuple[ToolCapabilityTag, ...] = Field(default_factory=tuple)
     expected_artifacts: tuple[ToolExpectedArtifact, ...] = Field(default_factory=tuple)
     required_secrets: tuple[str, ...] = Field(default_factory=tuple)
     mcp_input_schema: dict[str, Any] = Field(default_factory=dict)
@@ -170,6 +181,7 @@ EXECUTE_BASH_TOOL = ToolDefinition(
     required_permission=ToolPermissionLevel.WORKSPACE_WRITE,
     timeout_seconds=DEFAULT_EXECUTE_BASH_TIMEOUT_SECONDS,
     network_required=False,
+    capability_tags=(ToolCapabilityTag.WORKSPACE_WRITE, ToolCapabilityTag.DANGEROUS_SHELL),
     expected_artifacts=(
         ToolExpectedArtifact.STDOUT,
         ToolExpectedArtifact.STDERR,
@@ -202,6 +214,7 @@ EXECUTE_GIT_TOOL = ToolDefinition(
     required_permission=ToolPermissionLevel.WORKSPACE_WRITE,
     timeout_seconds=DEFAULT_EXECUTE_GIT_TIMEOUT_SECONDS,
     network_required=False,
+    capability_tags=(ToolCapabilityTag.WORKSPACE_WRITE,),
     expected_artifacts=(
         ToolExpectedArtifact.STDOUT,
         ToolExpectedArtifact.STDERR,
@@ -275,6 +288,11 @@ EXECUTE_GITHUB_TOOL = ToolDefinition(
     required_permission=ToolPermissionLevel.NETWORKED_WRITE,
     timeout_seconds=DEFAULT_EXECUTE_GITHUB_TIMEOUT_SECONDS,
     network_required=True,
+    capability_tags=(
+        ToolCapabilityTag.WORKSPACE_WRITE,
+        ToolCapabilityTag.AUTOMATED_EXTERNAL_PUBLICATION,
+        ToolCapabilityTag.NETWORK_EGRESS,
+    ),
     expected_artifacts=(
         ToolExpectedArtifact.STDOUT,
         ToolExpectedArtifact.STDERR,
@@ -338,6 +356,7 @@ EXECUTE_BROWSER_TOOL = ToolDefinition(
     required_permission=ToolPermissionLevel.NETWORKED_WRITE,
     timeout_seconds=DEFAULT_EXECUTE_BROWSER_TIMEOUT_SECONDS,
     network_required=True,
+    capability_tags=(ToolCapabilityTag.READ_ONLY, ToolCapabilityTag.NETWORK_EGRESS),
     expected_artifacts=(
         ToolExpectedArtifact.STDOUT,
         ToolExpectedArtifact.STDERR,
@@ -380,6 +399,7 @@ VIEW_FILE_TOOL = ToolDefinition(
     required_permission=ToolPermissionLevel.READ_ONLY,
     timeout_seconds=DEFAULT_VIEW_FILE_TIMEOUT_SECONDS,
     network_required=False,
+    capability_tags=(ToolCapabilityTag.READ_ONLY,),
     expected_artifacts=(
         ToolExpectedArtifact.STDOUT,
         ToolExpectedArtifact.STDERR,
@@ -417,6 +437,7 @@ SEARCH_FILE_TOOL = ToolDefinition(
     required_permission=ToolPermissionLevel.READ_ONLY,
     timeout_seconds=DEFAULT_SEARCH_FILE_TIMEOUT_SECONDS,
     network_required=False,
+    capability_tags=(ToolCapabilityTag.READ_ONLY,),
     expected_artifacts=(
         ToolExpectedArtifact.STDOUT,
         ToolExpectedArtifact.STDERR,
@@ -463,6 +484,7 @@ SEARCH_DIR_TOOL = ToolDefinition(
     required_permission=ToolPermissionLevel.READ_ONLY,
     timeout_seconds=DEFAULT_SEARCH_DIR_TIMEOUT_SECONDS,
     network_required=False,
+    capability_tags=(ToolCapabilityTag.READ_ONLY,),
     expected_artifacts=(
         ToolExpectedArtifact.STDOUT,
         ToolExpectedArtifact.STDERR,
@@ -511,6 +533,7 @@ STR_REPLACE_EDITOR_TOOL = ToolDefinition(
     required_permission=ToolPermissionLevel.WORKSPACE_WRITE,
     timeout_seconds=DEFAULT_STR_REPLACE_EDITOR_TIMEOUT_SECONDS,
     network_required=False,
+    capability_tags=(ToolCapabilityTag.WORKSPACE_WRITE,),
     expected_artifacts=(
         ToolExpectedArtifact.STDOUT,
         ToolExpectedArtifact.STDERR,

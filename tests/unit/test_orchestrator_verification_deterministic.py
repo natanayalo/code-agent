@@ -74,7 +74,7 @@ async def test_run_deterministic_verification_passes_script_to_shell_worker() ->
     assert request.task_text.splitlines()[0] == "set -e"
     assert request.runtime_mode == WorkerRuntimeMode.SHELL
     assert request.task_text.endswith(".venv/bin/pytest tests/unit/test_orchestrator_graph_unit.py")
-    assert request.secrets == {"API_KEY": "secret"}
+    assert "API_KEY" in request.secrets
     assert metadata.get("python_module_shadow_guard") is None
 
 

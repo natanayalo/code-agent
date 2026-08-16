@@ -16,8 +16,17 @@ class SecretRedactor:
         # Filter out empty or whitespace-only secrets
         clean_secrets = {s for s in (secrets or []) if s and s.strip()}
         # Sort secrets by length descending to avoid partial masking of longer secrets
-        # that contain shorter secrets (e.g. "password123" vs "password").
         self._secrets = sorted(clean_secrets, key=len, reverse=True)
+        self._rebuild_pattern()
+
+    def register(self, secret: str) -> None:
+        """Dynamically register a new secret for redaction."""
+        if secret and secret.strip() and secret not in self._secrets:
+            self._secrets.append(secret)
+            self._secrets.sort(key=len, reverse=True)
+            self._rebuild_pattern()
+
+    def _rebuild_pattern(self) -> None:
         self._pattern = (
             re.compile("|".join(re.escape(s) for s in self._secrets)) if self._secrets else None
         )
