@@ -12,12 +12,15 @@ from sandbox.capability import (
     ConflictingSecretDeclarationError,
     DeprecatedLegacySecretsError,
     EphemeralSecretHandle,
+    EphemeralSecretRecord,
     EphemeralSecretStore,
     IngressMigrationAdapter,
     InMemoryEphemeralSecretStore,
     LegacyIngressTaskRequest,
+    MissingTaskContextError,
     RegisteredSecretDefinition,
     SecretExposurePolicy,
+    SecretNotFoundError,
     SecretRef,
     SecretRegistry,
     SecretResolver,
@@ -113,15 +116,31 @@ def test_ingress_migration_adapter_and_worker_request_migration() -> None:
 
 def test_ephemeral_secret_store_and_ingress_migration_lifecycle() -> None:
     # 1. EphemeralSecretStore / InMemoryEphemeralSecretStore basic operations
-    store = InMemoryEphemeralSecretStore({"initial_key": "val1"})
+    store = InMemoryEphemeralSecretStore(
+        {
+            "initial_key": EphemeralSecretRecord(
+                handle_id="initial_key",
+                task_id="task_init",
+                value="val1",
+                required_scope=SecretScope.CUSTOM,
+            )
+        }
+    )
     assert len(store) == 1
     assert "initial_key" in store
-    assert store.get("initial_key") == "val1"
-    store.store("new_key", "val2")
-    assert store.get("new_key") == "val2"
-    assert store.has("new_key") is True
-    store.remove("initial_key")
-    assert "initial_key" not in store
+    assert store.get("initial_key", task_id="task_init") == "val1"
+    assert store.get("initial_key") is None  # Missing task_id fails closed
+    assert store.get("initial_key", task_id="wrong_task") is None
+
+    store.store("new_key", "val2", task_id="task_init")
+    assert store.get("new_key", task_id="task_init") == "val2"
+    assert store.has("new_key", task_id="task_init") is True
+    assert store.has("new_key") is False
+
+    store.remove("initial_key", task_id="wrong_task")
+    assert store.has("initial_key", task_id="task_init") is True
+    store.remove("initial_key", task_id="task_init")
+    assert store.has("initial_key", task_id="task_init") is False
 
     handle = EphemeralSecretHandle(handle_id="ephem_handle_123")
     assert handle.handle_id == "ephem_handle_123"
@@ -134,6 +153,7 @@ def test_ephemeral_secret_store_and_ingress_migration_lifecycle() -> None:
             {"task_text": "", "secrets": {"ORPHAN_SECRET": "secret_abc"}},
             registry=registry,
             ephemeral_store=ephem_store,
+            task_id="task_123",
         )
     assert len(ephem_store) == 0
     assert len(registry) == 0
@@ -147,15 +167,16 @@ def test_ephemeral_secret_store_and_ingress_migration_lifecycle() -> None:
         raw_payload,
         registry=registry,
         ephemeral_store=ephem_store,
+        task_id="task_123",
         scope=SecretScope.CUSTOM,
         exposure_policy=SecretExposurePolicy.SANDBOX_ENV,
     )
     assert len(refs) == 1
     opaque_ref = refs[0]
     assert opaque_ref.name.startswith("ephem_CUSTOM_TOKEN_")
-    assert ephem_store.get(opaque_ref.name) == "caller_secret_xyz_999"
+    assert ephem_store.get(opaque_ref.name, task_id="task_123") == "caller_secret_xyz_999"
 
-    sec_def = registry.require(opaque_ref.name)
+    sec_def = registry.require(opaque_ref.name, task_id="task_123")
     assert sec_def.source == SecretSource.EPHEMERAL
     assert sec_def.source_key == opaque_ref.name
     assert sec_def.destination_env_var == "CODE_AGENT_SECRET_CUSTOM_TOKEN"
@@ -165,7 +186,7 @@ def test_ephemeral_secret_store_and_ingress_migration_lifecycle() -> None:
         allowed_secret_refs=(opaque_ref.name,),
         granted_secret_scopes=(SecretScope.CUSTOM,),
     )
-    resolver = SecretResolver(registry, ephemeral_store=ephem_store)
+    resolver = SecretResolver(registry, task_id="task_123", ephemeral_store=ephem_store)
     resolved = resolver.resolve_for_sandbox(opaque_ref, grant)
     assert resolved.name == opaque_ref.name
     assert resolved.destination_env_var == "CODE_AGENT_SECRET_CUSTOM_TOKEN"
@@ -196,6 +217,7 @@ def test_ephemeral_migration_prevents_shadowing_authoritative_broker_secrets() -
         raw_payload,
         registry=registry,
         ephemeral_store=ephem_store,
+        task_id="task_shadow",
         scope=SecretScope.PROVIDER_AUTH,
         exposure_policy=SecretExposurePolicy.SANDBOX_ENV,
     )
@@ -214,6 +236,7 @@ def test_ephemeral_migration_prevents_shadowing_authoritative_broker_secrets() -
     # 5. Resolving opaque ref resolves caller's ephemeral material
     resolver = SecretResolver(
         registry,
+        task_id="task_shadow",
         env={"OPENAI_API_KEY": "broker_system_key_123"},
         ephemeral_store=ephem_store,
     )
@@ -245,11 +268,12 @@ def test_ephemeral_migration_sandbox_file_destination_mount_path() -> None:
         raw_payload,
         registry=registry,
         ephemeral_store=ephem_store,
+        task_id="task_file",
         scope=SecretScope.CUSTOM,
         exposure_policy=SecretExposurePolicy.SANDBOX_FILE,
     )
     assert len(refs) == 1
-    sec_def = registry.require(refs[0].name)
+    sec_def = registry.require(refs[0].name, task_id="task_file")
     assert sec_def.exposure_policy == SecretExposurePolicy.SANDBOX_FILE
     assert sec_def.destination_mount_path == "/run/secrets/code-agent/ephemeral_custom_cert.secret"
     assert sec_def.destination_mount_name == "ephemeral_custom_cert.secret"
@@ -267,13 +291,13 @@ def test_ephemeral_migration_reserved_github_token_enforces_broker_only() -> Non
         raw_payload,
         registry=registry,
         ephemeral_store=ephem_store,
-        # Even if caller passes sandbox_env and custom scope, broker-owned policy takes precedence
+        task_id="task_gh",
         scope=SecretScope.CUSTOM,
         exposure_policy=SecretExposurePolicy.SANDBOX_ENV,
     )
     assert len(refs) == 1
     opaque_ref = refs[0]
-    sec_def = registry.require(opaque_ref.name)
+    sec_def = registry.require(opaque_ref.name, task_id="task_gh")
 
     # 1. Enforces BROKER_ONLY and GIT_PUSH scope
     assert sec_def.exposure_policy == SecretExposurePolicy.BROKER_ONLY
@@ -286,7 +310,7 @@ def test_ephemeral_migration_reserved_github_token_enforces_broker_only() -> Non
         allowed_secret_refs=(opaque_ref.name,),
         granted_secret_scopes=(SecretScope.GIT_PUSH,),
     )
-    resolver = SecretResolver(registry, ephemeral_store=ephem_store)
+    resolver = SecretResolver(registry, task_id="task_gh", ephemeral_store=ephem_store)
     with pytest.raises(BrokerOnlySecretExposureError, match="BROKER_ONLY"):
         resolver.resolve_for_sandbox(opaque_ref, grant)
 
@@ -298,7 +322,7 @@ def test_ephemeral_migration_reserved_github_token_enforces_broker_only() -> Non
 def test_distributed_secret_definition_resolution_across_processes() -> None:
     # 1. Ingress process adapts and registers record into shared store
     shared_store = InMemoryEphemeralSecretStore()
-    ingress_registry = SecretRegistry(ephemeral_store=shared_store)
+    ingress_registry = SecretRegistry(ephemeral_store=shared_store, task_id="task_abc_123")
     raw_payload = {
         "task_text": "Distributed execution task",
         "secrets": {"custom_api_key": "caller_secret_val_999"},
@@ -341,6 +365,53 @@ def test_distributed_secret_definition_resolution_across_processes() -> None:
     assert wrong_task_registry.get(opaque_ref.name) is None
 
 
+def test_ephemeral_secret_missing_task_id_fails_closed() -> None:
+    store = EphemeralSecretStore()
+    registry = SecretRegistry(ephemeral_store=store)
+    raw_payload = {
+        "task_text": "Run task",
+        "secrets": {"CUSTOM_KEY": "secret_abc"},
+    }
+    # adapt_and_register_ephemeral requires non-empty task_id
+    with pytest.raises(ValueError, match="task_id must be a non-empty string"):
+        IngressMigrationAdapter.adapt_and_register_ephemeral(
+            raw_payload,
+            registry=registry,
+            ephemeral_store=store,
+            task_id="",
+        )
+
+    refs = IngressMigrationAdapter.adapt_and_register_ephemeral(
+        raw_payload,
+        registry=registry,
+        ephemeral_store=store,
+        task_id="task_owner_1",
+    )
+    opaque_ref = refs[0]
+
+    # 1. EphemeralSecretStore requires task_id matching owner
+    assert store.get_record(opaque_ref.name) is None
+    assert store.get_record(opaque_ref.name, task_id="wrong_task") is None
+    assert store.get_record(opaque_ref.name, task_id="task_owner_1") is not None
+
+    # 2. SecretRegistry without task_id cannot resolve ephemeral secret
+    unscoped_registry = SecretRegistry(ephemeral_store=store)
+    assert unscoped_registry.get(opaque_ref.name) is None
+    with pytest.raises(SecretNotFoundError):
+        unscoped_registry.require(opaque_ref.name)
+
+    # 3. SecretResolver without task_id raises MissingTaskContextError
+    scoped_registry = SecretRegistry(ephemeral_store=store, task_id="task_owner_1")
+    factory = CapabilityGrantFactory(secret_registry=scoped_registry)
+    grant = factory.create_grant(
+        allowed_secret_refs=(opaque_ref.name,),
+        granted_secret_scopes=(SecretScope.CUSTOM,),
+    )
+    unscoped_resolver = SecretResolver(scoped_registry, ephemeral_store=store)
+    with pytest.raises(MissingTaskContextError, match="Missing task_id"):
+        unscoped_resolver.resolve_for_sandbox(opaque_ref, grant)
+
+
 def test_destination_collision_validation_fails_closed() -> None:
     registry = SecretRegistry()
     registry.register(
@@ -360,7 +431,7 @@ def test_destination_collision_validation_fails_closed() -> None:
             source_key="USER_OPENAI_KEY",
             required_scope=SecretScope.PROVIDER_AUTH,
             exposure_policy=SecretExposurePolicy.SANDBOX_ENV,
-            destination_env_var="OPENAI_API_KEY",  # Duplicate destination
+            destination_env_var="OPENAI_API_KEY",
         )
     )
 

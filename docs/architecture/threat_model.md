@@ -137,7 +137,7 @@ Any code granted a plaintext secret and permitted network egress can intentional
 [2. Ingress Intake & Ephemeral Migration]
     Raw transport payload is transactionally validated via sanitize_legacy_ingress_payload and LegacyIngressTaskRequest.
     Reserved legacy keys (e.g. github_token, gh_token) strictly enforce broker-owned policies (GIT_PUSH + BROKER_ONLY).
-    All secret records (EphemeralSecretRecord) are validated in memory and committed to EphemeralSecretStore (outside Temporal workflow history / PostgreSQL) under task-scoped opaque handles (ephem_<key>_<token_128bit>).
+    All secret records (EphemeralSecretRecord with hide_input_in_errors=True) are validated in memory and committed to EphemeralSecretStore (outside Temporal workflow history / PostgreSQL) under required task-scoped opaque handles (ephem_<key>_<token_128bit>), failing closed whenever task_id context is missing.
     EphemeralSecretRecord carries complete non-secret metadata across distributed processes, enabling worker SecretRegistry instances to resolve authoritative definitions on demand.
     Durable request records contain only opaque SecretRef(name) instances.
         ↓
@@ -146,7 +146,7 @@ Any code granted a plaintext secret and permitted network egress can intentional
         ↓
 [4. Runtime Resolution & Consumption Validation]
     SecretResolver and validate_grant_for_execution validate dual-key authorization, destination uniqueness, network audience, and publication coupling.
-    Rejects BROKER_ONLY secrets from sandbox resolution; retrieves ephemeral definitions and values from out-of-history EphemeralSecretStore backend with task_id verification.
+    Rejects BROKER_ONLY secrets from sandbox resolution; retrieves ephemeral definitions and values from out-of-history EphemeralSecretStore backend with mandatory task_id verification (fails closed with MissingTaskContextError if task_id context is absent).
         ↓
 [5. Staging & Execution]
     Secret values registered with task-scoped SecretRedactor.
@@ -156,7 +156,7 @@ Any code granted a plaintext secret and permitted network egress can intentional
     Task container destroyed; temporary secret mounts unmounted and removed; EphemeralSecretStore handles expired/deleted; SecretRedactor discarded.
 ```
 
-In production deployments (M28.5A.2), `EphemeralSecretStore` uses a dedicated out-of-history encrypted backend with TTL (e.g., Redis with encryption-at-rest or Vault KV) shared by trusted ingress and trusted Temporal workers without serializing secret material into workflow execution history. `InMemoryEphemeralSecretStore` provides the in-memory reference implementation for single-process runners and test fixtures.
+In production deployments (M28.5A.2), `EphemeralSecretStore` uses a dedicated out-of-history encrypted backend with TTL and atomic batch commit/rollback (e.g., Redis with encryption-at-rest or Vault KV) shared by trusted ingress and trusted Temporal workers without serializing secret material into workflow execution history. `InMemoryEphemeralSecretStore` provides the in-memory reference implementation for single-process runners and test fixtures.
 
 ---
 

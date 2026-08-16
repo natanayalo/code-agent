@@ -194,7 +194,7 @@ class IngressMigrationAdapter:
         *,
         registry: SecretRegistry,
         ephemeral_store: EphemeralSecretStore,
-        task_id: str = "default_task",
+        task_id: str,
         scope: SecretScope = SecretScope.CUSTOM,
         exposure_policy: SecretExposurePolicy = SecretExposurePolicy.SANDBOX_ENV,
         permitted_egress_hosts: Sequence[str] = (),
@@ -202,6 +202,8 @@ class IngressMigrationAdapter:
         """Adapt raw payload into ephemeral store entries and register definitions."""
         if not isinstance(raw_payload, Mapping):
             raise ValueError("Ingress task payload must be a JSON object / dictionary")
+        if not isinstance(task_id, str) or not task_id.strip():
+            raise ValueError("task_id must be a non-empty string")
 
         temp_raw_secrets = cls._extract_raw_secrets(raw_payload)
 
@@ -259,7 +261,7 @@ class IngressMigrationAdapter:
             records_to_commit.append(record)
             adapted_refs.append(SecretRef(name=opaque_name))
 
-        # Commit all records and definitions transactionally
+        # Commit after complete validation
         for record, definition in zip(records_to_commit, definitions_to_register):
             ephemeral_store.store_record(record)
             registry.register(definition)

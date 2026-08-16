@@ -44,6 +44,10 @@ class MissingSecretScopeError(SecretResolutionError):
     pass
 
 
+class MissingTaskContextError(SecretResolutionError):
+    """Raised when required task_id context is missing for ephemeral secret access."""
+
+
 class SecretNotFoundError(SecretResolutionError):
     pass
 
@@ -89,7 +93,7 @@ class SecretExposurePolicy(enum.StrEnum):
 class EphemeralSecretRecord(BaseModel):
     """Complete metadata and secret material stored in the out-of-history ephemeral store."""
 
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", hide_input_in_errors=True)
 
     handle_id: str = Field(min_length=1)
     task_id: str = Field(min_length=1)
@@ -142,25 +146,31 @@ class EphemeralSecretStore:
         key: str,
         value: str,
         *,
-        task_id: str = "default_task",
+        task_id: str,
         scope: SecretScope = SecretScope.CUSTOM,
         exposure_policy: SecretExposurePolicy = SecretExposurePolicy.SANDBOX_ENV,
         ttl_seconds: int = 3600,
     ) -> str:
-        record = EphemeralSecretRecord(
-            handle_id=key,
-            task_id=task_id,
-            value=value,
-            required_scope=scope,
-            exposure_policy=exposure_policy,
+        if not task_id or not task_id.strip():
+            raise ValueError("task_id must be a non-empty string")
+        return self.store_record(
+            EphemeralSecretRecord(
+                handle_id=key,
+                task_id=task_id,
+                value=value,
+                required_scope=scope,
+                exposure_policy=exposure_policy,
+            ),
+            ttl_seconds=ttl_seconds,
         )
-        return self.store_record(record, ttl_seconds=ttl_seconds)
 
     def get_record(
         self, handle_id: str, *, task_id: str | None = None
     ) -> EphemeralSecretRecord | None:
+        if not task_id:
+            return None
         rec = self._records.get(handle_id)
-        if rec is None or (task_id is not None and rec.task_id != task_id):
+        if rec is None or rec.task_id != task_id:
             return None
         return rec
 
@@ -172,11 +182,10 @@ class EphemeralSecretStore:
         return self.get_record(handle_or_key, task_id=task_id) is not None
 
     def remove(self, handle_or_key: str, *, task_id: str | None = None) -> None:
-        if task_id is not None:
-            rec = self._records.get(handle_or_key)
-            if rec is not None and rec.task_id == task_id:
-                self._records.pop(handle_or_key, None)
-        else:
+        if not task_id:
+            return
+        rec = self._records.get(handle_or_key)
+        if rec is not None and rec.task_id == task_id:
             self._records.pop(handle_or_key, None)
 
     def clear(self) -> None:
@@ -195,12 +204,10 @@ class InMemoryEphemeralSecretStore(EphemeralSecretStore):
 
 def normalize_fqdn(host: str) -> str:
     """Normalize and validate a fully-qualified domain name (FQDN)."""
-    stripped = host.strip().rstrip(".").lower()
     try:
-        ascii_host = stripped.encode("idna").decode("ascii")
+        ascii_host = host.strip().rstrip(".").lower().encode("idna").decode("ascii")
     except Exception as err:
         raise ValueError(f"Invalid IDNA hostname: {host!r}") from err
-
     if not _RE_FQDN.match(ascii_host):
         raise ValueError(f"Invalid FQDN format: {host!r}")
     return ascii_host
@@ -267,9 +274,9 @@ class RegisteredSecretDefinition(BaseModel):
     def _validate_env_var(cls, v: str | None) -> str | None:
         if v is None:
             return None
-        if not _RE_SAFE_ENV_VAR.match(v):
-            raise ValueError(f"Invalid destination environment variable name: {v!r}")
-        if not (v in ALLOWED_SECRET_ENV_VARS or v.startswith(_SECRET_ENV_VAR_PREFIX)):
+        if not _RE_SAFE_ENV_VAR.match(v) or not (
+            v in ALLOWED_SECRET_ENV_VARS or v.startswith(_SECRET_ENV_VAR_PREFIX)
+        ):
             raise ValueError(
                 f"destination_env_var must be in {sorted(ALLOWED_SECRET_ENV_VARS)} "
                 f"or prefixed with '{_SECRET_ENV_VAR_PREFIX}', got {v!r}"
@@ -294,9 +301,11 @@ class RegisteredSecretDefinition(BaseModel):
 
     @property
     def destination_mount_path(self) -> str | None:
-        if self.destination_mount_name is None:
-            return None
-        return f"/run/secrets/code-agent/{self.destination_mount_name}"
+        return (
+            f"/run/secrets/code-agent/{self.destination_mount_name}"
+            if self.destination_mount_name
+            else None
+        )
 
     @model_validator(mode="after")
     def _validate_destination_consistency(self) -> RegisteredSecretDefinition:
@@ -365,8 +374,7 @@ class ResolvedSecret:
     def __repr__(self) -> str:
         return f"ResolvedSecret(name={self._name!r}, scope={self._scope.value!r}, redacted=True)"
 
-    def __str__(self) -> str:
-        return self.__repr__()
+    __str__ = __repr__
 
 
 class SecretRegistry:
@@ -393,10 +401,9 @@ class SecretRegistry:
     def get(self, name: str, *, task_id: str | None = None) -> RegisteredSecretDefinition | None:
         if name in self._definitions:
             return self._definitions[name]
-        effective_task_id = task_id if task_id is not None else self._task_id
-        if self._ephemeral_store is not None and name.startswith("ephem_"):
-            record = self._ephemeral_store.get_record(name, task_id=effective_task_id)
-            if record is not None:
+        eff_task = task_id or self._task_id
+        if self._ephemeral_store and name.startswith("ephem_") and eff_task:
+            if record := self._ephemeral_store.get_record(name, task_id=eff_task):
                 return record.to_registered_definition()
         return None
 
@@ -435,17 +442,15 @@ class SecretResolver:
     ) -> None:
         self._registry = registry
         self._task_id = task_id
-        self._env = env if env is not None else {}
-        self._secret_store = secret_store if secret_store is not None else {}
-        self._file_store = file_store if file_store is not None else {}
+        self._env = env or {}
+        self._secret_store = secret_store or {}
+        self._file_store = file_store or {}
         self._ephemeral_store = (
             ephemeral_store
             if isinstance(ephemeral_store, EphemeralSecretStore)
             else EphemeralSecretStore(ephemeral_store)
-            if ephemeral_store is not None
-            else EphemeralSecretStore()
         )
-        self._tool_registry = tool_registry if tool_registry is not None else DEFAULT_TOOL_REGISTRY
+        self._tool_registry = tool_registry or DEFAULT_TOOL_REGISTRY
         if self._registry._ephemeral_store is None:
             self._registry._ephemeral_store = self._ephemeral_store
         if self._registry._task_id is None:
@@ -479,12 +484,11 @@ class SecretResolver:
             raise CapabilityViolationError("DISABLED network cannot specify allowed_egress_hosts")
 
         if self._tool_registry is not None and allowed_tools:
-            has_pub = any(
+            if any(
                 (t_obj := self._tool_registry.get_tool(t)) is not None
                 and ToolCapabilityTag.AUTOMATED_EXTERNAL_PUBLICATION in t_obj.capability_tags
                 for t in allowed_tools
-            )
-            if has_pub:
+            ):
                 raise CapabilityViolationError(
                     f"Cannot resolve sandbox secret {definition.name!r} with publication tools"
                 )
@@ -535,7 +539,7 @@ class SecretResolver:
         if definition.required_scope not in granted_secret_scopes:
             scope_val = definition.required_scope.value
             raise MissingSecretScopeError(
-                f"Grant lacks required scope {scope_val!r} for secret {definition.name!r}"
+                f"Grant lacks required scope {scope_val!r} for {definition.name!r}"
             )
 
         if definition.source == SecretSource.ENV:
@@ -545,6 +549,8 @@ class SecretResolver:
         elif definition.source == SecretSource.FILE:
             value = self._file_store.get(definition.source_key)
         elif definition.source == SecretSource.EPHEMERAL:
+            if not self._task_id:
+                raise MissingTaskContextError(f"Missing task_id context for {definition.name!r}")
             value = self._ephemeral_store.get(definition.source_key, task_id=self._task_id)
         else:
             raise SecretResolutionError(f"Unsupported secret source: {definition.source!r}")
@@ -576,6 +582,7 @@ __all__ = [
     "EphemeralSecretStore",
     "InMemoryEphemeralSecretStore",
     "MissingSecretScopeError",
+    "MissingTaskContextError",
     "RegisteredSecretDefinition",
     "ResolvedSecret",
     "SecretExposurePolicy",
