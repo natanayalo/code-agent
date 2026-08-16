@@ -222,10 +222,10 @@ def _make_step(
 
 
 def test_wave3a_field_exclusions_and_serialization() -> None:
-    """task_plan and decomposed_plan must be excluded; node_outcomes retained in Wave 3B.1."""
+    """task_plan, decomposed_plan, and node_outcomes must be excluded from snapshots."""
     assert "task_plan" in EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS
     assert "decomposed_plan" in EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS
-    assert "node_outcomes" not in EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS
+    assert "node_outcomes" in EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS
 
     step = _make_step("step-1", "Inspect repo", mode="read_only")
     node = _make_sample_node("step-1", "Inspect repo", mode="read_only")
@@ -242,7 +242,7 @@ def test_wave3a_field_exclusions_and_serialization() -> None:
     serialized = _serialize_temporal_task_state(state)
     assert "task_plan" not in serialized
     assert "decomposed_plan" not in serialized
-    assert "node_outcomes" in serialized
+    assert "node_outcomes" not in serialized
 
 
 def test_task_plan_exact_round_trip() -> None:
@@ -701,7 +701,7 @@ def test_merge_v2_wave_from_pruned_snapshot() -> None:
         assert snapshot is not None
         assert "decomposed_plan" not in snapshot.state
         assert "task_plan" not in snapshot.state
-        assert "node_outcomes" in snapshot.state
+        assert "node_outcomes" not in snapshot.state
 
     reloaded_state = activities._get_current_state(task_id)
     assert len(reloaded_state.node_outcomes) == 1

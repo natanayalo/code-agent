@@ -64,8 +64,8 @@ from workers import WorkerResult
 
 
 def test_wave3b_field_exclusion_and_serialization() -> None:
-    """node_outcomes is serialized in Wave 3B.1 snapshots for rolling deployment safety."""
-    assert "node_outcomes" not in EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS
+    """node_outcomes is excluded from state snapshot serialization."""
+    assert "node_outcomes" in EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS
     outcome = NodeOutcome(
         node_id="step-1",
         status="completed",
@@ -75,11 +75,14 @@ def test_wave3b_field_exclusion_and_serialization() -> None:
     state = _make_sample_state()
     state.node_outcomes = [outcome]
     serialized = _serialize_temporal_task_state(state)
-    assert "node_outcomes" in serialized
+    assert "node_outcomes" not in serialized
 
 
 def test_1_k1_merged_k2_unmerged_rehydration_and_selector() -> None:
-    """1. K1 merged -> K2 unmerged -> rehydrate returns K1; selector returns merge_terminal(K2)."""
+    """1. K1 merged -> K2 unmerged -> rehydrate returns K1; selector returns merge_terminal(K2).
+
+    Snapshot has NO serialized node_outcomes (pruned).
+    """
     factory = _make_db()
     task_id = "task-3b-1"
     node = _make_sample_node("step-1", "Execute step")
@@ -107,6 +110,9 @@ def test_1_k1_merged_k2_unmerged_rehydration_and_selector() -> None:
             terminal_result_payload=p2,
         )
         _seed_snapshot(session, task_id, decomposed_plan)
+        raw_snap = TemporalTaskStateRepository(session).get(task_id=task_id)
+        assert raw_snap is not None
+        assert "node_outcomes" not in raw_snap.state
 
     activities = _make_activities(factory)
     loaded_state = activities._get_current_state(task_id)
@@ -147,6 +153,9 @@ def test_2_blocked_k1_merged_permission_approved_k2_retry() -> None:
             terminal_result_payload=p1,
         )
         _seed_snapshot(session, task_id, decomposed_plan)
+        raw_snap = TemporalTaskStateRepository(session).get(task_id=task_id)
+        assert raw_snap is not None
+        assert "node_outcomes" not in raw_snap.state
 
     activities = _make_activities(factory)
     _resolve_permission_escalation_state(factory, task_id, approved=True)

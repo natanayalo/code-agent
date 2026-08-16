@@ -2,49 +2,9 @@
 
 ## Current phase
 
-Phase 4A: Temporal stabilization and measured reliability.
+Phase 4A: Temporal stabilization, execution architecture foundation, and measured reliability.
 
-Completed milestone: **M26 — Review-Comment Repair**.
-
-M26 is complete: review-comment repair polling on open draft PRs, author filtering, budget capping, deduplicated reply planning, immediate per-reply DB checkpointing, and thread replies are fully implemented and verified.
-
-Completed milestone: **M28 — Memory Effectiveness and Session Continuity**.
-
-M28's required real-worker evidence is complete on the hardened native-agent
-executor boundary. The scoped matrix is effective: all eight Codex/Antigravity
-cold-and-assisted pairs passed useful-hit, irrelevant-rejection,
-stale-reverification, and conflict-handling gates.
-
-Completed milestone: **M28.5B Wave 1 — State Reduction & Universal Terminal Cleanup**.
-
-M28.5B Wave 1 is complete: `progress_updates` is excluded from intermediate
-`TemporalTaskState` serialization at the persistence boundary while runtime
-compatibility is preserved, and terminal snapshot deletion is universal across
-all exit paths including initial approval rejection.
-
-Completed slice: **M28.5B Wave 2 State Reduction Closeout — Candidate Fields Pruning & Canonical Resolution**.
-
-M28.5B Wave 2 state reduction is complete: all remaining candidate fields
-(`friction_reports`, `errors`, `session_state_update`, `scout_phase_results`,
-`memory_to_persist`, and `timeline_events`) are excluded from intermediate
-`TemporalTaskState` serialization at the persistence boundary. Canonical memory
-resolution is centralized at `persist_memory_node` from retained `WorkerResult`,
-session state is regenerated at consumption, the current Temporal workflow does
-not schedule deep-scout multi-phase chaining (executing single-phase runs where
-`state.result` is authoritative for proposals and artifacts), verification friction
-is ephemeral, and error reporting is projected directly to `tasks.last_error` and
-`TASK_FAILED` timeline events.
-
-Completed slice: **M28.5B Wave 3A — DAG Plan Reconstruction & Pruning (`task_plan` & `decomposed_plan`)**.
-
-M28.5B Wave 3A is complete: `task_plan` and `decomposed_plan` are pruned from
-`TemporalTaskState` serialization, with authoritative plan contracts restored
-directly from `TASK_PLANNED` timeline event payloads. `TaskPlan` dependency semantics
-(`depends_on=None` vs `[]`) and planner metadata are preserved, pre-decomposition
-lifecycles maintain `decomposed_plan=None` cleanly, relational projection validation
-verifies immutable scheduler contracts against Postgres `execution_plans` and
-`execution_plan_nodes`, and all 5 direct snapshot readers route through `_rehydrate_dag_state()`.
-`node_outcomes` remains unexcluded until Wave 3B.
+Active focus: **M28.5 — Execution Architecture Foundation** (M28.5A Sandbox/Trust Boundary, M28.5C AgentEvent, M28.5D ContextEnvelope).
 
 ## Current capabilities
 
@@ -134,14 +94,11 @@ Temporal migration and rollback record is in the
 - the trusted Temporal worker retains Docker authority, while native provider
   CLI execution is confined to one-shot task containers; a separate sandbox
   broker remains deferred
-- lifecycle data currently overlaps across Temporal history/workflow state,
-  serialized `TemporalTaskState`, task/product projections, execution-plan
-  rows, and timeline events; Wave 1, Wave 2, and Wave 3A have pruned
-  ephemeral `progress_updates`, candidate fields (`friction_reports`, `errors`,
-  `session_state_update`, `scout_phase_results`, `memory_to_persist`, `timeline_events`),
-  and DAG plan models (`task_plan`, `decomposed_plan`) from snapshots; Wave 3B.1
-  establishes relational merge markers and attempt-aware rehydration with dual-write
-  preservation of `node_outcomes` in snapshots (Wave 3B.2 will prune snapshot serialization)
+- lifecycle data overlaps across Temporal history/workflow state, serialized
+  `TemporalTaskState`, task/product projections, and execution-plan rows;
+  intermediate state pruning (Waves 1-3) has eliminated ephemeral notifications,
+  candidate metadata, plan models, and node outcomes from snapshots while
+  relational projections and markers retain authoritative execution truth
 - the worker boundary is currently terminal `WorkerRequest -> WorkerResult`;
   provider-neutral streaming `AgentEvent` and `ContextEnvelope` contracts are
   planned rather than available today
@@ -151,10 +108,9 @@ Temporal migration and rollback record is in the
 
 ## Next slices only
 
-1. Execute Milestone M28.5B Wave 3B.2 to safely prune `node_outcomes` snapshot serialization following the Wave 3B.1 relational authority deployment.
-2. Continue M28.5 execution-architecture foundation work (M28.5A sandbox broker/threat model,
+1. Continue M28.5 execution-architecture foundation work (M28.5A sandbox broker/threat model,
    M28.5C `AgentEvent`, M28.5D `ContextEnvelope`).
-3. Use the M28 report as a scoped safety/effectiveness signal only; do not
+2. Use the M28 report as a scoped safety/effectiveness signal only; do not
    change routing or add semantic retrieval without further evidence.
 
 ## Deferred
