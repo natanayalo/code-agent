@@ -102,6 +102,7 @@ class WorkerRequest(WorkerModel):
     task_plan: dict[str, Any] | None = None
     task_spec: dict[str, Any] | None = None
     secret_refs: tuple[SecretRef, ...] = Field(default_factory=tuple)
+    secrets: dict[str, str] = Field(default_factory=dict, exclude=True, repr=False)
     tools: list[str] | None = None
     constraints: dict[str, Any] = Field(default_factory=dict)
     budget: dict[str, Any] = Field(default_factory=dict)
@@ -120,19 +121,19 @@ class WorkerRequest(WorkerModel):
     @classmethod
     def _migrate_legacy_secrets(cls, data: Any) -> Any:
         if isinstance(data, dict) and "secrets" in data:
-            legacy_secrets = data.pop("secrets")
+            legacy_secrets = data.get("secrets")
             if isinstance(legacy_secrets, dict) and legacy_secrets:
                 existing_refs = list(data.get("secret_refs", ()))
+                sanitized_secrets = {}
                 for key in legacy_secrets:
                     if isinstance(key, str) and key:
                         existing_refs.append(SecretRef(name=key))
+                        sanitized_secrets[key] = key
                 data["secret_refs"] = tuple(existing_refs)
+                data["secrets"] = sanitized_secrets
+            else:
+                data["secrets"] = {}
         return data
-
-    @property
-    def secrets(self) -> dict[str, str]:
-        """Deprecated legacy secrets accessor returning logical secret references."""
-        return {ref.name: ref.name for ref in self.secret_refs}
 
     @field_validator("worker_type", mode="before")
     @classmethod

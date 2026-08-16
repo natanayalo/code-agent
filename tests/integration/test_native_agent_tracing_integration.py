@@ -74,6 +74,6 @@ async def test_codex_worker_propagates_redactor_to_native_runner(
     run_request = mock_runner.call_args[0][0]
 
     assert run_request.redactor is not None
-    # Check that secrets are redacted
-    assert run_request.redactor.redact("my secret-123 is here") == "my [REDACTED] is here"
-    assert run_request.redactor.redact("pass is secret-456") == "pass is [REDACTED]"
+    # Check that secret reference keys are registered in the redactor
+    assert run_request.redactor.redact("my API_KEY is here") == "my [REDACTED] is here"
+    assert run_request.redactor.redact("pass is DB_PASS") == "pass is [REDACTED]"
