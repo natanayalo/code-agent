@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -112,10 +113,14 @@ class PostgresEphemeralSecretStore(EphemeralSecretStore):
         if not secret:
             return None
 
-        if secret.expires_at and secret.expires_at < datetime.now(UTC):
-            self._session.delete(secret)
-            self._session.flush()
-            return None
+        if secret.expires_at:
+            expires_at = secret.expires_at
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=UTC)
+            if expires_at < datetime.now(UTC):
+                self._session.delete(secret)
+                self._session.flush()
+                return None
 
         try:
             plaintext = fernet.decrypt(secret.encrypted_value).decode("utf-8")
@@ -165,3 +170,83 @@ class PostgresEphemeralSecretStore(EphemeralSecretStore):
     def delete_task_secrets(self, task_id: str) -> None:
         self._session.query(EphemeralSecret).filter_by(task_id=task_id).delete()
         self._session.flush()
+
+
+class SessionFactoryEphemeralSecretStore(EphemeralSecretStore):
+    """Postgres-backed ephemeral secret store that manages its own sessions.
+
+    This store takes a session factory and wraps all operations in their own
+    transactions, making it safe to inject into long-lived application components
+    like workers that process many tasks.
+    """
+
+    def __init__(self, session_factory: Any) -> None:
+        self._session_factory = session_factory
+
+    def store_record(self, record: EphemeralSecretRecord, *, ttl_seconds: int = 3600) -> str:
+        from repositories import session_scope
+
+        with session_scope(self._session_factory) as session:
+            return PostgresEphemeralSecretStore(session).store_record(
+                record, ttl_seconds=ttl_seconds
+            )
+
+    def store(
+        self,
+        key: str,
+        value: str,
+        *,
+        task_id: str,
+        scope: SecretScope = SecretScope.CUSTOM,
+        exposure_policy: SecretExposurePolicy = SecretExposurePolicy.SANDBOX_ENV,
+        ttl_seconds: int = 3600,
+    ) -> str:
+        from repositories import session_scope
+
+        with session_scope(self._session_factory) as session:
+            return PostgresEphemeralSecretStore(session).store(
+                key,
+                value,
+                task_id=task_id,
+                scope=scope,
+                exposure_policy=exposure_policy,
+                ttl_seconds=ttl_seconds,
+            )
+
+    def get_record(
+        self, handle_id: str, *, task_id: str | None = None
+    ) -> EphemeralSecretRecord | None:
+        from repositories import session_scope
+
+        with session_scope(self._session_factory) as session:
+            return PostgresEphemeralSecretStore(session).get_record(handle_id, task_id=task_id)
+
+    def get(self, handle_or_key: str, *, task_id: str | None = None) -> str | None:
+        from repositories import session_scope
+
+        with session_scope(self._session_factory) as session:
+            return PostgresEphemeralSecretStore(session).get(handle_or_key, task_id=task_id)
+
+    def has(self, handle_or_key: str, *, task_id: str | None = None) -> bool:
+        from repositories import session_scope
+
+        with session_scope(self._session_factory) as session:
+            return PostgresEphemeralSecretStore(session).has(handle_or_key, task_id=task_id)
+
+    def remove(self, handle_or_key: str, *, task_id: str | None = None) -> None:
+        from repositories import session_scope
+
+        with session_scope(self._session_factory) as session:
+            PostgresEphemeralSecretStore(session).remove(handle_or_key, task_id=task_id)
+
+    def refresh_task_ttl(self, task_id: str, *, ttl_seconds: int = 3600) -> None:
+        from repositories import session_scope
+
+        with session_scope(self._session_factory) as session:
+            PostgresEphemeralSecretStore(session).refresh_task_ttl(task_id, ttl_seconds=ttl_seconds)
+
+    def delete_task_secrets(self, task_id: str) -> None:
+        from repositories import session_scope
+
+        with session_scope(self._session_factory) as session:
+            PostgresEphemeralSecretStore(session).delete_task_secrets(task_id)

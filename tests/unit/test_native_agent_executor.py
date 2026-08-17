@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 import sandbox.native_agent_proxy as native_agent_proxy
+from sandbox.capability import FileSystemAccessPolicy, NetworkEgressPolicy, SandboxCapabilityGrant
 from sandbox.native_agent_executor import (
     DockerNativeAgentExecutor,
     NativeAgentExecutorError,
@@ -17,9 +18,10 @@ from sandbox.native_agent_executor import (
     native_agent_home_for_request,
     native_executor_workspace_handle,
     provider_home_name,
-    stage_provider_auth,
 )
+from sandbox.provider_bootstrap import ProviderBootstrap
 from sandbox.scratch import node_agent_home
+from sandbox.trusted_context import TrustedSandboxExecutionContext
 
 
 def test_executor_command_is_hardened_and_mounts_only_task_paths(tmp_path: Path) -> None:
@@ -40,6 +42,11 @@ def test_executor_command_is_hardened_and_mounts_only_task_paths(tmp_path: Path)
         agent_home=agent_home,
         environment={"PATH": "/usr/bin"},
         read_only_workspace=True,
+        resource_limits=type(
+            "ResourceLimits",
+            (),
+            {"pids_limit": 100, "memory_bytes": 1024 * 1024 * 1024, "cpu_limit": 1.0},
+        )(),
     )
 
     joined = " ".join(command)
@@ -106,37 +113,6 @@ def test_provider_home_uses_explicit_source_not_ambiguous_environment() -> None:
     assert provider_home_name(command=["codex", "exec"], provider_auth_source=None) == ".codex"
 
 
-def test_stage_provider_auth_copies_selected_files_not_the_source_home(tmp_path: Path) -> None:
-    source = tmp_path / "source"
-    destination = tmp_path / "destination"
-    source.mkdir()
-    (source / "auth.json").write_text('{"token":"secret"}', encoding="utf-8")
-    (source / "oauth_creds.json").write_text('{"refresh_token":"secret"}', encoding="utf-8")
-    token_path = source / "antigravity-cli" / "antigravity-oauth-token"
-    token_path.parent.mkdir()
-    token_path.write_text("secret", encoding="utf-8")
-    (source / "antigravity-cli" / "history.jsonl").write_text("do not copy", encoding="utf-8")
-    config_path = source / "config" / "config.json"
-    config_path.parent.mkdir()
-    config_path.write_text("{}", encoding="utf-8")
-    (source / "unrelated-secret.txt").write_text("do not copy", encoding="utf-8")
-
-    destination_token = destination / "antigravity-cli" / "antigravity-oauth-token"
-    destination_token.parent.mkdir(parents=True)
-    destination_token.symlink_to(token_path)
-
-    stage_provider_auth(source=source, destination=destination)
-
-    assert (destination / "auth.json").read_text(encoding="utf-8") == '{"token":"secret"}'
-    assert (destination / "oauth_creds.json").is_file()
-    assert destination_token.is_file()
-    assert not destination_token.is_symlink()
-    assert destination_token.read_text(encoding="utf-8") == "secret"
-    assert (destination / "config" / "config.json").is_file()
-    assert not (destination / "antigravity-cli" / "history.jsonl").exists()
-    assert not (destination / "unrelated-secret.txt").exists()
-
-
 def test_proxy_public_egress_rejects_private_and_dns_rebinding_addresses() -> None:
     assert is_public_egress_host("api.openai.com", ["104.18.33.45"])
     assert not is_public_egress_host("localhost", ["127.0.0.1"])
@@ -152,9 +128,11 @@ def test_executor_auth_staging_failure_writes_startup_manifest(tmp_path: Path, m
     repo.mkdir(parents=True)
     artifacts.mkdir()
     monkeypatch.setattr(
-        "sandbox.native_agent_executor.stage_provider_auth",
-        lambda **_kwargs: (_ for _ in ()).throw(OSError("staging denied")),
+        "sandbox.provider_stager.ProviderCredentialStager.stage",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("staging denied")),
     )
+    monkeypatch.setattr("os.chown", lambda path, uid, gid: None)
+    monkeypatch.setattr("os.chmod", lambda path, mode: None)
 
     with pytest.raises(NativeAgentExecutorError, match="staging denied"):
         DockerNativeAgentExecutor(image="native-image").run(
@@ -166,13 +144,21 @@ def test_executor_auth_staging_failure_writes_startup_manifest(tmp_path: Path, m
             artifact_root=artifacts,
             environment={},
             timeout_seconds=1,
-            read_only_workspace=False,
             scratch_namespace="node-1",
             cancel_requested=None,
             redactor=None,
-            network_enabled=False,
-            github_credentials={},
-            provider_auth_source=tmp_path / ".gemini",
+            context=TrustedSandboxExecutionContext(
+                task_id="task-1",
+                grant=SandboxCapabilityGrant(
+                    network=NetworkEgressPolicy.DISABLED,
+                    filesystem=FileSystemAccessPolicy.READ_ONLY,
+                    allowed_secret_refs=frozenset(),
+                ),
+                secret_resolver=type("Resolver", (), {"resolve_for_sandbox": lambda *args: None})(),
+                provider_bootstrap=ProviderBootstrap(
+                    definitions=[], file_store={}, destination_by_ref={}, ref_names=tuple()
+                ),
+            ),
         )
 
     manifest = json.loads((artifacts / "native-isolation-manifest.json").read_text())
@@ -189,7 +175,11 @@ def test_executor_cleans_network_when_polling_is_interrupted(tmp_path: Path, mon
     executor = DockerNativeAgentExecutor(image="native-image")
     cleanup_calls: list[tuple[str | None, str | None]] = []
 
-    monkeypatch.setattr("sandbox.native_agent_executor.stage_provider_auth", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        "sandbox.provider_stager.ProviderCredentialStager.stage", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr("os.chown", lambda path, uid, gid: None)
+    monkeypatch.setattr("os.chmod", lambda path, mode: None)
     monkeypatch.setattr(executor, "_start_proxy", lambda **_kwargs: "native-egress-test")
     monkeypatch.setattr(
         executor,
@@ -201,7 +191,9 @@ def test_executor_cleans_network_when_polling_is_interrupted(tmp_path: Path, mon
     monkeypatch.setattr(
         "sandbox.native_agent_executor.subprocess.Popen",
         lambda *_args, **_kwargs: type(
-            "Process", (), {"poll": lambda _self: None, "stdin": None}
+            "Process",
+            (),
+            {"poll": lambda _self: None, "stdin": None, "stdout": None, "stderr": None},
         )(),
     )
     monkeypatch.setattr(
@@ -219,13 +211,22 @@ def test_executor_cleans_network_when_polling_is_interrupted(tmp_path: Path, mon
             artifact_root=artifacts,
             environment={},
             timeout_seconds=60,
-            read_only_workspace=True,
             scratch_namespace="node-1",
             cancel_requested=None,
             redactor=None,
-            network_enabled=True,
-            github_credentials={},
-            provider_auth_source=tmp_path / ".codex",
+            context=TrustedSandboxExecutionContext(
+                task_id="task-1",
+                grant=SandboxCapabilityGrant(
+                    network=NetworkEgressPolicy.ALLOWLISTED_HOSTS,
+                    allowed_egress_hosts=("api.example.com",),
+                    filesystem=FileSystemAccessPolicy.READ_ONLY,
+                    allowed_secret_refs=frozenset(),
+                ),
+                secret_resolver=type("Resolver", (), {"resolve_for_sandbox": lambda *args: None})(),
+                provider_bootstrap=ProviderBootstrap(
+                    definitions=[], file_store={}, destination_by_ref={}, ref_names=tuple()
+                ),
+            ),
         )
 
     assert len(cleanup_calls) == 1

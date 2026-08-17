@@ -259,7 +259,7 @@ def _persist_submission(
         if raw_secrets:
             store = PostgresEphemeralSecretStore(session)
             adapted_refs = IngressMigrationAdapter.adapt_and_register_ephemeral(
-                {"secrets": raw_secrets},
+                {"task_text": "placeholder", "secrets": raw_secrets},
                 registry=DEFAULT_SECRET_REGISTRY,
                 ephemeral_store=store,
                 task_id=task_id,

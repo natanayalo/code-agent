@@ -446,7 +446,9 @@ class CodexCliWorkerNativeMixin:
             provider_dir = Path("/root/.codex")
 
         bootstrap = ProviderBootstrapLoader.load(provider_dir)
-        registry = SecretRegistry(ephemeral_store=getattr(self, "ephemeral_store", None))
+        registry = SecretRegistry(
+            ephemeral_store=getattr(self, "ephemeral_store", None), task_id=task_id
+        )
         for d in bootstrap.definitions:
             registry.register(d)
 
