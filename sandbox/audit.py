@@ -68,7 +68,7 @@ def run_git_command(
         cmd.extend(
             [
                 f"--git-dir={workspace.trusted_git_dir}",
-                f"--work-tree={workspace.workspace_path}",
+                f"--work-tree={workspace.repo_path}",
                 "-c",
                 "core.hooksPath=/dev/null",
             ]
@@ -77,7 +77,7 @@ def run_git_command(
 
     return subprocess.run(
         cmd,
-        cwd=workspace.workspace_path if not workspace.trusted_git_dir else None,
+        cwd=workspace.repo_path if not workspace.trusted_git_dir else None,
         env=env,
         check=False,
         capture_output=True,
