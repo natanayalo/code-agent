@@ -442,8 +442,11 @@ class CodexCliWorkerNativeMixin:
         from sandbox.trusted_context import TrustedSandboxExecutionContext
 
         provider_dir = Path(os.environ.get("CODE_AGENT_CODEX_AUTH_DIR", Path.home() / ".codex"))
-        if not provider_dir.exists() and Path("/root/.codex").exists():
-            provider_dir = Path("/root/.codex")
+        try:
+            if not provider_dir.exists() and Path("/root/.codex").exists():
+                provider_dir = Path("/root/.codex")
+        except OSError:
+            pass
 
         bootstrap = ProviderBootstrapLoader.load(provider_dir)
         registry = SecretRegistry(

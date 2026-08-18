@@ -508,8 +508,11 @@ class GeminiCliWorkerNativeMixin:
         from sandbox.trusted_context import TrustedSandboxExecutionContext
 
         provider_dir = Path(os.environ.get("CODE_AGENT_GEMINI_AUTH_DIR", Path.home() / ".gemini"))
-        if not provider_dir.exists() and Path("/root/.gemini").exists():
-            provider_dir = Path("/root/.gemini")
+        try:
+            if not provider_dir.exists() and Path("/root/.gemini").exists():
+                provider_dir = Path("/root/.gemini")
+        except OSError:
+            pass
 
         bootstrap = ProviderBootstrapLoader.load(provider_dir)
         registry = SecretRegistry(
