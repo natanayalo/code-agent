@@ -137,7 +137,7 @@ def test_executor_auth_staging_failure_writes_startup_manifest(tmp_path: Path, m
     with pytest.raises(NativeAgentExecutorError, match="staging denied"):
         DockerNativeAgentExecutor(image="native-image").run(
             command=["agy", "-p", "prompt"],
-            prompt=None,
+            prompt="test prompt",
             workspace=native_executor_workspace_handle(
                 workspace_path=workspace_root, repo_path=repo, task_id="task-1"
             ),
@@ -204,7 +204,7 @@ def test_executor_cleans_network_when_polling_is_interrupted(tmp_path: Path, mon
     with pytest.raises(KeyboardInterrupt):
         executor.run(
             command=["codex", "exec"],
-            prompt=None,
+            prompt="test prompt",
             workspace=native_executor_workspace_handle(
                 workspace_path=workspace_root, repo_path=repo, task_id="task-1"
             ),
@@ -299,6 +299,9 @@ async def test_native_agent_runner_full_mocked_execution(tmp_path: Path, monkeyp
             self.stderr = MockStream()
 
         def poll(self):
+            if not hasattr(self, "called"):
+                self.called = True
+                return None
             return 0
 
         def wait(self, *args, **kwargs):
@@ -343,9 +346,48 @@ async def test_native_agent_runner_full_mocked_execution(tmp_path: Path, monkeyp
         secret_resolver=registry,
     )
 
+    from sandbox.secrets import ResolvedSecret, SecretResolver, SecretScope
+
+    # Mock allowed_secret_refs and resolver
+    object.__setattr__(
+        context.grant, "allowed_secret_refs", ("env-sec", "mount-sec", "provider-sec")
+    )
+
+    def mock_resolve(handle, grant):
+        if handle == "env-sec":
+            return ResolvedSecret(
+                name="env-sec",
+                scope=list(SecretScope)[0],
+                value="val",
+                destination_env_var="ENV_SEC",
+            )
+        elif handle == "mount-sec":
+            return ResolvedSecret(
+                name="mount-sec",
+                scope=list(SecretScope)[0],
+                value="val",
+                destination_mount_path="mount-sec",
+            )
+        elif handle == "provider-sec":
+            return ResolvedSecret(
+                name="provider-sec",
+                scope=SecretScope.PROVIDER_AUTH,
+                value="val",
+                destination_env_var="PROV_SEC",
+            )
+        return ResolvedSecret(name=handle, scope=list(SecretScope)[0], value="val")
+
+    context = TrustedSandboxExecutionContext(
+        grant=context.grant,
+        task_id=context.task_id,
+        provider_bootstrap=context.provider_bootstrap,
+        secret_resolver=SecretResolver(registry),
+    )
+    monkeypatch.setattr(context.secret_resolver, "resolve_for_sandbox", mock_resolve)
+
     result = executor.run(
         command=["echo", "test"],
-        prompt=None,
+        prompt="test prompt",
         workspace=native_executor_workspace_handle(
             workspace_path=workspace_root, repo_path=repo, task_id="task-123"
         ),

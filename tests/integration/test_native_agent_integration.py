@@ -161,14 +161,26 @@ sys.exit(1)
 
 def _is_docker_available() -> bool:
     try:
-        subprocess.run(["docker", "info"], check=True, capture_output=True)
-        return True
-    except (subprocess.CalledProcessError, FileNotFoundError):
+        docker_info = subprocess.run(
+            ["docker", "info"], capture_output=True, check=False, timeout=5
+        )
+        if docker_info.returncode != 0:
+            return False
+        inspect = subprocess.run(
+            ["docker", "image", "inspect", "code-agent-worker:latest"],
+            capture_output=True,
+            check=False,
+            timeout=5,
+        )
+        return inspect.returncode == 0
+    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
         return False
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(not _is_docker_available(), reason="Docker unavailable")
+@pytest.mark.skipif(
+    not _is_docker_available(), reason="Docker or code-agent-worker:latest unavailable"
+)
 async def test_native_agent_mutation_with_scratch_namespace(tmp_path: Path):
     """Verify that a native agent can mutate the workspace when scratch_namespace is used and read_only is False."""  # noqa: E501
     from sandbox.capability import (
