@@ -453,7 +453,10 @@ class DockerNativeAgentExecutor:
             sandbox_secrets_dir = agent_home / "secrets"
             sandbox_secrets_dir.mkdir(parents=True, exist_ok=True)
             os.chmod(sandbox_secrets_dir, 0o750)
-            os.chown(sandbox_secrets_dir, 0, 65532)
+            try:
+                os.chown(sandbox_secrets_dir, 0, 65532)
+            except OSError:
+                pass
 
             scoped_env = build_executor_environment(
                 {**environment},
