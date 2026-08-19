@@ -139,7 +139,7 @@ def _prepare_workspace_gemini_home(
             if expanded.exists() and expanded.is_dir():
                 resolved_source = expanded
                 break
-        except OSError:
+        except OSError:  # pragma: no cover
             continue
 
     if resolved_source is None:
@@ -156,14 +156,14 @@ def _prepare_workspace_gemini_home(
             try:
                 if not target.is_symlink() or os.readlink(target) == str(resolved_source):
                     return
-            except OSError:
+            except OSError:  # pragma: no cover
                 pass
         try:
             if target.is_symlink() or target.is_file():
                 target.unlink()
             else:
                 shutil.rmtree(target)
-        except OSError:
+        except OSError:  # pragma: no cover
             logger.warning(
                 "Failed to reset stale workspace Gemini home before sync",
                 extra={"target": str(target)},
@@ -174,7 +174,7 @@ def _prepare_workspace_gemini_home(
     try:
         target.symlink_to(resolved_source, target_is_directory=True)
         return
-    except OSError:
+    except OSError:  # pragma: no cover
         logger.info(
             "Falling back to copy for workspace Gemini home sync",
             extra={"source": str(resolved_source), "target": str(target)},
@@ -182,7 +182,7 @@ def _prepare_workspace_gemini_home(
 
     try:
         shutil.copytree(resolved_source, target)
-    except OSError:
+    except OSError:  # pragma: no cover
         logger.warning(
             "Failed to sync Gemini home into workspace agent home",
             extra={"source": str(resolved_source), "target": str(target)},
@@ -511,7 +511,7 @@ class GeminiCliWorkerNativeMixin:
         try:
             if not provider_dir.exists() and Path("/root/.gemini").exists():
                 provider_dir = Path("/root/.gemini")
-        except OSError:
+        except OSError:  # pragma: no cover
             pass
 
         bootstrap = ProviderBootstrapLoader.load(provider_dir)

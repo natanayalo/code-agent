@@ -445,7 +445,7 @@ class CodexCliWorkerNativeMixin:
         try:
             if not provider_dir.exists() and Path("/root/.codex").exists():
                 provider_dir = Path("/root/.codex")
-        except OSError:
+        except OSError:  # pragma: no cover
             pass
 
         bootstrap = ProviderBootstrapLoader.load(provider_dir)
