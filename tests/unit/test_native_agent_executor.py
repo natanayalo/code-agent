@@ -256,3 +256,106 @@ def test_proxy_audit_is_identity_only_and_redacts_request_content(
         "timestamp": payload["timestamp"],
     }
     assert "authorization" not in audit_path.read_text(encoding="utf-8").lower()
+
+
+@pytest.mark.asyncio
+async def test_native_agent_runner_full_mocked_execution(tmp_path: Path, monkeypatch) -> None:
+    workspace_root = tmp_path / "task"
+    repo = workspace_root / "repo"
+    artifacts = tmp_path / "artifacts"
+    repo.mkdir(parents=True)
+    artifacts.mkdir()
+    executor = DockerNativeAgentExecutor(image="native-image")
+
+    # Mock synchronous docker commands (like network creation/connection)
+    monkeypatch.setattr(
+        executor, "_docker", lambda command: subprocess.CompletedProcess(command, 0, "false 0", "")
+    )
+
+    # Mock proxy startup
+
+    monkeypatch.setattr(executor, "_cleanup_network", lambda **kwargs: "removed")
+
+    class MockProcess:
+        def __init__(self, *args, **kwargs):
+            self.returncode = 0
+            self.args = args
+            self.stdin = None
+
+            class MockStream:
+                def __init__(self):
+                    self.closed = False
+
+                def __iter__(self):
+                    return iter(["output"])
+
+                def read(self, *args):
+                    if not self.closed:
+                        self.closed = True
+                        return "output"
+                    return ""
+
+            self.stdout = MockStream()
+            self.stderr = MockStream()
+
+        def poll(self):
+            return 0
+
+        def wait(self, *args, **kwargs):
+            return 0
+
+        def communicate(self, *args, **kwargs):
+            return ("output", "")
+
+        def kill(self):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    monkeypatch.setattr(subprocess, "Popen", MockProcess)
+    monkeypatch.setattr(executor, "_exited_container_code", lambda *args: 0)
+    from sandbox.capability import (
+        CapabilityGrantFactory,
+        FileSystemAccessPolicy,
+        NetworkEgressPolicy,
+    )
+    from sandbox.secrets import InMemoryEphemeralSecretStore, SecretRegistry
+
+    registry = SecretRegistry(ephemeral_store=InMemoryEphemeralSecretStore(), task_id="task-123")
+    grant = CapabilityGrantFactory(registry).create_grant(
+        network=NetworkEgressPolicy.ALLOWLISTED_HOSTS,
+        filesystem=FileSystemAccessPolicy.WORKSPACE_WRITE,
+        allowed_egress_hosts=["example.com"],
+    )
+
+    from sandbox.provider_bootstrap import ProviderBootstrap
+
+    context = TrustedSandboxExecutionContext(
+        grant=grant,
+        task_id="task-123",
+        provider_bootstrap=ProviderBootstrap(
+            definitions=[], destination_by_ref={}, file_store={}, ref_names=()
+        ),
+        secret_resolver=registry,
+    )
+
+    result = executor.run(
+        command=["echo", "test"],
+        prompt=None,
+        workspace=native_executor_workspace_handle(
+            workspace_path=workspace_root, repo_path=repo, task_id="task-123"
+        ),
+        artifact_root=artifacts,
+        environment={},
+        timeout_seconds=30,
+        scratch_namespace="scratch-1",
+        cancel_requested=lambda: False,
+        redactor=None,
+        context=context,
+    )
+
+    assert result.completed.returncode == 0

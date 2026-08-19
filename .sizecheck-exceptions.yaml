@@ -128,3 +128,5 @@ function_exceptions:
     run_shared_self_review_fix_loop: Bounded retry loop mutating execution in place; heavy local state coupling.
   orchestrator/execution_queue.py:
     run_forever: Core background queue polling loop; tightly coupled state machine that cannot be easily split.
+  tests/unit/test_native_agent_executor.py:
+    test_native_agent_runner_full_mocked_execution: Mocking multiple subprocess handles for synchronous unit test coverage takes many lines
