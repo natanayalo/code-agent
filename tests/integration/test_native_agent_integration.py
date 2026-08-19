@@ -1,5 +1,6 @@
 import os
 import stat
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -156,3 +157,68 @@ sys.exit(1)
         # The failure kind should be mapped by classify_failure_kind
         # Rate limits are usually mapped to 'provider_error' or similar
         assert result.failure_kind is not None
+
+
+def _is_docker_available() -> bool:
+    try:
+        subprocess.run(["docker", "info"], check=True, capture_output=True)
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not _is_docker_available(), reason="Docker unavailable")
+async def test_native_agent_mutation_with_scratch_namespace(tmp_path: Path):
+    """Verify that a native agent can mutate the workspace when scratch_namespace is used and read_only is False."""  # noqa: E501
+    from sandbox.capability import (
+        CapabilityGrantFactory,
+        FileSystemAccessPolicy,
+        NetworkEgressPolicy,
+    )
+    from sandbox.provider_bootstrap import ProviderBootstrap
+    from sandbox.secrets import InMemoryEphemeralSecretStore, SecretRegistry
+    from sandbox.trusted_context import TrustedSandboxExecutionContext
+    from tests.unit.test_gemini_cli_worker import _make_workspace
+    from workers.native_agent_runner import DockerNativeAgentExecutor
+
+    workspace = _make_workspace(tmp_path)
+    workspace.workspace_path.joinpath("target.txt").write_text("initial", encoding="utf-8")
+    workspace.workspace_path.joinpath(".git").mkdir(exist_ok=True)
+    workspace.workspace_path.joinpath(".git", "config").write_text("", encoding="utf-8")
+
+    # We want a real docker execution that mutates the file
+    registry = SecretRegistry(ephemeral_store=InMemoryEphemeralSecretStore(), task_id="task-123")
+    grant = CapabilityGrantFactory(registry).create_grant(
+        network=NetworkEgressPolicy.DISABLED, filesystem=FileSystemAccessPolicy.WORKSPACE_WRITE
+    )
+
+    context = TrustedSandboxExecutionContext(
+        grant=grant,
+        task_id="task-123",
+        provider_bootstrap=ProviderBootstrap(
+            definitions=[], destination_by_ref={}, file_store={}, ref_names=()
+        ),
+        secret_resolver=MagicMock(),
+    )
+
+    executor = DockerNativeAgentExecutor()
+
+    # Run a simple shell command that mutates the target file.
+    execution = executor.run(
+        command=["sh", "-c", "echo 'mutated' > target.txt"],
+        prompt=None,
+        workspace=workspace,
+        artifact_root=tmp_path / "artifacts",
+        environment={},
+        timeout_seconds=30,
+        scratch_namespace="test-scratch",
+        cancel_requested=None,
+        redactor=None,
+        context=context,
+    )
+
+    assert execution.completed.returncode == 0
+    assert (
+        workspace.repo_path.joinpath("target.txt").read_text(encoding="utf-8").strip() == "mutated"
+    )

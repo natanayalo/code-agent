@@ -427,6 +427,7 @@ class CodexCliWorkerNativeMixin:
 
         from sandbox.capability import (
             CapabilityGrantFactory,
+            FileSystemAccessPolicy,
             NetworkEgressPolicy,
             validate_grant_for_execution,
         )
@@ -469,6 +470,9 @@ class CodexCliWorkerNativeMixin:
 
         grant = CapabilityGrantFactory(registry).create_grant(
             network=NetworkEgressPolicy.ALLOWLISTED_HOSTS,
+            filesystem=FileSystemAccessPolicy.READ_ONLY
+            if request.read_only
+            else FileSystemAccessPolicy.WORKSPACE_WRITE,
             allowed_secret_refs=tuple(sandbox_refs),
             granted_secret_scopes=frozenset([SecretScope.PROVIDER_AUTH, SecretScope.GIT_PUSH]),
             allowed_egress_hosts=CODEX_RUNTIME_HOSTS,

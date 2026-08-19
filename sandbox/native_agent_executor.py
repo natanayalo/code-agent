@@ -467,9 +467,13 @@ class DockerNativeAgentExecutor:
                 elif val.destination_mount_path:
                     secret_path = sandbox_secrets_dir / val.name
                     secret_path.write_text(val.reveal_secret_value(), encoding="utf-8")
-                    os.chown(secret_path, 0, 65532)
-                    os.chmod(secret_path, 0o440)
-                elif val.destination_env_var:
+                    try:
+                        os.chown(secret_path, 0, 65532)
+                        os.chmod(secret_path, 0o440)
+                    except OSError:
+                        pass
+
+                if val.destination_env_var:
                     scoped_env[val.destination_env_var] = val.reveal_secret_value()
 
             ProviderCredentialStager.stage(

@@ -493,6 +493,7 @@ class GeminiCliWorkerNativeMixin:
 
         from sandbox.capability import (
             CapabilityGrantFactory,
+            FileSystemAccessPolicy,
             NetworkEgressPolicy,
             validate_grant_for_execution,
         )
@@ -514,7 +515,14 @@ class GeminiCliWorkerNativeMixin:
         except OSError:  # pragma: no cover
             pass
 
-        bootstrap = ProviderBootstrapLoader.load(provider_dir)
+        if self._is_antigravity_native_adapter():
+            from sandbox.provider_bootstrap import ProviderBootstrap
+
+            bootstrap = ProviderBootstrap(
+                definitions=[], destination_by_ref={}, file_store={}, ref_names=()
+            )
+        else:
+            bootstrap = ProviderBootstrapLoader.load(provider_dir)
         registry = SecretRegistry(
             ephemeral_store=getattr(self, "ephemeral_store", None), task_id=task_id
         )
@@ -535,6 +543,9 @@ class GeminiCliWorkerNativeMixin:
 
         grant = CapabilityGrantFactory(registry).create_grant(
             network=NetworkEgressPolicy.ALLOWLISTED_HOSTS,
+            filesystem=FileSystemAccessPolicy.READ_ONLY
+            if request.read_only
+            else FileSystemAccessPolicy.WORKSPACE_WRITE,
             allowed_secret_refs=tuple(sandbox_refs),
             granted_secret_scopes=frozenset([SecretScope.PROVIDER_AUTH, SecretScope.GIT_PUSH]),
             allowed_egress_hosts=GEMINI_RUNTIME_HOSTS,
