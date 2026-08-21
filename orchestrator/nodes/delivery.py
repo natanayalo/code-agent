@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import os
+import subprocess
 from collections.abc import Awaitable, Callable
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from apps.observability import (
@@ -253,8 +255,6 @@ async def _delivery_success_response(
     pr_body: str,
     gh_token: str | None,
 ) -> dict[str, Any]:
-    import asyncio
-
     merged_result = _merge_delivery_result(state.result, delivery_result)
     delivery_metadata = await asyncio.to_thread(
         _capture_delivery_metadata, state, branch_name, gh_token
@@ -306,8 +306,6 @@ async def _reconcile_existing_draft_pr(
 ) -> dict[str, Any] | None:
     if not state.task_spec or state.task_spec.delivery_mode != "draft_pr":
         return None
-
-    import asyncio
 
     delivery_metadata = await asyncio.to_thread(
         _capture_delivery_metadata, state, branch_name, gh_token
@@ -402,6 +400,81 @@ def _broker_git_environment(gh_token: str | None) -> dict[str, str]:
     return environment
 
 
+def _run_broker_git_commands(
+    *,
+    trusted_git_dir: Path,
+    workspace_path: Path,
+    files_to_stage: list[str],
+    gh_token: str | None,
+    pr_title: str,
+    pr_body: str,
+    branch_name: str,
+) -> tuple[str | None, str | None]:
+    """Run the broker-owned Git sequence outside the Temporal event loop."""
+
+    def _run_git(
+        *args: str, include_github_token: bool = False
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                "git",
+                f"--git-dir={trusted_git_dir}",
+                f"--work-tree={workspace_path}",
+                "-c",
+                "core.hooksPath=/dev/null",
+                *args,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+            env=_broker_git_environment(gh_token) if include_github_token else None,
+        )
+
+    reset_res = _run_git("reset")
+    if reset_res.returncode != 0:
+        return (
+            f"Delivery failed to reset staging area: {reset_res.stderr}",
+            "delivery failed (git reset)",
+        )
+
+    if files_to_stage:
+        add_res = _run_git("add", "--", *files_to_stage)
+        if add_res.returncode != 0:
+            return f"Delivery failed to stage files: {add_res.stderr}", "delivery failed (git add)"
+
+    staged_res = _run_git("diff", "--cached", "--quiet")
+    if staged_res.returncode == 1:
+        commit_res = _run_git(
+            "-c",
+            f"user.name={_BROKER_GIT_AUTHOR_NAME}",
+            "-c",
+            f"user.email={_BROKER_GIT_AUTHOR_EMAIL}",
+            "commit",
+            "-m",
+            f"{pr_title}\n\n{pr_body}",
+        )
+        if commit_res.returncode != 0:
+            return f"Delivery failed to commit: {commit_res.stderr}", "delivery failed (git commit)"
+    elif staged_res.returncode != 0:
+        return (
+            f"Delivery failed to inspect staged files: {staged_res.stderr}",
+            "delivery failed (git diff --cached)",
+        )
+
+    push_res = _run_git(
+        "push",
+        "-u",
+        "origin",
+        f"HEAD:refs/heads/{branch_name}",
+        include_github_token=True,
+    )
+    if push_res.returncode != 0:
+        return f"Delivery failed to push branch: {push_res.stderr}", "delivery failed (git push)"
+
+    return None, None
+
+
 async def _run_deliver_result(
     state_input: OrchestratorState,
     session_factory: Any | None = None,
@@ -451,8 +524,6 @@ async def _run_deliver_result(
             }
         )
 
-        import subprocess
-
         from sandbox.workspace import _trusted_git_dir, default_workspace_root
 
         workspace_id = state.dispatch.workspace_id
@@ -468,81 +539,24 @@ async def _run_deliver_result(
                 "delivery failed (missing workspace)",
             )
 
-        def _run_git(
-            *args: str, include_github_token: bool = False
-        ) -> subprocess.CompletedProcess[str]:
-            return subprocess.run(
-                [
-                    "git",
-                    f"--git-dir={trusted_git_dir}",
-                    f"--work-tree={workspace_path}",
-                    "-c",
-                    "core.hooksPath=/dev/null",
-                    *args,
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=60,
-                env=_broker_git_environment(gh_token) if include_github_token else None,
-            )
-
-        reset_res = _run_git("reset")
-        if reset_res.returncode != 0:
-            return _delivery_failure_response(
-                state,
-                f"Delivery failed to reset staging area: {reset_res.stderr}",
-                "delivery failed (git reset)",
-            )
-
         files_to_stage, path_failure = _delivery_files_to_stage(state)
         if path_failure is not None:
             return _delivery_failure_response(state, path_failure, "delivery failed (unsafe path)")
-        if files_to_stage:
-            add_res = _run_git("add", "--", *files_to_stage)
-            if add_res.returncode != 0:
-                return _delivery_failure_response(
-                    state,
-                    f"Delivery failed to stage files: {add_res.stderr}",
-                    "delivery failed (git add)",
-                )
-
-        staged_res = _run_git("diff", "--cached", "--quiet")
-        if staged_res.returncode == 1:
-            commit_res = _run_git(
-                "-c",
-                f"user.name={_BROKER_GIT_AUTHOR_NAME}",
-                "-c",
-                f"user.email={_BROKER_GIT_AUTHOR_EMAIL}",
-                "commit",
-                "-m",
-                f"{pr_title}\n\n{pr_body}",
-            )
-            if commit_res.returncode != 0:
-                return _delivery_failure_response(
-                    state,
-                    f"Delivery failed to commit: {commit_res.stderr}",
-                    "delivery failed (git commit)",
-                )
-        elif staged_res.returncode != 0:
-            return _delivery_failure_response(
-                state,
-                f"Delivery failed to inspect staged files: {staged_res.stderr}",
-                "delivery failed (git diff --cached)",
-            )
-
-        push_res = _run_git(
-            "push",
-            "-u",
-            "origin",
-            f"HEAD:refs/heads/{branch_name}",
-            include_github_token=True,
+        failure_message, failure_progress_message = await asyncio.to_thread(
+            _run_broker_git_commands,
+            trusted_git_dir=trusted_git_dir,
+            workspace_path=workspace_path,
+            files_to_stage=files_to_stage,
+            gh_token=gh_token,
+            pr_title=pr_title,
+            pr_body=pr_body,
+            branch_name=branch_name,
         )
-        if push_res.returncode != 0:
+        if failure_message is not None:
             return _delivery_failure_response(
                 state,
-                f"Delivery failed to push branch: {push_res.stderr}",
-                "delivery failed (git push)",
+                failure_message,
+                failure_progress_message or "delivery failed (broker git)",
             )
 
         delivery_result = WorkerResult(status="success", summary="Changes delivered via broker.")

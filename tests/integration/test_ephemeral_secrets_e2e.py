@@ -25,6 +25,9 @@ os.environ["CODE_AGENT_ENCRYPTION_KEY"] = base64.urlsafe_b64encode(os.urandom(32
 
 def test_ephemeral_secret_resolution_across_boundaries(session_factory):
     """Test ephemeral secret lifecycle from API ingress through native worker resolution."""
+    with session_factory() as session:
+        session.connection().exec_driver_sql("PRAGMA foreign_keys = ON")
+
     # 1. Initialize API (submission service) and Worker service boundaries independently
     ephemeral_store = SessionFactoryEphemeralSecretStore(session_factory)
 

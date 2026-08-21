@@ -255,17 +255,6 @@ def _persist_submission(
         task_id = str(uuid.uuid4())
         trace_context = capture_trace_context()
 
-        effective_secret_refs = list(submission.secret_refs)
-        if raw_secrets:
-            store = PostgresEphemeralSecretStore(session)
-            adapted_refs = IngressMigrationAdapter.adapt_and_register_ephemeral(
-                {"task_text": "placeholder", "secrets": raw_secrets},
-                registry=DEFAULT_SECRET_REGISTRY,
-                ephemeral_store=store,
-                task_id=task_id,
-            )
-            effective_secret_refs.extend(adapted_refs)
-
         task = task_repo.create(
             task_id=task_id,
             session_id=conversation_session.id,
@@ -276,7 +265,7 @@ def _persist_submission(
             worker_override=submission.worker_override,
             budget=submission.budget,
             secrets=dict(submission.secrets),
-            secret_refs=tuple(effective_secret_refs),
+            secret_refs=submission.secret_refs,
             task_spec=task_spec,
             trace_context=trace_context,
             constraints=persisted_constraints,
@@ -288,6 +277,18 @@ def _persist_submission(
             repair_for_task_id=submission.repair_for_task_id,
             orchestration_runtime=OrchestrationRuntime.TEMPORAL,
         )
+        if raw_secrets:
+            store = PostgresEphemeralSecretStore(session)
+            adapted_refs = IngressMigrationAdapter.adapt_and_register_ephemeral(
+                {"task_text": "placeholder", "secrets": raw_secrets},
+                registry=DEFAULT_SECRET_REGISTRY,
+                ephemeral_store=store,
+                task_id=task_id,
+            )
+            task.secret_refs = [
+                ref.model_dump(mode="json") for ref in (*submission.secret_refs, *adapted_refs)
+            ]
+            session.flush()
         interaction_repo.sync_task_spec_flags(task_id=task.id, task_spec=task_spec)
         TemporalCommandRepository(session).enqueue(
             task_id=task.id,

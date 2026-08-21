@@ -509,11 +509,7 @@ class DockerNativeAgentExecutor:
                     pass
 
             _chown_recursive(agent_home)
-            if scratch_namespace:
-                _chown_recursive(
-                    workspace.workspace_path / ".code-agent" / "scratch" / scratch_namespace
-                )
-            elif not read_only_workspace:
+            if not read_only_workspace:
                 _chown_recursive(workspace.workspace_path)
 
             scoped_env.update(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hmac
 import logging
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
@@ -221,6 +222,12 @@ async def get_sanitized_task_ingress(request: Request) -> SanitizedCreateTaskIng
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
 
+    try:
+        sanitized_copy = sanitize_legacy_ingress_payload(raw_body)
+    except ValueError as e:
+        raise RequestValidationError([{"loc": ("body",), "msg": str(e), "type": "value_error"}])
+
+    assert isinstance(raw_body, Mapping)
     raw_secrets = raw_body.get("secrets", {})
     if not isinstance(raw_secrets, dict):
         raise RequestValidationError(
@@ -243,13 +250,6 @@ async def get_sanitized_task_ingress(request: Request) -> SanitizedCreateTaskIng
                     }
                 ]
             )
-
-    try:
-        sanitized_copy = sanitize_legacy_ingress_payload(raw_body)
-    except ValueError as e:
-        raise RequestValidationError(
-            [{"loc": ("body", "secrets"), "msg": str(e), "type": "value_error"}]
-        )
 
     try:
         validated = CreateTaskRequest.model_validate(sanitized_copy)
@@ -276,6 +276,12 @@ async def get_sanitized_task_replay_ingress(request: Request) -> SanitizedTaskRe
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
 
+    try:
+        sanitized_copy = sanitize_legacy_ingress_payload(raw_body)
+    except ValueError as e:
+        raise RequestValidationError([{"loc": ("body",), "msg": str(e), "type": "value_error"}])
+
+    assert isinstance(raw_body, Mapping)
     raw_secrets = raw_body.get("secrets", {})
     if not isinstance(raw_secrets, dict):
         raise RequestValidationError(
@@ -298,13 +304,6 @@ async def get_sanitized_task_replay_ingress(request: Request) -> SanitizedTaskRe
                     }
                 ]
             )
-
-    try:
-        sanitized_copy = sanitize_legacy_ingress_payload(raw_body)
-    except ValueError as e:
-        raise RequestValidationError(
-            [{"loc": ("body", "secrets"), "msg": str(e), "type": "value_error"}]
-        )
 
     try:
         validated = TaskReplayRequest.model_validate(sanitized_copy)

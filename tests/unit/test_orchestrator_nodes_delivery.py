@@ -1,6 +1,8 @@
+import asyncio
 import json
 import shutil
 import subprocess
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -254,6 +256,39 @@ async def test_run_deliver_result_stages_only_reported_files_and_pushes(
     assert all(
         ".code-agent/native-agent-runner/provider.log" not in command for command in git_commands
     )
+
+
+@pytest.mark.asyncio
+async def test_run_deliver_result_keeps_event_loop_responsive_during_broker_git(
+    broker_workspace,
+) -> None:
+    """Slow broker Git commands must not stall other Temporal coroutines."""
+    state = _delivery_state(files_changed=["src/changed.py"])
+
+    def _slow_run(command, **_kwargs):
+        time.sleep(0.05)
+        return subprocess.CompletedProcess(
+            command,
+            1 if command[-3:] == ["diff", "--cached", "--quiet"] else 0,
+            "",
+            "",
+        )
+
+    async def _other_coroutine() -> None:
+        await asyncio.sleep(0.01)
+
+    loop = asyncio.get_running_loop()
+    started_at = loop.time()
+    with (
+        patch("subprocess.run", side_effect=_slow_run),
+        patch("orchestrator.nodes.delivery.start_optional_span"),
+    ):
+        delivery = asyncio.create_task(_run_deliver_result(state))
+        await _other_coroutine()
+        assert loop.time() - started_at < 0.1
+        result = await delivery
+
+    assert result["timeline_events"][0].event_type == TimelineEventType.DELIVERY_COMPLETED
 
 
 @pytest.mark.asyncio

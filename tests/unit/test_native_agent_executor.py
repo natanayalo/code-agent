@@ -265,7 +265,14 @@ async def test_native_agent_runner_full_mocked_execution(tmp_path: Path, monkeyp
     artifacts = tmp_path / "artifacts"
     repo.mkdir(parents=True)
     artifacts.mkdir()
+    tracked_file = repo / "tracked.py"
+    tracked_file.write_text("value = 1\n", encoding="utf-8")
+    git_dir = workspace_root / ".git"
+    git_dir.mkdir()
+    git_config = git_dir / "config"
+    git_config.write_text("[core]\n", encoding="utf-8")
     executor = DockerNativeAgentExecutor(image="native-image")
+    chowned_paths: list[Path] = []
 
     # Mock synchronous docker commands (like network creation/connection)
     monkeypatch.setattr(
@@ -321,6 +328,10 @@ async def test_native_agent_runner_full_mocked_execution(tmp_path: Path, monkeyp
 
     monkeypatch.setattr(subprocess, "Popen", MockProcess)
     monkeypatch.setattr(executor, "_exited_container_code", lambda *args: 0)
+    monkeypatch.setattr(
+        "sandbox.native_agent_executor.os.chown",
+        lambda path, _uid, _gid: chowned_paths.append(Path(path)),
+    )
     from sandbox.capability import (
         CapabilityGrantFactory,
         FileSystemAccessPolicy,
@@ -401,3 +412,8 @@ async def test_native_agent_runner_full_mocked_execution(tmp_path: Path, monkeyp
     )
 
     assert result.completed.returncode == 0
+    assert workspace_root in chowned_paths
+    assert repo in chowned_paths
+    assert tracked_file in chowned_paths
+    assert git_dir not in chowned_paths
+    assert git_config not in chowned_paths

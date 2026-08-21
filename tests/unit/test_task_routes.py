@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from apps.api.auth import ApiAuthConfig
@@ -217,6 +218,19 @@ def test_submit_task_returns_422_for_validation_errors() -> None:
 
     assert response.status_code == 422
     assert response.json() == {"detail": "submission is invalid"}
+
+
+@pytest.mark.parametrize("path", ["/tasks", "/tasks/task-1/replay"])
+def test_task_ingress_rejects_non_object_json_before_secret_extraction(path: str) -> None:
+    """JSON arrays must return validation errors instead of calling ``.get`` on a list."""
+    service = _FakeTaskService()
+
+    with _task_client(service) as client:
+        response = client.post(path, json=[])
+
+    assert response.status_code == 422
+    assert service.create_calls == []
+    assert service.replay_calls == []
 
 
 def test_submit_task_returns_503_without_persisting_when_temporal_is_unavailable() -> None:
