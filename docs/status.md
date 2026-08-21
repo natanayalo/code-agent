@@ -100,7 +100,7 @@ Temporal migration and rollback record is in the
 - the trusted Temporal worker retains Docker authority, while native provider
   CLI execution is confined to one-shot task containers; a separate sandbox
   broker remains deferred; live Docker container runtime enforcement of M28.5A
-  contracts is scheduled for M28.5A.2
+  contracts is now completed (M28.5A.2).
 - lifecycle data overlaps across Temporal history/workflow state, serialized
   `TemporalTaskState`, task/product projections, and execution-plan rows;
   intermediate state pruning (Waves 1-3) has eliminated ephemeral notifications,
@@ -115,8 +115,8 @@ Temporal migration and rollback record is in the
 
 ## Next slices only
 
-1. Continue M28.5 execution-architecture foundation work (M28.5A.2 Docker runtime
-   enforcement, M28.5C `AgentEvent`, M28.5D `ContextEnvelope`).
+1. Continue M28.5 execution-architecture foundation work (M28.5C `AgentEvent`,
+   M28.5D `ContextEnvelope`).
 2. Use the M28 report as a scoped safety/effectiveness signal only; do not
    change routing or add semantic retrieval without further evidence.
 

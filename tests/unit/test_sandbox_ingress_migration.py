@@ -13,7 +13,6 @@ from sandbox.capability import (
     DeprecatedLegacySecretsError,
     EphemeralSecretHandle,
     EphemeralSecretRecord,
-    EphemeralSecretStore,
     IngressMigrationAdapter,
     InMemoryEphemeralSecretStore,
     LegacyIngressTaskRequest,
@@ -146,7 +145,7 @@ def test_ephemeral_secret_store_and_ingress_migration_lifecycle() -> None:
     assert handle.handle_id == "ephem_handle_123"
 
     # 2. Transactional validation: invalid request does not commit secrets
-    ephem_store = EphemeralSecretStore()
+    ephem_store = InMemoryEphemeralSecretStore()
     registry = SecretRegistry()
     with pytest.raises(ValidationError):
         IngressMigrationAdapter.adapt_and_register_ephemeral(
@@ -212,7 +211,7 @@ def test_ephemeral_migration_prevents_shadowing_authoritative_broker_secrets() -
         "task_text": "Run task with custom openai key",
         "secrets": {"openai_api_key": "caller_provided_openai_key_val"},
     }
-    ephem_store = EphemeralSecretStore()
+    ephem_store = InMemoryEphemeralSecretStore()
     refs = IngressMigrationAdapter.adapt_and_register_ephemeral(
         raw_payload,
         registry=registry,
@@ -259,7 +258,7 @@ def test_ephemeral_migration_prevents_shadowing_authoritative_broker_secrets() -
 
 def test_ephemeral_migration_sandbox_file_destination_mount_path() -> None:
     registry = SecretRegistry()
-    ephem_store = EphemeralSecretStore()
+    ephem_store = InMemoryEphemeralSecretStore()
     raw_payload = {
         "task_text": "Run file secret task",
         "secrets": {"custom_cert": "-----BEGIN CERTIFICATE-----..."},
@@ -282,7 +281,7 @@ def test_ephemeral_migration_sandbox_file_destination_mount_path() -> None:
 
 def test_ephemeral_migration_reserved_github_token_enforces_broker_only() -> None:
     registry = SecretRegistry()
-    ephem_store = EphemeralSecretStore()
+    ephem_store = InMemoryEphemeralSecretStore()
     raw_payload = {
         "task_text": "Run github task",
         "secrets": {"github_token": "ghp_caller_custom_token_12345"},
@@ -366,7 +365,7 @@ def test_distributed_secret_definition_resolution_across_processes() -> None:
 
 
 def test_ephemeral_secret_missing_task_id_fails_closed() -> None:
-    store = EphemeralSecretStore()
+    store = InMemoryEphemeralSecretStore()
     registry = SecretRegistry(ephemeral_store=store)
     raw_payload = {
         "task_text": "Run task",

@@ -373,7 +373,12 @@ class CapabilityGrantFactory:
         seen_env: dict[str, str] = {}
         seen_mount: dict[str, str] = {}
         for s in sandbox_secrets:
-            if s.exposure_policy == SecretExposurePolicy.SANDBOX_ENV and s.destination_env_var:
+            if s.exposure_policy == SecretExposurePolicy.SANDBOX_ENV:
+                if not s.destination_env_var:
+                    raise CapabilityViolationError(
+                        f"Secret {s.name!r} has SANDBOX_ENV policy but no destination_env_var"
+                    )
+
                 if s.destination_env_var in seen_env:
                     prior = seen_env[s.destination_env_var]
                     raise CapabilityViolationError(

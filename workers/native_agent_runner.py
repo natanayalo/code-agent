@@ -548,13 +548,10 @@ def _execute_native_agent_subprocess(
                     artifact_root=artifact_root,
                     environment=effective_env,
                     timeout_seconds=request.timeout_seconds,
-                    read_only_workspace=request.read_only_workspace,
                     scratch_namespace=request.scratch_namespace,
                     cancel_requested=request.cancel_requested,
                     redactor=request.redactor,
-                    network_enabled=request.network_enabled,
-                    github_credentials=request.github_credentials,
-                    provider_auth_source=request.provider_auth_source,
+                    context=request.context,
                 )
                 completed = execution.completed
                 llm_output, llm_metadata = _split_llm_output_and_metadata(completed.stdout or "")

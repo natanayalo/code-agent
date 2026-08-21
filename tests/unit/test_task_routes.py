@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from apps.api.auth import ApiAuthConfig
@@ -64,8 +65,13 @@ class _FakeTaskService:
         self.interaction_result: TaskSnapshot | None = None
         self.interaction_calls: list[dict[str, Any]] = []
 
-    def create_task(self, payload: TaskSubmission) -> tuple[TaskSnapshot, object]:
-        self.create_calls.append(payload)
+    def create_task(
+        self,
+        submission: TaskSubmission,
+        *,
+        raw_secrets: dict[str, str] | None = None,
+    ) -> tuple[TaskSnapshot, object]:
+        self.create_calls.append(submission)
         if self.create_error is not None:
             raise self.create_error
         return self.created_snapshot, object()
@@ -113,7 +119,8 @@ class _FakeTaskService:
         self,
         *,
         source_task_id: str,
-        replay_request: TaskReplayRequest | None,
+        replay_request: TaskReplayRequest | None = None,
+        raw_secrets: dict[str, str] | None = None,
     ) -> TaskReplayResult:
         self.replay_calls.append(
             {
@@ -211,6 +218,19 @@ def test_submit_task_returns_422_for_validation_errors() -> None:
 
     assert response.status_code == 422
     assert response.json() == {"detail": "submission is invalid"}
+
+
+@pytest.mark.parametrize("path", ["/tasks", "/tasks/task-1/replay"])
+def test_task_ingress_rejects_non_object_json_before_secret_extraction(path: str) -> None:
+    """JSON arrays must return validation errors instead of calling ``.get`` on a list."""
+    service = _FakeTaskService()
+
+    with _task_client(service) as client:
+        response = client.post(path, json=[])
+
+    assert response.status_code == 422
+    assert service.create_calls == []
+    assert service.replay_calls == []
 
 
 def test_submit_task_returns_503_without_persisting_when_temporal_is_unavailable() -> None:
@@ -385,6 +405,7 @@ def test_replay_task_returns_422_for_submission_validation_errors() -> None:
         *,
         source_task_id: str,
         replay_request: TaskReplayRequest | None,
+        raw_secrets: dict[str, str] | None = None,
     ) -> TaskReplayResult:
         raise TaskSubmissionValidationError("replay payload is invalid")
 

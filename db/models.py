@@ -17,6 +17,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     TypeDecorator,
@@ -259,6 +260,7 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     budget: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     secrets: Mapped[dict[str, str]] = mapped_column(EncryptedJSON, nullable=False, default=dict)
     secrets_encrypted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    secret_refs: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
     status: Mapped[TaskStatus] = mapped_column(
         TASK_STATUS_ENUM,
         nullable=False,
@@ -798,6 +800,7 @@ class HumanInteraction(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         HUMAN_INTERACTION_STATUS_ENUM, nullable=False, default=HumanInteractionStatus.PENDING
     )
     summary: Mapped[str] = mapped_column(Text, nullable=False)
+
     data: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     response_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
@@ -1145,3 +1148,21 @@ class ExecutionPlanNodeAttempt(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     result_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
     plan_node: Mapped[ExecutionPlanNode] = relationship(back_populates="attempts")
+
+
+class EphemeralSecret(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Encrypted ephemeral secret records outside durable workflow history."""
+
+    __tablename__ = "ephemeral_secret_records"
+    __table_args__ = (
+        UniqueConstraint("task_id", "handle_id", name="uq_ephemeral_secrets_task_handle"),
+        Index("ix_ephemeral_secrets_task_id", "task_id"),
+    )
+
+    task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
+    handle_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    encrypted_value: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    metadata_payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    task: Mapped[Task | None] = relationship()

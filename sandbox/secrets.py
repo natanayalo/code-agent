@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import abc
 import enum
 import re
 from collections.abc import Iterator, Mapping, Sequence
@@ -117,8 +118,57 @@ class EphemeralSecretRecord(BaseModel):
         )
 
 
-class EphemeralSecretStore:
+class EphemeralSecretStore(abc.ABC):
     """Storage interface for ephemeral legacy secrets outside durable workflow history."""
+
+    @abc.abstractmethod
+    def store_record(self, record: EphemeralSecretRecord, *, ttl_seconds: int = 3600) -> str:
+        pass
+
+    @abc.abstractmethod
+    def store(
+        self,
+        key: str,
+        value: str,
+        *,
+        task_id: str,
+        scope: SecretScope = SecretScope.CUSTOM,
+        exposure_policy: SecretExposurePolicy = SecretExposurePolicy.SANDBOX_ENV,
+        ttl_seconds: int = 3600,
+    ) -> str:
+        pass
+
+    @abc.abstractmethod
+    def get_record(
+        self, handle_id: str, *, task_id: str | None = None
+    ) -> EphemeralSecretRecord | None:
+        pass
+
+    @abc.abstractmethod
+    def get(self, handle_or_key: str, *, task_id: str | None = None) -> str | None:
+        pass
+
+    @abc.abstractmethod
+    def has(self, handle_or_key: str, *, task_id: str | None = None) -> bool:
+        pass
+
+    @abc.abstractmethod
+    def remove(self, handle_or_key: str, *, task_id: str | None = None) -> None:
+        pass
+
+    @abc.abstractmethod
+    def refresh_task_ttl(self, task_id: str, *, ttl_seconds: int = 3600) -> None:
+        """Refresh the TTL of all ephemeral secrets for the given task."""
+        pass
+
+    @abc.abstractmethod
+    def delete_task_secrets(self, task_id: str) -> None:
+        """Delete all ephemeral secrets for the given task."""
+        pass
+
+
+class InMemoryEphemeralSecretStore(EphemeralSecretStore):
+    """In-memory ephemeral secret store implementation for testing and local runtime."""
 
     def __init__(
         self, initial_records: Mapping[str, EphemeralSecretRecord | str] | None = None
@@ -188,6 +238,14 @@ class EphemeralSecretStore:
         if rec is not None and rec.task_id == task_id:
             self._records.pop(handle_or_key, None)
 
+    def refresh_task_ttl(self, task_id: str, *, ttl_seconds: int = 3600) -> None:
+        pass
+
+    def delete_task_secrets(self, task_id: str) -> None:
+        keys_to_delete = [k for k, rec in self._records.items() if rec.task_id == task_id]
+        for k in keys_to_delete:
+            self._records.pop(k, None)
+
     def clear(self) -> None:
         self._records.clear()
 
@@ -196,10 +254,6 @@ class EphemeralSecretStore:
 
     def __len__(self) -> int:
         return len(self._records)
-
-
-class InMemoryEphemeralSecretStore(EphemeralSecretStore):
-    """In-memory ephemeral secret store implementation for testing and local runtime."""
 
 
 def normalize_fqdn(host: str) -> str:
@@ -448,7 +502,7 @@ class SecretResolver:
         self._ephemeral_store = (
             ephemeral_store
             if isinstance(ephemeral_store, EphemeralSecretStore)
-            else EphemeralSecretStore(ephemeral_store)
+            else InMemoryEphemeralSecretStore(ephemeral_store)
         )
         self._tool_registry = tool_registry or DEFAULT_TOOL_REGISTRY
         if self._registry._ephemeral_store is None:
@@ -495,17 +549,18 @@ class SecretResolver:
 
     def resolve_for_sandbox(
         self,
-        ref: SecretRef,
+        ref_or_name: SecretRef | str,
         grant: Any,
         *,
         redactor: SecretRedactor | None = None,
     ) -> ResolvedSecret:
         """Resolve a secret for container injection, failing closed if unauthorized."""
-        definition = self._registry.require(ref.name, task_id=self._task_id)
+        name = ref_or_name.name if isinstance(ref_or_name, SecretRef) else ref_or_name
+        definition = self._registry.require(name, task_id=self._task_id)
 
         if definition.exposure_policy == SecretExposurePolicy.BROKER_ONLY:
             raise BrokerOnlySecretExposureError(
-                f"Secret {ref.name!r} is BROKER_ONLY and cannot be resolved for sandbox injection"
+                f"Secret {name!r} is BROKER_ONLY and cannot be resolved for sandbox injection"
             )
 
         self._validate_sandbox_grant_invariants(definition, grant)

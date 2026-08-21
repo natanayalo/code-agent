@@ -17,11 +17,13 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, Literal, Protocol
+from typing import Any, Final, Literal, Protocol
 from uuid import uuid4
 
+from sandbox.capability import FileSystemAccessPolicy, NetworkEgressPolicy
 from sandbox.redact import SecretRedactor
 from sandbox.scratch import node_agent_home
+from sandbox.trusted_context import TrustedSandboxExecutionContext
 from sandbox.workspace import WorkspaceHandle
 
 DEFAULT_NATIVE_AGENT_IMAGE: Final[str] = "code-agent-worker"
@@ -78,13 +80,10 @@ class NativeAgentProcessRunner(Protocol):
         artifact_root: Path,
         environment: Mapping[str, str],
         timeout_seconds: int,
-        read_only_workspace: bool,
         scratch_namespace: str | None,
         cancel_requested: Callable[[], bool] | None,
         redactor: SecretRedactor | None,
-        network_enabled: bool,
-        github_credentials: Mapping[str, str],
-        provider_auth_source: Path | None,
+        context: TrustedSandboxExecutionContext | None,
     ) -> NativeAgentExecution: ...
 
 
@@ -160,45 +159,7 @@ def native_agent_home_for_request(workspace_path: Path, scratch_namespace: str |
     return workspace_path / ".agent_home"
 
 
-def stage_provider_auth(
-    *,
-    source: Path | None,
-    destination: Path,
-) -> None:
-    """Copy a minimal provider auth surface into task-private scratch."""
-    destination.mkdir(parents=True, exist_ok=True)
-    if source is None:
-        return
-    for name in (
-        "auth.json",
-        "config.toml",
-        "settings.json",
-        "google_accounts.json",
-        "oauth_creds.json",
-        "projects.json",
-        "state.json",
-        "installation_id",
-        "trustedFolders.json",
-        "config/config.json",
-        "config/projects/default-cli-project.json",
-        "antigravity/antigravity_state.pbtxt",
-        "antigravity/installation_id",
-        "antigravity-cli/antigravity-oauth-token",
-        "antigravity-cli/jetski_state.pbtxt",
-    ):
-        candidate = source / name
-        target = destination / name
-        if candidate.is_file():
-            target.parent.mkdir(parents=True, exist_ok=True)
-            # Native command preparation may have created a worker-local link
-            # to the source OAuth token.  That link deliberately cannot work
-            # in the executor, which never mounts the trusted worker home.
-            # Replace it before copying so the task home contains a real,
-            # private credential file rather than a dangling host reference.
-            if target.is_symlink():
-                target.unlink()
-            shutil.copy2(candidate, target)
-            target.chmod(0o600)
+# Removed obsolete stage_provider_auth
 
 
 def is_public_egress_host(host: str, resolved_addresses: list[str]) -> bool:
@@ -255,6 +216,7 @@ class DockerNativeAgentExecutor:
         agent_home: Path,
         environment: Mapping[str, str],
         read_only_workspace: bool,
+        resource_limits: Any,
         network_name: str | None = None,
     ) -> list[str]:
         workspace_path = workspace.workspace_path.resolve()
@@ -266,16 +228,18 @@ class DockerNativeAgentExecutor:
             "--name",
             container_name,
             "--read-only",
+            "--user",
+            "65532:65532",
             "--cap-drop",
             "ALL",
             "--security-opt",
             "no-new-privileges=true",
             "--pids-limit",
-            str(self.pids_limit),
+            str(resource_limits.pids_limit),
             "--memory",
-            self.memory_limit,
+            str(resource_limits.memory_bytes),
             "--cpus",
-            str(self.cpu_limit),
+            str(resource_limits.cpu_limit),
             "--ipc",
             "private",
             "--network",
@@ -293,6 +257,15 @@ class DockerNativeAgentExecutor:
                         "type=bind,source="
                         f"{workspace_path / '.code-agent'},target={workspace_path / '.code-agent'}"
                     ),
+                ]
+            )
+        else:
+            docker_command.extend(
+                [
+                    "--mount",
+                    f"type=bind,source=/dev/null,target={workspace_path / '.git' / 'config'},readonly",  # noqa: E501
+                    "--mount",
+                    f"type=tmpfs,target={workspace_path / '.git' / 'hooks'},tmpfs-mode=0755,tmpfs-size=1m",  # noqa: E501
                 ]
             )
         docker_command.extend(
@@ -344,50 +317,69 @@ class DockerNativeAgentExecutor:
             timeout=timeout,
         )
 
-    def _start_proxy(self, *, network_name: str, artifact_root: Path, task_id: str) -> str:
+    def _start_proxy(
+        self,
+        *,
+        network_name: str,
+        artifact_root: Path,
+        task_id: str,
+        network_policy: str,
+        allowed_hosts: list[str],
+    ) -> str:
         proxy_name = f"native-egress-{uuid4().hex[:20]}"
         created = self._docker(["network", "create", "--internal", network_name])
         if created.returncode != 0:
             raise NativeAgentExecutorError(
                 created.stderr.strip() or "failed to create executor network"
             )
-        proxy = self._docker(
+
+        docker_args = [
+            "run",
+            "-d",
+            "--rm",
+            "--name",
+            proxy_name,
+            "--network",
+            network_name,
+            "--network-alias",
+            "native-egress-proxy",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges=true",
+            "--pids-limit",
+            "128",
+            "--memory",
+            "128m",
+            "--cpus",
+            "0.25",
+            "--ipc",
+            "private",
+            "--tmpfs",
+            "/tmp:rw,noexec,nosuid,size=16m",
+            "--mount",
+            f"type=bind,source={artifact_root},target={artifact_root}",
+            "--env",
+            f"CODE_AGENT_PROXY_AUDIT_PATH={artifact_root / 'egress-audit.jsonl'}",
+            "--env",
+            f"CODE_AGENT_PROXY_TASK_ID={task_id}",
+            "--env",
+            f"CODE_AGENT_NETWORK_POLICY={network_policy}",
+        ]
+
+        if allowed_hosts:
+            docker_args.extend(["--env", f"CODE_AGENT_ALLOWED_HOSTS={','.join(allowed_hosts)}"])
+
+        docker_args.extend(
             [
-                "run",
-                "-d",
-                "--rm",
-                "--name",
-                proxy_name,
-                "--network",
-                network_name,
-                "--network-alias",
-                "native-egress-proxy",
-                "--read-only",
-                "--cap-drop",
-                "ALL",
-                "--security-opt",
-                "no-new-privileges=true",
-                "--pids-limit",
-                "128",
-                "--memory",
-                "128m",
-                "--cpus",
-                "0.25",
-                "--ipc",
-                "private",
-                "--tmpfs",
-                "/tmp:rw,noexec,nosuid,size=16m",
-                "--mount",
-                f"type=bind,source={artifact_root},target={artifact_root}",
-                "--env",
-                f"CODE_AGENT_PROXY_AUDIT_PATH={artifact_root / 'egress-audit.jsonl'}",
-                "--env",
-                f"CODE_AGENT_PROXY_TASK_ID={task_id}",
                 self.image,
                 "python",
                 "/app/sandbox/native_agent_proxy.py",
             ]
         )
+
+        proxy = self._docker(docker_args)
         if proxy.returncode != 0:
             self._docker(["network", "rm", network_name])
             message = proxy.stderr.strip() or "failed to start egress proxy"
@@ -425,31 +417,101 @@ class DockerNativeAgentExecutor:
         artifact_root: Path,
         environment: Mapping[str, str],
         timeout_seconds: int,
-        read_only_workspace: bool,
         scratch_namespace: str | None,
         cancel_requested: Callable[[], bool] | None,
         redactor: SecretRedactor | None,
-        network_enabled: bool,
-        github_credentials: Mapping[str, str],
-        provider_auth_source: Path | None,
+        context: TrustedSandboxExecutionContext | None,
     ) -> NativeAgentExecution:
-        del redactor
+        if not context:
+            raise NativeAgentExecutorError(
+                "TrustedSandboxExecutionContext is required for native execution."
+            )
+
+        import threading
+
+        from sandbox.provider_stager import ProviderCredentialStager
+        from sandbox.redact import StreamingRedactor
+        from sandbox.secrets import SecretScope
+
         artifact_root.mkdir(parents=True, exist_ok=True)
         agent_home = native_agent_home_for_request(workspace.workspace_path, scratch_namespace)
-        source_home = provider_auth_source or provider_auth_home_for_environment(environment)
-        provider_home = agent_home / provider_home_name(
-            command=command,
-            provider_auth_source=provider_auth_source,
-        )
+
         container_name = f"native-agent-{uuid4().hex[:20]}"
+
+        network_enabled = context.grant.network in (
+            NetworkEgressPolicy.ALLOWLISTED_HOSTS,
+            NetworkEgressPolicy.PUBLIC_HTTPS_PROXY,
+        )
+        read_only_workspace = context.grant.filesystem != FileSystemAccessPolicy.WORKSPACE_WRITE
         network_name = f"native-agent-net-{uuid4().hex[:20]}" if network_enabled else None
         proxy_name: str | None = None
+
         try:
-            stage_provider_auth(source=source_home, destination=provider_home)
+            resolver = context.secret_resolver
+
+            provider_resolved_secrets = []
+            sandbox_secrets_dir = agent_home / "secrets"
+            sandbox_secrets_dir.mkdir(parents=True, exist_ok=True)
+            os.chmod(sandbox_secrets_dir, 0o750)
+            try:
+                os.chown(sandbox_secrets_dir, 0, 65532)
+            except OSError:
+                pass
+
             scoped_env = build_executor_environment(
-                {**environment, **github_credentials},
-                allow_github_credentials=bool(github_credentials),
+                {**environment},
+                allow_github_credentials=False,
             )
+
+            for handle in context.grant.allowed_secret_refs:
+                val = resolver.resolve_for_sandbox(handle, context.grant)
+                if val.scope == SecretScope.PROVIDER_AUTH:
+                    provider_resolved_secrets.append(val)
+                elif val.destination_mount_path:
+                    secret_path = sandbox_secrets_dir / val.name
+                    secret_path.write_text(val.reveal_secret_value(), encoding="utf-8")
+                    try:
+                        os.chown(secret_path, 0, 65532)
+                        os.chmod(secret_path, 0o440)
+                    except OSError:
+                        pass
+
+                if val.destination_env_var:
+                    scoped_env[val.destination_env_var] = val.reveal_secret_value()
+
+            ProviderCredentialStager.stage(
+                provider_resolved_secrets,
+                destination_by_ref=context.provider_bootstrap.destination_by_ref,
+                task_home=agent_home,
+            )
+
+            # Change ownership of task home and workspace for the 65532 user
+            def _chown_recursive(path: Path) -> None:
+                if not path.exists():
+                    return
+                for root, dirs, files in os.walk(path):
+                    # Exclude .git directory from being chowned
+                    if ".git" in dirs:
+                        dirs.remove(".git")
+                    for d in dirs:
+                        try:
+                            os.chown(os.path.join(root, d), 65532, 65532)
+                        except OSError:
+                            pass
+                    for f in files:
+                        try:
+                            os.chown(os.path.join(root, f), 65532, 65532)
+                        except OSError:
+                            pass
+                try:
+                    os.chown(path, 65532, 65532)
+                except OSError:
+                    pass
+
+            _chown_recursive(agent_home)
+            if not read_only_workspace:
+                _chown_recursive(workspace.workspace_path)
+
             scoped_env.update(
                 {
                     "HOME": str(agent_home),
@@ -462,6 +524,10 @@ class DockerNativeAgentExecutor:
                     network_name=network_name or "",
                     artifact_root=artifact_root,
                     task_id=workspace.task_id,
+                    network_policy=context.grant.network.value,
+                    allowed_hosts=list(context.grant.allowed_egress_hosts)
+                    if context.grant.allowed_egress_hosts
+                    else [],
                 )
                 scoped_env.update(
                     {
@@ -478,6 +544,7 @@ class DockerNativeAgentExecutor:
                 agent_home=agent_home,
                 environment=scoped_env,
                 read_only_workspace=read_only_workspace,
+                resource_limits=context.grant.resource_limits,
                 network_name=network_name,
             )
         except (OSError, subprocess.SubprocessError, NativeAgentExecutorError) as exc:
@@ -491,7 +558,7 @@ class DockerNativeAgentExecutor:
                 if network_enabled
                 else "disabled",
                 "provider_auth_scope": "task_scoped_staged_home",
-                "github_grant": bool(github_credentials),
+                "github_grant": False,  # Managed centrally by SandboxCapabilityGrant now
                 "termination_reason": "startup_error",
                 "cleanup": cleanup,
             }
@@ -545,6 +612,49 @@ class DockerNativeAgentExecutor:
             raise NativeAgentExecutorError(
                 f"Failed to start isolated Docker executor: {exc}"
             ) from exc
+
+        stdout_chunks: list[str] = []
+        stderr_chunks: list[str] = []
+        stdout_redactor = StreamingRedactor(redactor)
+        stderr_redactor = StreamingRedactor(redactor)
+
+        def read_stream(
+            stream: Any, chunks: list[str], streaming_redactor: StreamingRedactor
+        ) -> None:
+            if not stream:
+                return
+            try:
+                while True:
+                    chunk = stream.read(4096)
+                    if not chunk:
+                        break
+                    safe_chunk = streaming_redactor.push(chunk)
+                    if safe_chunk:
+                        chunks.append(safe_chunk)
+                final_chunk = streaming_redactor.flush()
+                if final_chunk:
+                    chunks.append(final_chunk)
+            except OSError:
+                pass
+
+        stdout_thread = threading.Thread(
+            target=read_stream, args=(process.stdout, stdout_chunks, stdout_redactor), daemon=True
+        )
+        stderr_thread = threading.Thread(
+            target=read_stream, args=(process.stderr, stderr_chunks, stderr_redactor), daemon=True
+        )
+        stdout_thread.start()
+        stderr_thread.start()
+
+        def collect_output(timeout: int = 15) -> tuple[str, str]:
+            try:
+                process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                pass
+            stdout_thread.join(timeout=5)
+            stderr_thread.join(timeout=5)
+            return "".join(stdout_chunks), "".join(stderr_chunks)
+
         try:
             last_container_check = started
             while process.poll() is None:
@@ -554,7 +664,7 @@ class DockerNativeAgentExecutor:
                     exit_code = self._exited_container_code(container_name)
                     if exit_code is not None:
                         process.terminate()
-                        stdout, stderr = process.communicate(timeout=15)
+                        stdout, stderr = collect_output(timeout=15)
                         self._remove(container_name)
                         manifest.update(
                             {
@@ -574,7 +684,7 @@ class DockerNativeAgentExecutor:
                         )
                 if cancel_requested and cancel_requested():
                     self._remove(container_name)
-                    stdout, stderr = process.communicate(timeout=15)
+                    stdout, stderr = collect_output(timeout=15)
                     manifest.update(
                         {
                             "termination_reason": "cancelled",
@@ -591,7 +701,7 @@ class DockerNativeAgentExecutor:
                     )
                 if time.monotonic() - started > timeout_seconds:
                     self._remove(container_name)
-                    stdout, stderr = process.communicate(timeout=15)
+                    stdout, stderr = collect_output(timeout=15)
                     manifest.update(
                         {
                             "termination_reason": "timeout",
@@ -607,7 +717,7 @@ class DockerNativeAgentExecutor:
                         manifest_path=manifest_path,
                     )
                 time.sleep(self.poll_interval_seconds)
-            stdout, stderr = process.communicate(timeout=15)
+            stdout, stderr = collect_output(timeout=15)
         except (OSError, subprocess.SubprocessError) as exc:
             self._remove(container_name)
             cleanup_network()

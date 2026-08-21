@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 import sandbox.native_agent_proxy as native_agent_proxy
+from sandbox.capability import FileSystemAccessPolicy, NetworkEgressPolicy, SandboxCapabilityGrant
 from sandbox.native_agent_executor import (
     DockerNativeAgentExecutor,
     NativeAgentExecutorError,
@@ -17,9 +18,10 @@ from sandbox.native_agent_executor import (
     native_agent_home_for_request,
     native_executor_workspace_handle,
     provider_home_name,
-    stage_provider_auth,
 )
+from sandbox.provider_bootstrap import ProviderBootstrap
 from sandbox.scratch import node_agent_home
+from sandbox.trusted_context import TrustedSandboxExecutionContext
 
 
 def test_executor_command_is_hardened_and_mounts_only_task_paths(tmp_path: Path) -> None:
@@ -40,6 +42,11 @@ def test_executor_command_is_hardened_and_mounts_only_task_paths(tmp_path: Path)
         agent_home=agent_home,
         environment={"PATH": "/usr/bin"},
         read_only_workspace=True,
+        resource_limits=type(
+            "ResourceLimits",
+            (),
+            {"pids_limit": 100, "memory_bytes": 1024 * 1024 * 1024, "cpu_limit": 1.0},
+        )(),
     )
 
     joined = " ".join(command)
@@ -106,37 +113,6 @@ def test_provider_home_uses_explicit_source_not_ambiguous_environment() -> None:
     assert provider_home_name(command=["codex", "exec"], provider_auth_source=None) == ".codex"
 
 
-def test_stage_provider_auth_copies_selected_files_not_the_source_home(tmp_path: Path) -> None:
-    source = tmp_path / "source"
-    destination = tmp_path / "destination"
-    source.mkdir()
-    (source / "auth.json").write_text('{"token":"secret"}', encoding="utf-8")
-    (source / "oauth_creds.json").write_text('{"refresh_token":"secret"}', encoding="utf-8")
-    token_path = source / "antigravity-cli" / "antigravity-oauth-token"
-    token_path.parent.mkdir()
-    token_path.write_text("secret", encoding="utf-8")
-    (source / "antigravity-cli" / "history.jsonl").write_text("do not copy", encoding="utf-8")
-    config_path = source / "config" / "config.json"
-    config_path.parent.mkdir()
-    config_path.write_text("{}", encoding="utf-8")
-    (source / "unrelated-secret.txt").write_text("do not copy", encoding="utf-8")
-
-    destination_token = destination / "antigravity-cli" / "antigravity-oauth-token"
-    destination_token.parent.mkdir(parents=True)
-    destination_token.symlink_to(token_path)
-
-    stage_provider_auth(source=source, destination=destination)
-
-    assert (destination / "auth.json").read_text(encoding="utf-8") == '{"token":"secret"}'
-    assert (destination / "oauth_creds.json").is_file()
-    assert destination_token.is_file()
-    assert not destination_token.is_symlink()
-    assert destination_token.read_text(encoding="utf-8") == "secret"
-    assert (destination / "config" / "config.json").is_file()
-    assert not (destination / "antigravity-cli" / "history.jsonl").exists()
-    assert not (destination / "unrelated-secret.txt").exists()
-
-
 def test_proxy_public_egress_rejects_private_and_dns_rebinding_addresses() -> None:
     assert is_public_egress_host("api.openai.com", ["104.18.33.45"])
     assert not is_public_egress_host("localhost", ["127.0.0.1"])
@@ -152,27 +128,37 @@ def test_executor_auth_staging_failure_writes_startup_manifest(tmp_path: Path, m
     repo.mkdir(parents=True)
     artifacts.mkdir()
     monkeypatch.setattr(
-        "sandbox.native_agent_executor.stage_provider_auth",
-        lambda **_kwargs: (_ for _ in ()).throw(OSError("staging denied")),
+        "sandbox.provider_stager.ProviderCredentialStager.stage",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("staging denied")),
     )
+    monkeypatch.setattr("os.chown", lambda path, uid, gid: None)
+    monkeypatch.setattr("os.chmod", lambda path, mode: None)
 
     with pytest.raises(NativeAgentExecutorError, match="staging denied"):
         DockerNativeAgentExecutor(image="native-image").run(
             command=["agy", "-p", "prompt"],
-            prompt=None,
+            prompt="test prompt",
             workspace=native_executor_workspace_handle(
                 workspace_path=workspace_root, repo_path=repo, task_id="task-1"
             ),
             artifact_root=artifacts,
             environment={},
             timeout_seconds=1,
-            read_only_workspace=False,
             scratch_namespace="node-1",
             cancel_requested=None,
             redactor=None,
-            network_enabled=False,
-            github_credentials={},
-            provider_auth_source=tmp_path / ".gemini",
+            context=TrustedSandboxExecutionContext(
+                task_id="task-1",
+                grant=SandboxCapabilityGrant(
+                    network=NetworkEgressPolicy.DISABLED,
+                    filesystem=FileSystemAccessPolicy.READ_ONLY,
+                    allowed_secret_refs=frozenset(),
+                ),
+                secret_resolver=type("Resolver", (), {"resolve_for_sandbox": lambda *args: None})(),
+                provider_bootstrap=ProviderBootstrap(
+                    definitions=[], file_store={}, destination_by_ref={}, ref_names=tuple()
+                ),
+            ),
         )
 
     manifest = json.loads((artifacts / "native-isolation-manifest.json").read_text())
@@ -189,7 +175,11 @@ def test_executor_cleans_network_when_polling_is_interrupted(tmp_path: Path, mon
     executor = DockerNativeAgentExecutor(image="native-image")
     cleanup_calls: list[tuple[str | None, str | None]] = []
 
-    monkeypatch.setattr("sandbox.native_agent_executor.stage_provider_auth", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        "sandbox.provider_stager.ProviderCredentialStager.stage", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr("os.chown", lambda path, uid, gid: None)
+    monkeypatch.setattr("os.chmod", lambda path, mode: None)
     monkeypatch.setattr(executor, "_start_proxy", lambda **_kwargs: "native-egress-test")
     monkeypatch.setattr(
         executor,
@@ -201,7 +191,9 @@ def test_executor_cleans_network_when_polling_is_interrupted(tmp_path: Path, mon
     monkeypatch.setattr(
         "sandbox.native_agent_executor.subprocess.Popen",
         lambda *_args, **_kwargs: type(
-            "Process", (), {"poll": lambda _self: None, "stdin": None}
+            "Process",
+            (),
+            {"poll": lambda _self: None, "stdin": None, "stdout": None, "stderr": None},
         )(),
     )
     monkeypatch.setattr(
@@ -212,20 +204,29 @@ def test_executor_cleans_network_when_polling_is_interrupted(tmp_path: Path, mon
     with pytest.raises(KeyboardInterrupt):
         executor.run(
             command=["codex", "exec"],
-            prompt=None,
+            prompt="test prompt",
             workspace=native_executor_workspace_handle(
                 workspace_path=workspace_root, repo_path=repo, task_id="task-1"
             ),
             artifact_root=artifacts,
             environment={},
             timeout_seconds=60,
-            read_only_workspace=True,
             scratch_namespace="node-1",
             cancel_requested=None,
             redactor=None,
-            network_enabled=True,
-            github_credentials={},
-            provider_auth_source=tmp_path / ".codex",
+            context=TrustedSandboxExecutionContext(
+                task_id="task-1",
+                grant=SandboxCapabilityGrant(
+                    network=NetworkEgressPolicy.ALLOWLISTED_HOSTS,
+                    allowed_egress_hosts=("api.example.com",),
+                    filesystem=FileSystemAccessPolicy.READ_ONLY,
+                    allowed_secret_refs=frozenset(),
+                ),
+                secret_resolver=type("Resolver", (), {"resolve_for_sandbox": lambda *args: None})(),
+                provider_bootstrap=ProviderBootstrap(
+                    definitions=[], file_store={}, destination_by_ref={}, ref_names=tuple()
+                ),
+            ),
         )
 
     assert len(cleanup_calls) == 1
@@ -255,3 +256,164 @@ def test_proxy_audit_is_identity_only_and_redacts_request_content(
         "timestamp": payload["timestamp"],
     }
     assert "authorization" not in audit_path.read_text(encoding="utf-8").lower()
+
+
+@pytest.mark.asyncio
+async def test_native_agent_runner_full_mocked_execution(tmp_path: Path, monkeypatch) -> None:
+    workspace_root = tmp_path / "task"
+    repo = workspace_root / "repo"
+    artifacts = tmp_path / "artifacts"
+    repo.mkdir(parents=True)
+    artifacts.mkdir()
+    tracked_file = repo / "tracked.py"
+    tracked_file.write_text("value = 1\n", encoding="utf-8")
+    git_dir = workspace_root / ".git"
+    git_dir.mkdir()
+    git_config = git_dir / "config"
+    git_config.write_text("[core]\n", encoding="utf-8")
+    executor = DockerNativeAgentExecutor(image="native-image")
+    chowned_paths: list[Path] = []
+
+    # Mock synchronous docker commands (like network creation/connection)
+    monkeypatch.setattr(
+        executor, "_docker", lambda command: subprocess.CompletedProcess(command, 0, "false 0", "")
+    )
+
+    # Mock proxy startup
+
+    monkeypatch.setattr(executor, "_cleanup_network", lambda **kwargs: "removed")
+
+    class MockProcess:
+        def __init__(self, *args, **kwargs):
+            self.returncode = 0
+            self.args = args
+            self.stdin = None
+
+            class MockStream:
+                def __init__(self):
+                    self.closed = False
+
+                def __iter__(self):
+                    return iter(["output"])
+
+                def read(self, *args):
+                    if not self.closed:
+                        self.closed = True
+                        return "output"
+                    return ""
+
+            self.stdout = MockStream()
+            self.stderr = MockStream()
+
+        def poll(self):
+            if not hasattr(self, "called"):
+                self.called = True
+                return None
+            return 0
+
+        def wait(self, *args, **kwargs):
+            return 0
+
+        def communicate(self, *args, **kwargs):
+            return ("output", "")
+
+        def kill(self):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    monkeypatch.setattr(subprocess, "Popen", MockProcess)
+    monkeypatch.setattr(executor, "_exited_container_code", lambda *args: 0)
+    monkeypatch.setattr(
+        "sandbox.native_agent_executor.os.chown",
+        lambda path, _uid, _gid: chowned_paths.append(Path(path)),
+    )
+    from sandbox.capability import (
+        CapabilityGrantFactory,
+        FileSystemAccessPolicy,
+        NetworkEgressPolicy,
+    )
+    from sandbox.secrets import InMemoryEphemeralSecretStore, SecretRegistry
+
+    registry = SecretRegistry(ephemeral_store=InMemoryEphemeralSecretStore(), task_id="task-123")
+    grant = CapabilityGrantFactory(registry).create_grant(
+        network=NetworkEgressPolicy.ALLOWLISTED_HOSTS,
+        filesystem=FileSystemAccessPolicy.WORKSPACE_WRITE,
+        allowed_egress_hosts=["example.com"],
+    )
+
+    from sandbox.provider_bootstrap import ProviderBootstrap
+
+    context = TrustedSandboxExecutionContext(
+        grant=grant,
+        task_id="task-123",
+        provider_bootstrap=ProviderBootstrap(
+            definitions=[], destination_by_ref={}, file_store={}, ref_names=()
+        ),
+        secret_resolver=registry,
+    )
+
+    from sandbox.secrets import ResolvedSecret, SecretResolver, SecretScope
+
+    # Mock allowed_secret_refs and resolver
+    object.__setattr__(
+        context.grant, "allowed_secret_refs", ("env-sec", "mount-sec", "provider-sec")
+    )
+
+    def mock_resolve(handle, grant):
+        if handle == "env-sec":
+            return ResolvedSecret(
+                name="env-sec",
+                scope=list(SecretScope)[0],
+                value="val",
+                destination_env_var="ENV_SEC",
+            )
+        elif handle == "mount-sec":
+            return ResolvedSecret(
+                name="mount-sec",
+                scope=list(SecretScope)[0],
+                value="val",
+                destination_mount_path="mount-sec",
+            )
+        elif handle == "provider-sec":
+            return ResolvedSecret(
+                name="provider-sec",
+                scope=SecretScope.PROVIDER_AUTH,
+                value="val",
+                destination_env_var="PROV_SEC",
+            )
+        return ResolvedSecret(name=handle, scope=list(SecretScope)[0], value="val")
+
+    context = TrustedSandboxExecutionContext(
+        grant=context.grant,
+        task_id=context.task_id,
+        provider_bootstrap=context.provider_bootstrap,
+        secret_resolver=SecretResolver(registry),
+    )
+    monkeypatch.setattr(context.secret_resolver, "resolve_for_sandbox", mock_resolve)
+
+    result = executor.run(
+        command=["echo", "test"],
+        prompt="test prompt",
+        workspace=native_executor_workspace_handle(
+            workspace_path=workspace_root, repo_path=repo, task_id="task-123"
+        ),
+        artifact_root=artifacts,
+        environment={},
+        timeout_seconds=30,
+        scratch_namespace="scratch-1",
+        cancel_requested=lambda: False,
+        redactor=None,
+        context=context,
+    )
+
+    assert result.completed.returncode == 0
+    assert workspace_root in chowned_paths
+    assert repo in chowned_paths
+    assert tracked_file in chowned_paths
+    assert git_dir not in chowned_paths
+    assert git_config not in chowned_paths

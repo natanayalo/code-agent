@@ -88,6 +88,7 @@ class WorkspaceHandle(SandboxModel):
     repo_path: Path
     repo_url: str
     branch: str | None = None
+    trusted_git_dir: Path | None = None
     workspace_mode: WorkspaceMode = WorkspaceMode.CLONE
     cleanup_policy: WorkspaceCleanupPolicy
 
@@ -116,6 +117,11 @@ def _build_workspace_id(task_id: str, attempt: int = 1) -> str:
     if attempt > 1:
         return f"workspace-{_slugify_task_id(task_id)}-{task_hash}-v{attempt}"
     return f"workspace-{_slugify_task_id(task_id)}-{task_hash}"
+
+
+def _trusted_git_dir(workspace_path: Path, workspace_id: str) -> Path:
+    """Return the broker-authoritative GIT_DIR path for a workspace."""
+    return workspace_path.parent / ".code-agent-git" / workspace_id
 
 
 def default_workspace_root(env: Mapping[str, str] | None = None) -> Path:
@@ -217,6 +223,7 @@ class WorkspaceManager:
             repo_path=repo_path,
             repo_url=request.repo_url,
             branch=request.branch,
+            trusted_git_dir=_trusted_git_dir(workspace_path, workspace_id),
             workspace_mode=request.workspace_mode,
             cleanup_policy=request.cleanup_policy or self.cleanup_policy,
         )
@@ -231,9 +238,17 @@ class WorkspaceManager:
     ) -> WorkspaceHandle | None:
         try:
             if workspace_path.exists():
-                if (workspace_path / ".git").is_dir():
+                if (workspace_path / ".git").is_dir() or _trusted_git_dir(
+                    workspace_path, workspace_id
+                ).is_dir():
+                    trusted_git_dir = _trusted_git_dir(workspace_path, workspace_id)
+                    if not trusted_git_dir.exists():
+                        raise WorkspaceManagerError(
+                            f"Workspace {workspace_id} exists but trusted GIT_DIR is missing. "
+                            "Refusing to reprovision from potentially attacker-controlled workspace/.git."  # noqa: E501
+                        )
                     logger.info(
-                        "Reusing existing workspace directory",
+                        "Reusing existing workspace directory and trusted GIT_DIR",
                         extra={"workspace_id": workspace_id, "task_id": request.task_id},
                     )
                     return self._workspace_handle(
@@ -259,6 +274,77 @@ class WorkspaceManager:
         except Exception as exc:
             raise WorkspaceManagerError(f"Failed to prepare workspace directory: {exc}") from exc
         return None
+
+    def _establish_trusted_git_authority(
+        self, workspace_path: Path, trusted_git_dir: Path, clone_url: str
+    ) -> None:
+        """Move the cloned .git to a broker-owned location and verify parity."""
+        workspace_git = workspace_path / ".git"
+        if not workspace_git.exists():
+            return  # INIT mode without initial git, or NONE mode
+
+        if trusted_git_dir.exists():
+            shutil.rmtree(trusted_git_dir, ignore_errors=True)
+
+        shutil.copytree(workspace_git, trusted_git_dir, symlinks=True)
+
+        # Verify parity
+        try:
+            # broker HEAD == workspace HEAD
+            head_cmd = ["git", "--git-dir", str(trusted_git_dir), "rev-parse", "HEAD"]
+            proc = subprocess.run(head_cmd, capture_output=True, text=True, check=True)
+            broker_head = proc.stdout.strip()
+
+            proc = subprocess.run(
+                ["git", "--git-dir", str(workspace_git), "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            workspace_head = proc.stdout.strip()
+
+            if broker_head != workspace_head:
+                raise WorkspaceManagerError("Trusted GIT_DIR HEAD does not match workspace HEAD")
+
+            # verify remote origin URL
+            remote_cmd = [
+                "git",
+                "--git-dir",
+                str(trusted_git_dir),
+                "config",
+                "--get",
+                "remote.origin.url",
+            ]
+            proc = subprocess.run(remote_cmd, capture_output=True, text=True)
+            if proc.returncode == 0:
+                broker_url = proc.stdout.strip()
+                if broker_url != clone_url:
+                    raise WorkspaceManagerError(
+                        f"Trusted GIT_DIR remote origin mismatch: expected {clone_url}, got {broker_url}"  # noqa: E501
+                    )
+
+            # verify no uncommitted changes
+            diff_cmd = [
+                "git",
+                "--git-dir",
+                str(trusted_git_dir),
+                "--work-tree",
+                str(workspace_path),
+                "-c",
+                "core.hooksPath=/dev/null",
+                "diff",
+                "--quiet",
+                "HEAD",
+            ]
+            proc = subprocess.run(diff_cmd, capture_output=True, text=True)
+            if proc.returncode != 0:
+                raise WorkspaceManagerError(
+                    "Trusted GIT_DIR indicates uncommitted changes immediately after clone"
+                )
+
+        except Exception as e:
+            shutil.rmtree(trusted_git_dir, ignore_errors=True)
+            raise WorkspaceManagerError(f"Failed to verify trusted GIT_DIR parity: {e}") from e
 
     def _initialize_workspace(self, request: WorkspaceRequest, repo_path: Path) -> None:
         if request.workspace_mode == WorkspaceMode.CLONE:
@@ -305,6 +391,11 @@ class WorkspaceManager:
 
         try:
             self._initialize_workspace(request, repo_path)
+            if request.workspace_mode == WorkspaceMode.CLONE:
+                trusted_git_dir = _trusted_git_dir(workspace_path, workspace_id)
+                self._establish_trusted_git_authority(
+                    workspace_path, trusted_git_dir, request.repo_url
+                )
         except Exception:
             shutil.rmtree(workspace_path, ignore_errors=True)
             logger.exception(
@@ -347,6 +438,7 @@ class WorkspaceManager:
             repo_path=repo_path,
             repo_url=repo_url or "unknown",
             branch=branch,
+            trusted_git_dir=_trusted_git_dir(workspace_path, workspace_id),
             cleanup_policy=self.cleanup_policy,
         )
 
@@ -374,6 +466,12 @@ class WorkspaceManager:
             if not scratch_root.is_relative_to(scratch_parent):
                 raise WorkspaceManagerError("Refusing to delete scratch outside root")
             shutil.rmtree(scratch_root, ignore_errors=True)
+
+            if workspace.trusted_git_dir:
+                trusted_git = workspace.trusted_git_dir.resolve()
+                trusted_parent = (self.root_dir / ".code-agent-git").resolve()
+                if trusted_git.is_relative_to(trusted_parent):
+                    shutil.rmtree(trusted_git, ignore_errors=True)
         except FileNotFoundError:
             return True
         except OSError as exc:

@@ -52,6 +52,7 @@ EXPECTED_TABLES = {
     "users",
     "worker_nodes",
     "worker_runs",
+    "ephemeral_secret_records",
 }
 
 

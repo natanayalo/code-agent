@@ -38,6 +38,7 @@ def build_orchestrator_graph_input(
             "constraints": dict(submission.constraints),
             "budget": effective_budget,
             "secrets": dict(submission.secrets),
+            "secret_refs": [r.model_dump() for r in submission.secret_refs],
             "tools": submission.tools,
         },
         "task_spec": persisted.task_spec,

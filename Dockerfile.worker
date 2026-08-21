@@ -62,4 +62,9 @@ COPY . /app
 
 RUN poetry install --only main --no-interaction --no-ansi
 
+# UID 65532: safe non-root identity for hostile child containers only.
+# The broker process itself does NOT switch to this user.
+RUN groupadd -g 65532 code-agent && \
+    useradd -u 65532 -g 65532 -m -d /home/code-agent -s /bin/bash code-agent
+
 CMD ["/usr/local/bin/python", "-m", "apps.worker.main"]
