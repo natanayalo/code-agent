@@ -3,7 +3,7 @@
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from sandbox.secrets import SecretRef
+from sandbox.secrets import SecretExposurePolicy, SecretRef
 from sandbox.workspace import WorkspaceCleanupPolicy, WorkspaceHandle
 from workers.base import WorkerRequest, WorkerRuntimeMode
 from workers.cli_runtime_types import CliRuntimeSettings
@@ -78,7 +78,9 @@ def test_gemini_native_prepare_request_secret_refs(monkeypatch, tmp_path):
     # Mock registry and bootstrap
     class FakeDefinition:
         name = "builtin"
-        exposure_policy = "sandbox_env"
+        exposure_policy = SecretExposurePolicy.SANDBOX_ENV
+        source_key = "opaque-gemini-key-handle"
+        destination_env_var = "GEMINI_API_KEY"
 
     class FakeBootstrap:
         definitions = [FakeDefinition()]
@@ -118,8 +120,15 @@ def test_gemini_native_prepare_request_secret_refs(monkeypatch, tmp_path):
         def create_grant(self, *args, **kwargs):
             return FakeGrant()
 
+    load_calls: list[bool] = []
+
+    def _load_bootstrap(*_args, **kwargs):
+        load_calls.append(kwargs["has_api_key"])
+        return FakeBootstrap()
+
     monkeypatch.setattr(
-        "sandbox.provider_bootstrap.ProviderBootstrapLoader.load", lambda *args: FakeBootstrap()
+        "sandbox.provider_bootstrap.ProviderBootstrapLoader.load",
+        _load_bootstrap,
     )
     monkeypatch.setattr("sandbox.secrets.SecretRegistry", FakeRegistry)
     monkeypatch.setattr("sandbox.capability.CapabilityGrantFactory", FakeGrant)
@@ -137,3 +146,4 @@ def test_gemini_native_prepare_request_secret_refs(monkeypatch, tmp_path):
         system_prompt_override=None,
     )
     assert result is not None
+    assert load_calls == [True]

@@ -53,7 +53,7 @@ from repositories import (
 )
 from sandbox.ephemeral_store_postgres import PostgresEphemeralSecretStore
 from sandbox.ingress import IngressMigrationAdapter
-from sandbox.secrets import DEFAULT_SECRET_REGISTRY
+from sandbox.secrets import DEFAULT_SECRET_REGISTRY, SecretRef
 
 logger = logging.getLogger("orchestrator.execution")
 
@@ -397,6 +397,7 @@ def _load_submission_for_task(
             constraints=task_constraints,
             budget=dict(task.budget or {}),
             secrets=dict(task.secrets or {}),
+            secret_refs=tuple(SecretRef.model_validate(r) for r in (task.secret_refs or ())),
             callback_url=task.callback_url,
             tools=task_constraints.get("tools"),
             priority=task.priority,

@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from orchestrator.reflection import FrictionReport
 from orchestrator.repo_profile import RepoProfile
+from sandbox.secrets import SecretRef
 from workers import (
     SUPPORTED_WORKER_TYPES as WORKER_SUPPORTED_TYPES,
 )
@@ -105,6 +106,8 @@ class TaskRequest(OrchestratorModel):
     constraints: dict[str, Any] = Field(default_factory=dict)
     budget: dict[str, Any] = Field(default_factory=dict)
     secrets: dict[str, str] = Field(default_factory=dict)
+    secret_refs: tuple[SecretRef, ...] = Field(default_factory=tuple)
+
     tools: list[str] | None = None
 
     @field_validator("worker_override", mode="before")

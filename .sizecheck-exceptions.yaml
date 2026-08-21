@@ -23,6 +23,7 @@ file_exceptions:
   orchestrator/temporal/activities.py: Temporal activity adapters keep the product projection and worker handoff contract together.
   tests/unit/test_memory_observation.py: Contains comprehensive unit tests for all memory observation, candidate extraction, and trace-bridging rules.
   sandbox/secrets.py: Consolidated secret resolution and typing logic to keep policy boundary cohesive.
+  orchestrator/nodes/delivery.py: Delivery logic orchestrates broker-owned secret resolution and Git commands.
 function_exceptions:
   sandbox/ingress.py:
     adapt_and_register_ephemeral: Legacy mapping of ingress environment requires inline host extraction.
@@ -64,6 +65,7 @@ function_exceptions:
     replay_task: Clones task state, flags, and specs for replay; requires dense DB model interactions.
   orchestrator/graph.py:
     _apply_brain_route_suggestion: Applies routing suggestions by merging them securely into state; tightly coupled mapping block.
+    _build_worker_request: Builds worker request constraints and task specs.
     _aggregate_decomposed_results: Aggregates all node-level worker outputs into the existing parent WorkerResult contract; keeping the field mapping together prevents delivery and memory fields from being dropped.
     _await_decomposed_nodes: Sequential DAG execution loop coordinates dependency readiness, retries, shared worker context, and permission-blocked resume state.
     await_result: Worker-result boundary includes the sequential decomposed execution branch while preserving single-worker behavior.
@@ -130,3 +132,7 @@ function_exceptions:
     run_forever: Core background queue polling loop; tightly coupled state machine that cannot be easily split.
   tests/unit/test_native_agent_executor.py:
     test_native_agent_runner_full_mocked_execution: Mocking multiple subprocess handles for synchronous unit test coverage takes many lines
+  sandbox/provider_bootstrap.py:
+    load: Dynamically loads provider bootstrap config.
+  orchestrator/nodes/delivery.py:
+    _run_deliver_result: Delivery worker removed, git commands managed centrally.

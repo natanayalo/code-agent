@@ -585,8 +585,20 @@ def _build_worker_request(
     runtime_mode = (dispatch.runtime_mode if dispatch else None) or (
         route.runtime_mode if route else None
     )
-    read_only = constraints.get("read_only", False)
     effective_task_spec = task_spec_override or state.task_spec
+    read_only_constraint = (
+        constraints.get("read_only") is True or constraints.get("task_type") == "scout"
+    )
+    if effective_task_spec is not None:
+        if effective_task_spec.task_type == "scout":
+            read_only = True
+        elif effective_task_spec.allowed_actions:
+            read_only = "modify_workspace_files" not in effective_task_spec.allowed_actions
+        else:
+            read_only = read_only_constraint
+    else:
+        read_only = read_only_constraint
+
     runtime_manifest = _build_worker_request_runtime_manifest(
         state,
         worker_profile=worker_profile,
@@ -610,6 +622,7 @@ def _build_worker_request(
         constraints=constraints,
         budget=dict(state.task.budget),
         secrets=dict((state.task.secrets or {}) | {"POETRY_VIRTUALENVS_IN_PROJECT": "true"}),
+        secret_refs=state.task.secret_refs,
         tools=state.task.tools,
         worker_profile=worker_profile,
         runtime_mode=runtime_mode,

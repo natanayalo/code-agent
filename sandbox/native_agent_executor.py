@@ -490,6 +490,9 @@ class DockerNativeAgentExecutor:
                 if not path.exists():
                     return
                 for root, dirs, files in os.walk(path):
+                    # Exclude .git directory from being chowned
+                    if ".git" in dirs:
+                        dirs.remove(".git")
                     for d in dirs:
                         try:
                             os.chown(os.path.join(root, d), 65532, 65532)
@@ -510,7 +513,7 @@ class DockerNativeAgentExecutor:
                 _chown_recursive(
                     workspace.workspace_path / ".code-agent" / "scratch" / scratch_namespace
                 )
-            else:
+            elif not read_only_workspace:
                 _chown_recursive(workspace.workspace_path)
 
             scoped_env.update(

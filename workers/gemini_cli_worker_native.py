@@ -94,6 +94,18 @@ def _workspace_task_id(request: WorkerRequest) -> str:
     return f"gemini-cli-{_slugify(source)}"
 
 
+def _is_gemini_api_key_secret(definition: Any | None) -> bool:
+    """Identify API-key references from broker-owned secret metadata."""
+    return bool(
+        definition
+        and (
+            getattr(definition, "name", None) == "GEMINI_API_KEY"
+            or getattr(definition, "source_key", None) == "GEMINI_API_KEY"
+            or getattr(definition, "destination_env_var", None) == "GEMINI_API_KEY"
+        )
+    )
+
+
 def _workspace_artifacts(workspace: WorkspaceHandle) -> list[ArtifactReference]:
     """Build the default artifact references for a retained workspace."""
     return [
@@ -498,7 +510,6 @@ class GeminiCliWorkerNativeMixin:
             validate_grant_for_execution,
         )
         from sandbox.provider_bootstrap import ProviderBootstrapLoader
-        from sandbox.provider_hosts import GEMINI_RUNTIME_HOSTS
         from sandbox.secrets import (
             SecretExposurePolicy,
             SecretRef,
@@ -515,6 +526,9 @@ class GeminiCliWorkerNativeMixin:
         except OSError:  # pragma: no cover
             pass
 
+        registry = SecretRegistry(
+            ephemeral_store=getattr(self, "ephemeral_store", None), task_id=task_id
+        )
         if self._is_antigravity_native_adapter():
             from sandbox.provider_bootstrap import ProviderBootstrap
 
@@ -522,10 +536,11 @@ class GeminiCliWorkerNativeMixin:
                 definitions=[], destination_by_ref={}, file_store={}, ref_names=()
             )
         else:
-            bootstrap = ProviderBootstrapLoader.load(provider_dir)
-        registry = SecretRegistry(
-            ephemeral_store=getattr(self, "ephemeral_store", None), task_id=task_id
-        )
+            has_api_key = "GEMINI_API_KEY" in request.secrets or any(
+                _is_gemini_api_key_secret(registry.get(ref.name, task_id=task_id))
+                for ref in request.secret_refs or ()
+            )
+            bootstrap = ProviderBootstrapLoader.load(provider_dir, has_api_key=has_api_key)
         for d in bootstrap.definitions:
             registry.register(d)
 
@@ -541,14 +556,24 @@ class GeminiCliWorkerNativeMixin:
         for d in bootstrap.definitions:
             sandbox_refs.append(SecretRef(name=d.name))
 
+        has_api_key = "GEMINI_API_KEY" in request.secrets or any(
+            _is_gemini_api_key_secret(registry.get(ref.name, task_id=task_id))
+            for ref in request.secret_refs or ()
+        )
+        from sandbox.provider_hosts import GEMINI_API_KEY_HOSTS, GEMINI_OAUTH_HOSTS
+
+        allowed_hosts = GEMINI_API_KEY_HOSTS if has_api_key else GEMINI_OAUTH_HOSTS
+
         grant = CapabilityGrantFactory(registry).create_grant(
             network=NetworkEgressPolicy.ALLOWLISTED_HOSTS,
             filesystem=FileSystemAccessPolicy.READ_ONLY
             if request.read_only
             else FileSystemAccessPolicy.WORKSPACE_WRITE,
             allowed_secret_refs=tuple(sandbox_refs),
-            granted_secret_scopes=frozenset([SecretScope.PROVIDER_AUTH, SecretScope.GIT_PUSH]),
-            allowed_egress_hosts=GEMINI_RUNTIME_HOSTS,
+            granted_secret_scopes=frozenset(
+                [SecretScope.PROVIDER_AUTH, SecretScope.GIT_PUSH, SecretScope.CUSTOM]
+            ),
+            allowed_egress_hosts=allowed_hosts,
         )
 
         validate_grant_for_execution(grant, secret_registry=registry)

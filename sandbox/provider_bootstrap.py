@@ -4,9 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Final
 
-from sandbox.provider_hosts import CODEX_RUNTIME_HOSTS, GEMINI_RUNTIME_HOSTS
+from sandbox.provider_hosts import (
+    CODEX_API_KEY_HOSTS,
+    CODEX_CHATGPT_HOSTS,
+    GEMINI_API_KEY_HOSTS,
+    GEMINI_OAUTH_HOSTS,
+)
 from sandbox.secrets import (
     RegisteredSecretDefinition,
     SecretExposurePolicy,
@@ -34,20 +38,9 @@ class ProviderBootstrapLoader:
 
     # Map of known files to (is_required, ref_name, logical_mount_path, provider_hosts)
     # Using 'codex' and 'gemini' as top-level dir inference.
-    _FILE_POLICIES: Final[dict[str, tuple[bool, str, str, tuple[str, ...]]]] = {
-        "auth.json": (True, "codex_auth_json", ".codex/auth.json", CODEX_RUNTIME_HOSTS),
-        "config.toml": (False, "codex_config_toml", ".codex/config.toml", CODEX_RUNTIME_HOSTS),
-        "oauth_creds.json": (
-            True,
-            "gemini_oauth_creds",
-            ".gemini/oauth_creds.json",
-            GEMINI_RUNTIME_HOSTS,
-        ),
-        "settings.json": (False, "gemini_settings", ".gemini/settings.json", GEMINI_RUNTIME_HOSTS),
-    }
 
     @classmethod
-    def load(cls, provider_dir: Path) -> ProviderBootstrap:
+    def load(cls, provider_dir: Path, has_api_key: bool = False) -> ProviderBootstrap:
         """Load bootstrap definitions from a provider config directory."""
         definitions: list[RegisteredSecretDefinition] = []
         file_store: dict[str, str] = {}
@@ -67,15 +60,38 @@ class ProviderBootstrapLoader:
                     continue
 
                 file_name = file_path.name
-                if file_name not in cls._FILE_POLICIES:
-                    continue
 
-                is_required, ref_name, dest_path, runtime_hosts = cls._FILE_POLICIES[file_name]
+                # Determine policy based on auth mode
+                is_required = False
+                ref_name = ""
+                dest_path = ""
+                runtime_hosts: tuple[str, ...] = ()
 
-                # Only process files corresponding to the expected provider type
-                if is_gemini and "gemini" not in ref_name:
-                    continue
-                if is_codex and "codex" not in ref_name:
+                if file_name == "auth.json" and is_codex:
+                    if has_api_key:
+                        continue
+                    is_required = not has_api_key
+                    ref_name = "codex_auth_json"
+                    dest_path = ".codex/auth.json"
+                    runtime_hosts = CODEX_CHATGPT_HOSTS
+                elif file_name == "config.toml" and is_codex:
+                    is_required = False
+                    ref_name = "codex_config_toml"
+                    dest_path = ".codex/config.toml"
+                    runtime_hosts = CODEX_CHATGPT_HOSTS if not has_api_key else CODEX_API_KEY_HOSTS
+                elif file_name == "oauth_creds.json" and is_gemini:
+                    if has_api_key:
+                        continue
+                    is_required = not has_api_key
+                    ref_name = "gemini_oauth_creds"
+                    dest_path = ".gemini/oauth_creds.json"
+                    runtime_hosts = GEMINI_OAUTH_HOSTS
+                elif file_name == "settings.json" and is_gemini:
+                    is_required = False
+                    ref_name = "gemini_settings"
+                    dest_path = ".gemini/settings.json"
+                    runtime_hosts = GEMINI_OAUTH_HOSTS if not has_api_key else GEMINI_API_KEY_HOSTS
+                else:
                     continue
 
                 if is_required:
@@ -105,14 +121,15 @@ class ProviderBootstrapLoader:
                 )
                 definitions.append(definition)
 
-        if not found_required and is_codex and not provider_dir.joinpath("auth.json").exists():
-            raise ProviderBootstrapError(f"Required auth.json missing in {provider_dir}")
-        if (
-            not found_required
-            and is_gemini
-            and not provider_dir.joinpath("oauth_creds.json").exists()
-        ):
-            raise ProviderBootstrapError(f"Required oauth_creds.json missing in {provider_dir}")
+        if not has_api_key:
+            if not found_required and is_codex and not provider_dir.joinpath("auth.json").exists():
+                raise ProviderBootstrapError(f"Required auth.json missing in {provider_dir}")
+            if (
+                not found_required
+                and is_gemini
+                and not provider_dir.joinpath("oauth_creds.json").exists()
+            ):
+                raise ProviderBootstrapError(f"Required oauth_creds.json missing in {provider_dir}")
 
         return ProviderBootstrap(
             definitions=definitions,

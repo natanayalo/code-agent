@@ -95,6 +95,18 @@ def _workspace_task_id(request: WorkerRequest) -> str:
     return f"codex-cli-{_slugify(source)}"
 
 
+def _is_openai_api_key_secret(definition: Any | None) -> bool:
+    """Identify API-key references from broker-owned secret metadata."""
+    return bool(
+        definition
+        and (
+            getattr(definition, "name", None) == "OPENAI_API_KEY"
+            or getattr(definition, "source_key", None) == "OPENAI_API_KEY"
+            or getattr(definition, "destination_env_var", None) == "OPENAI_API_KEY"
+        )
+    )
+
+
 def _workspace_artifacts(workspace: WorkspaceHandle) -> list[ArtifactReference]:
     """Build the default artifact references for a retained workspace."""
     return [
@@ -432,7 +444,6 @@ class CodexCliWorkerNativeMixin:
             validate_grant_for_execution,
         )
         from sandbox.provider_bootstrap import ProviderBootstrapLoader
-        from sandbox.provider_hosts import CODEX_RUNTIME_HOSTS
         from sandbox.secrets import (
             SecretExposurePolicy,
             SecretRef,
@@ -449,10 +460,14 @@ class CodexCliWorkerNativeMixin:
         except OSError:  # pragma: no cover
             pass
 
-        bootstrap = ProviderBootstrapLoader.load(provider_dir)
         registry = SecretRegistry(
             ephemeral_store=getattr(self, "ephemeral_store", None), task_id=task_id
         )
+        has_api_key = "OPENAI_API_KEY" in request.secrets or any(
+            _is_openai_api_key_secret(registry.get(ref.name, task_id=task_id))
+            for ref in request.secret_refs or ()
+        )
+        bootstrap = ProviderBootstrapLoader.load(provider_dir, has_api_key=has_api_key)
         for d in bootstrap.definitions:
             registry.register(d)
 
@@ -468,14 +483,24 @@ class CodexCliWorkerNativeMixin:
         for d in bootstrap.definitions:
             sandbox_refs.append(SecretRef(name=d.name))
 
+        has_api_key = "OPENAI_API_KEY" in request.secrets or any(
+            _is_openai_api_key_secret(registry.get(ref.name, task_id=task_id))
+            for ref in request.secret_refs or ()
+        )
+        from sandbox.provider_hosts import CODEX_API_KEY_HOSTS, CODEX_CHATGPT_HOSTS
+
+        allowed_hosts = CODEX_API_KEY_HOSTS if has_api_key else CODEX_CHATGPT_HOSTS
+
         grant = CapabilityGrantFactory(registry).create_grant(
             network=NetworkEgressPolicy.ALLOWLISTED_HOSTS,
             filesystem=FileSystemAccessPolicy.READ_ONLY
             if request.read_only
             else FileSystemAccessPolicy.WORKSPACE_WRITE,
             allowed_secret_refs=tuple(sandbox_refs),
-            granted_secret_scopes=frozenset([SecretScope.PROVIDER_AUTH, SecretScope.GIT_PUSH]),
-            allowed_egress_hosts=CODEX_RUNTIME_HOSTS,
+            granted_secret_scopes=frozenset(
+                [SecretScope.PROVIDER_AUTH, SecretScope.GIT_PUSH, SecretScope.CUSTOM]
+            ),
+            allowed_egress_hosts=allowed_hosts,
         )
 
         validate_grant_for_execution(grant, secret_registry=registry)
