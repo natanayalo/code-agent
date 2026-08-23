@@ -16,7 +16,7 @@ import subprocess
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Final, Literal, Protocol
 from uuid import uuid4
 
@@ -62,6 +62,7 @@ _EXECUTOR_ENV_KEYS: Final[frozenset[str]] = frozenset(
         "TZ",
     }
 )
+_SANDBOX_FILE_SECRET_ROOT: Final[PurePosixPath] = PurePosixPath("/run/secrets/code-agent")
 
 
 class NativeAgentExecutorError(RuntimeError):
@@ -159,6 +160,24 @@ def native_agent_home_for_request(workspace_path: Path, scratch_namespace: str |
     return workspace_path / ".agent_home"
 
 
+def _sandbox_file_secret_name(destination_mount_path: str) -> str:
+    """Return the validated filename for a declared sandbox-file destination."""
+    destination = PurePosixPath(destination_mount_path)
+    if destination.parent != _SANDBOX_FILE_SECRET_ROOT or not destination.name:
+        raise NativeAgentExecutorError(
+            f"Invalid sandbox file secret destination: {destination_mount_path!r}"
+        )
+    return destination.name
+
+
+def _sandbox_file_secret_mount(sandbox_secrets_dir: Path) -> str:
+    """Build the read-only Docker bind mount for task-scoped file secrets."""
+    return (
+        "type=bind,source="
+        f"{sandbox_secrets_dir.resolve()},target={_SANDBOX_FILE_SECRET_ROOT},readonly"
+    )
+
+
 # Removed obsolete stage_provider_auth
 
 
@@ -217,6 +236,7 @@ class DockerNativeAgentExecutor:
         environment: Mapping[str, str],
         read_only_workspace: bool,
         resource_limits: Any,
+        sandbox_secrets_dir: Path | None = None,
         network_name: str | None = None,
     ) -> list[str]:
         workspace_path = workspace.workspace_path.resolve()
@@ -274,10 +294,11 @@ class DockerNativeAgentExecutor:
                 f"type=bind,source={artifact_root},target={artifact_root}",
                 "--mount",
                 f"type=bind,source={agent_home},target={agent_home}",
-                "--workdir",
-                str(workspace.repo_path.resolve()),
             ]
         )
+        if sandbox_secrets_dir is not None:
+            docker_command.extend(["--mount", _sandbox_file_secret_mount(sandbox_secrets_dir)])
+        docker_command.extend(["--workdir", str(workspace.repo_path.resolve())])
         for key, value in sorted(environment.items()):
             docker_command.extend(["--env", f"{key}={value}"])
         docker_command.append(self.image)
@@ -468,10 +489,15 @@ class DockerNativeAgentExecutor:
                 if val.scope == SecretScope.PROVIDER_AUTH:
                     provider_resolved_secrets.append(val)
                 elif val.destination_mount_path:
-                    secret_path = sandbox_secrets_dir / val.name
+                    secret_path = sandbox_secrets_dir / _sandbox_file_secret_name(
+                        val.destination_mount_path
+                    )
                     secret_path.write_text(val.reveal_secret_value(), encoding="utf-8")
                     try:
                         os.chown(secret_path, 0, 65532)
+                    except OSError:
+                        pass
+                    try:
                         os.chmod(secret_path, 0o440)
                     except OSError:
                         pass
@@ -542,6 +568,7 @@ class DockerNativeAgentExecutor:
                 workspace=workspace,
                 artifact_root=artifact_root,
                 agent_home=agent_home,
+                sandbox_secrets_dir=sandbox_secrets_dir,
                 environment=scoped_env,
                 read_only_workspace=read_only_workspace,
                 resource_limits=context.grant.resource_limits,

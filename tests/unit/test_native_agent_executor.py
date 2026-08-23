@@ -68,6 +68,42 @@ def test_executor_command_is_hardened_and_mounts_only_task_paths(tmp_path: Path)
     assert "--network none" in joined
 
 
+def test_executor_command_mounts_file_secrets_at_the_declared_container_path(
+    tmp_path: Path,
+) -> None:
+    workspace_root = tmp_path / "task"
+    repo = workspace_root / "repo"
+    artifacts = workspace_root / ".code-agent" / "artifacts"
+    agent_home = tmp_path / "agent-home"
+    secret_dir = tmp_path / "sandbox-secrets"
+    repo.mkdir(parents=True)
+    artifacts.mkdir(parents=True)
+    agent_home.mkdir()
+    secret_dir.mkdir()
+    command = DockerNativeAgentExecutor(image="native-image").build_run_command(
+        container_name="native-test",
+        command=["codex", "exec"],
+        workspace=native_executor_workspace_handle(
+            workspace_path=workspace_root, repo_path=repo, task_id="task-1"
+        ),
+        artifact_root=artifacts,
+        agent_home=agent_home,
+        sandbox_secrets_dir=secret_dir,
+        environment={"PATH": "/usr/bin"},
+        read_only_workspace=True,
+        resource_limits=type(
+            "ResourceLimits",
+            (),
+            {"pids_limit": 100, "memory_bytes": 1024 * 1024 * 1024, "cpu_limit": 1.0},
+        )(),
+    )
+
+    assert (
+        f"type=bind,source={secret_dir.resolve()},target=/run/secrets/code-agent,readonly"
+        in command
+    )
+
+
 def test_executor_reads_exited_container_code_without_attached_client() -> None:
     executor = DockerNativeAgentExecutor(image="native-image")
     executor._docker = lambda _command: subprocess.CompletedProcess([], 0, "false 17\n", "")  # type: ignore[method-assign]
@@ -377,7 +413,7 @@ async def test_native_agent_runner_full_mocked_execution(tmp_path: Path, monkeyp
                 name="mount-sec",
                 scope=list(SecretScope)[0],
                 value="val",
-                destination_mount_path="mount-sec",
+                destination_mount_path="/run/secrets/code-agent/mount-sec",
             )
         elif handle == "provider-sec":
             return ResolvedSecret(

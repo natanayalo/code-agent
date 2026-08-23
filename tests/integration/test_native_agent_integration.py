@@ -234,3 +234,81 @@ async def test_native_agent_mutation_with_scratch_namespace(tmp_path: Path):
     assert (
         workspace.repo_path.joinpath("target.txt").read_text(encoding="utf-8").strip() == "mutated"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    not _is_docker_available(), reason="Docker or code-agent-worker:latest unavailable"
+)
+async def test_native_agent_mounts_file_secret_at_declared_destination(tmp_path: Path):
+    """File-backed secrets must be readable only at their broker-declared path."""
+    from sandbox.capability import (
+        CapabilityGrantFactory,
+        FileSystemAccessPolicy,
+        NetworkEgressPolicy,
+    )
+    from sandbox.provider_bootstrap import ProviderBootstrap
+    from sandbox.secrets import (
+        RegisteredSecretDefinition,
+        SecretExposurePolicy,
+        SecretRegistry,
+        SecretResolver,
+        SecretScope,
+        SecretSource,
+    )
+    from sandbox.trusted_context import TrustedSandboxExecutionContext
+    from tests.unit.test_gemini_cli_worker import _make_workspace
+    from workers.native_agent_runner import DockerNativeAgentExecutor
+
+    workspace = _make_workspace(tmp_path)
+    workspace.workspace_path.joinpath(".git").mkdir(exist_ok=True)
+    workspace.workspace_path.joinpath(".git", "config").write_text("", encoding="utf-8")
+    definition = RegisteredSecretDefinition(
+        name="task_certificate",
+        source=SecretSource.FILE,
+        source_key="certificate.pem",
+        required_scope=SecretScope.CUSTOM,
+        exposure_policy=SecretExposurePolicy.SANDBOX_FILE,
+        destination_mount_path="declared-certificate.pem",
+    )
+    registry = SecretRegistry([definition])
+    grant = CapabilityGrantFactory(registry).create_grant(
+        network=NetworkEgressPolicy.DISABLED,
+        filesystem=FileSystemAccessPolicy.WORKSPACE_WRITE,
+        allowed_secret_refs=("task_certificate",),
+        granted_secret_scopes=(SecretScope.CUSTOM,),
+    )
+    context = TrustedSandboxExecutionContext(
+        grant=grant,
+        task_id="task-file-secret",
+        provider_bootstrap=ProviderBootstrap(
+            definitions=[], destination_by_ref={}, file_store={}, ref_names=()
+        ),
+        secret_resolver=SecretResolver(
+            registry, file_store={"certificate.pem": "test-certificate"}
+        ),
+    )
+    agent_home = (
+        workspace.workspace_path / ".code-agent" / "scratch" / "file-secret" / ".agent_home"
+    )
+    execution = DockerNativeAgentExecutor().run(
+        command=[
+            "sh",
+            "-c",
+            'test "$(cat /run/secrets/code-agent/declared-certificate.pem)" = test-certificate '
+            '&& test "$(stat -c %a /run/secrets/code-agent/declared-certificate.pem)" = 440 '
+            "&& ! (printf replacement > /run/secrets/code-agent/declared-certificate.pem)",
+        ],
+        prompt=None,
+        workspace=workspace,
+        artifact_root=tmp_path / "artifacts",
+        environment={},
+        timeout_seconds=30,
+        scratch_namespace="file-secret",
+        cancel_requested=None,
+        redactor=None,
+        context=context,
+    )
+
+    assert execution.completed.returncode == 0, execution.completed.stderr
+    assert not agent_home.exists()
