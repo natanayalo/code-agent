@@ -18,9 +18,10 @@ from sandbox.native_agent_executor import (
     native_agent_home_for_request,
     native_executor_workspace_handle,
     provider_home_name,
+    sandbox_file_secret_dir_for_request,
 )
 from sandbox.provider_bootstrap import ProviderBootstrap
-from sandbox.scratch import node_agent_home
+from sandbox.scratch import node_agent_home, node_scratch_root
 from sandbox.trusted_context import TrustedSandboxExecutionContext
 
 
@@ -131,6 +132,10 @@ def test_executor_agent_home_matches_native_command_scratch_namespace(tmp_path: 
         workspace, "temporal-node-1"
     )
     assert native_agent_home_for_request(workspace, None) == workspace / ".agent_home"
+    assert sandbox_file_secret_dir_for_request(workspace, "temporal-node-1") == (
+        node_scratch_root(workspace, "temporal-node-1") / "sandbox-secrets"
+    )
+    assert not sandbox_file_secret_dir_for_request(workspace, None).is_relative_to(workspace)
 
 
 def test_provider_home_uses_explicit_source_not_ambiguous_environment() -> None:
@@ -200,6 +205,8 @@ def test_executor_auth_staging_failure_writes_startup_manifest(tmp_path: Path, m
     manifest = json.loads((artifacts / "native-isolation-manifest.json").read_text())
     assert manifest["termination_reason"] == "startup_error"
     assert manifest["cleanup"] == "removed"
+    assert not native_agent_home_for_request(workspace_root, "node-1").exists()
+    assert not sandbox_file_secret_dir_for_request(workspace_root, "node-1").exists()
 
 
 def test_executor_cleans_network_when_polling_is_interrupted(tmp_path: Path, monkeypatch) -> None:
@@ -269,6 +276,8 @@ def test_executor_cleans_network_when_polling_is_interrupted(tmp_path: Path, mon
     network_name, proxy_name = cleanup_calls[0]
     assert network_name and network_name.startswith("native-agent-net-")
     assert proxy_name == "native-egress-test"
+    assert not native_agent_home_for_request(workspace_root, "node-1").exists()
+    assert not sandbox_file_secret_dir_for_request(workspace_root, "node-1").exists()
 
 
 def test_proxy_audit_is_identity_only_and_redacts_request_content(

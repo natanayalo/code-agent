@@ -22,7 +22,7 @@ from uuid import uuid4
 
 from sandbox.capability import FileSystemAccessPolicy, NetworkEgressPolicy
 from sandbox.redact import SecretRedactor
-from sandbox.scratch import node_agent_home
+from sandbox.scratch import node_agent_home, node_scratch_root
 from sandbox.trusted_context import TrustedSandboxExecutionContext
 from sandbox.workspace import WorkspaceHandle
 
@@ -158,6 +158,13 @@ def native_agent_home_for_request(workspace_path: Path, scratch_namespace: str |
     if scratch_namespace:
         return node_agent_home(workspace_path, scratch_namespace)
     return workspace_path / ".agent_home"
+
+
+def sandbox_file_secret_dir_for_request(
+    workspace_path: Path, scratch_namespace: str | None
+) -> Path:
+    """Return the file-secret source directory outside writable container mounts."""
+    return node_scratch_root(workspace_path, scratch_namespace) / "sandbox-secrets"
 
 
 def _sandbox_file_secret_name(destination_mount_path: str) -> str:
@@ -456,6 +463,9 @@ class DockerNativeAgentExecutor:
 
         artifact_root.mkdir(parents=True, exist_ok=True)
         agent_home = native_agent_home_for_request(workspace.workspace_path, scratch_namespace)
+        sandbox_secrets_dir = sandbox_file_secret_dir_for_request(
+            workspace.workspace_path, scratch_namespace
+        )
 
         container_name = f"native-agent-{uuid4().hex[:20]}"
 
@@ -471,7 +481,7 @@ class DockerNativeAgentExecutor:
             resolver = context.secret_resolver
 
             provider_resolved_secrets = []
-            sandbox_secrets_dir = agent_home / "secrets"
+            agent_home.mkdir(parents=True, exist_ok=True)
             sandbox_secrets_dir.mkdir(parents=True, exist_ok=True)
             os.chmod(sandbox_secrets_dir, 0o750)
             try:
@@ -577,6 +587,7 @@ class DockerNativeAgentExecutor:
         except (OSError, subprocess.SubprocessError, NativeAgentExecutorError) as exc:
             cleanup = self._cleanup_network(network_name=network_name, proxy_name=proxy_name)
             shutil.rmtree(agent_home, ignore_errors=True)
+            shutil.rmtree(sandbox_secrets_dir, ignore_errors=True)
             manifest = {
                 "execution_backend": "docker_native_agent_executor",
                 "image": self.image,
@@ -636,6 +647,7 @@ class DockerNativeAgentExecutor:
             )
             manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
             shutil.rmtree(agent_home, ignore_errors=True)
+            shutil.rmtree(sandbox_secrets_dir, ignore_errors=True)
             raise NativeAgentExecutorError(
                 f"Failed to start isolated Docker executor: {exc}"
             ) from exc
@@ -752,6 +764,7 @@ class DockerNativeAgentExecutor:
         finally:
             cleanup_network()
             shutil.rmtree(agent_home, ignore_errors=True)
+            shutil.rmtree(sandbox_secrets_dir, ignore_errors=True)
         self._remove(container_name)
         manifest.update(
             {

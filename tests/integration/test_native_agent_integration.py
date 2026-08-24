@@ -8,6 +8,22 @@ import pytest
 
 import workers.native_agent_runner as native_agent_runner
 from db.enums import WorkerRuntimeMode
+from sandbox.capability import CapabilityGrantFactory, FileSystemAccessPolicy, NetworkEgressPolicy
+from sandbox.native_agent_executor import (
+    DockerNativeAgentExecutor,
+    native_agent_home_for_request,
+    sandbox_file_secret_dir_for_request,
+)
+from sandbox.provider_bootstrap import ProviderBootstrap
+from sandbox.secrets import (
+    RegisteredSecretDefinition,
+    SecretExposurePolicy,
+    SecretRegistry,
+    SecretResolver,
+    SecretScope,
+    SecretSource,
+)
+from sandbox.trusted_context import TrustedSandboxExecutionContext
 from tests.native_agent_test_doubles import LocalNativeAgentRunner
 from tests.unit.test_gemini_cli_worker import (
     _FakeContainerManager,
@@ -242,24 +258,6 @@ async def test_native_agent_mutation_with_scratch_namespace(tmp_path: Path):
 )
 async def test_native_agent_mounts_file_secret_at_declared_destination(tmp_path: Path):
     """File-backed secrets must be readable only at their broker-declared path."""
-    from sandbox.capability import (
-        CapabilityGrantFactory,
-        FileSystemAccessPolicy,
-        NetworkEgressPolicy,
-    )
-    from sandbox.provider_bootstrap import ProviderBootstrap
-    from sandbox.secrets import (
-        RegisteredSecretDefinition,
-        SecretExposurePolicy,
-        SecretRegistry,
-        SecretResolver,
-        SecretScope,
-        SecretSource,
-    )
-    from sandbox.trusted_context import TrustedSandboxExecutionContext
-    from tests.unit.test_gemini_cli_worker import _make_workspace
-    from workers.native_agent_runner import DockerNativeAgentExecutor
-
     workspace = _make_workspace(tmp_path)
     workspace.workspace_path.joinpath(".git").mkdir(exist_ok=True)
     workspace.workspace_path.joinpath(".git", "config").write_text("", encoding="utf-8")
@@ -288,20 +286,23 @@ async def test_native_agent_mounts_file_secret_at_declared_destination(tmp_path:
             registry, file_store={"certificate.pem": "test-certificate"}
         ),
     )
-    agent_home = (
-        workspace.workspace_path / ".code-agent" / "scratch" / "file-secret" / ".agent_home"
+    agent_home = native_agent_home_for_request(workspace.workspace_path, "file-secret")
+    sandbox_secrets_dir = sandbox_file_secret_dir_for_request(
+        workspace.workspace_path, "file-secret"
     )
+    artifact_root = tmp_path / "artifacts"
     execution = DockerNativeAgentExecutor().run(
         command=[
             "sh",
             "-c",
             'test "$(cat /run/secrets/code-agent/declared-certificate.pem)" = test-certificate '
             '&& test "$(stat -c %a /run/secrets/code-agent/declared-certificate.pem)" = 440 '
+            '&& test ! -e "$HOME/secrets/declared-certificate.pem" '
             "&& ! (printf replacement > /run/secrets/code-agent/declared-certificate.pem)",
         ],
         prompt=None,
         workspace=workspace,
-        artifact_root=tmp_path / "artifacts",
+        artifact_root=artifact_root,
         environment={},
         timeout_seconds=30,
         scratch_namespace="file-secret",
@@ -312,3 +313,14 @@ async def test_native_agent_mounts_file_secret_at_declared_destination(tmp_path:
 
     assert execution.completed.returncode == 0, execution.completed.stderr
     assert not agent_home.exists()
+    secret_mount = next(
+        mount
+        for mount in execution.completed.args
+        if mount.endswith("target=/run/secrets/code-agent,readonly")
+    )
+    secret_source = Path(secret_mount.split("source=", 1)[1].split(",target=", 1)[0])
+    assert secret_source == sandbox_secrets_dir.resolve()
+    assert not secret_source.is_relative_to(workspace.workspace_path)
+    assert not secret_source.is_relative_to(agent_home)
+    assert not secret_source.is_relative_to(artifact_root)
+    assert not secret_source.exists()
