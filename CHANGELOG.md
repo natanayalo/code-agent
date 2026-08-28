@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: implement M28.5A.2 native agent docker isolation and ingress secret enforcement ([#378](https://github.com/natanayalo/code-agent/pull/378))
+
 - Feat(sandbox): implement threat model and execution capability contracts (M28.5A) ([#377](https://github.com/natanayalo/code-agent/pull/377))
 
 - Feat(orchestrator): prune node_outcomes from temporal state snapshots (m28.5b wave 3b.2) ([#376](https://github.com/natanayalo/code-agent/pull/376))
