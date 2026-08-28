@@ -24,25 +24,33 @@ from sandbox.secrets import (
 _RE_SAFE_NAME: Final[re.Pattern[str]] = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 
 RESERVED_LEGACY_SECRET_POLICIES: Final[
-    dict[str, tuple[SecretScope, SecretExposurePolicy, str | None]]
+    dict[str, tuple[SecretScope, SecretExposurePolicy, str | None, tuple[str, ...]]]
 ] = {
-    "github_token": (SecretScope.GIT_PUSH, SecretExposurePolicy.BROKER_ONLY, None),
-    "gh_token": (SecretScope.GIT_PUSH, SecretExposurePolicy.BROKER_ONLY, None),
+    "github_token": (SecretScope.GIT_PUSH, SecretExposurePolicy.BROKER_ONLY, None, ()),
+    "gh_token": (SecretScope.GIT_PUSH, SecretExposurePolicy.BROKER_ONLY, None, ()),
     "openai_api_key": (
         SecretScope.PROVIDER_AUTH,
         SecretExposurePolicy.SANDBOX_ENV,
         "OPENAI_API_KEY",
+        ("api.openai.com", "auth.openai.com"),
     ),
-    "openai_key": (SecretScope.PROVIDER_AUTH, SecretExposurePolicy.SANDBOX_ENV, "OPENAI_API_KEY"),
+    "openai_key": (
+        SecretScope.PROVIDER_AUTH,
+        SecretExposurePolicy.SANDBOX_ENV,
+        "OPENAI_API_KEY",
+        ("api.openai.com", "auth.openai.com"),
+    ),
     "gemini_api_key": (
         SecretScope.PROVIDER_AUTH,
         SecretExposurePolicy.SANDBOX_ENV,
         "GEMINI_API_KEY",
+        ("generativelanguage.googleapis.com", "oauth2.googleapis.com"),
     ),
     "openrouter_api_key": (
         SecretScope.PROVIDER_AUTH,
         SecretExposurePolicy.SANDBOX_ENV,
         "OPENROUTER_API_KEY",
+        ("openrouter.ai",),
     ),
 }
 
@@ -165,14 +173,14 @@ class IngressMigrationAdapter:
         legacy_key: str,
         default_scope: SecretScope,
         default_exposure: SecretExposurePolicy,
-    ) -> tuple[SecretScope, SecretExposurePolicy, str | None, str | None]:
+    ) -> tuple[SecretScope, SecretExposurePolicy, str | None, str | None, tuple[str, ...]]:
         norm = legacy_key.lower().replace("-", "_")
         if norm in RESERVED_LEGACY_SECRET_POLICIES:
-            res_scope, res_exposure, res_dest = RESERVED_LEGACY_SECRET_POLICIES[norm]
+            res_scope, res_exposure, res_dest, res_hosts = RESERVED_LEGACY_SECRET_POLICIES[norm]
             if res_exposure == SecretExposurePolicy.BROKER_ONLY:
-                return res_scope, res_exposure, None, None
+                return res_scope, res_exposure, None, None, res_hosts
             if res_exposure == SecretExposurePolicy.SANDBOX_ENV:
-                return res_scope, res_exposure, res_dest, None
+                return res_scope, res_exposure, res_dest, None, res_hosts
 
         if default_exposure == SecretExposurePolicy.SANDBOX_ENV:
             clean_env = re.sub(r"[^A-Z0-9_]", "_", legacy_key.upper())[:44]
@@ -181,11 +189,11 @@ class IngressMigrationAdapter:
                 if clean_env.startswith("CODE_AGENT_SECRET_")
                 else f"CODE_AGENT_SECRET_{clean_env}"
             )
-            return default_scope, default_exposure, dest_env, None
+            return default_scope, default_exposure, dest_env, None, ()
         if default_exposure == SecretExposurePolicy.SANDBOX_FILE:
             clean_file = re.sub(r"[^a-zA-Z0-9_.-]", "_", legacy_key)[:48]
-            return default_scope, default_exposure, None, f"ephemeral_{clean_file}.secret"
-        return default_scope, default_exposure, None, None
+            return default_scope, default_exposure, None, f"ephemeral_{clean_file}.secret", ()
+        return default_scope, default_exposure, None, None, ()
 
     @classmethod
     def adapt_and_register_ephemeral(
@@ -233,9 +241,13 @@ class IngressMigrationAdapter:
                     f"Ephemeral secret definition {opaque_name!r} already exists in registry"
                 )
 
-            sec_scope, sec_exposure, dest_env, dest_mount = cls._compute_destinations_and_policy(
-                legacy_key, default_scope=scope, default_exposure=exposure_policy
+            sec_scope, sec_exposure, dest_env, dest_mount, extra_hosts = (
+                cls._compute_destinations_and_policy(
+                    legacy_key, default_scope=scope, default_exposure=exposure_policy
+                )
             )
+
+            merged_hosts = tuple(sorted(set(permitted_egress_hosts) | set(extra_hosts)))
 
             definition = RegisteredSecretDefinition(
                 name=opaque_name,
@@ -243,7 +255,7 @@ class IngressMigrationAdapter:
                 source_key=opaque_name,
                 required_scope=sec_scope,
                 exposure_policy=sec_exposure,
-                permitted_egress_hosts=tuple(permitted_egress_hosts),
+                permitted_egress_hosts=merged_hosts,
                 destination_env_var=dest_env,
                 destination_mount_path=dest_mount,
             )
@@ -253,7 +265,7 @@ class IngressMigrationAdapter:
                 value=raw_val,
                 required_scope=sec_scope,
                 exposure_policy=sec_exposure,
-                permitted_egress_hosts=tuple(permitted_egress_hosts),
+                permitted_egress_hosts=merged_hosts,
                 destination_env_var=dest_env,
                 destination_mount_path=dest_mount,
             )

@@ -21,6 +21,7 @@ from orchestrator.execution_context import _PersistedTaskContext
 from orchestrator.execution_policy import validate_callback_url
 from orchestrator.operational_health_types import ExecutionHealthMetrics
 from orchestrator.state import AggregationRole, NodeExecutionMode, TaskSpec
+from sandbox.secrets import SecretRef
 from workers.base import normalize_worker_profile_name
 
 
@@ -74,6 +75,7 @@ class TaskSubmission(ExecutionModel):
     constraints: dict[str, Any] = Field(default_factory=dict)
     budget: dict[str, Any] = Field(default_factory=dict)
     secrets: dict[str, str] = Field(default_factory=dict)
+    secret_refs: tuple[SecretRef, ...] = Field(default_factory=tuple)
     tools: list[str] | None = None
     callback_url: str | None = Field(default=None, max_length=2048)
     session: SubmissionSession = Field(default_factory=SubmissionSession)
@@ -100,6 +102,7 @@ class TaskReplayRequest(ExecutionModel):
     constraints: dict[str, Any] | None = None
     budget: dict[str, Any] | None = None
     secrets: dict[str, str] | None = None
+    secret_refs: tuple[SecretRef, ...] | None = None
 
 
 class TaskSubmissionValidationError(ValueError):

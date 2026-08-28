@@ -249,10 +249,11 @@ references instead of raw credentials. The sandbox broker/runtime resolves and
 injects only the credential required by the grant, just in time and for the
 narrowest practical process and lifetime. Secrets should not unnecessarily
 enter Temporal history, `AgentEvent`, persisted `ContextEnvelope`, logs,
-artifacts, or general worker-request payloads. The exact mechanism remains an
-M28.5A design decision.
+artifacts, or general worker-request payloads.
 
-Exit criteria:
+M28.5A and its Docker runtime enforcement (M28.5A.2) are now complete.
+
+Exit criteria (completed):
 
 - documented threat model across control plane, sandbox infrastructure,
   native process, workspace, network, provider auth, and artifact paths

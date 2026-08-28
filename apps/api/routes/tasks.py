@@ -3,13 +3,22 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from apps.api.config import SystemConfig
-from apps.api.dependencies import get_system_config, get_task_service, require_any_valid_auth
+from apps.api.dependencies import (
+    get_sanitized_task_ingress,
+    get_sanitized_task_replay_ingress,
+    get_system_config,
+    get_task_service,
+    require_any_valid_auth,
+)
+from apps.api.task_schemas import (
+    SanitizedCreateTaskIngress,
+    SanitizedTaskReplayIngress,
+    ScoutTriggerRequest,
+)
 from apps.observability import (
     SESSION_ID_ATTRIBUTE,
     SPAN_KIND_AGENT,
@@ -19,87 +28,26 @@ from apps.observability import (
     start_optional_span,
     with_span_kind,
 )
-from db.enums import TaskStatus, WorkerType
+from db.enums import TaskStatus
 from orchestrator.execution import (
     InteractionInboxCard,
     InteractionResponse,
     SubmissionSession,
     TaskApprovalDecision,
     TaskExecutionService,
-    TaskReplayRequest,
     TaskSnapshot,
     TaskSubmission,
     TaskSubmissionValidationError,
     TaskSummarySnapshot,
     TemporalUnavailableError,
-    validate_callback_url,
 )
-
-
-class ScoutTriggerRequest(BaseModel):
-    """Payload for manually triggering a scout task."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    mode: Literal["repo", "research", "deep"] = "repo"
-    repo_key: str | None = None
-    branch: str | None = None
-    focus: str | None = None
-    depth: Literal["shallow", "standard", "deep"] = "standard"
-    max_proposals: int = Field(default=5)
-
-    @model_validator(mode="after")
-    def _normalize_and_validate(self) -> ScoutTriggerRequest:
-        if self.repo_key is not None:
-            self.repo_key = self.repo_key.strip() or None
-        if self.branch is not None:
-            self.branch = self.branch.strip() or None
-        if self.focus is not None:
-            self.focus = self.focus.strip() or None
-
-        self.max_proposals = max(1, min(20, self.max_proposals))
-
-        if self.mode == "research" and not self.focus:
-            raise ValueError("Research mode requires a focus topic.")
-        return self
-
-
-class CreateTaskRequest(BaseModel):
-    """Public HTTP payload for submitting a new task.
-
-    Validates inputs and resolves repository references before mapping
-    to the internal TaskSubmission model.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    task_text: str = Field(min_length=1)
-    repo_key: str | None = Field(default=None, max_length=255)
-    branch: str | None = Field(default=None, max_length=255)
-    priority: int = Field(default=0, ge=0)
-    worker_override: WorkerType | None = None
-    worker_profile_override: str | None = Field(default=None, min_length=1, max_length=255)
-    constraints: dict[str, Any] = Field(default_factory=dict)
-    budget: dict[str, Any] = Field(default_factory=dict)
-    secrets: dict[str, str] = Field(default_factory=dict)
-    tools: list[str] | None = None
-    callback_url: str | None = Field(default=None, max_length=2048)
-    session: SubmissionSession | None = None
-
-    @field_validator("callback_url")
-    @classmethod
-    def _validate_callback_url(cls, v: str | None) -> str | None:
-        if v is not None:
-            return validate_callback_url(v)
-        return v
-
 
 router = APIRouter(prefix="/tasks", tags=["tasks"], dependencies=[Depends(require_any_valid_auth)])
 
 
 @router.post("", response_model=TaskSnapshot, status_code=status.HTTP_202_ACCEPTED)
 def submit_task(
-    payload: CreateTaskRequest,
+    ingress: SanitizedCreateTaskIngress = Depends(get_sanitized_task_ingress),
     task_service: TaskExecutionService = Depends(get_task_service),
     config: SystemConfig = Depends(get_system_config),
 ) -> TaskSnapshot:
@@ -109,28 +57,29 @@ def submit_task(
         span_name="api.tasks.submit",
         attributes=with_span_kind(SPAN_KIND_AGENT),
     ):
-        set_span_input_output(input_data=payload.model_dump(exclude={"secrets"}))
+        set_span_input_output(input_data=ingress.request.model_dump(exclude={"secrets"}))
 
-        resolved_repo_url = config.resolve_repo_key(payload.repo_key)
-        if payload.repo_key and not resolved_repo_url:
+        resolved_repo_url = config.resolve_repo_key(ingress.request.repo_key)
+        if ingress.request.repo_key and not resolved_repo_url:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Repo key '{payload.repo_key}' is not in the allowlist.",
+                detail=f"Repo key '{ingress.request.repo_key}' is not in the allowlist.",
             )
 
         submission = TaskSubmission(
-            task_text=payload.task_text,
+            task_text=ingress.request.task_text,
             repo_url=resolved_repo_url,
-            branch=payload.branch,
-            priority=payload.priority,
-            worker_override=payload.worker_override,
-            worker_profile_override=payload.worker_profile_override,
-            constraints=payload.constraints,
-            budget=payload.budget,
-            secrets=payload.secrets,
-            tools=payload.tools,
-            callback_url=payload.callback_url,
-            session=payload.session
+            branch=ingress.request.branch,
+            priority=ingress.request.priority,
+            worker_override=ingress.request.worker_override,
+            worker_profile_override=ingress.request.worker_profile_override,
+            constraints=ingress.request.constraints,
+            budget=ingress.request.budget,
+            secrets=ingress.request.secrets,
+            secret_refs=ingress.request.secret_refs,
+            tools=ingress.request.tools,
+            callback_url=ingress.request.callback_url,
+            session=ingress.request.session
             or SubmissionSession(
                 channel="http",
                 external_user_id="http:anonymous",
@@ -139,7 +88,7 @@ def submit_task(
         )
 
         try:
-            task_snapshot, _ = task_service.create_task(submission)
+            task_snapshot, _ = task_service.create_task(submission, raw_secrets=ingress.raw_secrets)
             set_current_span_attribute(TASK_ID_ATTRIBUTE, task_snapshot.task_id)
             set_current_span_attribute(SESSION_ID_ATTRIBUTE, task_snapshot.session_id)
             return task_snapshot
@@ -325,14 +274,15 @@ def cancel_task(
 )
 def replay_task(
     task_id: str,
-    payload: TaskReplayRequest | None = None,
+    ingress: SanitizedTaskReplayIngress = Depends(get_sanitized_task_replay_ingress),
     task_service: TaskExecutionService = Depends(get_task_service),
 ) -> TaskSnapshot:
     """Replay a prior terminal task, creating a new task with optional overrides."""
     try:
         result = task_service.replay_task(
             source_task_id=task_id,
-            replay_request=payload,
+            replay_request=ingress.request,
+            raw_secrets=ingress.raw_secrets,
         )
     except TaskSubmissionValidationError as exc:
         raise HTTPException(

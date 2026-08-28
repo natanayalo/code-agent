@@ -751,7 +751,7 @@ class TaskExecutionActivities:
             orchestrator_brain=self.service.orchestrator_brain,
         )
         self.review_result_node = build_review_result_node(self.service.worker)
-        self.deliver_result_node = build_deliver_result_node(self.service.worker)
+        self.deliver_result_node = build_deliver_result_node(self.service.session_factory)
         self.persist_memory_node = (
             build_persist_memory_node(self.service.session_factory)
             if self.service.session_factory

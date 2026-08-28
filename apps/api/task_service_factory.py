@@ -21,6 +21,8 @@ from orchestrator.brain import RuleBasedOrchestratorBrain
 from orchestrator.execution import ProgressNotifier, TaskExecutionService
 from repositories import create_engine_from_url, create_session_factory
 from sandbox import DockerSandboxContainerManager
+from sandbox.ephemeral_store_postgres import SessionFactoryEphemeralSecretStore
+from sandbox.secrets import EphemeralSecretStore
 from sandbox.workspace import default_workspace_root
 from workers import (
     AntigravityCliRuntimeAdapter,
@@ -309,7 +311,9 @@ def _database_url_from_env(environ: Mapping[str, str]) -> str | None:
 
 
 def _build_codex_worker(
-    resolved_env: Mapping[str, str], container_manager: DockerSandboxContainerManager
+    resolved_env: Mapping[str, str],
+    container_manager: DockerSandboxContainerManager,
+    ephemeral_store: EphemeralSecretStore,
 ) -> CodexCliWorker:
     codex_runtime_mode = _resolve_default_runtime_mode(
         resolved_env.get(CODEX_RUNTIME_MODE_ENV_VAR),
@@ -320,6 +324,7 @@ def _build_codex_worker(
     return CodexCliWorker(
         runtime_adapter=CodexExecCliRuntimeAdapter.from_env(resolved_env),
         container_manager=container_manager,
+        ephemeral_store=ephemeral_store,
         default_runtime_mode=codex_runtime_mode,
         native_sandbox_mode=resolved_env.get(
             CODEX_SANDBOX_ENV_VAR,
@@ -337,7 +342,9 @@ def _build_codex_worker(
 
 
 def _build_gemini_worker(
-    resolved_env: Mapping[str, str], container_manager: DockerSandboxContainerManager
+    resolved_env: Mapping[str, str],
+    container_manager: DockerSandboxContainerManager,
+    ephemeral_store: EphemeralSecretStore,
 ) -> GeminiCliWorker | None:
     legacy_gemini_bin = resolved_env.get(GEMINI_EXECUTABLE_ENV_VAR)
     legacy_bin_requests_antigravity = (
@@ -379,6 +386,7 @@ def _build_gemini_worker(
     return GeminiCliWorker(
         runtime_adapter=runtime_adapter,
         container_manager=container_manager,
+        ephemeral_store=ephemeral_store,
         default_runtime_mode=gemini_runtime_mode,
         native_sandbox_enabled=_is_enabled(native_sandbox_value),
     )
@@ -518,9 +526,10 @@ def build_task_service_from_env(
     session_factory = _build_session_factory(resolved_env)
     container_manager = _build_container_manager(resolved_env)
     resolved_workspace_root = _resolve_workspace_root(resolved_env)
+    ephemeral_store = SessionFactoryEphemeralSecretStore(session_factory)
 
-    codex_worker = _build_codex_worker(resolved_env, container_manager)
-    gemini_worker = _build_gemini_worker(resolved_env, container_manager)
+    codex_worker = _build_codex_worker(resolved_env, container_manager, ephemeral_store)
+    gemini_worker = _build_gemini_worker(resolved_env, container_manager, ephemeral_store)
     openrouter_worker = _build_openrouter_worker(resolved_env, container_manager)
     shell_worker = ShellWorker(
         workspace_root=resolved_workspace_root,

@@ -25,6 +25,7 @@ from sandbox import (
     WorkspaceManagerError,
     WorkspaceRequest,
 )
+from sandbox.secrets import EphemeralSecretStore
 from sandbox.workspace import _mask_url_credentials, default_workspace_root
 from tools import (
     DEFAULT_TOOL_REGISTRY,
@@ -144,6 +145,7 @@ class CodexCliWorker(CodexCliWorkerNativeMixin, Worker):
         native_sandbox_mode: str = DEFAULT_CODEX_NATIVE_SANDBOX_MODE,
         native_event_capture_enabled: bool = False,
         trusted_repo_patterns: list[str] | None = None,
+        ephemeral_store: EphemeralSecretStore | None = None,
     ) -> None:
         self.runtime_adapter = runtime_adapter
         self.tool_registry = tool_registry or DEFAULT_TOOL_REGISTRY
@@ -183,6 +185,13 @@ class CodexCliWorker(CodexCliWorkerNativeMixin, Worker):
             sandbox_adapter=self.sandbox_adapter,
             runtime_settings=self.runtime_settings,
         )
+        self.ephemeral_store: EphemeralSecretStore
+        if not ephemeral_store:
+            from sandbox.secrets import InMemoryEphemeralSecretStore
+
+            self.ephemeral_store = InMemoryEphemeralSecretStore()
+        else:
+            self.ephemeral_store = ephemeral_store
 
     async def run(
         self, request: WorkerRequest, *, system_prompt: str | None = None

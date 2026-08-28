@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import logging
 import os
+import subprocess
 from collections.abc import Awaitable, Callable
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from apps.observability import (
-    NATIVE_AGENT_STDERR_ATTRIBUTE,
-    NATIVE_AGENT_STDOUT_ATTRIBUTE,
     SPAN_KIND_CHAIN,
-    set_current_span_attribute,
     set_span_input_output,
     start_optional_span,
 )
@@ -21,17 +22,32 @@ from orchestrator.github_delivery import (
     publish_draft_pr_from_workspace,
 )
 from orchestrator.nodes.utils import (
-    _available_workers,
     _ensure_state,
     _progress_update,
     _timeline_event,
 )
-from orchestrator.runtime_manifest import build_runtime_manifest
 from orchestrator.state import OrchestratorState
-from tools import ToolPermissionLevel
-from workers.base import Worker, WorkerRequest, WorkerResult
+from workers.base import WorkerResult
 
 logger = logging.getLogger(__name__)
+
+_BROKER_GIT_AUTHOR_NAME = "Code Agent"
+_BROKER_GIT_AUTHOR_EMAIL = "code-agent@localhost"
+_DELIVERY_DIAGNOSTIC_FILENAMES = frozenset(
+    {"coverage_report.txt", "run_test_select.py", "run_test_selection.py"}
+)
+_DELIVERY_RUNTIME_DIRECTORIES = frozenset(
+    {
+        ".agent_home",
+        ".cache",
+        ".code-agent",
+        ".pytest_cache",
+        ".venv",
+        "__pycache__",
+        "node_modules",
+        "target",
+    }
+)
 
 
 def _is_valid_git_branch_name(name: str) -> bool:
@@ -61,52 +77,6 @@ def _is_valid_git_branch_name(name: str) -> bool:
     return True
 
 
-def _build_delivery_prompt(
-    state: OrchestratorState,
-    branch_name: str,
-    pr_title: str,
-    pr_body: str,
-) -> str:
-    """Construct the agent prompt to execute the delivery."""
-    delivery_mode = state.task_spec.delivery_mode if state.task_spec else "workspace"
-
-    # Return a natural language prompt for the agent instead of a bash script.
-    mode_instructions = ""
-    if delivery_mode == "draft_pr":
-        mode_instructions = (
-            f"After pushing, use the github tool or gh cli to create a draft PR titled "
-            f"'{pr_title}' with body '{pr_body}'. If it already exists, do not error."
-        )
-
-    prompt = f"""
-Please deliver the current workspace changes to the remote repository.
-
-Configuration:
-- Target branch: {branch_name}
-- Delivery mode: {delivery_mode}
-
-Instructions:
-1. Fetch the latest from origin.
-2. Checkout or create the branch `{branch_name}`.
-3. Check for any uncommitted changes using `git status`.
-   - Before committing, review the changes to ensure no unintended files
-     (like debug logs, temporary artifacts, or secrets) are included.
-   - Stage ONLY the files relevant to this task (avoid blindly using `git add .`).
-   - Commit them locally on `{branch_name}` with a clear, specific message
-     describing the work done.
-4. If the remote branch exists, gracefully rebase your changes onto it.
-   Resolve any conflicts professionally.
-5. Push the changes to origin (`git push -u origin {branch_name}`).
-{mode_instructions}
-
-Do not use `--force` or `-f` when pushing.
-Never use `--no-verify` to bypass git hooks or pre-commit checks.
-If a hook fails, you must fix the underlying issue.
-If you encounter any unresolvable conflicts, gracefully exit and explain the failure.
-    """
-    return prompt.strip()
-
-
 def _delivery_failure_response(
     state: OrchestratorState,
     msg: str,
@@ -125,17 +95,6 @@ def _delivery_failure_response(
             payload=payload,
         ),
     }
-
-
-def _select_delivery_worker(
-    state: OrchestratorState, available: dict[str, Worker]
-) -> tuple[str, Worker | None]:
-    # Try to use the worker that was dispatched for the task.
-    # Fallback to Antigravity if it's shell or not found.
-    worker_id = state.dispatch.worker_type if state.dispatch else "antigravity"
-    if worker_id == "shell" or worker_id not in available:
-        worker_id = "antigravity"
-    return worker_id, available.get(worker_id)
 
 
 def _delivery_github_token(state: OrchestratorState) -> str | None:
@@ -207,63 +166,6 @@ def _draft_pr_token_failure(
     )
 
 
-def _build_delivery_worker_request(
-    state: OrchestratorState,
-    *,
-    prompt: str,
-    gh_token: str | None,
-) -> WorkerRequest:
-    assert state.dispatch is not None
-    task_secrets = state.task.secrets or {}
-    worker_profile = state.dispatch.worker_profile or (
-        state.route.chosen_profile if state.route else None
-    )
-    runtime_mode = state.dispatch.runtime_mode or (
-        state.route.runtime_mode if state.route else None
-    )
-    worker_type = state.dispatch.worker_type or (state.route.chosen_worker if state.route else None)
-    budget = {
-        "worker_timeout_seconds": 300,
-        **(state.task.budget or {}),
-    }
-    runtime_manifest = build_runtime_manifest(
-        worker_type=worker_type,
-        worker_profile=worker_profile,
-        runtime_mode=runtime_mode,
-        workspace_id=state.dispatch.workspace_id,
-        task_spec=state.task_spec,
-        read_only=False,
-        network_enabled=True,
-        budget=budget,
-        requested_tools=["execute_bash", "execute_git", "execute_github"],
-    ).model_dump(mode="json")
-    return WorkerRequest(
-        session_id=state.session.session_id if state.session else None,
-        task_id=state.task.task_id,
-        repo_url=state.task.repo_url,
-        branch=state.task.branch,
-        workspace_id=state.dispatch.workspace_id,
-        task_text=prompt,
-        constraints={
-            **(state.task.constraints or {}),
-            # Delivery is the explicit, auditable capability grant that permits
-            # the native executor to receive the task's GitHub token.
-            "granted_permission": ToolPermissionLevel.GIT_PUSH_OR_DEPLOY.value,
-        },
-        budget=budget,
-        network_enabled=True,
-        secrets={
-            **task_secrets,
-            "GH_TOKEN": gh_token or "",
-            "GITHUB_TOKEN": gh_token or "",
-        },
-        tools=["execute_bash", "execute_git", "execute_github"],
-        worker_profile=worker_profile,
-        runtime_mode=runtime_mode,
-        runtime_manifest=runtime_manifest,
-    )
-
-
 def _capture_delivery_metadata(
     state: OrchestratorState,
     branch_name: str,
@@ -277,13 +179,6 @@ def _capture_delivery_metadata(
         branch_name=branch_name,
         token=gh_token,
     )
-
-
-def _record_delivery_worker_output(result: WorkerResult) -> None:
-    if hasattr(result, "stdout") and result.stdout:
-        set_current_span_attribute(NATIVE_AGENT_STDOUT_ATTRIBUTE, result.stdout)
-    if hasattr(result, "stderr") and result.stderr:
-        set_current_span_attribute(NATIVE_AGENT_STDERR_ATTRIBUTE, result.stderr)
 
 
 def _merge_delivery_result(
@@ -330,35 +225,6 @@ def _log_delivery_start(state: OrchestratorState) -> None:
     )
 
 
-async def _run_delivery_worker(
-    state: OrchestratorState,
-    delivery_worker: Worker,
-    request: WorkerRequest,
-) -> WorkerResult | dict[str, Any]:
-    try:
-        result = await delivery_worker.run(request)
-    except Exception as exc:
-        msg = f"Delivery execution failed: {type(exc).__name__}: {exc}"
-        logger.debug(msg)
-        return _delivery_failure_response(state, msg, "delivery execution failed")
-
-    _record_delivery_worker_output(result)
-
-    if getattr(result, "status", None) == WorkerRunStatus.SUCCESS:
-        return result
-
-    msg = f"Delivery script failed: {getattr(result, 'summary', '')}"
-    return _delivery_failure_response(
-        state,
-        msg,
-        "delivery script failed",
-        payload={
-            "stdout": getattr(result, "stdout", ""),
-            "stderr": getattr(result, "stderr", ""),
-        },
-    )
-
-
 def _delivery_completed_response(
     state: OrchestratorState,
     *,
@@ -389,8 +255,6 @@ async def _delivery_success_response(
     pr_body: str,
     gh_token: str | None,
 ) -> dict[str, Any]:
-    import asyncio
-
     merged_result = _merge_delivery_result(state.result, delivery_result)
     delivery_metadata = await asyncio.to_thread(
         _capture_delivery_metadata, state, branch_name, gh_token
@@ -443,8 +307,6 @@ async def _reconcile_existing_draft_pr(
     if not state.task_spec or state.task_spec.delivery_mode != "draft_pr":
         return None
 
-    import asyncio
-
     delivery_metadata = await asyncio.to_thread(
         _capture_delivery_metadata, state, branch_name, gh_token
     )
@@ -466,9 +328,156 @@ async def _reconcile_existing_draft_pr(
     )
 
 
+def _resolve_broker_github_token(
+    state: OrchestratorState,
+    session_factory: Any | None,
+) -> str | None:
+    """Resolve the task's broker-only GitHub token without sandbox exposure."""
+    token = _delivery_github_token(state)
+    if token or session_factory is None:
+        return token
+
+    from sandbox.ephemeral_store_postgres import SessionFactoryEphemeralSecretStore
+    from sandbox.secrets import SecretExposurePolicy, SecretRegistry, SecretScope
+
+    store = SessionFactoryEphemeralSecretStore(session_factory)
+    registry = SecretRegistry(ephemeral_store=store, task_id=state.task.task_id)
+    for ref in state.task.secret_refs or ():
+        try:
+            definition = registry.get(ref.name)
+            if (
+                definition is None
+                or definition.exposure_policy != SecretExposurePolicy.BROKER_ONLY
+                or definition.required_scope != SecretScope.GIT_PUSH
+            ):
+                continue
+            token = store.get(ref.name, task_id=state.task.task_id)
+        except Exception:
+            logger.debug("Failed to resolve broker-only delivery credential", exc_info=True)
+            continue
+        if token:
+            return token
+    return None
+
+
+def _delivery_files_to_stage(state: OrchestratorState) -> tuple[list[str], str | None]:
+    """Return the worker-reported workspace paths safe for broker staging."""
+    if state.result is None:
+        return [], None
+
+    paths: list[str] = []
+    for raw_path in state.result.files_changed:
+        path = PurePosixPath(raw_path)
+        if (
+            raw_path.startswith("/")
+            or not path.parts
+            or any(part in {".", ".."} for part in path.parts)
+        ):
+            return [], f"Delivery failed: worker reported unsafe path {raw_path!r}."
+        if (
+            path.name in _DELIVERY_DIAGNOSTIC_FILENAMES
+            or path.parts[0] in _DELIVERY_RUNTIME_DIRECTORIES
+        ):
+            logger.info("Skipping runtime or diagnostic delivery path", extra={"path": raw_path})
+            continue
+        if raw_path not in paths:
+            paths.append(raw_path)
+    return paths, None
+
+
+def _broker_git_environment(gh_token: str | None) -> dict[str, str]:
+    """Build the broker-only environment needed for an authenticated GitHub push."""
+    environment = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+    if gh_token:
+        encoded_token = base64.b64encode(f"x-access-token:{gh_token}".encode()).decode()
+        environment.update(
+            {
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": "http.https://github.com/.extraheader",
+                "GIT_CONFIG_VALUE_0": f"Authorization: Basic {encoded_token}",
+            }
+        )
+    return environment
+
+
+def _run_broker_git_commands(
+    *,
+    trusted_git_dir: Path,
+    workspace_path: Path,
+    files_to_stage: list[str],
+    gh_token: str | None,
+    pr_title: str,
+    pr_body: str,
+    branch_name: str,
+) -> tuple[str | None, str | None]:
+    """Run the broker-owned Git sequence outside the Temporal event loop."""
+
+    def _run_git(
+        *args: str, include_github_token: bool = False
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                "git",
+                f"--git-dir={trusted_git_dir}",
+                f"--work-tree={workspace_path}",
+                "-c",
+                "core.hooksPath=/dev/null",
+                *args,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+            env=_broker_git_environment(gh_token) if include_github_token else None,
+        )
+
+    reset_res = _run_git("reset")
+    if reset_res.returncode != 0:
+        return (
+            f"Delivery failed to reset staging area: {reset_res.stderr}",
+            "delivery failed (git reset)",
+        )
+
+    if files_to_stage:
+        add_res = _run_git("add", "--", *files_to_stage)
+        if add_res.returncode != 0:
+            return f"Delivery failed to stage files: {add_res.stderr}", "delivery failed (git add)"
+
+    staged_res = _run_git("diff", "--cached", "--quiet")
+    if staged_res.returncode == 1:
+        commit_res = _run_git(
+            "-c",
+            f"user.name={_BROKER_GIT_AUTHOR_NAME}",
+            "-c",
+            f"user.email={_BROKER_GIT_AUTHOR_EMAIL}",
+            "commit",
+            "-m",
+            f"{pr_title}\n\n{pr_body}",
+        )
+        if commit_res.returncode != 0:
+            return f"Delivery failed to commit: {commit_res.stderr}", "delivery failed (git commit)"
+    elif staged_res.returncode != 0:
+        return (
+            f"Delivery failed to inspect staged files: {staged_res.stderr}",
+            "delivery failed (git diff --cached)",
+        )
+
+    push_res = _run_git(
+        "push",
+        "-u",
+        "origin",
+        f"HEAD:refs/heads/{branch_name}",
+        include_github_token=True,
+    )
+    if push_res.returncode != 0:
+        return f"Delivery failed to push branch: {push_res.stderr}", "delivery failed (git push)"
+
+    return None, None
+
+
 async def _run_deliver_result(
     state_input: OrchestratorState,
-    worker: Worker | None = None,
+    session_factory: Any | None = None,
 ) -> dict[str, Any]:
     state = _ensure_state(state_input)
 
@@ -476,17 +485,6 @@ async def _run_deliver_result(
         return {"current_step": "deliver_result"}
     assert state.task_spec is not None
     assert state.dispatch is not None
-
-    available = _available_workers(worker)
-    worker_id, delivery_worker = _select_delivery_worker(state, available)
-    if not delivery_worker:
-        msg = f"Delivery failed: no suitable delivery worker configured (tried {worker_id})."
-        logger.warning(msg)
-        return _delivery_failure_response(
-            state,
-            msg,
-            f"delivery failed (missing worker {worker_id})",
-        )
 
     with start_optional_span(
         tracer_name="orchestrator.graph",
@@ -498,7 +496,8 @@ async def _run_deliver_result(
     ):
         _log_delivery_start(state)
 
-        gh_token = _delivery_github_token(state)
+        gh_token = _resolve_broker_github_token(state, session_factory)
+
         token_failure = _draft_pr_token_failure(state, gh_token)
         if token_failure is not None:
             return token_failure
@@ -517,28 +516,54 @@ async def _run_deliver_result(
         if existing_pr_response is not None:
             return existing_pr_response
 
-        prompt = _build_delivery_prompt(state, branch_name, pr_title, pr_body)
-        request = _build_delivery_worker_request(
-            state,
-            prompt=prompt,
-            gh_token=gh_token,
-        )
-
         set_span_input_output(
             input_data={
                 "delivery_mode": state.task_spec.delivery_mode,
                 "branch": branch_name,
-                "worker": worker_id,
+                "worker": "broker",
             }
         )
 
-        result = await _run_delivery_worker(state, delivery_worker, request)
-        if isinstance(result, dict):
-            return result
+        from sandbox.workspace import _trusted_git_dir, default_workspace_root
+
+        workspace_id = state.dispatch.workspace_id
+        assert workspace_id is not None
+        workspace_root = default_workspace_root().resolve()
+        workspace_path = (workspace_root / workspace_id).resolve()
+        trusted_git_dir = _trusted_git_dir(workspace_path, workspace_id)
+
+        if not workspace_path.exists() or not trusted_git_dir.exists():
+            return _delivery_failure_response(
+                state,
+                "Delivery failed: workspace or trusted git dir missing.",
+                "delivery failed (missing workspace)",
+            )
+
+        files_to_stage, path_failure = _delivery_files_to_stage(state)
+        if path_failure is not None:
+            return _delivery_failure_response(state, path_failure, "delivery failed (unsafe path)")
+        failure_message, failure_progress_message = await asyncio.to_thread(
+            _run_broker_git_commands,
+            trusted_git_dir=trusted_git_dir,
+            workspace_path=workspace_path,
+            files_to_stage=files_to_stage,
+            gh_token=gh_token,
+            pr_title=pr_title,
+            pr_body=pr_body,
+            branch_name=branch_name,
+        )
+        if failure_message is not None:
+            return _delivery_failure_response(
+                state,
+                failure_message,
+                failure_progress_message or "delivery failed (broker git)",
+            )
+
+        delivery_result = WorkerResult(status="success", summary="Changes delivered via broker.")
 
         return await _delivery_success_response(
             state,
-            result,
+            delivery_result,
             branch_name,
             pr_title,
             pr_body,
@@ -547,12 +572,12 @@ async def _run_deliver_result(
 
 
 def build_deliver_result_node(
-    worker: Worker | None = None,
+    session_factory: Any | None = None,
 ) -> Callable[[OrchestratorState], Awaitable[dict[str, Any]]]:
     """Factory for the delivery node."""
     import functools
 
     return functools.partial(
         _run_deliver_result,
-        worker=worker,
+        session_factory=session_factory,
     )
