@@ -16,6 +16,7 @@ from apps.observability import (
     start_optional_span,
 )
 from db.enums import TimelineEventType, WorkerRunStatus
+from orchestrator.acceptance import verification_rejection
 from orchestrator.github_delivery import (
     capture_delivery_metadata,
     publish_draft_pr_from_workspace,
@@ -27,7 +28,7 @@ from orchestrator.nodes.utils import (
 )
 from orchestrator.state import OrchestratorState
 from sandbox.workspace import build_authenticated_github_git_env
-from workers.base import WorkerResult
+from workers.base import FailureKind, WorkerResult
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +84,7 @@ def _delivery_failure_response(
     progress_message: str,
     *,
     payload: dict[str, Any] | None = None,
+    failure_kind: FailureKind = "incomplete_delivery",
 ) -> dict[str, Any]:
     prior_result = state.result
     if prior_result is not None:
@@ -91,11 +93,12 @@ def _delivery_failure_response(
         failure_result = prior_result.model_copy(
             update={
                 "status": "failure",
+                "failure_kind": failure_kind,
                 "summary": "\n\n".join(summary_parts),
             }
         )
     else:
-        failure_result = WorkerResult(status="failure", summary=msg)
+        failure_result = WorkerResult(status="failure", summary=msg, failure_kind=failure_kind)
     return {
         "current_step": "deliver_result",
         "progress_updates": _progress_update(state, progress_message),
@@ -104,7 +107,7 @@ def _delivery_failure_response(
             state,
             TimelineEventType.DELIVERY_FAILED,
             message=msg,
-            payload=payload,
+            payload={**(payload or {}), "failure_kind": failure_kind},
         ),
     }
 
@@ -485,6 +488,22 @@ async def _run_deliver_result(
 ) -> dict[str, Any]:
     state = _ensure_state(state_input)
 
+    if state.result and state.result.status == "success":
+        if rejection := verification_rejection(state):
+            kind, message = rejection
+            return _delivery_failure_response(
+                state, message, "acceptance failed (verification)", failure_kind=kind
+            )
+        if (
+            state.task_spec
+            and state.task_spec.delivery_mode in {"branch", "draft_pr"}
+            and not state.dispatch.workspace_id
+        ):
+            return _delivery_failure_response(
+                state,
+                "Required delivery workspace is missing.",
+                "delivery failed (missing workspace)",
+            )
     if not _should_deliver_result(state):
         return {"current_step": "deliver_result"}
     assert state.task_spec is not None

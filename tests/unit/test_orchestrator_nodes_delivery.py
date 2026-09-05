@@ -136,16 +136,17 @@ async def test_run_deliver_result_skips_when_preconditions_fail():
     res = await _run_deliver_result(state)
     assert res == {"current_step": "deliver_result"}
 
-    # No workspace
+    # Required delivery without a workspace must fail explicitly.
     state = OrchestratorState.model_validate(
         {
             "task": {"task_text": "demo"},
             "result": {"status": "success", "summary": "ok"},
             "task_spec": {"delivery_mode": "branch", "goal": "demo"},
+            "verification": {"status": "passed"},
         }
     )
     res = await _run_deliver_result(state)
-    assert res == {"current_step": "deliver_result"}
+    assert res["result"].failure_kind == "incomplete_delivery"
 
 
 def _delivery_state(
@@ -172,6 +173,7 @@ def _delivery_state(
                 "delivery_branch": "qa/evidence",
                 "goal": "demo",
             },
+            "verification": {"status": "passed"},
             "dispatch": {"workspace_id": "ws-1", "worker_type": "codex"},
         }
     )

@@ -15,6 +15,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from db.enums import TaskStatus, WorkerRunStatus, WorkerType, coerce_worker_type
+from orchestrator.acceptance import task_acceptance_rejection
 from orchestrator.state import OrchestratorState
 from tools.numeric import coerce_non_negative_int_like, coerce_positive_int_like
 
@@ -360,7 +361,7 @@ def _task_status_from_result(state: OrchestratorState) -> TaskStatus:
         return TaskStatus.PENDING
     if state.result is None:
         return TaskStatus.FAILED
-    if state.result.status == "success":
+    if task_acceptance_rejection(state) is None:
         return TaskStatus.COMPLETED
     return TaskStatus.FAILED
 
