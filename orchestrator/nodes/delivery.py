@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import logging
 import os
 import subprocess
@@ -27,6 +26,7 @@ from orchestrator.nodes.utils import (
     _timeline_event,
 )
 from orchestrator.state import OrchestratorState
+from sandbox.workspace import build_authenticated_github_git_env
 from workers.base import WorkerResult
 
 logger = logging.getLogger(__name__)
@@ -387,17 +387,7 @@ def _delivery_files_to_stage(state: OrchestratorState) -> tuple[list[str], str |
 
 def _broker_git_environment(gh_token: str | None) -> dict[str, str]:
     """Build the broker-only environment needed for an authenticated GitHub push."""
-    environment = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
-    if gh_token:
-        encoded_token = base64.b64encode(f"x-access-token:{gh_token}".encode()).decode()
-        environment.update(
-            {
-                "GIT_CONFIG_COUNT": "1",
-                "GIT_CONFIG_KEY_0": "http.https://github.com/.extraheader",
-                "GIT_CONFIG_VALUE_0": f"Authorization: Basic {encoded_token}",
-            }
-        )
-    return environment
+    return build_authenticated_github_git_env(gh_token)
 
 
 def _run_broker_git_commands(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import logging
 import os
 import re
@@ -13,6 +14,7 @@ from collections.abc import Mapping
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Protocol
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -32,6 +34,7 @@ class CommandRunner(Protocol):
         *,
         cwd: Path | None = None,
         timeout: int = DEFAULT_SANDBOX_MAX_COMMAND_TIMEOUT_SECONDS,
+        env: Mapping[str, str] | None = None,
     ) -> None: ...
 
 
@@ -77,6 +80,7 @@ class WorkspaceRequest(SandboxModel):
     workspace_mode: WorkspaceMode = WorkspaceMode.CLONE
     attempt: int = 1
     cleanup_policy: WorkspaceCleanupPolicy | None = None
+    git_token: str | None = Field(default=None, repr=False)
 
 
 class WorkspaceHandle(SandboxModel):
@@ -160,20 +164,90 @@ def _should_delete_workspace(policy: WorkspaceCleanupPolicy, *, succeeded: bool)
     return not policy.retain_on_failure
 
 
+def _is_github_repo_url(repo_url: str | None) -> bool:
+    """Check whether a repository URL targets github.com."""
+    if not repo_url:
+        return False
+    stripped = repo_url.strip()
+    if not stripped:
+        return False
+    try:
+        parsed = urlparse(stripped)
+        netloc = parsed.netloc.lower()
+        if "@" in netloc:
+            netloc = netloc.split("@")[-1]
+        if netloc in {"github.com", "www.github.com"}:
+            return True
+    except Exception:
+        pass
+    return stripped.startswith(("git@github.com:", "github.com/"))
+
+
+def build_authenticated_github_git_env(
+    token: str | None,
+    base_env: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    """Build broker Git environment with GitHub authorization header.
+
+    Preserves any existing git configs in the base environment.
+    """
+    env = dict(os.environ if base_env is None else base_env)
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    if not token or not token.strip():
+        return env
+
+    encoded_token = base64.b64encode(f"x-access-token:{token.strip()}".encode()).decode()
+    header_key = "http.https://github.com/.extraheader"
+    header_val = f"Authorization: Basic {encoded_token}"
+
+    try:
+        count = int(env.get("GIT_CONFIG_COUNT", "0"))
+    except ValueError:
+        count = 0
+
+    target_idx = None
+    for i in range(count):
+        if env.get(f"GIT_CONFIG_KEY_{i}") == header_key:
+            target_idx = i
+            break
+
+    if target_idx is not None:
+        env[f"GIT_CONFIG_VALUE_{target_idx}"] = header_val
+    else:
+        env[f"GIT_CONFIG_KEY_{count}"] = header_key
+        env[f"GIT_CONFIG_VALUE_{count}"] = header_val
+        env["GIT_CONFIG_COUNT"] = str(count + 1)
+
+    return env
+
+
+def _redact_git_error_message(message: str, env: Mapping[str, str]) -> str:
+    redacted = _mask_url_credentials(message)
+    for key, value in env.items():
+        if key.startswith("GIT_CONFIG_VALUE_") and "Authorization: Basic " in value:
+            b64_part = value.split("Authorization: Basic ", 1)[-1].strip()
+            if b64_part:
+                redacted = redacted.replace(b64_part, "[REDACTED]")
+        elif key in {"GH_TOKEN", "GITHUB_TOKEN"} and value.strip():
+            redacted = redacted.replace(value.strip(), "[REDACTED]")
+    return redacted
+
+
 def _run_command(
     command: list[str],
     *,
     cwd: Path | None = None,
     timeout: int = DEFAULT_SANDBOX_MAX_COMMAND_TIMEOUT_SECONDS,
+    env: Mapping[str, str] | None = None,
 ) -> None:
     """Run a command and raise a workspace-specific error on failure."""
-    env = os.environ.copy()
-    env["GIT_TERMINAL_PROMPT"] = "0"
+    effective_env = os.environ.copy() if env is None else dict(env)
+    effective_env["GIT_TERMINAL_PROMPT"] = "0"
     try:
         completed = subprocess.run(
             command,
             cwd=cwd,
-            env=env,
+            env=effective_env,
             check=False,
             capture_output=True,
             text=True,
@@ -188,8 +262,9 @@ def _run_command(
         message = stderr or stdout or "command failed without output"
         if len(message) > 1024:
             message = message[:1024] + "... (truncated)"
+        redacted_message = _redact_git_error_message(message, effective_env)
         cmd_str = _mask_url_credentials(shlex.join(command))
-        raise WorkspaceManagerError(f"Command failed ({cmd_str}): {message}")
+        raise WorkspaceManagerError(f"Command failed ({cmd_str}): {redacted_message}")
 
 
 class WorkspaceManager:
@@ -350,10 +425,23 @@ class WorkspaceManager:
         if request.workspace_mode == WorkspaceMode.CLONE:
             if not request.repo_url:
                 raise WorkspaceManagerError("repo_url is required for CLONE mode")
-            self._command_runner(
-                _build_clone_command(request.repo_url, repo_path, request.branch),
-                timeout=self.command_timeout,
+            clone_cmd = _build_clone_command(request.repo_url, repo_path, request.branch)
+            clone_env = (
+                build_authenticated_github_git_env(request.git_token)
+                if (request.git_token and _is_github_repo_url(request.repo_url))
+                else None
             )
+            if clone_env is not None:
+                try:
+                    self._command_runner(
+                        clone_cmd,
+                        timeout=self.command_timeout,
+                        env=clone_env,
+                    )
+                except TypeError:
+                    self._command_runner(clone_cmd, timeout=self.command_timeout)
+            else:
+                self._command_runner(clone_cmd, timeout=self.command_timeout)
         elif request.workspace_mode == WorkspaceMode.INIT:
             self._command_runner(["git", "init"], cwd=repo_path, timeout=self.command_timeout)
         elif request.workspace_mode == WorkspaceMode.NONE:

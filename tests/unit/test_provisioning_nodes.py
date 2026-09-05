@@ -60,6 +60,77 @@ def test_provision_workspace_node_reuses_existing_workspace() -> None:
     manager.create_workspace.assert_not_called()
 
 
+def test_provision_workspace_node_passes_git_token_from_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GH_TOKEN", "broker-env-token")
+    manager = MagicMock()
+    handle = MagicMock()
+    handle.workspace_id = "ws-auth"
+    manager.create_workspace.return_value = handle
+
+    node = build_provision_workspace_node(manager)
+    state = OrchestratorState(
+        task={
+            "task_id": "t-auth",
+            "repo_url": "https://github.com/org/private-repo",
+            "task_text": "fix bug",
+        },
+        dispatch={},
+    )
+    result = node(state)
+    assert result["dispatch"]["workspace_id"] == "ws-auth"
+    manager.create_workspace.assert_called_once()
+    req = manager.create_workspace.call_args[0][0]
+    assert req.git_token == "broker-env-token"
+
+
+def test_provision_workspace_node_passes_git_token_from_session_factory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    manager = MagicMock()
+    handle = MagicMock()
+    handle.workspace_id = "ws-secret"
+    manager.create_workspace.return_value = handle
+
+    mock_session_factory = MagicMock()
+    mock_store = MagicMock()
+    mock_registry = MagicMock()
+    mock_def = MagicMock()
+    from sandbox.secrets import SecretExposurePolicy, SecretScope
+
+    mock_def.exposure_policy = SecretExposurePolicy.BROKER_ONLY
+    mock_def.required_scope = SecretScope.GIT_PUSH
+    mock_registry.get.return_value = mock_def
+    mock_store.get.return_value = "secret-from-store"
+
+    monkeypatch.setattr(
+        "sandbox.ephemeral_store_postgres.SessionFactoryEphemeralSecretStore",
+        lambda sf: mock_store,
+    )
+    monkeypatch.setattr(
+        "sandbox.secrets.SecretRegistry",
+        lambda ephemeral_store, task_id: mock_registry,
+    )
+
+    node = build_provision_workspace_node(manager, session_factory=mock_session_factory)
+    state = OrchestratorState(
+        task={
+            "task_id": "t-secret",
+            "repo_url": "https://github.com/org/private-repo",
+            "task_text": "fix bug",
+            "secret_refs": [{"name": "github_pat"}],
+        },
+        dispatch={},
+    )
+    result = node(state)
+    assert result["dispatch"]["workspace_id"] == "ws-secret"
+    req = manager.create_workspace.call_args[0][0]
+    assert req.git_token == "secret-from-store"
+
+
 @pytest.mark.asyncio
 async def test_init_environment_node_detects_poetry(tmp_path: Path) -> None:
     """Verify detection of poetry.lock."""
