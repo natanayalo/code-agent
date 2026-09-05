@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: support broker-authenticated git operations for private repository provisioning ([#380](https://github.com/natanayalo/code-agent/pull/380))
+
 - Feat: implement M28.5A.2 native agent docker isolation and ingress secret enforcement ([#378](https://github.com/natanayalo/code-agent/pull/378))
 
 - Feat(sandbox): implement threat model and execution capability contracts (M28.5A) ([#377](https://github.com/natanayalo/code-agent/pull/377))
