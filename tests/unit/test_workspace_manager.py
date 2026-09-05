@@ -5,6 +5,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -17,9 +18,12 @@ from sandbox.workspace import (
     WorkspaceManagerError,
     WorkspaceRequest,
     _build_clone_command,
+    _is_github_repo_url,
+    _redact_git_error_message,
     _run_command,
     _should_delete_workspace,
     _slugify_task_id,
+    build_authenticated_github_git_env,
     default_workspace_root,
 )
 
@@ -305,3 +309,134 @@ def test_cleanup_workspace_succeeds_when_already_deleted(tmp_path: Path) -> None
 
     result = manager.cleanup_workspace(workspace, succeeded=True)
     assert result is True
+
+
+def test_is_github_repo_url() -> None:
+    assert _is_github_repo_url("https://github.com/org/repo.git") is True
+    assert _is_github_repo_url("http://github.com/org/repo") is True
+    assert _is_github_repo_url("git@github.com:org/repo.git") is True
+    assert _is_github_repo_url("github.com/org/repo") is True
+    assert _is_github_repo_url("https://gitlab.com/org/repo.git") is False
+    assert _is_github_repo_url("https://example.com/repo.git") is False
+    assert _is_github_repo_url("") is False
+    assert _is_github_repo_url("   ") is False
+    assert _is_github_repo_url(None) is False
+
+
+def test_build_authenticated_github_git_env() -> None:
+    # None or empty token leaves config untouched
+    empty_env = build_authenticated_github_git_env(None, base_env={"EXISTING": "1"})
+    assert empty_env["EXISTING"] == "1"
+    assert empty_env["GIT_TERMINAL_PROMPT"] == "0"
+    assert "GIT_CONFIG_COUNT" not in empty_env
+
+    # Valid token adds Authorization header via git config
+    auth_env = build_authenticated_github_git_env("secret_pat_value", base_env={})
+    assert auth_env["GIT_TERMINAL_PROMPT"] == "0"
+    assert auth_env["GIT_CONFIG_COUNT"] == "1"
+    assert auth_env["GIT_CONFIG_KEY_0"] == "http.https://github.com/.extraheader"
+    assert "Authorization: Basic " in auth_env["GIT_CONFIG_VALUE_0"]
+    import base64
+
+    b64_val = auth_env["GIT_CONFIG_VALUE_0"].split("Authorization: Basic ")[1]
+    assert base64.b64decode(b64_val).decode() == "x-access-token:secret_pat_value"
+
+    # Preserves and appends to existing git configs
+    extended_env = build_authenticated_github_git_env(
+        "second_pat",
+        base_env={
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "safe.directory",
+            "GIT_CONFIG_VALUE_0": "*",
+        },
+    )
+    assert extended_env["GIT_CONFIG_COUNT"] == "2"
+    assert extended_env["GIT_CONFIG_KEY_0"] == "safe.directory"
+    assert extended_env["GIT_CONFIG_KEY_1"] == "http.https://github.com/.extraheader"
+
+    # Updates in-place if already present
+    updated_env = build_authenticated_github_git_env(
+        "updated_pat",
+        base_env={
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "http.https://github.com/.extraheader",
+            "GIT_CONFIG_VALUE_0": "old_value",
+        },
+    )
+    assert updated_env["GIT_CONFIG_COUNT"] == "1"
+    assert updated_env["GIT_CONFIG_KEY_0"] == "http.https://github.com/.extraheader"
+    assert "old_value" not in updated_env["GIT_CONFIG_VALUE_0"]
+
+
+def test_redact_git_error_message() -> None:
+    token = "test_dummy_token_123"
+    auth_env = build_authenticated_github_git_env(token, base_env={})
+    raw_error = (
+        "fatal: unable to access 'https://github.com/org/repo.git/': "
+        "Authorization: Basic eC1hY2Nlc3MtdG9rZW46dGVzdF9kdW1teV90b2tlbl8xMjM="
+    )
+    redacted = _redact_git_error_message(raw_error, auth_env)
+    assert token not in redacted
+    assert "eC1hY2Nlc3MtdG9rZW46dGVzdF9kdW1teV90b2tlbl8xMjM=" not in redacted
+    assert "[REDACTED]" in redacted
+
+
+def test_workspace_request_masks_git_token_in_repr() -> None:
+    request = WorkspaceRequest(
+        task_id="test",
+        repo_url="https://github.com/org/repo.git",
+        git_token="super_secret_github_token",
+    )
+    repr_str = repr(request)
+    assert "super_secret_github_token" not in repr_str
+    assert "git_token" not in repr_str
+
+
+def test_create_workspace_passes_auth_env_for_github_with_token(tmp_path: Path) -> None:
+    captured_kwargs: dict[str, Any] = {}
+
+    def runner(cmd: list[str], **kwargs: Any) -> None:
+        captured_kwargs.update(kwargs)
+
+    manager = WorkspaceManager(tmp_path, command_runner=runner)
+    request = WorkspaceRequest(
+        task_id="test-github-auth",
+        repo_url="https://github.com/org/private-repo.git",
+        git_token="test_dummy_token_123",
+    )
+    manager.create_workspace(request)
+
+    assert "env" in captured_kwargs
+    passed_env = captured_kwargs["env"]
+    assert passed_env["GIT_CONFIG_KEY_0"] == "http.https://github.com/.extraheader"
+    assert "Authorization: Basic " in passed_env["GIT_CONFIG_VALUE_0"]
+
+
+def test_create_workspace_skips_auth_env_for_non_github_or_empty_token(tmp_path: Path) -> None:
+    captured_kwargs: dict[str, Any] = {}
+
+    def runner(cmd: list[str], **kwargs: Any) -> None:
+        captured_kwargs.clear()
+        captured_kwargs.update(kwargs)
+
+    manager = WorkspaceManager(tmp_path, command_runner=runner)
+
+    # Non-GitHub URL with token
+    manager.create_workspace(
+        WorkspaceRequest(
+            task_id="test-gitlab",
+            repo_url="https://gitlab.com/org/repo.git",
+            git_token="some_token",
+        )
+    )
+    assert "env" not in captured_kwargs
+
+    # GitHub URL with no token
+    manager.create_workspace(
+        WorkspaceRequest(
+            task_id="test-no-token",
+            repo_url="https://github.com/org/public-repo.git",
+            git_token=None,
+        )
+    )
+    assert "env" not in captured_kwargs

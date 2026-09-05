@@ -95,6 +95,7 @@ def _push_workspace_head(
     repo_spec: str,
     branch_name: str,
     token: str,
+    trusted_git_dir: Path | None = None,
 ) -> bool:
     encoded_token = base64.b64encode(f"x-access-token:{token}".encode()).decode()
     command_env = {
@@ -105,16 +106,29 @@ def _push_workspace_head(
         "GIT_TERMINAL_PROMPT": "0",
     }
     remote_url = f"https://github.com/{repo_spec}.git"
+    if trusted_git_dir is not None:
+        command = [
+            "git",
+            f"--git-dir={trusted_git_dir}",
+            f"--work-tree={workspace_path}",
+            "-c",
+            "core.hooksPath=/dev/null",
+            "push",
+            remote_url,
+            f"HEAD:refs/heads/{branch_name}",
+        ]
+    else:
+        command = [
+            "git",
+            "-C",
+            str(workspace_path),
+            "push",
+            remote_url,
+            f"HEAD:refs/heads/{branch_name}",
+        ]
     try:
         completed = subprocess.run(
-            [
-                "git",
-                "-C",
-                str(workspace_path),
-                "push",
-                remote_url,
-                f"HEAD:refs/heads/{branch_name}",
-            ],
+            command,
             capture_output=True,
             check=False,
             env=command_env,
@@ -130,7 +144,11 @@ def _push_workspace_head(
     if completed.returncode != 0:
         logger.warning(
             "Deterministic draft PR branch push returned a non-zero status",
-            extra={"branch_name": branch_name, "exit_code": completed.returncode},
+            extra={
+                "branch_name": branch_name,
+                "exit_code": completed.returncode,
+                "stderr": completed.stderr.strip() if completed.stderr else "",
+            },
         )
         return False
     return True
@@ -210,6 +228,7 @@ def publish_draft_pr_from_workspace(
     pr_title: str,
     pr_body: str,
     token: str,
+    trusted_git_dir: Path | None = None,
 ) -> dict[str, Any] | None:
     """Push the retained workspace HEAD and create a confirmed GitHub draft PR."""
     repo_spec = github_repo_spec_from_url(repo_url)
@@ -219,11 +238,16 @@ def publish_draft_pr_from_workspace(
     workspace_path = _resolve_workspace_path(workspace_id)
     if workspace_path is None:
         return None
+    if trusted_git_dir is None:
+        candidate = workspace_path.parent / ".code-agent-git" / workspace_id
+        if candidate.is_dir():
+            trusted_git_dir = candidate
     if not _push_workspace_head(
         workspace_path=workspace_path,
         repo_spec=repo_spec,
         branch_name=branch_name,
         token=token,
+        trusted_git_dir=trusted_git_dir,
     ):
         return None
     return _create_draft_pr(

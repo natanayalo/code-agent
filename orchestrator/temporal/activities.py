@@ -728,7 +728,10 @@ class TaskExecutionActivities:
             else None
         )
         self.provision_workspace_node = (
-            build_provision_workspace_node(workspace_manager=self.service.workspace_manager)
+            build_provision_workspace_node(
+                workspace_manager=self.service.workspace_manager,
+                session_factory=self.service.session_factory,
+            )
             if self.service.workspace_manager
             else None
         )

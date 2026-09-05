@@ -198,6 +198,7 @@ async def _execute_gitignore_hardening(
 def _run_provision_workspace(
     state_input: OrchestratorState,
     workspace_manager: WorkspaceManager,
+    session_factory: Any | None = None,
 ) -> dict[str, Any]:
     state = _ensure_state(state_input)
 
@@ -221,6 +222,10 @@ def _run_provision_workspace(
 
     workspace_mode = state.task_spec.workspace_mode if state.task_spec else "clone"
 
+    from orchestrator.nodes.delivery import _resolve_broker_github_token
+
+    git_token = _resolve_broker_github_token(state, session_factory)
+
     handle = workspace_manager.create_workspace(
         WorkspaceRequest(
             task_id=workspace_task_id,
@@ -228,6 +233,7 @@ def _run_provision_workspace(
             branch=state.task.branch,
             attempt=state.attempt_count + 1,
             workspace_mode=WorkspaceMode(workspace_mode),
+            git_token=git_token,
         )
     )
 
@@ -252,11 +258,16 @@ def _run_provision_workspace(
 
 def build_provision_workspace_node(
     workspace_manager: WorkspaceManager,
+    session_factory: Any | None = None,
 ) -> Callable[[OrchestratorState], dict[str, Any]]:
     """Create a node that ensures a workspace is provisioned for the current attempt."""
     import functools
 
-    return functools.partial(_run_provision_workspace, workspace_manager=workspace_manager)
+    return functools.partial(
+        _run_provision_workspace,
+        workspace_manager=workspace_manager,
+        session_factory=session_factory,
+    )
 
 
 async def _execute_setup_command(

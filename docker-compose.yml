@@ -156,6 +156,7 @@ services:
       CODE_AGENT_DECOMPOSED_FANOUT_ENABLED: ${CODE_AGENT_DECOMPOSED_FANOUT_ENABLED:-false}
       CODE_AGENT_TEMPORAL_WORKER_ID: ${CODE_AGENT_TEMPORAL_WORKER_ID:-}
       TEMPORAL_ADDRESS: ${TEMPORAL_ADDRESS_DOCKER:-temporal:7233}
+      GH_TOKEN: ${GH_TOKEN:-}
     depends_on:
       postgres:
         condition: service_healthy

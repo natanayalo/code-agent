@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import logging
 import os
 import subprocess
@@ -27,6 +26,7 @@ from orchestrator.nodes.utils import (
     _timeline_event,
 )
 from orchestrator.state import OrchestratorState
+from sandbox.workspace import build_authenticated_github_git_env
 from workers.base import WorkerResult
 
 logger = logging.getLogger(__name__)
@@ -84,10 +84,22 @@ def _delivery_failure_response(
     *,
     payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    prior_result = state.result
+    if prior_result is not None:
+        summary_parts = [prior_result.summary] if prior_result.summary else []
+        summary_parts.append(f"Delivery Output:\n{msg}")
+        failure_result = prior_result.model_copy(
+            update={
+                "status": "failure",
+                "summary": "\n\n".join(summary_parts),
+            }
+        )
+    else:
+        failure_result = WorkerResult(status="failure", summary=msg)
     return {
         "current_step": "deliver_result",
         "progress_updates": _progress_update(state, progress_message),
-        "result": WorkerResult(status="failure", summary=msg),
+        "result": failure_result,
         **_timeline_event(
             state,
             TimelineEventType.DELIVERY_FAILED,
@@ -254,6 +266,7 @@ async def _delivery_success_response(
     pr_title: str,
     pr_body: str,
     gh_token: str | None,
+    trusted_git_dir: Path | None = None,
 ) -> dict[str, Any]:
     merged_result = _merge_delivery_result(state.result, delivery_result)
     delivery_metadata = await asyncio.to_thread(
@@ -275,6 +288,7 @@ async def _delivery_success_response(
             pr_title=pr_title,
             pr_body=pr_body,
             token=gh_token,
+            trusted_git_dir=trusted_git_dir,
         )
     if (
         state.task_spec
@@ -387,17 +401,7 @@ def _delivery_files_to_stage(state: OrchestratorState) -> tuple[list[str], str |
 
 def _broker_git_environment(gh_token: str | None) -> dict[str, str]:
     """Build the broker-only environment needed for an authenticated GitHub push."""
-    environment = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
-    if gh_token:
-        encoded_token = base64.b64encode(f"x-access-token:{gh_token}".encode()).decode()
-        environment.update(
-            {
-                "GIT_CONFIG_COUNT": "1",
-                "GIT_CONFIG_KEY_0": "http.https://github.com/.extraheader",
-                "GIT_CONFIG_VALUE_0": f"Authorization: Basic {encoded_token}",
-            }
-        )
-    return environment
+    return build_authenticated_github_git_env(gh_token)
 
 
 def _run_broker_git_commands(
@@ -568,6 +572,7 @@ async def _run_deliver_result(
             pr_title,
             pr_body,
             gh_token,
+            trusted_git_dir=trusted_git_dir,
         )
 
 
