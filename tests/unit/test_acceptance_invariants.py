@@ -144,3 +144,15 @@ def test_operator_required_checks_cannot_be_omitted_from_report(key):
     state = state_for("summary")
     state.task.constraints[key] = ["pytest"]
     assert task_acceptance_rejection(state)[0] == "infra_verifier_unavailable"
+
+
+def test_read_only_required_command_failure_retains_test_failure_kind():
+    from orchestrator.nodes.verification_result import verify_result
+
+    state = state_for("summary")
+    state.result.files_changed = []
+    state.task.constraints["read_only"] = True
+    state.task_spec.verification_commands = ["exit 23"]
+    updates = verify_result(state, deterministic_verifier_outcome=("failed", "exit 23"))
+    assert updates["verification"]["status"] == "failed"
+    assert updates["verification"]["failure_kind"] == "test_regression"
