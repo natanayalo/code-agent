@@ -8,6 +8,7 @@ import subprocess
 from pathlib import Path
 
 from sandbox import DockerShellSessionError
+from sandbox.audit import _should_ignore_path
 from workers.adapter_utils import truncate_detail_keep_tail
 from workers.cli_runtime_types import ShellSessionProtocol
 from workers.constants import DEFAULT_CHANGED_FILES_TIMEOUT_SECONDS
@@ -28,11 +29,12 @@ _UNTRACKED_NATIVE_RUNTIME_FILES = frozenset(
 
 
 def _is_untracked_native_runtime_path(status: str, path: str) -> bool:
-    """Return whether an untracked path is created by a native worker runtime."""
+    """Return whether an untracked path is created by runtime noise or native workers."""
     if status != "??":
         return False
     return (
-        path in {".agent_home", ".code-agent/native-agent-runner"}
+        _should_ignore_path(path)
+        or path in {".agent_home", ".code-agent/native-agent-runner"}
         or path in _UNTRACKED_NATIVE_RUNTIME_FILES
         or path.startswith(_UNTRACKED_NATIVE_RUNTIME_PREFIXES)
     )
@@ -69,7 +71,7 @@ def _parse_porcelain_z(output: str) -> list[str]:
         path = item[3:]
         if "R" in status or "C" in status:
             next(items, None)
-        if path:
+        if path and not _is_untracked_native_runtime_path(status, path):
             parsed.append(path)
     return parsed
 
@@ -85,7 +87,8 @@ def _parse_porcelain_lines(output: str) -> list[str]:
             continue
         if ("R" in status or "C" in status) and " -> " in path:
             _, path = path.split(" -> ", 1)
-        parsed.append(path)
+        if path and not _is_untracked_native_runtime_path(status, path):
+            parsed.append(path)
     return parsed
 
 

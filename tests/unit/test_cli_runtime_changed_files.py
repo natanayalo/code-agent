@@ -139,6 +139,29 @@ def test_collect_changed_files_runs_git_in_explicit_working_directory() -> None:
     assert [command for command, _ in session.calls] == [status_command]
 
 
+def test_collect_changed_files_ignores_untracked_native_paths() -> None:
+    """Session changed-file collection should exclude internal native runner files."""
+    session = _FakeSession(
+        {
+            "git status --porcelain=v1 -z --untracked-files=all": _command_result(
+                "git status --porcelain=v1 -z --untracked-files=all",
+                output=(
+                    " M src/main.py\0"
+                    "?? .agent_home/.code_agent_env.sh\0"
+                    "?? .agent_home/.profile\0"
+                    "?? .code-agent/native-agent-runner/stdout.txt\0"
+                    "?? .cache/pip/sample.whl\0"
+                    "?? real_untracked.py\0"
+                ),
+            )
+        }
+    )
+
+    changed_files = collect_changed_files(session)
+
+    assert changed_files == ["src/main.py", "real_untracked.py"]
+
+
 def test_collect_changed_files_from_repo_path_parses_porcelain_z_output(monkeypatch) -> None:
     """Host-side fallback should parse git porcelain output for changed files."""
 
