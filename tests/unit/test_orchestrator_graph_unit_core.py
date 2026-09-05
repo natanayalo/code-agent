@@ -17,6 +17,9 @@ def test_classify_task_kind():
     assert _classify_task_kind("hello") == "implementation"
     assert _classify_task_kind("refactor code") == "architecture"
     assert _classify_task_kind("investigate logs") == "ambiguous"
+    assert _classify_task_kind("Fix bug. Do NOT refactor adjacent logic.") == "implementation"
+    assert _classify_task_kind("Fix bug without refactoring.") == "implementation"
+    assert _classify_task_kind("Do not refactor the parser. Refactor the lexer.") == "architecture"
 
 
 def test_is_destructive_task():
