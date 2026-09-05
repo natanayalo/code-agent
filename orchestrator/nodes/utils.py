@@ -22,6 +22,16 @@ OPENROUTER_WORKER: Final[WorkerType] = "openrouter"
 _COMPLEX_TASK_PATTERN = re.compile(
     rf"(?<![\w-])(?:{'|'.join(re.escape(marker) for marker in COMPLEX_TASK_MARKERS)})(?![\w-])"
 )
+_NEGATED_REFACTOR_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:do\s+not|don't|dont|avoid|without|no|never)\s+(?:[\w-]+\s+){0,2}(?:refactor(?:ing|s)?|restructur(?:e|ing|es)?|redesign(?:ing|s)?|architectur(?:e|al))\b",
+    re.IGNORECASE,
+)
+
+
+def _strip_negated_refactor_requests(task_text: str) -> str:
+    """Remove explicit negative restrictions against refactoring from task text."""
+    return _NEGATED_REFACTOR_PATTERN.sub("", task_text)
+
 
 MINIMUM_MEANINGFUL_SUMMARY_LENGTH: Final[int] = 100
 
@@ -82,9 +92,10 @@ def _timeline_event(
 
 def _classify_task_kind(task_text: str) -> str:
     """Apply a small heuristic classifier for the workflow skeleton."""
-    normalized_text = task_text.lower()
-    if any(keyword in normalized_text for keyword in ("refactor", "architecture", "design")):
+    active_text = _strip_negated_refactor_requests(task_text).lower()
+    if any(keyword in active_text for keyword in ("refactor", "architecture", "design")):
         return "architecture"
+    normalized_text = task_text.lower()
     if any(
         keyword in normalized_text
         for keyword in ("investigate", "debug", "analyze", "review", "audit", "compare")
