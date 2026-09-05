@@ -82,3 +82,42 @@ def test_publish_draft_pr_stops_when_push_times_out(tmp_path) -> None:
 
     assert metadata is None
     open_mock.assert_not_called()
+
+
+def test_publish_draft_pr_uses_trusted_git_dir_when_present(tmp_path) -> None:
+    workspace = tmp_path / "workspace-1"
+    workspace.mkdir()
+    trusted_git = tmp_path / ".code-agent-git" / "workspace-1"
+    trusted_git.mkdir(parents=True)
+    completed = MagicMock(returncode=0)
+    response = MagicMock()
+    response.__enter__.return_value = response
+    response.__exit__.return_value = None
+    response.read.return_value = json.dumps(
+        {
+            "html_url": "https://github.com/example/project/pull/9",
+            "number": 9,
+            "head": {"sha": "def456"},
+        }
+    ).encode()
+
+    with (
+        patch("orchestrator.github_delivery.default_workspace_root", return_value=tmp_path),
+        patch("orchestrator.github_delivery.subprocess.run", return_value=completed) as run_mock,
+        patch("orchestrator.github_delivery.urlopen", return_value=response),
+    ):
+        metadata = publish_draft_pr_from_workspace(
+            repo_url="https://github.com/example/project.git",
+            workspace_id="workspace-1",
+            branch_name="qa/evidence",
+            base_branch="master",
+            pr_title="Evidence PR",
+            pr_body="Do not merge.",
+            token="task-token",
+        )
+
+    assert metadata is not None
+    assert metadata["pr_url"] == "https://github.com/example/project/pull/9"
+    command = run_mock.call_args.args[0]
+    assert f"--git-dir={trusted_git}" in command
+    assert f"--work-tree={workspace}" in command

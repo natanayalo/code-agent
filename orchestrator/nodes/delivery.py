@@ -84,10 +84,22 @@ def _delivery_failure_response(
     *,
     payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    prior_result = state.result
+    if prior_result is not None:
+        summary_parts = [prior_result.summary] if prior_result.summary else []
+        summary_parts.append(f"Delivery Output:\n{msg}")
+        failure_result = prior_result.model_copy(
+            update={
+                "status": "failure",
+                "summary": "\n\n".join(summary_parts),
+            }
+        )
+    else:
+        failure_result = WorkerResult(status="failure", summary=msg)
     return {
         "current_step": "deliver_result",
         "progress_updates": _progress_update(state, progress_message),
-        "result": WorkerResult(status="failure", summary=msg),
+        "result": failure_result,
         **_timeline_event(
             state,
             TimelineEventType.DELIVERY_FAILED,
@@ -254,6 +266,7 @@ async def _delivery_success_response(
     pr_title: str,
     pr_body: str,
     gh_token: str | None,
+    trusted_git_dir: Path | None = None,
 ) -> dict[str, Any]:
     merged_result = _merge_delivery_result(state.result, delivery_result)
     delivery_metadata = await asyncio.to_thread(
@@ -275,6 +288,7 @@ async def _delivery_success_response(
             pr_title=pr_title,
             pr_body=pr_body,
             token=gh_token,
+            trusted_git_dir=trusted_git_dir,
         )
     if (
         state.task_spec
@@ -558,6 +572,7 @@ async def _run_deliver_result(
             pr_title,
             pr_body,
             gh_token,
+            trusted_git_dir=trusted_git_dir,
         )
 
 
