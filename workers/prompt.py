@@ -246,6 +246,8 @@ def build_workflow_instructions_section(request: WorkerRequest) -> str:
         [
             "- The persistent shell already starts in the checked-out workspace repository; "
             "treat `repo_url` as the clone source, not as a filesystem path to `cd` into.",
+            "- Check the repository interpreter (.venv/bin/python or .venv/bin/<tool>) and verify "
+            "installed packages before reporting missing dependencies or environment blockers.",
             "- Use tools with focused commands; avoid dumping large files.",
             "- Base steps on observed output and exit codes.",
             "- Surface blockers explicitly instead of guessing.",

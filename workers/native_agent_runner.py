@@ -78,6 +78,7 @@ _INTERIM_STATUS_COMPLETION_MARKERS: Final[tuple[str, ...]] = (
 # Standardized system environment variables that are safe to propagate to the sandbox.
 SAFE_SYSTEM_ENV_ALLOWLIST: Final[frozenset[str]] = frozenset(
     {
+        "BASH_ENV",
         "PATH",
         "LANG",
         "LC_ALL",

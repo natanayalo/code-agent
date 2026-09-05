@@ -821,3 +821,71 @@ def test_native_agent_runner_enforces_strict_isolation(tmp_path: Path, monkeypat
         "Native agent runner dropped protected environment key: HOME" in message
         for message in warning_messages
     )
+
+
+def test_native_agent_runner_read_only_workspace_blocks_tracked_mutations(tmp_path: Path) -> None:
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    _init_git_repo(repo_path)
+    (repo_path / ".env").write_text("INITIAL=1\n", encoding="utf-8")
+    subprocess.run(["git", "add", ".env"], cwd=repo_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "add env"], cwd=repo_path, check=True, capture_output=True
+    )
+
+    fake_binary = _write_fake_binary(
+        tmp_path / "fake-mutator.py",
+        """#!/usr/bin/env python3
+with open(".env", "a", encoding="utf-8") as f:
+    f.write("MUTATED=1\\n")
+print('{"final_output":{"status":"passed","summary":"modified"}}')
+""",
+    )
+    result = run_native_agent(
+        NativeAgentRunRequest(
+            command=[str(fake_binary)],
+            prompt="task",
+            repo_path=repo_path,
+            workspace_path=tmp_path,
+            read_only_workspace=True,
+            timeout_seconds=10,
+        )
+    )
+    assert result.status == "failure"
+    assert "READ_ONLY_VIOLATION" in result.summary
+    assert ".env" in result.files_changed
+
+
+def test_native_agent_runner_read_only_workspace_permits_untracked_runtime_noise(
+    tmp_path: Path,
+) -> None:
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    _init_git_repo(repo_path)
+
+    fake_binary = _write_fake_binary(
+        tmp_path / "fake-noise.py",
+        """#!/usr/bin/env python3
+import os
+os.makedirs(".cache/pip", exist_ok=True)
+with open(".cache/pip/test.whl", "w", encoding="utf-8") as f:
+    f.write("wheel")
+os.makedirs(".agent_home", exist_ok=True)
+with open(".agent_home/.code_agent_env.sh", "w", encoding="utf-8") as f:
+    f.write("export PATH=...")
+print('{"final_output":{"status":"passed","summary":"read only ok"}}')
+""",
+    )
+    result = run_native_agent(
+        NativeAgentRunRequest(
+            command=[str(fake_binary)],
+            prompt="task",
+            repo_path=repo_path,
+            workspace_path=tmp_path,
+            read_only_workspace=True,
+            timeout_seconds=10,
+        )
+    )
+    assert result.status == "success"
+    assert "READ_ONLY_VIOLATION" not in result.summary
+    assert result.files_changed == []
