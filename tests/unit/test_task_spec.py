@@ -462,3 +462,45 @@ def test_build_task_spec_forces_summary_delivery_for_scout_tasks() -> None:
     assert "prepare_draft_pr_delivery" not in spec.allowed_actions
     assert "workspace_diff" not in spec.expected_artifacts
     assert validate_task_spec_policy(spec) == []
+
+
+def test_build_task_spec_negated_refactor_does_not_classify_as_refactor() -> None:
+    """Negated refactoring restrictions must not cause refactor or architecture classification."""
+    spec = build_task_spec(
+        task_text=(
+            "Fix zero banked free transfers handling in fpl_horizon/planning/optimizer.py, "
+            "add deterministic regression coverage, and deliver a draft PR. "
+            "Do NOT refactor adjacent logic."
+        ),
+        repo_url="https://github.com/natanayalo/fpl-horizon",
+        target_branch="master",
+    )
+
+    assert spec.task_type == "bugfix"
+    assert spec.task_type != "refactor"
+
+
+@pytest.mark.parametrize(
+    ("task_text", "expected_type"),
+    [
+        ("Fix bug in optimizer without refactoring.", "bugfix"),
+        ("Fix the calculation. Don't refactor.", "bugfix"),
+        ("Investigate memory leak. Avoid refactoring.", "investigation"),
+        ("Do not make unrelated refactors. Fix typo in README.", "docs"),
+        ("Refactor the parser into multiple modules.", "refactor"),
+        ("Please restructure the models.", "refactor"),
+        ("Redesign the state machine.", "refactor"),
+        ("Do not refactor the database. Refactor the authentication service.", "refactor"),
+    ],
+)
+def test_build_task_spec_refactor_classification_distinguishes_negation(
+    task_text: str,
+    expected_type: str,
+) -> None:
+    """Negative refactor instructions must not trigger refactor, while affirmative ones do."""
+    spec = build_task_spec(
+        task_text=task_text,
+        repo_url="https://github.com/natanayalo/code-agent",
+        target_branch="master",
+    )
+    assert spec.task_type == expected_type
