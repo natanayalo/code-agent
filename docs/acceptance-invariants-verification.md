@@ -29,22 +29,34 @@ exposed the read-only deterministic-failure downgrade. The final negative smoke
 above verifies the subsequent correction. These are distinct platform checks,
 not additional completed target-repository tasks.
 
-The outstanding pre-merge check is a successful live branch or draft-PR delivery
-after executor quota is available. Broker-confirmed success and duplicate activity
-delivery are covered by integration tests, but those do not replace this live check.
+The outstanding pre-merge check is a successful live branch or draft-PR delivery.
+A subsequent Terra-supervised attempt, `4b37871e-928f-40e4-ba34-5ccc7e1b221d`,
+created the requested file and passed deterministic verification. Independent
+verification was blocked: the native runner treated inherited executor edits as
+verifier mutations, masking Antigravity's authentication error with
+`read_only_violation` and preventing fallback. API and Temporal result both returned
+`failed`; timeline contained `delivery_failed` and `task_failed`; no branch was
+published. Fixing the verifier audit requires separate approval under AGENTS.md.
+
+Independent review also found an existing-PR shortcut that could bypass pushing
+the current workspace. That shortcut has been removed: even when a PR already
+exists, broker push must succeed before reconciliation. A persisted-state
+integration regression confirms that a failed push cannot complete the task.
 
 ## Automated checks
 
 Using `.venv/bin/pytest` with the same source packages and branch coverage as
 `.github/workflows/pytest.yml`:
 
-- `tests/unit tests/workers`: **2,383 passed**, 3 dependency warnings.
-- `tests/integration`: **357 passed**, 1 PostgreSQL test skipped, 44 warnings.
-- The skipped PostgreSQL full-text-search test was then run with
-  `CODE_AGENT_TEST_POSTGRES_URL` using its isolated database fixture: **1 passed**.
-- Combined coverage after those runs: **89.96%**, below the **90%** gate.
-  This gate has not passed; the draft is not merge-ready. No coverage exclusions
-  or threshold reductions were introduced to hide the gap.
+- Final `tests/unit tests/workers`: **2,392 passed**, 3 dependency warnings.
+- Final `tests/integration`, including PostgreSQL using its isolated database
+  fixture: **359 passed**, 45 warnings.
+- Combined coverage: **90.04%**, passing the **90%** gate. Focused workspace
+  identity and rejected-push tests close the earlier gap; no coverage exclusions
+  or threshold reductions were introduced.
+- `.venv/bin/python scripts/e2e/run_frozen_eval.py --runner orchestrator`:
+  **25/25 passed, score 84/84**. Its mock runner now explicitly requests summary
+  delivery because it has no broker workspace or external delivery channel.
 - Isolated `orchestrator.acceptance` coverage: **100% of lines and branches**,
   with 20 acceptance cases passing before the final additional missing-result
   regression. A combined-coverage diff inspection found 87/88 added executable
@@ -55,8 +67,10 @@ Exact coverage invocation: append
 `--cov=apps --cov=db --cov=memory --cov=orchestrator --cov=repositories
 --cov=sandbox --cov=tools --cov=workers --cov-branch --cov-report=term`
 to the unit/worker command, then add `--cov-append --cov-fail-under=90`
-for integration and the PostgreSQL follow-up. Pytest printed a coverage failure
-despite exit code zero in this environment; the numeric report is authoritative.
+for integration with `CODE_AGENT_TEST_POSTGRES_URL` set. The final combined run
+used `COVERAGE_FILE=/tmp/terra-ci.coverage`. Earlier local and GitHub pytest runs
+printed coverage failures despite successful process/step status; the numeric
+report is authoritative. The final numeric report explicitly passes the gate.
 
 ## Historical trial corrections
 
