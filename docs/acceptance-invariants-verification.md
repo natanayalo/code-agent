@@ -52,10 +52,13 @@ integration regression confirms that a failed push cannot complete the task.
 Using `.venv/bin/pytest` with the same source packages and branch coverage as
 `.github/workflows/pytest.yml`:
 
-- Final `tests/unit tests/workers`: **2,411 passed**, 3 dependency warnings.
+- Full local `tests/unit tests/workers`: **2,411 passed**, 3 dependency warnings.
+  A later portable audit regression run passed **17 cases**, including four new
+  cases covering cancellation, OS errors, retry baselines, and missing results.
 - Final `tests/integration`, including PostgreSQL using its isolated database
   fixture: **361 passed**, 45 warnings.
-- Combined coverage: **90.09%**, passing the **90%** gate. Focused workspace
+- Combined local coverage: **90.13%** after the portable regressions, passing the
+  **90%** gate (the initial full run measured 90.09%). Focused workspace
   identity and rejected-push tests close the earlier gap; no coverage exclusions
   or threshold reductions were introduced.
 - `.venv/bin/python scripts/e2e/run_frozen_eval.py --runner orchestrator`:
@@ -63,8 +66,8 @@ Using `.venv/bin/pytest` with the same source packages and branch coverage as
   delivery because it has no broker workspace or external delivery channel.
 - Isolated snapshot-helper coverage: **100% of lines and branches**, 22 focused
   cases passed. Added executable worker lines in the approved audit correction:
-  **106/108 covered (98.15%)**; the uncovered lines are existing defensive return
-  paths moved while routing early outcomes through the audit.
+  **106/108 covered (98.15%)** in the initial full run. The portable regressions
+  subsequently exercised the remaining moved defensive return paths.
 - Earlier isolated `orchestrator.acceptance` coverage: **100% of lines and branches**,
   with 20 acceptance cases passing before the final additional missing-result
   regression. A combined-coverage diff inspection found 87/88 added executable
@@ -79,6 +82,10 @@ for integration with `CODE_AGENT_TEST_POSTGRES_URL` set. The final combined run
 used `COVERAGE_FILE=/tmp/verifier-full.coverage`. Earlier local and GitHub pytest runs
 printed coverage failures despite successful process/step status; the numeric
 report is authoritative. The final numeric report explicitly passes the gate.
+GitHub run `34036340123` skipped three Docker-image-dependent integration tests
+and reported only 89.98% despite a green workflow status. The portable regressions
+were added to cover audit behavior in that environment too; assess subsequent CI
+by its numeric report, not merely the check icon.
 
 ## Historical trial corrections
 
