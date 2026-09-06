@@ -1,6 +1,6 @@
 # Proposed verifier read-only audit correction
 
-Status: awaiting explicit approval for sandbox-behavior changes under AGENTS.md.
+Status: explicitly approved by the operator and implemented; final live verification pending.
 
 ## Reproduction
 
@@ -33,6 +33,19 @@ when unchanged; modifications to an already-dirty file, new files, deletion,
 renames, and relevant metadata changes are rejected; ordinary execution artifacts
 remain available; genuine provider errors retain their classification and the
 existing fallback path. Add integration coverage through independent verification.
+
+The implementation uses descriptor-relative traversal with no-follow opens,
+content hashes, entry types, modes, and symlink targets. It reuses existing audit
+runtime exclusions at every directory depth and excludes broker SQLite scratch
+files. Read-only result fields describe only invocation changes; the original task
+diff artifact remains available. Snapshot errors fail closed before execution or
+on result collection, including timeout and startup-error paths. The exact provider
+message `authentication required` now retains `provider_auth` classification so
+the existing fallback can run. No provider override was introduced.
+
+Snapshot helper coverage: 100% of lines and branches; 22 focused cases passed.
+The integration regression confirms both fallback on unchanged inherited edits
+and rejection of real verifier mutations.
 
 After focused tests and the full coverage gate pass, rebuild the local trial worker
 and submit one bounded dummy-repository task. Require independently verified file

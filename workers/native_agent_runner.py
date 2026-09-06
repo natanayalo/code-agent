@@ -52,6 +52,12 @@ from workers.native_agent_messages import (
     _stdout_fallback_final_message,
 )
 from workers.native_agent_models import NativeAgentRunRequest, NativeAgentRunResult
+from workers.native_agent_read_only import (
+    ReadOnlySnapshotError,
+    ReadOnlyWorkspaceSnapshot,
+    capture_read_only_workspace_snapshot,
+    read_only_mutation_evidence,
+)
 from workers.native_agent_tracing import _record_span_data
 
 logger = logging.getLogger(__name__)
@@ -132,6 +138,57 @@ _SIGNAL_EXIT_CODES: Final = {
     139: "SIGSEGV",
     -11: "SIGSEGV",
 }
+
+
+def _read_only_snapshot_failure_result(
+    result: NativeAgentRunResult,
+    error: ReadOnlySnapshotError,
+) -> NativeAgentRunResult:
+    """Fail closed when a read-only invocation cannot be compared to its baseline."""
+    result.status = "error"
+    result.summary = f"READ_ONLY_SNAPSHOT_UNAVAILABLE: {error}"
+    result.files_changed = []
+    result.diff_text = None
+    result.friction_reports.append(
+        _build_friction_report_dict(
+            source="sandbox",
+            description="Read-only native execution could not capture workspace mutation evidence.",
+            impact="blocked",
+            context={"error_type": type(error).__name__},
+        )
+    )
+    return result
+
+
+def _apply_read_only_snapshot_result(
+    result: NativeAgentRunResult,
+    before: ReadOnlyWorkspaceSnapshot,
+    repo_path: Path,
+) -> NativeAgentRunResult:
+    """Replace task-wide git evidence with this invocation's mutation evidence."""
+    try:
+        after = capture_read_only_workspace_snapshot(repo_path)
+    except ReadOnlySnapshotError as exc:
+        logger.error("Read-only native execution snapshot failed after invocation: %s", exc)
+        return _read_only_snapshot_failure_result(result, exc)
+
+    files_changed, diff_text = read_only_mutation_evidence(before, after)
+    result.files_changed = files_changed
+    result.diff_text = diff_text
+    if not files_changed:
+        return result
+
+    result.status = "failure"
+    result.summary = "READ_ONLY_VIOLATION: native executor mutated the workspace."
+    result.friction_reports.append(
+        _build_friction_report_dict(
+            source="sandbox",
+            description="Read-only native execution produced invocation-scoped mutation evidence.",
+            impact="blocked",
+            context={"files_changed": files_changed},
+        )
+    )
+    return result
 
 
 def _native_sandbox_db_path(request: NativeAgentRunRequest) -> Path:
@@ -905,6 +962,32 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
         _setup_native_agent_paths(request)
     )
 
+    read_only_snapshot: ReadOnlyWorkspaceSnapshot | None = None
+    if request.read_only_workspace:
+        try:
+            read_only_snapshot = capture_read_only_workspace_snapshot(repo_path)
+        except ReadOnlySnapshotError as exc:
+            logger.error("Read-only native execution snapshot failed before invocation: %s", exc)
+            return _finalize_native_agent_run(
+                request=request,
+                status="error",
+                summary=f"READ_ONLY_SNAPSHOT_UNAVAILABLE: {exc}",
+                command_text=_sanitize_run_command(shlex.join(request.command), request),
+                started_at=time.perf_counter(),
+                timed_out=False,
+                friction_reports=[
+                    _build_friction_report_dict(
+                        source="sandbox",
+                        description=(
+                            "Read-only native execution could not capture its starting "
+                            "workspace state."
+                        ),
+                        impact="blocked",
+                        context={"error_type": type(exc).__name__},
+                    )
+                ],
+            )
+
     base_git_ref = _capture_git_head(
         repo_path,
         timeout_seconds=request.changed_files_timeout_seconds,
@@ -938,7 +1021,7 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
                 provider_log_path=provider_log_path,
             )
         except OSError as exc:
-            return _finalize_native_agent_run(
+            result = _finalize_native_agent_run(
                 request=request,
                 status="error",
                 summary=(f"Native agent command could not start `{request.command[0]}`: {exc}"),
@@ -946,46 +1029,35 @@ def run_native_agent(request: NativeAgentRunRequest) -> NativeAgentRunResult:
                 started_at=started_at,
                 timed_out=False,
             )
-
-        if isinstance(result_or_completed, NativeAgentRunResult):
-            return result_or_completed
-
-        completed, termination_reason = result_or_completed
-        if completed is None:
-            # Should be unreachable if the loop exited via break
-            return _finalize_native_agent_run(
-                request=request,
-                status="error",
-                summary="Native agent runner failed unexpectedly (process result missing).",
-                command_text=command_text,
-                started_at=started_at,
-                timed_out=False,
-            )
-
-        result = _collect_native_agent_results(
-            request=request,
-            completed=completed,
-            repo_path=repo_path,
-            base_git_ref=base_git_ref,
-            command_text=command_text,
-            started_at=started_at,
-            artifact_root=artifact_root,
-            events_path=events_path,
-            provider_log_path=provider_log_path,
-            final_message_path=final_message_path,
-        )
-        result.termination_reason = termination_reason  # type: ignore[assignment]
-        if request.read_only_workspace and (result.files_changed or result.diff_text):
-            result.status = "failure"
-            result.summary = (
-                "READ_ONLY_VIOLATION: native executor reported workspace mutation evidence."
-            )
-            result.friction_reports.append(
-                _build_friction_report_dict(
-                    source="sandbox",
-                    description="Read-only native execution produced repository mutation evidence.",
-                    impact="blocked",
-                    context={"files_changed": result.files_changed},
-                )
-            )
+        else:
+            if isinstance(result_or_completed, NativeAgentRunResult):
+                result = result_or_completed
+            else:
+                completed, termination_reason = result_or_completed
+                if completed is None:
+                    # Should be unreachable if the loop exited via break
+                    result = _finalize_native_agent_run(
+                        request=request,
+                        status="error",
+                        summary="Native agent runner failed unexpectedly (process result missing).",
+                        command_text=command_text,
+                        started_at=started_at,
+                        timed_out=False,
+                    )
+                else:
+                    result = _collect_native_agent_results(
+                        request=request,
+                        completed=completed,
+                        repo_path=repo_path,
+                        base_git_ref=base_git_ref,
+                        command_text=command_text,
+                        started_at=started_at,
+                        artifact_root=artifact_root,
+                        events_path=events_path,
+                        provider_log_path=provider_log_path,
+                        final_message_path=final_message_path,
+                    )
+                    result.termination_reason = termination_reason  # type: ignore[assignment]
+        if read_only_snapshot is not None:
+            return _apply_read_only_snapshot_result(result, read_only_snapshot, repo_path)
         return result

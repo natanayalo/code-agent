@@ -11,6 +11,12 @@ and artifacts for inspection. Required verifier unavailability produces
 `infra_verifier_unavailable`; unrelated advisory warnings remain non-blocking.
 Read-only tasks still have to pass their explicitly required verification commands.
 
+Read-only native execution compares source contents and entry metadata immediately
+before and after each invocation. Inherited coding-worker edits remain visible in
+task diff artifacts but are not attributed to the verifier. Real invocation changes
+and unavailable snapshots block verification. Existing runtime exclusions apply;
+read-only filesystem mounts and broker Git isolation remain in force.
+
 Environment setup failures retain the identity of an already provisioned workspace
 for diagnosis, but block worker dispatch. In particular, a missing required lockfile
 does not authorize a non-reproducible installation. Use an explicitly approved
