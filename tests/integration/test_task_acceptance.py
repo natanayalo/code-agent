@@ -1,6 +1,6 @@
 """Task acceptance agrees across activity results, persisted state and API projections."""
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy.pool import StaticPool
@@ -8,7 +8,7 @@ from temporalio import workflow
 from temporalio.exceptions import ApplicationError
 
 from db.base import Base
-from db.enums import TaskStatus
+from db.enums import TaskStatus, TimelineEventType
 from orchestrator.execution import TaskExecutionService, TaskSubmission
 from orchestrator.state import OrchestratorState
 from orchestrator.temporal.activities import TaskExecutionActivities
@@ -127,6 +127,47 @@ async def test_broker_confirmed_delivery_completes_once(harness):
     assert service.get_task(state.task.task_id).status == TaskStatus.COMPLETED
     assert (await activities.deliver_result(state.task.task_id))["status"] == "completed"
     activities.deliver_result_node.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_existing_draft_pr_does_not_complete_when_current_broker_push_fails(
+    harness, monkeypatch, tmp_path
+):
+    service, activities, state = harness
+    state.dispatch.workspace_id = "existing-workspace"
+    workspace_root = tmp_path / "workspaces"
+    (workspace_root / "existing-workspace").mkdir(parents=True)
+    (workspace_root / ".code-agent-git" / "existing-workspace").mkdir(parents=True)
+    monkeypatch.setenv("GH_TOKEN", "broker-token")
+    monkeypatch.setattr("sandbox.workspace.default_workspace_root", lambda: workspace_root)
+    persist(harness, state)
+
+    existing_pr = {
+        "delivery_mode": "draft_pr",
+        "branch_name": f"task/{state.task.task_id}",
+        "pr_url": "https://github.com/example/repo/pull/1",
+        "head_sha": "stale-pr-head",
+    }
+    with (
+        patch(
+            "orchestrator.nodes.delivery._capture_delivery_metadata",
+            return_value=existing_pr,
+        ),
+        patch(
+            "orchestrator.nodes.delivery._run_broker_git_commands",
+            return_value=("Delivery failed to push branch: rejected", "delivery failed (git push)"),
+        ),
+    ):
+        outcome = await activities.deliver_result(state.task.task_id)
+
+    assert outcome == {"status": "failed"}
+    snapshot = service.get_task(state.task.task_id)
+    assert snapshot.status == TaskStatus.FAILED
+    assert snapshot.latest_run.delivery_metadata is None
+    with session_scope(service.session_factory) as session:
+        events = TaskTimelineRepository(session).list_by_task(state.task.task_id)
+    assert TimelineEventType.DELIVERY_FAILED in {event.event_type for event in events}
+    assert TimelineEventType.DELIVERY_COMPLETED not in {event.event_type for event in events}
 
 
 @pytest.mark.asyncio
