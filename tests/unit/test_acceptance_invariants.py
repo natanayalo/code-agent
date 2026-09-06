@@ -156,3 +156,14 @@ def test_read_only_required_command_failure_retains_test_failure_kind():
     updates = verify_result(state, deterministic_verifier_outcome=("failed", "exit 23"))
     assert updates["verification"]["status"] == "failed"
     assert updates["verification"]["failure_kind"] == "test_regression"
+
+
+def test_delivery_failure_without_worker_result_preserves_failure_kind():
+    from orchestrator.nodes.delivery import _delivery_failure_response
+
+    state = state_for()
+    state.result = None
+    updates = _delivery_failure_response(state, "Missing output", "Delivery failed")
+    assert updates["result"].status == "failure"
+    assert updates["result"].failure_kind == "incomplete_delivery"
+    assert updates["result"].summary == "Missing output"

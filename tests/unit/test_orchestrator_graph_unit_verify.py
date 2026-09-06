@@ -525,8 +525,8 @@ def test_verify_result_failure_kinds() -> None:
         }
     )
     res_ro = verify_result(state_ro, deterministic_verifier_outcome=("failed", "Command failed"))
-    assert res_ro["verification"]["status"] == "warning"
-    assert res_ro["verification"]["failure_kind"] is None
+    assert res_ro["verification"]["status"] == "failed"
+    assert res_ro["verification"]["failure_kind"] == "test_regression"
     state = OrchestratorState.model_validate(
         {
             "task": {"task_text": "do"},
