@@ -121,3 +121,43 @@ def test_publish_draft_pr_uses_trusted_git_dir_when_present(tmp_path) -> None:
     command = run_mock.call_args.args[0]
     assert f"--git-dir={trusted_git}" in command
     assert f"--work-tree={workspace}" in command
+
+
+def test_publish_draft_pr_rejects_non_github_repo_before_push(tmp_path) -> None:
+    """Delivery must not claim branch evidence for a repository outside GitHub."""
+    with patch("orchestrator.github_delivery.subprocess.run") as run_mock:
+        metadata = publish_draft_pr_from_workspace(
+            repo_url="https://gitlab.com/example/project.git",
+            workspace_id="unused",
+            branch_name="qa/evidence",
+            base_branch="master",
+            pr_title="Evidence PR",
+            pr_body="Do not merge.",
+            token="task-token",
+        )
+
+    assert metadata is None
+    run_mock.assert_not_called()
+
+
+def test_publish_draft_pr_stops_when_push_is_rejected(tmp_path) -> None:
+    """A rejected push must prevent creation of a pull request that lacks the branch."""
+    (tmp_path / "workspace-1").mkdir()
+    completed = MagicMock(returncode=1, stderr="non-fast-forward")
+    with (
+        patch("orchestrator.github_delivery.default_workspace_root", return_value=tmp_path),
+        patch("orchestrator.github_delivery.subprocess.run", return_value=completed),
+        patch("orchestrator.github_delivery.urlopen") as open_mock,
+    ):
+        metadata = publish_draft_pr_from_workspace(
+            repo_url="https://github.com/example/project.git",
+            workspace_id="workspace-1",
+            branch_name="qa/evidence",
+            base_branch="master",
+            pr_title="Evidence PR",
+            pr_body="Do not merge.",
+            token="task-token",
+        )
+
+    assert metadata is None
+    open_mock.assert_not_called()

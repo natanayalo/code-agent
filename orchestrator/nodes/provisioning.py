@@ -485,6 +485,6 @@ def _init_fail(state: OrchestratorState, message: str) -> dict[str, Any]:
             message=message,
         ),
     }
-    if state.dispatch.workspace_id:
-        response["dispatch"] = {**state.dispatch.model_dump(), "workspace_id": None}
+    # Setup failure does not invalidate the provisioned workspace identity.
+    # Execution is blocked by the activity until setup succeeds.
     return response

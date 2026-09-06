@@ -1,5 +1,35 @@
 # Runbook
 
+## Task completion and delivery acceptance
+
+A worker's `success` is execution evidence, not task acceptance. A task requesting
+a branch or draft PR completes only after required verification passes and the
+broker records matching delivery metadata and a current-attempt
+`delivery_completed` event. A worker-supplied PR URL alone is insufficient.
+Missing delivery produces `incomplete_delivery` and preserves files, commands,
+and artifacts for inspection. Required verifier unavailability produces
+`infra_verifier_unavailable`; unrelated advisory warnings remain non-blocking.
+Read-only tasks still have to pass their explicitly required verification commands.
+
+Read-only native execution compares source contents and entry metadata immediately
+before and after each invocation. Inherited coding-worker edits remain visible in
+task diff artifacts but are not attributed to the verifier. Real invocation changes
+and unavailable snapshots block verification. Existing runtime exclusions apply;
+read-only filesystem mounts and broker Git isolation remain in force.
+
+Environment setup failures retain the identity of an already provisioned workspace
+for diagnosis, but block worker dispatch. In particular, a missing required lockfile
+does not authorize a non-reproducible installation. Use an explicitly approved
+setup command or the existing non-reproducible-install policy when appropriate,
+then replay the task. No host-side repository execution is introduced.
+
+Temporal histories use the `task-delivery-acceptance-v1` patch marker to adopt the
+delivery activity's terminal outcome. Older histories retain their recorded
+workflow-return behavior for replay compatibility; persisted task acceptance uses
+the corrected boundary. Roll back by redeploying the preceding reviewed revision;
+no database migration is required. Do not remove the patch marker while retained
+histories still require it.
+
 ## Purpose
 
 This runbook describes how to boot, operate, debug, and recover the current `code-agent` runtime.

@@ -196,8 +196,6 @@ def _check_deterministic_commands(
     if deterministic_verifier_outcome is None:
         return None
     status, summary = deterministic_verifier_outcome
-    if status == "failed" and is_task_read_only(state):
-        status = "warning"
     return VerificationReportItem(
         label="deterministic_commands",
         status=status,
