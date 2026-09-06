@@ -298,7 +298,7 @@ def test_read_only_runner_fails_closed_when_snapshot_is_unavailable_before_or_af
     assert after_failure.summary.startswith("READ_ONLY_SNAPSHOT_UNAVAILABLE")
 
 
-@pytest.mark.parametrize("outcome", ["startup_error", "timeout"])
+@pytest.mark.parametrize("outcome", ["startup_error", "timeout", "cancelled", "os_error"])
 def test_read_only_runner_checks_workspace_after_early_process_outcomes(
     tmp_path: Path,
     outcome: str,
@@ -312,9 +312,11 @@ def test_read_only_runner_checks_workspace_after_early_process_outcomes(
             (repo_path / f"{outcome}.txt").write_text("mutated\n", encoding="utf-8")
             if outcome == "startup_error":
                 raise NativeAgentExecutorError("executor unavailable")
+            if outcome == "os_error":
+                raise OSError("process failed to start")
             return NativeAgentExecution(
                 completed=subprocess.CompletedProcess([], 1, stdout="", stderr=""),
-                termination_reason="timeout",
+                termination_reason=outcome,
                 manifest_path=tmp_path / "manifest.json",
             )
 
@@ -333,3 +335,64 @@ def test_read_only_runner_checks_workspace_after_early_process_outcomes(
     assert result.status == "failure"
     assert result.summary == "READ_ONLY_VIOLATION: native executor mutated the workspace."
     assert result.files_changed == [f"{outcome}.txt"]
+
+
+def test_read_only_audit_keeps_original_baseline_across_network_retry(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+
+    class RetryingRunner:
+        calls = 0
+
+        def run(self, **_kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                (repo / "first-attempt.txt").write_text("mutation before timeout")
+                raise subprocess.TimeoutExpired("fixture", 1, output="ECONNRESET")
+            return NativeAgentExecution(
+                completed=subprocess.CompletedProcess([], 0, stdout="Finished", stderr=""),
+                termination_reason="completed",
+                manifest_path=tmp_path / "manifest.json",
+            )
+
+    runner = RetryingRunner()
+    with patch("workers.native_agent_runner.time.sleep"):
+        result = run_native_agent(
+            NativeAgentRunRequest(
+                command=["fixture"],
+                prompt="inspect",
+                repo_path=repo,
+                workspace_path=tmp_path,
+                read_only_workspace=True,
+                process_runner=runner,
+            )
+        )
+    assert runner.calls == 2
+    assert result.status == "failure"
+    assert "READ_ONLY_VIOLATION" in result.summary
+    assert result.files_changed == ["first-attempt.txt"]
+
+
+def test_read_only_audit_still_runs_when_process_result_is_missing(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+
+    def incomplete_result(**_kwargs):
+        (repo / "partial.txt").write_text("partial mutation")
+        return None, "startup_error"
+
+    with patch("workers.native_agent_runner._execute_native_agent_subprocess", incomplete_result):
+        result = run_native_agent(
+            NativeAgentRunRequest(
+                command=["fixture"],
+                prompt="inspect",
+                repo_path=repo,
+                workspace_path=tmp_path,
+                read_only_workspace=True,
+            )
+        )
+    assert result.status == "failure"
+    assert "READ_ONLY_VIOLATION" in result.summary
+    assert result.files_changed == ["partial.txt"]
