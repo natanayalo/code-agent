@@ -7,14 +7,14 @@ supervisor reports. It does not retroactively change historical task statuses.
 
 Branch: `task/enforce-delivery-acceptance-invariants`.
 Local API and worker were rebuilt at
-`732e370bf7e02efb8dd111ec7eb3be313c37be1e`. No production merge was performed.
+`c9c23264c585d2d1c3ce2fdd4bf0c4702cd6dab6`. No production merge was performed.
 Required verification failures, unavailable verification, and missing broker
 delivery evidence now prevent completion. Fatal setup failures retain workspace
 identity and block execution; missing lockfiles have not become advisory.
 
 ## Live service checks
 
-Both final checks used authenticated `POST /webhook` against the existing
+Live checks used authenticated `POST /webhook` against the existing
 allowlisted `qa-dummy` repository, without replacing its contents or changing
 credential scope. The API, persisted timeline, and Temporal result were inspected.
 
@@ -22,6 +22,7 @@ credential scope. The API, persisted timeline, and Temporal result were inspecte
 | --- | --- | --- |
 | `78ce6eb0-214e-46d7-91fd-e2cfd30fc406` | Expected failure | Read-only worker reported success; required `python3 -c "raise SystemExit(23)"` failed. API and Temporal returned `failed`; verification retained `test_regression`; timeline contained `task_failed` and no completion/delivery event; no changed files. |
 | `f5561c7e-379d-416a-8107-33eb572b97a3` | Happy-path check blocked | Codex executor exhausted its usage allowance before editing. API and Temporal returned `failed`; no delivery metadata or completion event. This is not evidence of successful branch delivery. |
+| `4cfe547d-11e9-41eb-bade-77533c012f9a` | Final happy path passed | At `c9c23264`, deterministic and independent verification passed. API and Temporal returned `completed`; broker recorded `delivery_completed` and branch metadata. The actual remote branch `qa/acceptance-final-c9c23264` points to `97e9ebd8efe4cd3435f1536423081d79aecf781e`; its only changed file contains exactly `Acceptance smoke passed` plus newline. |
 
 An earlier negative smoke, `5afcb85d-40b8-406a-b46c-27d016b1cb9c`, ran at
 `f8ce1dcf8d3c42ca91601f31d8cb212af6850831`. It correctly failed acceptance but
@@ -29,14 +30,17 @@ exposed the read-only deterministic-failure downgrade. The final negative smoke
 above verifies the subsequent correction. These are distinct platform checks,
 not additional completed target-repository tasks.
 
-The outstanding pre-merge check is a successful live branch or draft-PR delivery.
-A subsequent Terra-supervised attempt, `4b37871e-928f-40e4-ba34-5ccc7e1b221d`,
+An earlier Terra-supervised attempt, `4b37871e-928f-40e4-ba34-5ccc7e1b221d`,
 created the requested file and passed deterministic verification. Independent
 verification was blocked: the native runner treated inherited executor edits as
 verifier mutations, masking Antigravity's authentication error with
 `read_only_violation` and preventing fallback. API and Temporal result both returned
 `failed`; timeline contained `delivery_failed` and `task_failed`; no branch was
-published. Fixing the verifier audit requires separate approval under AGENTS.md.
+published. The operator explicitly approved the verifier audit correction, which
+was implemented and verified by the successful final run above. The final run's
+aggregate verification warning only concerns absent worker-reported test results
+in the dummy repository; both required verification checks passed. No verifier
+was disabled, credential scope changed, or usage-reset credit consumed.
 
 Independent review also found an existing-PR shortcut that could bypass pushing
 the current workspace. That shortcut has been removed: even when a PR already
@@ -48,16 +52,20 @@ integration regression confirms that a failed push cannot complete the task.
 Using `.venv/bin/pytest` with the same source packages and branch coverage as
 `.github/workflows/pytest.yml`:
 
-- Final `tests/unit tests/workers`: **2,392 passed**, 3 dependency warnings.
+- Final `tests/unit tests/workers`: **2,411 passed**, 3 dependency warnings.
 - Final `tests/integration`, including PostgreSQL using its isolated database
-  fixture: **359 passed**, 45 warnings.
-- Combined coverage: **90.04%**, passing the **90%** gate. Focused workspace
+  fixture: **361 passed**, 45 warnings.
+- Combined coverage: **90.09%**, passing the **90%** gate. Focused workspace
   identity and rejected-push tests close the earlier gap; no coverage exclusions
   or threshold reductions were introduced.
 - `.venv/bin/python scripts/e2e/run_frozen_eval.py --runner orchestrator`:
   **25/25 passed, score 84/84**. Its mock runner now explicitly requests summary
   delivery because it has no broker workspace or external delivery channel.
-- Isolated `orchestrator.acceptance` coverage: **100% of lines and branches**,
+- Isolated snapshot-helper coverage: **100% of lines and branches**, 22 focused
+  cases passed. Added executable worker lines in the approved audit correction:
+  **106/108 covered (98.15%)**; the uncovered lines are existing defensive return
+  paths moved while routing early outcomes through the audit.
+- Earlier isolated `orchestrator.acceptance` coverage: **100% of lines and branches**,
   with 20 acceptance cases passing before the final additional missing-result
   regression. A combined-coverage diff inspection found 87/88 added executable
   lines covered; the one uncovered failure-construction line received that
@@ -68,7 +76,7 @@ Exact coverage invocation: append
 --cov=sandbox --cov=tools --cov=workers --cov-branch --cov-report=term`
 to the unit/worker command, then add `--cov-append --cov-fail-under=90`
 for integration with `CODE_AGENT_TEST_POSTGRES_URL` set. The final combined run
-used `COVERAGE_FILE=/tmp/terra-ci.coverage`. Earlier local and GitHub pytest runs
+used `COVERAGE_FILE=/tmp/verifier-full.coverage`. Earlier local and GitHub pytest runs
 printed coverage failures despite successful process/step status; the numeric
 report is authoritative. The final numeric report explicitly passes the gate.
 

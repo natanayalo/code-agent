@@ -1,6 +1,6 @@
 # Proposed verifier read-only audit correction
 
-Status: explicitly approved by the operator and implemented; final live verification pending.
+Status: explicitly approved, implemented, and verified through live service ingress.
 
 ## Reproduction
 
@@ -47,7 +47,10 @@ Snapshot helper coverage: 100% of lines and branches; 22 focused cases passed.
 The integration regression confirms both fallback on unchanged inherited edits
 and rejection of real verifier mutations.
 
-After focused tests and the full coverage gate pass, rebuild the local trial worker
-and submit one bounded dummy-repository task. Require independently verified file
-content, pushed commit, broker delivery evidence, and matching API/timeline/Temporal
-completion. Keep PR #383 draft and unmerged until this live happy path succeeds.
+Final verification: 2,411 unit/worker tests and 361 integration tests passed;
+combined coverage is 90.09%. The worker was rebuilt at `c9c23264`, and one bounded
+task (`4cfe547d-11e9-41eb-bade-77533c012f9a`) completed with required verification,
+broker delivery evidence, and matching API/timeline/Temporal results. The remote
+branch commit and exact file bytes were independently checked. See
+`docs/acceptance-invariants-verification.md`. PR #383 remains unmerged pending
+operator review.
