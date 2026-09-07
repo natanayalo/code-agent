@@ -117,5 +117,6 @@ def test_agy_endpoint_does_not_expand_gemini_hosts():
     from sandbox.provider_hosts import ANTIGRAVITY_OAUTH_HOSTS, GEMINI_OAUTH_HOSTS
 
     assert set(ANTIGRAVITY_OAUTH_HOSTS) - set(GEMINI_OAUTH_HOSTS) == {
-        "daily-cloudcode-pa.googleapis.com"
+        "daily-cloudcode-pa.googleapis.com",
+        "www.googleapis.com",
     }

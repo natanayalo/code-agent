@@ -19,6 +19,7 @@ GEMINI_OAUTH_HOSTS: tuple[str, ...] = (
 ANTIGRAVITY_OAUTH_HOSTS: tuple[str, ...] = (
     *GEMINI_OAUTH_HOSTS,
     "daily-cloudcode-pa.googleapis.com",
+    "www.googleapis.com",
 )
 
 # For backwards compatibility with places that might import it:
