@@ -58,6 +58,17 @@ def test_classify_failure_kind_auth_error() -> None:
     assert failure_kind == "provider_auth"
 
 
+def test_native_authentication_required_is_not_a_tool_failure() -> None:
+    assert (
+        classify_failure_kind(
+            status="failure",
+            summary="Error: authentication required",
+            commands_run=[WorkerCommand(command="agy", exit_code=1)],
+        )
+        == "provider_auth"
+    )
+
+
 def test_classify_failure_kind_matches_python3_unittest_command() -> None:
     failure_kind = classify_failure_kind(
         status="failure",

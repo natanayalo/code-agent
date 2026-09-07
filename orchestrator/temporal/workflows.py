@@ -8,6 +8,7 @@ from temporalio.exceptions import CancelledError as TemporalCancelledError
 
 from orchestrator.temporal.policy import activity_options
 
+ACCEPTANCE_PATCH_ID = "task-delivery-acceptance-v1"
 MAX_PERMISSION_ESCALATIONS = 5
 NODE_WAVE_PATCH_ID = "m25-1b-temporal-node-wave"
 M25_2_FANOUT_PATCH_ID = "m25-2-bounded-selective-fanout"
@@ -150,7 +151,8 @@ class TaskExecutionWorkflow:
             **activity_options("persist_memory"),
         )
 
-        await workflow.execute_activity(
+        acceptance_enabled = workflow.patched(ACCEPTANCE_PATCH_ID)
+        delivery_outcome = await workflow.execute_activity(
             "deliver_result",
             task_id,
             **activity_options("deliver_result"),
@@ -161,6 +163,13 @@ class TaskExecutionWorkflow:
                 "status": "failed",
                 "summary": completion_decision.get("summary") or "Manual follow-up is required.",
             }
+        if (
+            acceptance_enabled
+            and isinstance(delivery_outcome, dict)
+            and delivery_outcome.get("status") == "failed"
+        ):
+            return {"status": "failed", "summary": "Task acceptance or delivery failed."}
+
         return {"status": "completed", "summary": "Task completed successfully via Temporal."}
 
     async def _run_completion_loop(

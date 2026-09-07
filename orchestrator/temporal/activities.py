@@ -13,6 +13,7 @@ from uuid import uuid4
 
 from sqlalchemy import select
 from temporalio import activity
+from temporalio.exceptions import ApplicationError
 
 from apps.observability import with_restored_trace_context
 from db.base import utc_now
@@ -26,6 +27,7 @@ from db.enums import (
 )
 from db.models import ExecutionPlanNodeAttempt, HumanInteraction, Task
 from db.utils import compute_interaction_content_hash
+from orchestrator.acceptance import enforce_task_acceptance, task_acceptance_rejection
 from orchestrator.decomposition import is_read_only_fanout_eligible
 from orchestrator.execution_graph_input import build_orchestrator_graph_input
 from orchestrator.execution_policy import _apply_execution_budget_policy
@@ -696,6 +698,20 @@ def _restore_task_trace_context(func: Any) -> Any:
     return _wrapped
 
 
+def _environment_initialization_failed(state: OrchestratorState) -> bool:
+    if (
+        state.current_step != "init_environment"
+        or not state.result
+        or state.result.status == "success"
+    ):
+        return False
+    logger.warning(
+        "Worker execution blocked by environment initialization failure",
+        extra={"task_id": state.task.task_id},
+    )
+    return True
+
+
 class TaskExecutionActivities:
     def __init__(self, service: Any) -> None:
         self.service = service
@@ -1127,6 +1143,14 @@ class TaskExecutionActivities:
             finished_at=finished_at,
         )
 
+        if _environment_initialization_failed(state):
+            await self.deliver_result(task_id)
+            raise ApplicationError(
+                "Environment initialization failed; worker execution was not started.",
+                type="sandbox_infra",
+                non_retryable=True,
+            )
+
     @activity.defn(name="run_worker")
     @_restore_task_trace_context
     async def run_worker(self, task_id: str) -> dict[str, bool]:
@@ -1152,6 +1176,8 @@ class TaskExecutionActivities:
             logger.info("run_worker already executed for task %s, skipping", task_id)
             return {"requires_permission_escalation": requires_permission}
 
+        if _environment_initialization_failed(state):
+            return {"requires_permission_escalation": False}
         heartbeat_task = asyncio.create_task(
             _send_activity_heartbeats(task_id), name=f"temporal-worker-heartbeat-{task_id}"
         )
@@ -2237,7 +2263,7 @@ class TaskExecutionActivities:
 
     @activity.defn(name="deliver_result")
     @_restore_task_trace_context
-    async def deliver_result(self, task_id: str) -> None:
+    async def deliver_result(self, task_id: str) -> dict[str, str]:
         state = await self.service._run_blocking(self._get_current_state, task_id)
         if self._has_event(
             state,
@@ -2246,26 +2272,27 @@ class TaskExecutionActivities:
         ):
             await self.service._run_blocking(self._delete_temporal_snapshot, task_id)
             logger.info("deliver_result already executed for task %s, skipping", task_id)
-            return
+            return {
+                "status": "failed"
+                if self._has_event(state, TimelineEventType.TASK_FAILED)
+                else "completed"
+            }
 
         started_at = utc_now()
         state_dict = state.model_dump()
-        for node in [self.deliver_result_node, summarize_result]:
-            updates = await self._run_node(node, state_dict)
-            self._merge_updates(state_dict, updates)
+        updates = await self._run_node(self.deliver_result_node, state_dict)
+        self._merge_updates(state_dict, updates)
 
         state = OrchestratorState.model_validate(state_dict)
         finished_at = utc_now()
 
-        force_status = None
-        if state.verification is not None and state.verification.status == "failed":
-            # Verification is the final acceptance gate. A worker can report success
-            # while deterministic validation finds a missing or invalid deliverable.
-            force_status = TaskStatus.FAILED
-        elif state.result is not None:
-            force_status = (
-                TaskStatus.COMPLETED if state.result.status == "success" else TaskStatus.FAILED
-            )
+        enforce_task_acceptance(state)
+        state_dict = state.model_dump()
+        self._merge_updates(state_dict, await self._run_node(summarize_result, state_dict))
+        state = OrchestratorState.model_validate(state_dict)
+        force_status = (
+            TaskStatus.FAILED if task_acceptance_rejection(state) else TaskStatus.COMPLETED
+        )
 
         await self.service._run_blocking(
             self._persist_state,
@@ -2285,6 +2312,8 @@ class TaskExecutionActivities:
             phase=phase,
             summary=state.result.summary if state.result is not None else None,
         )
+
+        return {"status": "completed" if force_status == TaskStatus.COMPLETED else "failed"}
 
     @activity.defn(name="persist_memory")
     @_restore_task_trace_context

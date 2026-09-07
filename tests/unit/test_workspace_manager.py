@@ -440,3 +440,103 @@ def test_create_workspace_skips_auth_env_for_non_github_or_empty_token(tmp_path:
         )
     )
     assert "env" not in captured_kwargs
+
+
+def test_initialize_workspace_retries_legacy_runner_without_broker_git_env(tmp_path: Path) -> None:
+    """Keep provisioning compatible with runners that cannot accept an env argument."""
+    calls: list[dict[str, Any]] = []
+
+    def legacy_runner(command: list[str], **kwargs: Any) -> None:
+        del command
+        calls.append(kwargs)
+        if "env" in kwargs:
+            raise TypeError("legacy runner does not accept env")
+
+    manager = WorkspaceManager(tmp_path, command_runner=legacy_runner)
+
+    manager._initialize_workspace(
+        WorkspaceRequest(
+            task_id="legacy-runner",
+            repo_url="https://github.com/org/private-repo.git",
+            git_token="test_dummy_token_123",
+        ),
+        tmp_path / "workspace",
+    )
+
+    assert len(calls) == 2
+    assert "env" in calls[0]
+    assert "env" not in calls[1]
+
+
+def test_create_workspace_reuses_only_broker_owned_git_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An existing task workspace is reusable only when its broker Git authority remains."""
+    workspace_id = "workspace-reuse"
+    workspace = tmp_path / workspace_id
+    workspace.mkdir()
+    (workspace / ".git").mkdir()
+    (tmp_path / ".code-agent-git" / workspace_id).mkdir(parents=True)
+    monkeypatch.setattr(workspace_module, "_build_workspace_id", lambda *_: workspace_id)
+    manager = WorkspaceManager(tmp_path, command_runner=lambda *_args, **_kwargs: None)
+
+    handle = manager.create_workspace(WorkspaceRequest(task_id="reuse", repo_url="repo"))
+
+    assert handle.workspace_id == workspace_id
+    assert handle.workspace_path == workspace
+    assert handle.trusted_git_dir == tmp_path / ".code-agent-git" / workspace_id
+
+
+def test_create_workspace_rejects_workspace_git_without_broker_authority(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Do not trust a retained workspace .git directory after broker state is lost."""
+    workspace_id = "workspace-untrusted"
+    workspace = tmp_path / workspace_id
+    workspace.mkdir()
+    (workspace / ".git").mkdir()
+    monkeypatch.setattr(workspace_module, "_build_workspace_id", lambda *_: workspace_id)
+    manager = WorkspaceManager(tmp_path, command_runner=lambda *_args, **_kwargs: None)
+
+    with pytest.raises(WorkspaceManagerError, match="trusted GIT_DIR is missing"):
+        manager.create_workspace(WorkspaceRequest(task_id="untrusted", repo_url="repo"))
+
+
+def test_establish_trusted_git_authority_rejects_remote_origin_mismatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A trusted Git directory may not be retained when its origin differs from the clone URL."""
+    workspace = tmp_path / "workspace"
+    workspace_git = workspace / ".git"
+    workspace_git.mkdir(parents=True)
+    trusted_git = tmp_path / ".code-agent-git" / "workspace"
+    expected_url = "https://github.com/org/repo.git"
+    responses = iter(
+        [
+            subprocess.CompletedProcess([], 0, stdout="same-head\n"),
+            subprocess.CompletedProcess([], 0, stdout="same-head\n"),
+            subprocess.CompletedProcess([], 0, stdout="https://github.com/other/repo.git\n"),
+        ]
+    )
+    monkeypatch.setattr(
+        workspace_module.subprocess, "run", lambda *_args, **_kwargs: next(responses)
+    )
+    manager = WorkspaceManager(tmp_path)
+
+    with pytest.raises(WorkspaceManagerError, match="remote origin mismatch"):
+        manager._establish_trusted_git_authority(workspace, trusted_git, expected_url)
+
+    assert not trusted_git.exists()
+
+
+def test_initialize_workspace_requires_repository_url_for_clone(tmp_path: Path) -> None:
+    """Clone mode must fail before a runner can receive an empty repository URL."""
+    manager = WorkspaceManager(tmp_path, command_runner=lambda *_args, **_kwargs: None)
+
+    with pytest.raises(WorkspaceManagerError, match="repo_url is required for CLONE mode"):
+        manager._initialize_workspace(
+            WorkspaceRequest(task_id="missing-url"), tmp_path / "workspace"
+        )

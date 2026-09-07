@@ -351,6 +351,9 @@ class OrchestratorReplayRunner(EvaluationRunner):
         constraints: dict[str, object] = {
             "evaluation_case_id": case.case_id,
             "execution_mode": "unattended",
+            # Frozen evaluation has no broker workspace or external delivery channel.
+            # It scores the orchestrator's decision and worker-result handling only.
+            "delivery_mode": "summary",
         }
         # Frozen eval runs unattended. Pre-seed trusted approval for non-destructive
         # cases so high-risk task-spec gating does not block deterministic scoring.

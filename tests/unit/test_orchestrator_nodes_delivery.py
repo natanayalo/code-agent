@@ -14,7 +14,6 @@ from orchestrator.nodes.delivery import (
     _delivery_files_to_stage,
     _delivery_success_response,
     _merge_delivery_result,
-    _reconcile_existing_draft_pr,
     _resolve_broker_github_token,
     _run_deliver_result,
     build_deliver_result_node,
@@ -136,16 +135,17 @@ async def test_run_deliver_result_skips_when_preconditions_fail():
     res = await _run_deliver_result(state)
     assert res == {"current_step": "deliver_result"}
 
-    # No workspace
+    # Required delivery without a workspace must fail explicitly.
     state = OrchestratorState.model_validate(
         {
             "task": {"task_text": "demo"},
             "result": {"status": "success", "summary": "ok"},
             "task_spec": {"delivery_mode": "branch", "goal": "demo"},
+            "verification": {"status": "passed"},
         }
     )
     res = await _run_deliver_result(state)
-    assert res == {"current_step": "deliver_result"}
+    assert res["result"].failure_kind == "incomplete_delivery"
 
 
 def _delivery_state(
@@ -172,6 +172,7 @@ def _delivery_state(
                 "delivery_branch": "qa/evidence",
                 "goal": "demo",
             },
+            "verification": {"status": "passed"},
             "dispatch": {"workspace_id": "ws-1", "worker_type": "codex"},
         }
     )
@@ -410,7 +411,9 @@ async def test_run_deliver_result_rejects_unsafe_reported_path(broker_workspace)
 
 
 @pytest.mark.asyncio
-async def test_run_deliver_result_resolves_broker_only_github_token(monkeypatch) -> None:
+async def test_run_deliver_result_resolves_broker_only_github_token(
+    broker_workspace, monkeypatch
+) -> None:
     monkeypatch.delenv("GH_TOKEN", raising=False)
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
     secret_ref_name = "ephem_github_token"
@@ -443,6 +446,7 @@ async def test_run_deliver_result_resolves_broker_only_github_token(monkeypatch)
             "orchestrator.nodes.delivery._capture_delivery_metadata",
             return_value=metadata,
         ) as capture_mock,
+        patch("orchestrator.nodes.delivery._run_broker_git_commands", return_value=(None, None)),
         patch("orchestrator.nodes.delivery.start_optional_span"),
     ):
         res = await _run_deliver_result(state, session_factory=MagicMock())
@@ -508,7 +512,7 @@ async def test_draft_pr_delivery_publishes_or_fails_when_metadata_is_missing() -
 
 
 @pytest.mark.asyncio
-async def test_broker_token_ignores_non_git_push_secret_and_draft_reconcile_without_pr() -> None:
+async def test_broker_token_ignores_non_git_push_secret() -> None:
     secret_ref_name = "ephem_custom_token"
     store = MagicMock()
     store.get_record.return_value = EphemeralSecretRecord(
@@ -529,18 +533,46 @@ async def test_broker_token_ignores_non_git_push_secret_and_draft_reconcile_with
     ):
         assert _resolve_broker_github_token(state, MagicMock()) is None
 
-    with patch(
-        "orchestrator.nodes.delivery._capture_delivery_metadata",
-        return_value={"delivery_mode": "draft_pr", "branch_name": "qa/evidence"},
-    ):
-        reconciled = await _reconcile_existing_draft_pr(
-            state,
-            branch_name="qa/evidence",
-            pr_title="Evidence PR",
-            gh_token="broker-token",
+
+@pytest.mark.asyncio
+async def test_existing_draft_pr_does_not_bypass_current_broker_push(
+    broker_workspace,
+    monkeypatch,
+) -> None:
+    state = _delivery_state(delivery_mode="draft_pr", files_changed=["src/changed.py"])
+    existing_pr = {
+        "delivery_mode": "draft_pr",
+        "branch_name": "qa/evidence",
+        "pr_url": "https://github.com/example/project/pull/8",
+        "head_sha": "stale-pr-head",
+    }
+    git_commands: list[list[str]] = []
+
+    def _run(command, **_kwargs):
+        git_commands.append(command)
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            "",
+            "",
         )
 
-    assert reconciled is None
+    monkeypatch.setenv("GH_TOKEN", "broker-token")
+    with (
+        patch("subprocess.run", side_effect=_run),
+        patch(
+            "orchestrator.nodes.delivery._capture_delivery_metadata",
+            return_value=existing_pr,
+        ),
+        patch("orchestrator.nodes.delivery.start_optional_span"),
+    ):
+        result = await _run_deliver_result(state)
+
+    assert result["timeline_events"][0].event_type == TimelineEventType.DELIVERY_COMPLETED
+    assert any(
+        command[-4:] == ["push", "-u", "origin", "HEAD:refs/heads/qa/evidence"]
+        for command in git_commands
+    )
 
 
 @pytest.mark.asyncio

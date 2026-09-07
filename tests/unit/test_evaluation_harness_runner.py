@@ -45,6 +45,7 @@ def _make_fake_evaluation(
         constraints = task["constraints"]
         assert isinstance(constraints, dict)
         assert constraints["evaluation_case_id"] == expected_case_id
+        assert constraints["delivery_mode"] == "summary"
         return OrchestratorState.model_validate(
             {
                 "task": {"task_text": "Do a thing"},

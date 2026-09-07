@@ -54,6 +54,7 @@ _COMPILE_SUMMARY_MARKERS = (
 _AUTH_SUMMARY_MARKERS = (
     "api key",
     "authentication failed",
+    "authentication required",
     "invalid authentication credentials",
     "invalid credentials",
     "oauth 2",
