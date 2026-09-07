@@ -68,6 +68,10 @@ completed-task ledger; keep completed work here instead.
 
 ### Fixed
 
+- Fix: require verification and broker delivery before completing tasks ([#383](https://github.com/natanayalo/code-agent/pull/383))
+
+- Fix: restore AGY authentication in native task sandboxes ([#384](https://github.com/natanayalo/code-agent/pull/384))
+
 - Fix(dashboard): update react-router-dom and lockfile for Dependabot security advisories ([#343](https://github.com/natanayalo/code-agent/pull/343))
 
 - Fix: harden Temporal interaction and worker shutdown ([#342](https://github.com/natanayalo/code-agent/pull/342))
