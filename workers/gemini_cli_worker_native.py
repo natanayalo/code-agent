@@ -126,6 +126,52 @@ def _native_gemini_home(workspace_path: Path, scratch_namespace: str | None) -> 
     return agent_home / ".gemini"
 
 
+def _antigravity_provider_dir(adapter: AntigravityCliRuntimeAdapter) -> Path:
+    """Find the trusted AGY token directory without loading generic Gemini OAuth."""
+    candidates: list[Path] = []
+    configured_agy_dir = os.environ.get("CODE_AGENT_ANTIGRAVITY_AUTH_DIR")
+    if configured_agy_dir:
+        candidates.append(Path(configured_agy_dir))
+    adapter_gemini_home = adapter.env.get("GEMINI_HOME")
+    if adapter_gemini_home:
+        candidates.append(Path(adapter_gemini_home))
+    env_gemini_home = os.environ.get("GEMINI_HOME")
+    if env_gemini_home:
+        candidates.append(Path(env_gemini_home))
+    configured_auth_dir = os.environ.get("CODE_AGENT_GEMINI_AUTH_DIR")
+    if configured_auth_dir:
+        candidates.append(Path(configured_auth_dir))
+    try:
+        candidates.append(Path.home() / ".gemini")
+    except OSError:  # pragma: no cover - platform home lookup failure
+        pass
+    candidates.append(Path("/root/.gemini"))
+
+    for candidate in candidates:
+        provider_dir = candidate.expanduser()
+        try:
+            if (provider_dir / "antigravity-cli" / "antigravity-oauth-token").is_file():
+                return provider_dir
+        except OSError:
+            continue
+    return candidates[0].expanduser() if candidates else Path("/root/.gemini")
+
+
+def _register_antigravity_token_fields(redactor: SecretRedactor, token: str) -> None:
+    """Redact nested AGY OAuth values in addition to the staged file payload."""
+    try:
+        payload = json.loads(token)
+    except (TypeError, json.JSONDecodeError):
+        return
+    token_fields = payload.get("token") if isinstance(payload, dict) else None
+    if not isinstance(token_fields, dict):
+        return
+    for field_name in ("access_token", "refresh_token"):
+        value = token_fields.get(field_name)
+        if isinstance(value, str) and value:
+            redactor.register(value)
+
+
 def _prepare_workspace_gemini_home(
     *,
     workspace_path: Path,
@@ -519,23 +565,23 @@ class GeminiCliWorkerNativeMixin:
         )
         from sandbox.trusted_context import TrustedSandboxExecutionContext
 
-        provider_dir = Path(os.environ.get("CODE_AGENT_GEMINI_AUTH_DIR", Path.home() / ".gemini"))
-        try:
-            if not provider_dir.exists() and Path("/root/.gemini").exists():
-                provider_dir = Path("/root/.gemini")
-        except OSError:  # pragma: no cover
-            pass
-
         registry = SecretRegistry(
             ephemeral_store=getattr(self, "ephemeral_store", None), task_id=task_id
         )
         if self._is_antigravity_native_adapter():
-            from sandbox.provider_bootstrap import ProviderBootstrap
-
-            bootstrap = ProviderBootstrap(
-                definitions=[], destination_by_ref={}, file_store={}, ref_names=()
-            )
+            adapter = getattr(self, "runtime_adapter", None)
+            if not isinstance(adapter, AntigravityCliRuntimeAdapter):
+                raise TypeError("Antigravity native run requires AntigravityCliRuntimeAdapter.")
+            bootstrap = ProviderBootstrapLoader.load_antigravity(_antigravity_provider_dir(adapter))
         else:
+            provider_dir = Path(
+                os.environ.get("CODE_AGENT_GEMINI_AUTH_DIR", Path.home() / ".gemini")
+            )
+            try:
+                if not provider_dir.exists() and Path("/root/.gemini").exists():
+                    provider_dir = Path("/root/.gemini")
+            except OSError:  # pragma: no cover
+                pass
             has_api_key = "GEMINI_API_KEY" in request.secrets or any(
                 _is_gemini_api_key_secret(registry.get(ref.name, task_id=task_id))
                 for ref in request.secret_refs or ()
@@ -588,7 +634,10 @@ class GeminiCliWorkerNativeMixin:
         redactor = SecretRedactor(list((request.secrets or {}).values()))
         for ref in sandbox_refs:
             resolved = resolver.resolve_for_sandbox(ref, grant)
-            redactor.register(resolved.reveal_secret_value())
+            resolved_value = resolved.reveal_secret_value()
+            redactor.register(resolved_value)
+            if ref.name == "antigravity_oauth_token":
+                _register_antigravity_token_fields(redactor, resolved_value)
 
         context = TrustedSandboxExecutionContext(
             grant=grant, task_id=task_id, secret_resolver=resolver, provider_bootstrap=bootstrap
