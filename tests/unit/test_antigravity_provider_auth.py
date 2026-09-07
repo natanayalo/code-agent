@@ -119,4 +119,5 @@ def test_agy_endpoint_does_not_expand_gemini_hosts():
     assert set(ANTIGRAVITY_OAUTH_HOSTS) - set(GEMINI_OAUTH_HOSTS) == {
         "daily-cloudcode-pa.googleapis.com",
         "www.googleapis.com",
+        "lh3.googleusercontent.com",
     }

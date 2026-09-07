@@ -8,7 +8,9 @@ Register only `antigravity-cli/antigravity-oauth-token` as provider authenticati
 stage a private file through the existing provider stager, and remove the legacy
 symlink/copy path. Keep broker mounts unchanged. AGY alone additionally permits its observed
 `daily-cloudcode-pa.googleapis.com` eligibility endpoint and the
-`www.googleapis.com/oauth2/v2/userinfo` account lookup (host-scoped); Gemini retains its
+`www.googleapis.com/oauth2/v2/userinfo` account lookup and
+`lh3.googleusercontent.com` profile-image lookup (host-scoped). AGY treats these
+lookups as mandatory during eligibility checking. Gemini retains its
 existing allowlist.
 
 The configured `CODE_AGENT_ANTIGRAVITY_AUTH_DIR` takes precedence when accessible;
