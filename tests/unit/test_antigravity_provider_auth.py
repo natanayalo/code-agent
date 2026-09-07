@@ -78,3 +78,44 @@ def test_legacy_token_symlink_removed_or_fails_closed(tmp_path, monkeypatch, unl
         assert not target.is_symlink()
         assert not target.exists()
     assert source.read_bytes() == original
+
+
+@pytest.mark.parametrize("source", ["environment", "gemini_config", "home", "missing", "denied"])
+def test_agy_discovery_fallbacks(tmp_path, monkeypatch, source):
+    for key in ("CODE_AGENT_ANTIGRAVITY_AUTH_DIR", "GEMINI_HOME", "CODE_AGENT_GEMINI_AUTH_DIR"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    directory = tmp_path / ".gemini"
+    if source == "environment":
+        monkeypatch.setenv("GEMINI_HOME", str(directory))
+    elif source == "gemini_config":
+        monkeypatch.setenv("CODE_AGENT_GEMINI_AUTH_DIR", str(directory))
+    if source not in ("missing", "denied"):
+        token = directory / "antigravity-cli/antigravity-oauth-token"
+        token.parent.mkdir(parents=True)
+        token.write_text("fake")
+    else:
+
+        def unavailable(_path):
+            if source == "denied":
+                raise PermissionError("test denied")
+            return False
+
+        monkeypatch.setattr(Path, "is_file", unavailable)
+    assert _antigravity_provider_dir(AntigravityCliRuntimeAdapter()) == directory
+
+
+def test_redaction_ignores_non_string_and_empty_token_fields():
+    redactor = SecretRedactor()
+    _register_antigravity_token_fields(
+        redactor, '{"token":{"access_token":null,"refresh_token":""}}'
+    )
+    assert redactor.redact("ordinary message") == "ordinary message"
+
+
+def test_agy_endpoint_does_not_expand_gemini_hosts():
+    from sandbox.provider_hosts import ANTIGRAVITY_OAUTH_HOSTS, GEMINI_OAUTH_HOSTS
+
+    assert set(ANTIGRAVITY_OAUTH_HOSTS) - set(GEMINI_OAUTH_HOSTS) == {
+        "daily-cloudcode-pa.googleapis.com"
+    }

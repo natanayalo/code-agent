@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from sandbox.provider_hosts import (
+    ANTIGRAVITY_OAUTH_HOSTS,
     CODEX_API_KEY_HOSTS,
     CODEX_CHATGPT_HOSTS,
     GEMINI_API_KEY_HOSTS,
@@ -162,7 +163,7 @@ class ProviderBootstrapLoader:
                     source_key=ref_name,
                     required_scope=SecretScope.PROVIDER_AUTH,
                     exposure_policy=SecretExposurePolicy.SANDBOX_FILE,
-                    permitted_egress_hosts=GEMINI_OAUTH_HOSTS,
+                    permitted_egress_hosts=ANTIGRAVITY_OAUTH_HOSTS,
                     destination_mount_path=ref_name,
                 )
             ],

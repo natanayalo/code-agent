@@ -6,7 +6,9 @@ AGY was given a symlink to the broker's `/root/.gemini` credential path, which t
 unprivileged task container cannot access. Its provider bootstrap was empty.
 Register only `antigravity-cli/antigravity-oauth-token` as provider authentication,
 stage a private file through the existing provider stager, and remove the legacy
-symlink/copy path. Keep broker mounts and provider egress permissions unchanged.
+symlink/copy path. Keep broker mounts unchanged. AGY alone additionally permits its observed
+`daily-cloudcode-pa.googleapis.com` eligibility endpoint; Gemini retains its
+existing allowlist.
 
 The configured `CODE_AGENT_ANTIGRAVITY_AUTH_DIR` takes precedence when accessible;
 inside Docker, discovery can use the existing `/root/.gemini` broker mount.

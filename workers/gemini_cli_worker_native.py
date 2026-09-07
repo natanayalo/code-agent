@@ -606,9 +606,15 @@ class GeminiCliWorkerNativeMixin:
             _is_gemini_api_key_secret(registry.get(ref.name, task_id=task_id))
             for ref in request.secret_refs or ()
         )
-        from sandbox.provider_hosts import GEMINI_API_KEY_HOSTS, GEMINI_OAUTH_HOSTS
+        from sandbox.provider_hosts import (
+            ANTIGRAVITY_OAUTH_HOSTS,
+            GEMINI_API_KEY_HOSTS,
+            GEMINI_OAUTH_HOSTS,
+        )
 
         allowed_hosts = GEMINI_API_KEY_HOSTS if has_api_key else GEMINI_OAUTH_HOSTS
+        if self._is_antigravity_native_adapter():
+            allowed_hosts = ANTIGRAVITY_OAUTH_HOSTS
 
         grant = CapabilityGrantFactory(registry).create_grant(
             network=NetworkEgressPolicy.ALLOWLISTED_HOSTS,

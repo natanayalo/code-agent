@@ -99,6 +99,10 @@ def test_antigravity_worker_builds_prompt_argv_command_and_settings(tmp_path: Pa
     bootstrap = native_request.context.provider_bootstrap
     assert bootstrap is not None
     assert bootstrap.ref_names == ("antigravity_oauth_token",)
+    assert "daily-cloudcode-pa.googleapis.com" in native_request.context.grant.allowed_egress_hosts
+    assert bootstrap.definitions[0].permitted_egress_hosts == (
+        native_request.context.grant.allowed_egress_hosts
+    )
     assert native_request.redactor is not None
     assert "test-access" not in native_request.redactor.redact("failure test-access")
     assert "test-refresh" not in native_request.redactor.redact("failure test-refresh")

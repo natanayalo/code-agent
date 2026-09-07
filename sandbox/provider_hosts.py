@@ -16,6 +16,11 @@ GEMINI_OAUTH_HOSTS: tuple[str, ...] = (
     "oauth2.googleapis.com",
 )
 
+ANTIGRAVITY_OAUTH_HOSTS: tuple[str, ...] = (
+    *GEMINI_OAUTH_HOSTS,
+    "daily-cloudcode-pa.googleapis.com",
+)
+
 # For backwards compatibility with places that might import it:
 CODEX_RUNTIME_HOSTS = CODEX_API_KEY_HOSTS
 GEMINI_RUNTIME_HOSTS = GEMINI_API_KEY_HOSTS
