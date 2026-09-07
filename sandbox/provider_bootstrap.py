@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from sandbox.provider_hosts import (
+    ANTIGRAVITY_OAUTH_HOSTS,
     CODEX_API_KEY_HOSTS,
     CODEX_CHATGPT_HOSTS,
     GEMINI_API_KEY_HOSTS,
@@ -136,4 +137,37 @@ class ProviderBootstrapLoader:
             file_store=file_store,
             destination_by_ref=destination_by_ref,
             ref_names=tuple(ref_names),
+        )
+
+    @classmethod
+    def load_antigravity(cls, provider_dir: Path) -> ProviderBootstrap:
+        """Load only the Antigravity OAuth token needed by the native AGY runtime."""
+        token_path = provider_dir / "antigravity-cli" / "antigravity-oauth-token"
+        if not token_path.is_file():
+            raise ProviderBootstrapError(
+                f"Required Antigravity OAuth token missing in {provider_dir}"
+            )
+        try:
+            token = token_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise ProviderBootstrapError(
+                f"Failed to read required Antigravity OAuth token in {provider_dir}: {exc}"
+            ) from exc
+
+        ref_name = "antigravity_oauth_token"
+        return ProviderBootstrap(
+            definitions=[
+                RegisteredSecretDefinition(
+                    name=ref_name,
+                    source=SecretSource.FILE,
+                    source_key=ref_name,
+                    required_scope=SecretScope.PROVIDER_AUTH,
+                    exposure_policy=SecretExposurePolicy.SANDBOX_FILE,
+                    permitted_egress_hosts=ANTIGRAVITY_OAUTH_HOSTS,
+                    destination_mount_path=ref_name,
+                )
+            ],
+            file_store={ref_name: token},
+            destination_by_ref={ref_name: ".gemini/antigravity-cli/antigravity-oauth-token"},
+            ref_names=(ref_name,),
         )
