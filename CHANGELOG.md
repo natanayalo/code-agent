@@ -46,6 +46,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Changed
 
+- Build(deps): bump fastapi from 0.140.0 to 0.141.1 ([#351](https://github.com/natanayalo/code-agent/pull/351))
+
 - Build(deps-dev): bump baseline-browser-mapping from 2.10.37 to 2.11.22 in /dashboard ([#387](https://github.com/natanayalo/code-agent/pull/387))
 
 - Build(deps-dev): bump vitest from 4.1.5 to 4.1.11 in /dashboard ([#386](https://github.com/natanayalo/code-agent/pull/386))
