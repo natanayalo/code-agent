@@ -48,6 +48,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Changed
 
+- Build(deps-dev): bump undici from 7.28.0 to 7.29.1 in /dashboard ([#389](https://github.com/natanayalo/code-agent/pull/389))
+
 - Build(deps-dev): bump js-yaml from 4.3.0 to 4.3.2 in /dashboard ([#388](https://github.com/natanayalo/code-agent/pull/388))
 
 - Build(deps-dev): bump fast-uri from 3.1.4 to 3.1.7 in /dashboard ([#379](https://github.com/natanayalo/code-agent/pull/379))
