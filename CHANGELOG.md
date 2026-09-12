@@ -46,6 +46,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Changed
 
+- Build(deps-dev): bump baseline-browser-mapping from 2.10.37 to 2.11.22 in /dashboard ([#387](https://github.com/natanayalo/code-agent/pull/387))
+
 - Build(deps-dev): bump vitest from 4.1.5 to 4.1.11 in /dashboard ([#386](https://github.com/natanayalo/code-agent/pull/386))
 
 - WIP: M28 real-worker effectiveness evidence framework ([#368](https://github.com/natanayalo/code-agent/pull/368))
