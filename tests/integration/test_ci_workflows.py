@@ -95,7 +95,7 @@ def test_pytest_workflow_runs_unit_coverage_and_integration_suite_on_push() -> N
     assert workflow["jobs"]["pytest"]["timeout-minutes"] == 15
     assert "import pytest_asyncio" in plugin_step["run"]
     assert "tests/unit" in unit_step["run"]
-    assert "pytest -n 4 tests/unit tests/workers" in unit_step["run"]
+    assert "pytest -n 3 tests/unit tests/workers" in unit_step["run"]
     for expected_flag in (
         "--cov=apps",
         "--cov=db",
