@@ -84,9 +84,21 @@ def _make_popen_mock(
     wait_side_effect: Exception | None = None,
 ) -> MagicMock:
     """Build a mock subprocess.Popen object with streaming stdout/stderr."""
+
+    class _ObservedBytesIO(io.BytesIO):
+        def __init__(self, data: bytes) -> None:
+            super().__init__(data)
+            self.read_started = threading.Event()
+
+        def read(self, size: int = -1) -> bytes:
+            self.read_started.set()
+            return super().read(size)
+
     mock = MagicMock()
-    mock.stdout = io.BytesIO(stdout_data)
-    mock.stderr = io.BytesIO(stderr_data)
+    stdout_stream = _ObservedBytesIO(stdout_data)
+    stderr_stream = _ObservedBytesIO(stderr_data)
+    mock.stdout = stdout_stream
+    mock.stderr = stderr_stream
     mock.returncode = returncode
 
     if wait_side_effect is not None:
@@ -94,6 +106,8 @@ def _make_popen_mock(
         # proc.kill()) must return normally so threads can join without propagating the exc.
         def _wait_side_effect(*args: object, **kwargs: object) -> int:
             if "timeout" in kwargs:
+                assert stdout_stream.read_started.wait(timeout=1)
+                assert stderr_stream.read_started.wait(timeout=1)
                 raise wait_side_effect  # type: ignore[misc]
             return returncode
 
