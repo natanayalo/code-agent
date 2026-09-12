@@ -249,7 +249,7 @@ Python CI enforces a 90% coverage floor. Run the currently enforced checks from
 the repository virtualenv:
 
 ```bash
-poetry run pytest -n 2 tests/unit tests/workers --cov=apps --cov=db --cov=memory --cov=orchestrator --cov=repositories --cov=sandbox --cov=tools --cov=workers --cov-branch --cov-report=term-missing --cov-report=xml
+poetry run pytest -n 4 tests/unit tests/workers --cov=apps --cov=db --cov=memory --cov=orchestrator --cov=repositories --cov=sandbox --cov=tools --cov=workers --cov-branch --cov-report=term-missing --cov-report=xml
 poetry run pytest tests/integration
 poetry run pre-commit run --all-files
 # Dashboard checks
