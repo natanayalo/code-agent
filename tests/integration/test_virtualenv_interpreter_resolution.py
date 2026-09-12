@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
+
+import pytest
 
 from sandbox.capability import CapabilityGrantFactory, FileSystemAccessPolicy, NetworkEgressPolicy
 from sandbox.native_agent_executor import (
@@ -13,6 +16,31 @@ from sandbox.provider_bootstrap import ProviderBootstrap
 from sandbox.secrets import SecretRegistry, SecretResolver
 from sandbox.trusted_context import TrustedSandboxExecutionContext
 from sandbox.workspace import WorkspaceHandle
+
+
+def _native_executor_image_available() -> bool:
+    image = DockerNativeAgentExecutor().image
+    try:
+        docker_info = subprocess.run(
+            ["docker", "info"], capture_output=True, check=False, timeout=5
+        )
+        if docker_info.returncode != 0:
+            return False
+        image_inspect = subprocess.run(
+            ["docker", "image", "inspect", image],
+            capture_output=True,
+            check=False,
+            timeout=5,
+        )
+        return image_inspect.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+pytestmark = pytest.mark.skipif(
+    not _native_executor_image_available(),
+    reason="Docker or native-agent worker image unavailable",
+)
 
 
 def _make_trusted_context(task_id: str) -> TrustedSandboxExecutionContext:
