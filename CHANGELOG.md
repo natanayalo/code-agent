@@ -48,6 +48,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Changed
 
+- Build(deps-dev): bump fast-uri from 3.1.4 to 3.1.7 in /dashboard ([#379](https://github.com/natanayalo/code-agent/pull/379))
+
 - Build(deps-dev): bump browserslist from 4.28.2 to 4.28.9 in /dashboard ([#385](https://github.com/natanayalo/code-agent/pull/385))
 
 - Build(deps): bump fastapi from 0.140.0 to 0.141.1 ([#351](https://github.com/natanayalo/code-agent/pull/351))
