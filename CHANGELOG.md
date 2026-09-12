@@ -73,6 +73,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Documentation
 
+- Docs: consolidate active project documentation ([#390](https://github.com/natanayalo/code-agent/pull/390))
+
 - Docs(architecture): add M28.5B field-level state ownership contract and reduction plan ([#370](https://github.com/natanayalo/code-agent/pull/370))
 
 - Docs: define execution architecture foundation ([#367](https://github.com/natanayalo/code-agent/pull/367))
