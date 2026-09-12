@@ -20,16 +20,15 @@
 
 ## Current phase
 
-Phase 4A: Temporal stabilization and measured reliability. M25.6 and M26 are
-complete. M28 is active.
+Phase 4A: Temporal stabilization and measured reliability. M25.6, M26, and M28
+are complete. M28.5 is active.
 
 Committed/current priority:
 
-1. finish M28: Memory Effectiveness and Session Continuity
-2. M28.5: Execution Architecture Foundation
-3. M29: Provider Reliability and Evidence-Driven Routing
-4. M30: GitHub-Native Task and Delivery Control
-5. M31: Proactive Operations and Safe Scheduled Work
+1. M28.5: Execution Architecture Foundation
+2. M29: Provider Reliability and Evidence-Driven Routing
+3. M30: GitHub-Native Task and Delivery Control
+4. M31: Proactive Operations and Safe Scheduled Work
 
 Deferred / evidence-gated:
 
@@ -221,7 +220,7 @@ The completed M28 live matrix ran through the native-agent executor boundary.
 Continue this milestone's remaining architecture work independently of the
 completed M28 evidence.
 
-Current concern: the Temporal worker mounts the host Docker socket, launches
+Original concern: the Temporal worker mounts the host Docker socket, launches
 native provider execution, mounts Codex/Antigravity authentication, and may
 select trusted Codex `danger-full-access` inside the current worker-controlled
 container topology. This concentrates container-runtime authority, provider
@@ -278,13 +277,13 @@ Target ownership:
   metadata, external GitHub/channel identities, operator/search/reporting data,
   and external-side-effect idempotency where needed
 
-Do not immediately remove current persistence. First document field-level
-authority, recovery/projection rules, and compatibility. The field-level state
-ownership contract, recovery rules, and prioritized reduction plan are
-established in [`docs/architecture/state_ownership.md`](architecture/state_ownership.md).
-New features must not deepen duplicate lifecycle ownership. Reduce full-state
-`TemporalTaskState` duplication incrementally across planned waves only when replay,
-recovery, query, and rollback behavior remain proven.
+M28.5B and its defined Waves 1–3 are complete. The field-level state ownership
+contract, recovery rules, completed reductions, and retained-state rationale are
+recorded in
+[`docs/architecture/state_ownership.md`](architecture/state_ownership.md). New
+features must not deepen duplicate lifecycle ownership. Any further reduction
+of `TemporalTaskState` requires proven replay, recovery, query, and rollback
+behavior.
 
 ### M28.5C — Provider-Neutral `AgentEvent`
 
@@ -371,6 +370,9 @@ route decision
 - add operator diagnostics for provider authentication, CLI availability,
   sandbox readiness, and other last-mile capability failures that a fresh
   worker heartbeat cannot prove
+- complete the compatibility-gated removal of `LegacyIngressTaskRequest` and
+  raw secret ingress; reject unregistered or raw secret payloads fail-closed
+  without broadening credential scope
 - replace checked-in seed metrics with a versioned advisory report generated
   from persisted, reviewable evidence
 - show sample size, recency, confidence, and fallback reason with every routing
@@ -683,8 +685,8 @@ provider-native cognition with the OpenHands reasoning loop.
 
 ## Open Planning Questions
 
-1. What M28 paired-result threshold supports an effectiveness claim, and what
-   measured miss would justify semantic retrieval?
+1. What post-M28 retrieval miss would justify semantic retrieval rather than
+   another full-text or admission-policy improvement?
 2. Which M28.5A threat assumptions differ for local and future remote sandbox
    execution?
 3. Which `AgentEvent` subset can both native providers expose without lossy

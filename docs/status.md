@@ -4,7 +4,8 @@
 
 Phase 4A: Temporal stabilization, execution architecture foundation, and measured reliability.
 
-Active focus: **M28.5 — Execution Architecture Foundation** (M28.5A Sandbox/Trust Boundary, M28.5C AgentEvent, M28.5D ContextEnvelope).
+Active focus: **M28.5 — Execution Architecture Foundation** (M28.5C
+`AgentEvent`, followed by M28.5D `ContextEnvelope`).
 
 ## Current capabilities
 

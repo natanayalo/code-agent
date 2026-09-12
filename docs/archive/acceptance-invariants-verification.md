@@ -1,5 +1,8 @@
 # Task acceptance verification and trial accounting
 
+This is a historical verification record, retained for auditability rather
+than as current operational guidance.
+
 Recorded 2026-09-06. This record distinguishes observed checks from earlier
 supervisor reports. It does not retroactively change historical task statuses.
 

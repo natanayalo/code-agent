@@ -6,10 +6,10 @@ This document establishes the authoritative Threat Model and Execution Trust Bou
 
 The primary goal of `code-agent` is to safely execute untrusted and semi-trusted tasks (generated from user prompts, Telegram messages, GitHub webhooks, or issues) using native autonomous coding models (Codex, Antigravity, OpenRouter) inside containerized environments without putting the host system, control plane, credentials, or private codebases at risk.
 
-### Milestone Framing: M28.5A vs. M28.5A.2
+### Milestone Framing: M28.5A and M28.5A.2
 
-- **M28.5A (This Milestone — Foundation & Migration Contracts):** Defines and formalizes the threat boundaries, STRIDE attack analysis, residual risk posture, broker-owned secret registry (`RegisteredSecretDefinition`), broker-issued capability grants (`SandboxCapabilityGrant`), fail-closed resolution engine (`SecretResolver`, `CapabilityGrantFactory`, `validate_grant_for_execution`), and migration/deprecation policies, ephemeral store contracts (`EphemeralSecretStore`), and sanitization contracts (`sanitize_legacy_ingress_payload`, `LegacyIngressTaskRequest`, `IngressMigrationAdapter`) for legacy raw credentials.
-- **M28.5A.2 (Follow-On Milestone — Runtime Enforcement):** Wires the capability contracts directly into `DockerNativeAgentExecutor` and `WorkerRequest`, wires all production ingress endpoints (API, webhooks, CLI) to drop raw values before persistence, routes legacy raw values through `EphemeralSecretStore` outside durable history, and proves live OS-level and Docker runtime containment through integration tests (direct socket bypass denial, TLS ClientHello SNI inspection, OS mount masking for `.git`, and `/run/secrets` lifecycle).
+- **M28.5A (Completed — Foundation & Migration Contracts):** Defined and formalized the threat boundaries, STRIDE attack analysis, residual risk posture, broker-owned secret registry (`RegisteredSecretDefinition`), broker-issued capability grants (`SandboxCapabilityGrant`), fail-closed resolution engine (`SecretResolver`, `CapabilityGrantFactory`, `validate_grant_for_execution`), migration/deprecation policies, ephemeral store contracts (`EphemeralSecretStore`), and sanitization contracts (`sanitize_legacy_ingress_payload`, `LegacyIngressTaskRequest`, `IngressMigrationAdapter`) for legacy raw credentials.
+- **M28.5A.2 (Completed — Runtime Enforcement):** Wired the capability contracts into `DockerNativeAgentExecutor` and `WorkerRequest`, wired production ingress endpoints (API, webhooks, CLI) to drop raw values before persistence, routed legacy raw values through `EphemeralSecretStore` outside durable task and workflow records, and proved live OS-level and Docker runtime containment through integration tests (direct socket bypass denial, TLS ClientHello SNI inspection, OS mount masking for `.git`, and `/run/secrets` lifecycle).
 
 ---
 
@@ -59,7 +59,7 @@ The primary goal of `code-agent` is to safely execute untrusted and semi-trusted
 1. **Boundary 1: Control Plane**
    - **Components:** FastAPI gateway, Telegram bot ingress, Webhook intake, Temporal workflows, PostgreSQL persistence.
    - **Trust Level:** Highest. Owns authentication keys, database connection strings, and capability issuance.
-   - **Protection:** Task-supplied requests are untrusted input. Ingress sanitization contracts (`sanitize_legacy_ingress_payload`, `LegacyIngressTaskRequest`, `IngressMigrationAdapter`) define value stripping into `SecretRef(name=...)` before persistence. In M28.5A.2, production ingress endpoints MUST run the sanitizer before any durable boundary (Temporal workflow history or PostgreSQL). `SandboxCapabilityGrant` instances are derived strictly by server-side orchestrator policy via `CapabilityGrantFactory` (bound to authoritative registries). Furthermore, `validate_grant_for_execution` and `SecretResolver` perform consumption-side validation against authoritative registries, ensuring manually instantiated grants cannot bypass factory security invariants.
+   - **Protection:** Task-supplied requests are untrusted input. Ingress sanitization contracts (`sanitize_legacy_ingress_payload`, `LegacyIngressTaskRequest`, `IngressMigrationAdapter`) strip values into `SecretRef(name=...)` before durable task or workflow persistence. `SandboxCapabilityGrant` instances are derived strictly by server-side orchestrator policy via `CapabilityGrantFactory` (bound to authoritative registries). Furthermore, `validate_grant_for_execution` and `SecretResolver` perform consumption-side validation against authoritative registries, ensuring manually instantiated grants cannot bypass factory security invariants.
 
 2. **Boundary 2: Sandbox Infrastructure Host**
    - **Components:** Host Linux system, Docker daemon socket (`/var/run/docker.sock`), Temporal worker process.
@@ -89,7 +89,7 @@ The primary goal of `code-agent` is to safely execute untrusted and semi-trusted
 7. **Boundary 7: Artifacts & Observability**
    - **Components:** Captured stdout/stderr, execution manifests, OpenInference tracing spans, Postgres timeline events.
    - **Trust Level:** Public/operator-visible audit record.
-   - **Protection:** In-process `SecretRedactor` scrubs known secret patterns before writing logs, manifests, or timeline events. `ResolvedSecret` uses `__slots__` and redacted string representations to prevent accidental serialization. (Note: chunk-aware streaming redaction across raw container output buffer boundaries is scheduled as an M28.5A.2 runtime enforcement requirement).
+   - **Protection:** In-process `SecretRedactor` scrubs known secret patterns before writing logs, manifests, or timeline events. `ResolvedSecret` uses `__slots__` and redacted string representations to prevent accidental serialization. Chunk-aware streaming redaction covers raw container output buffer boundaries.
 
 ---
 
@@ -156,12 +156,16 @@ Any code granted a plaintext secret and permitted network egress can intentional
     Task container destroyed; temporary secret mounts unmounted and removed; EphemeralSecretStore handles expired/deleted; SecretRedactor discarded.
 ```
 
-In production deployments (M28.5A.2), `EphemeralSecretStore` uses a dedicated out-of-history encrypted backend with TTL and atomic batch commit/rollback (e.g., Redis with encryption-at-rest or Vault KV) shared by trusted ingress and trusted Temporal workers without serializing secret material into workflow execution history. `InMemoryEphemeralSecretStore` provides the in-memory reference implementation for single-process runners and test fixtures.
+Production execution uses `PostgresEphemeralSecretStore` with encrypted values,
+task-scoped handles, TTLs, and explicit cleanup. Trusted ingress and Temporal
+workers share this store without copying secret material into durable task
+records or Temporal workflow history. `InMemoryEphemeralSecretStore` remains the
+reference implementation for single-process runners and test fixtures.
 
 ---
 
 ## 6. Migration and Deprecation Schedule
 
-- **M28.5A (Current):** Typed contracts, threat model, immutable capability grants, ingress DTO separation, ephemeral secret store backend interfaces (`EphemeralSecretStore`, `EphemeralSecretRecord`, `EphemeralSecretHandle`, `InMemoryEphemeralSecretStore`), distributed definition retrieval, reserved credential policies (`github_token` -> `BROKER_ONLY`), task-scoping, and consumption-side audience/network/destination validation.
-- **M28.5A.2 (Follow-On):** Runtime wiring into `DockerNativeAgentExecutor`, production ingress endpoint plumbing (sanitizer execution and out-of-history `EphemeralSecretStore` integration before Temporal/PostgreSQL persistence), OS-level `.git` isolation, proxy TLS SNI validation, and live container security verification.
+- **M28.5A (Completed):** Typed contracts, threat model, immutable capability grants, ingress DTO separation, ephemeral secret store backend interfaces (`EphemeralSecretStore`, `EphemeralSecretRecord`, `EphemeralSecretHandle`, `InMemoryEphemeralSecretStore`), distributed definition retrieval, reserved credential policies (`github_token` -> `BROKER_ONLY`), task-scoping, and consumption-side audience/network/destination validation.
+- **M28.5A.2 (Completed):** Runtime wiring into `DockerNativeAgentExecutor`, production ingress sanitization and encrypted ephemeral-store integration before durable task and workflow persistence, OS-level `.git` isolation, proxy TLS SNI validation, and live container security verification.
 - **M29 (Target Cutoff):** Complete removal of `LegacyIngressTaskRequest` and raw secret ingress. Unregistered or raw secret payloads are rejected fail-closed with `DeprecatedLegacySecretsError`.

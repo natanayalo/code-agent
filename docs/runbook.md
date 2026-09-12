@@ -570,9 +570,10 @@ Postgres/Temporal/sandbox stack and disposable repository.
 Keep the private bundle under ignored `artifacts/`: it contains task IDs and
 authenticated timeline data. The public report is allowlisted and excludes task
 text, repository URLs, memory values, logs, artifacts, secrets, and notes.
-Only an `effective` report after manual private-bundle review supports closing
-M28. Use `cleanup --repo-url <disposable-repo-url>` to remove only
-evaluator-owned fixtures.
+An `effective` report after manual private-bundle review was the evidence gate
+used to close M28. When reproducing that evaluation, use
+`cleanup --repo-url <disposable-repo-url>` to remove only evaluator-owned
+fixtures.
 
 ## 10) Antigravity Migration Guide
 

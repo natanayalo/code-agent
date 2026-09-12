@@ -44,9 +44,9 @@ per-task Docker containers. The trusted Temporal worker retains Docker
 authority; executor containers receive only the task workspace, scratch
 directories, staged provider auth, and a task-private public-HTTPS proxy.
 They never receive the Docker socket, control-plane credentials, or host auth
-mounts. The M28 real-worker matrix has run through this boundary with eight
-Codex/Antigravity cold-and-assisted pairs; it establishes safe expected memory
-behavior, not a general timing-improvement claim.
+mounts. Real-worker validation has exercised this boundary with paired Codex
+and Antigravity runs, establishing the expected safe memory behavior without
+making a general timing-improvement claim.
 
 The platform is organized into these layers:
 
@@ -109,7 +109,7 @@ scripts/up.sh
 The Compose stack uses Temporal unconditionally. If Temporal is unavailable,
 new submissions fail visibly; there is no runtime selector or polling fallback.
 
-The M25.2 decomposed-task fan-out pilot is disabled by default. Set
+The decomposed-task fan-out pilot is disabled by default. Set
 `CODE_AGENT_DECOMPOSED_FANOUT_ENABLED=true` only to enable version-gated,
 read-only two-node waves.
 
@@ -284,20 +284,3 @@ The workflow validates that only `CHANGELOG.md` changed before pushing and
 normalizes the generated file before committing it. Pure `CHANGELOG.md` pushes
 are ignored by the changelog and general CI push workflows to avoid follow-up
 no-op or formatting-only runs after the generated commit lands.
-
-## Current Focus
-
-The current phase is Temporal stabilization and measured reliability:
-
-1. finish M28 memory effectiveness and session continuity
-2. M28.5 execution architecture foundation
-3. M29 provider reliability and evidence-driven routing
-4. M30 GitHub-native task and delivery control
-5. M31 proactive operations and safe scheduled work
-
-M26 review-comment repair is complete. M27 reliability-based autonomy remains
-deferred until M29 and later operational evidence support reversible policy
-thresholds. Durable multi-agent execution remains future/conditional work, not
-current product scope.
-
-See [`docs/roadmap.md`](docs/roadmap.md) for full milestone plans and sequencing.
