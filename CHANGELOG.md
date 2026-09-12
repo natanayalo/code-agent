@@ -46,6 +46,11 @@ completed-task ledger; keep completed work here instead.
 - Feat: add temporal repair completion loop ([#345](https://github.com/natanayalo/code-agent/pull/345))
 
 
+### CI
+
+- Ci: parallelize unit tests with xdist ([#391](https://github.com/natanayalo/code-agent/pull/391))
+
+
 ### Changed
 
 - Build(deps-dev): bump undici from 7.28.0 to 7.29.1 in /dashboard ([#389](https://github.com/natanayalo/code-agent/pull/389))
