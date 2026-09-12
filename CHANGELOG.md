@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: resolve task repo virtualenv in native agent sandbox shell environment ([#381](https://github.com/natanayalo/code-agent/pull/381))
+
 - Feat: support broker-authenticated git operations for private repository provisioning ([#380](https://github.com/natanayalo/code-agent/pull/380))
 
 - Feat: implement M28.5A.2 native agent docker isolation and ingress secret enforcement ([#378](https://github.com/natanayalo/code-agent/pull/378))
