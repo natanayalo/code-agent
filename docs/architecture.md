@@ -318,38 +318,39 @@ repair-loop branch. The patch-aware workflow must remain deployed until all
 M25.4 histories have closed. Deep-scout phase chaining is not a supported
 Temporal lifecycle path.
 
-## Planned Execution Trust Boundary
+## Execution Trust Boundary and Future Evolution
 
-M28.5A will define and harden this boundary before selecting a specific
-container/runtime product:
+M28.5A and M28.5A.2 established the current boundary. The trusted Temporal
+worker performs the narrow sandbox-broker responsibilities and provisions a
+one-shot Docker executor for each native provider invocation:
 
 ```mermaid
 flowchart TD
-    CP["Temporal worker / control plane"] --> BROKER["Narrow Sandbox Broker / Sandbox Runtime API"]
-    BROKER --> ISO["Isolated execution environment"]
+    CP["Control plane"] --> BROKER["Trusted Temporal worker / sandbox broker"]
+    BROKER --> ISO["One-shot Docker executor"]
     ISO --> AGENT["Codex / Antigravity"]
 ```
 
-Only the sandbox infrastructure component should need container-runtime
-authority. Native agent processes must not access the container-control
+Only the trusted sandbox infrastructure has container-runtime authority.
+Native agent processes do not access the container-control
 interface, unrelated host resources, or broad infrastructure credentials.
-Provider credentials should be exposed at the narrowest practical scope and
+Provider credentials are exposed at the narrowest practical scope and
 lifetime.
 
-Target workflow and orchestration contracts should prefer opaque `SecretRef`
-or capability references over raw secret values. The sandbox broker/runtime
-should resolve and inject only the credential required by the granted
-capability, just in time and for the narrowest practical process and lifetime.
+Workflow and orchestration contracts prefer opaque `SecretRef` or capability
+references over raw secret values. The sandbox broker/runtime resolves and
+injects only the credential required by the granted capability, just in time
+and for the narrowest practical process and lifetime.
 Secrets should not unnecessarily enter Temporal history, `AgentEvent`, a
 persisted `ContextEnvelope`, logs, artifacts, or general worker-request
-payloads. M28.5A will define the contract and threat model without prescribing
-the exact secret-resolution implementation.
+payloads.
 
-The planned threat model comes before an implementation choice. A dedicated
-broker, rootless Docker, user namespaces, a containerd/runtime abstraction, a
-remote sandbox service, and future remote execution are options to evaluate,
-not decisions already made. Hardening must preserve current task reliability
-and must not increase autonomous privileges.
+The authoritative [threat model](architecture/threat_model.md) records the
+implemented controls and residual risks. A separately deployed broker, rootless
+Docker, user namespaces, a containerd/runtime abstraction, a remote sandbox
+service, and future remote execution remain options to evaluate rather than
+current commitments. Further hardening must preserve task reliability and must
+not increase autonomous privileges.
 
 ## Target State Ownership
 

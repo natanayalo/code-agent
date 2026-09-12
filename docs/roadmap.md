@@ -20,16 +20,15 @@
 
 ## Current phase
 
-Phase 4A: Temporal stabilization and measured reliability. M25.6 and M26 are
-complete. M28 is active.
+Phase 4A: Temporal stabilization and measured reliability. M25.6, M26, and M28
+are complete. M28.5 is active.
 
 Committed/current priority:
 
-1. finish M28: Memory Effectiveness and Session Continuity
-2. M28.5: Execution Architecture Foundation
-3. M29: Provider Reliability and Evidence-Driven Routing
-4. M30: GitHub-Native Task and Delivery Control
-5. M31: Proactive Operations and Safe Scheduled Work
+1. M28.5: Execution Architecture Foundation
+2. M29: Provider Reliability and Evidence-Driven Routing
+3. M30: GitHub-Native Task and Delivery Control
+4. M31: Proactive Operations and Safe Scheduled Work
 
 Deferred / evidence-gated:
 
