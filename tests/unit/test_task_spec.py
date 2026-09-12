@@ -491,6 +491,10 @@ def test_build_task_spec_negated_refactor_does_not_classify_as_refactor() -> Non
         ("Please restructure the models.", "refactor"),
         ("Redesign the state machine.", "refactor"),
         ("Do not refactor the database. Refactor the authentication service.", "refactor"),
+        ("Fix it; do not refactor or redesign anything.", "bugfix"),
+        ("Do not refactor but redesign the parser.", "refactor"),
+        ("Fix it without making any changes to the overall architecture.", "bugfix"),
+        ("Fix it without changing the public API design.", "bugfix"),
     ],
 )
 def test_build_task_spec_refactor_classification_distinguishes_negation(

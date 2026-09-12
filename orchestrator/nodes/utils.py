@@ -22,8 +22,15 @@ OPENROUTER_WORKER: Final[WorkerType] = "openrouter"
 _COMPLEX_TASK_PATTERN = re.compile(
     rf"(?<![\w-])(?:{'|'.join(re.escape(marker) for marker in COMPLEX_TASK_MARKERS)})(?![\w-])"
 )
+_REFACTOR_TERM_PATTERN: Final[str] = (
+    r"(?:refactor(?:ing|s)?|restructur(?:e|ing|es)?|redesign(?:ing|s)?|"
+    r"architectur(?:e|al)|design(?:ed|ing|s)?)"
+)
 _NEGATED_REFACTOR_PATTERN: Final[re.Pattern[str]] = re.compile(
-    r"\b(?:do\s+not|don't|dont|avoid|without|no|never)\s+(?:[\w-]+\s+){0,2}(?:refactor(?:ing|s)?|restructur(?:e|ing|es)?|redesign(?:ing|s)?|architectur(?:e|al))\b",
+    rf"\b(?:do\s+not|don't|dont|avoid|without|no|never)\s+"
+    rf"(?:(?!(?:{_REFACTOR_TERM_PATTERN}|but)\b)[\w-]+\s+){{0,6}}"
+    rf"{_REFACTOR_TERM_PATTERN}\b"
+    rf"(?:\s+(?:and|or)\s+{_REFACTOR_TERM_PATTERN}\b)*",
     re.IGNORECASE,
 )
 

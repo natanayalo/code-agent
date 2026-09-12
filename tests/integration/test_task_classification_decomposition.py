@@ -123,7 +123,7 @@ def test_affirmative_refactor_triggers_architectural_decomposition() -> None:
 def test_mixed_refactor_and_negation_triggers_architectural_decomposition() -> None:
     """A task with both negative restrictions and affirmative refactoring requests decomposes."""
     task_text = (
-        "Do not refactor the database layer. " "Refactor architecture across files in orchestrator."
+        "Do not refactor the database layer. Refactor architecture across files in orchestrator."
     )
     initial_state = OrchestratorState.model_validate(
         {
@@ -168,6 +168,40 @@ def test_mixed_refactor_and_negation_triggers_architectural_decomposition() -> N
     decomp_result = decompose_task_plan(state.task_plan, task_spec)
     assert decomp_result.status == "decomposed"
     assert len(decomp_result.nodes) == 3
+
+
+def test_contrastive_redesign_request_triggers_architectural_decomposition() -> None:
+    """A redesign after a contrastive conjunction remains an affirmative request."""
+    task_text = "Do not refactor the database layer but redesign the task parser."
+    state = OrchestratorState.model_validate(
+        {
+            "task": TaskRequest(
+                task_id="task-test-contrastive",
+                task_text=task_text,
+                repo_url="https://github.com/natanayalo/code-agent",
+                branch="master",
+            ),
+        }
+    )
+
+    ingest_result = ingest_task(state)
+    state = state.model_copy(update={"normalized_task_text": ingest_result["normalized_task_text"]})
+    classify_result = classify_task(state)
+    assert classify_result["task_kind"] == "architecture"
+    state = state.model_copy(update={"task_kind": classify_result["task_kind"]})
+
+    plan_result = plan_task(state)
+    assert plan_result["task_plan"] is not None
+    task_plan = TaskPlan.model_validate(plan_result["task_plan"])
+    state = state.model_copy(update={"task_plan": task_plan})
+
+    task_spec = build_task_spec_for_request(
+        state.task,
+        task_kind=state.task_kind,
+        task_plan=state.task_plan,
+    )
+    assert task_spec.task_type == "refactor"
+    assert decompose_task_plan(task_plan, task_spec).status == "decomposed"
 
 
 @pytest.mark.parametrize(
