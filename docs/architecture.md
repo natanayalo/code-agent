@@ -358,7 +358,7 @@ Current lifecycle information overlaps across Temporal workflow/history state,
 serialized `TemporalTaskState` (`OrchestratorState`), task and worker-run
 tables, execution-plan/node-attempt rows, and timeline/event projections.
 Existing persistence remains useful for activity handoff, idempotency,
-operator queries, and compatibility; M28.5B will not delete it for
+operator queries, and compatibility; M28.5B did not delete it for
 architectural purity.
 
 | Owner | Target authoritative responsibilities |
