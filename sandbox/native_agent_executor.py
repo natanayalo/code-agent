@@ -49,6 +49,7 @@ _PROTECTED_ENV_KEYS: Final[frozenset[str]] = frozenset(
 _EXECUTOR_ENV_KEYS: Final[frozenset[str]] = frozenset(
     {
         "AGY_CLI_DISABLE_AUTO_UPDATE",
+        "BASH_ENV",
         "CODEX_HOME",
         "FORCE_COLOR",
         "GEMINI_HOME",
@@ -185,7 +186,28 @@ def _sandbox_file_secret_mount(sandbox_secrets_dir: Path) -> str:
     )
 
 
-# Removed obsolete stage_provider_auth
+def stage_agent_home_shell_environment(
+    agent_home: Path,
+    repo_path: Path,
+) -> Path:
+    """Stage dynamic task virtualenv discovery scripts in agent home."""
+    env_script = agent_home / ".code_agent_env.sh"
+    repo_venv_bin = repo_path.resolve() / ".venv" / "bin"
+    script_content = (
+        f'if [ -d "{repo_venv_bin}" ]; then\n'
+        f'    case ":$PATH:" in\n'
+        f'        *":{repo_venv_bin}:"*) ;;\n'
+        f'        *) export PATH="{repo_venv_bin}:$PATH" ;;\n'
+        f"    esac\n"
+        f"fi\n"
+    )
+    env_script.write_text(script_content, encoding="utf-8")
+    loader_snippet = (
+        'if [ -f "$HOME/.code_agent_env.sh" ]; then\n    . "$HOME/.code_agent_env.sh"\nfi\n'
+    )
+    for startup_file in (agent_home / ".profile", agent_home / ".bashrc"):
+        startup_file.write_text(loader_snippet, encoding="utf-8")
+    return env_script
 
 
 def is_public_egress_host(host: str, resolved_addresses: list[str]) -> bool:
@@ -520,6 +542,8 @@ class DockerNativeAgentExecutor:
                 destination_by_ref=context.provider_bootstrap.destination_by_ref,
                 task_home=agent_home,
             )
+            env_script = stage_agent_home_shell_environment(agent_home, workspace.repo_path)
+            scoped_env["BASH_ENV"] = str(env_script)
 
             # Change ownership of task home and workspace for the 65532 user
             def _chown_recursive(path: Path) -> None:

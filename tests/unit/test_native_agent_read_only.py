@@ -1,6 +1,7 @@
 """Snapshot boundary regressions: traversal races, errors, and symlink metadata."""
 
 import os
+import subprocess
 
 import pytest
 
@@ -77,3 +78,19 @@ def test_nested_runtime_and_broker_database_do_not_change_snapshot(tmp_path):
     (tmp_path / ".sandbox.db-wal").write_bytes(b"journal")
     after = audit.capture_read_only_workspace_snapshot(tmp_path)
     assert audit.read_only_mutation_evidence(before, after) == ([], None)
+
+
+def test_tracked_file_inside_ignored_directory_remains_in_snapshot(tmp_path):
+    repo = tmp_path / "repo"
+    tracked_cache = repo / ".cache" / "tracked.json"
+    tracked_cache.parent.mkdir(parents=True)
+    tracked_cache.write_text("before", encoding="utf-8")
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "add", ".cache/tracked.json"], cwd=repo, check=True, capture_output=True)
+
+    before = audit.capture_read_only_workspace_snapshot(repo)
+    tracked_cache.write_text("after", encoding="utf-8")
+    (tracked_cache.parent / "untracked.bin").write_bytes(b"runtime noise")
+    after = audit.capture_read_only_workspace_snapshot(repo)
+
+    assert audit.read_only_mutation_evidence(before, after)[0] == [".cache/tracked.json"]

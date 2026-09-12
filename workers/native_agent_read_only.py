@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import stat
+import subprocess
 from pathlib import Path
 
 from sandbox.audit import _should_ignore_path
@@ -15,6 +16,47 @@ class ReadOnlySnapshotError(RuntimeError):
 
 
 ReadOnlyWorkspaceSnapshot = dict[str, tuple[str, int, str]]
+
+
+def _tracked_repository_paths(repo_path: Path) -> frozenset[str]:
+    """Return tracked paths so ignored runtime segments cannot hide source mutations."""
+    try:
+        completed = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_path),
+                "-c",
+                "core.hooksPath=/dev/null",
+                "ls-files",
+                "--cached",
+                "-z",
+            ],
+            check=False,
+            capture_output=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ReadOnlySnapshotError(f"cannot inspect tracked repository paths: {exc}") from exc
+
+    if completed.returncode == 0:
+        return frozenset(os.fsdecode(path) for path in completed.stdout.split(b"\0") if path)
+
+    error = completed.stderr.decode("utf-8", errors="replace").strip()
+    if "not a git repository" in error.lower():
+        return frozenset()
+    raise ReadOnlySnapshotError(error or "git ls-files failed without output")
+
+
+def _tracked_path_ancestors(tracked_paths: frozenset[str]) -> frozenset[str]:
+    """Return directories that must be traversed to snapshot tracked ignored files."""
+    ancestors: set[str] = set()
+    for tracked_path in tracked_paths:
+        for parent in Path(tracked_path).parents:
+            if parent == Path("."):
+                break
+            ancestors.add(parent.as_posix())
+    return frozenset(ancestors)
 
 
 def _snapshot_entry(
@@ -47,7 +89,12 @@ def _snapshot_entry(
 
 def capture_read_only_workspace_snapshot(repo_path: Path) -> ReadOnlyWorkspaceSnapshot:
     """Capture source content and metadata without following symlinks or gitignore."""
+    if not repo_path.is_dir():
+        raise ReadOnlySnapshotError(f"repository path is unavailable: {repo_path}")
+
     snapshot: ReadOnlyWorkspaceSnapshot = {}
+    tracked_paths = _tracked_repository_paths(repo_path)
+    tracked_ancestors = _tracked_path_ancestors(tracked_paths)
 
     def visit(directory_fd: int, relative_path: Path = Path()) -> None:
         try:
@@ -58,7 +105,11 @@ def capture_read_only_workspace_snapshot(repo_path: Path) -> ReadOnlyWorkspaceSn
             ) from exc
         for entry in entries:
             child_relative = relative_path / entry.name
-            if _should_ignore_path(child_relative.as_posix()) or child_relative.as_posix() in {
+            child_path = child_relative.as_posix()
+            ignored_untracked_path = _should_ignore_path(child_path) and (
+                child_path not in tracked_paths and child_path not in tracked_ancestors
+            )
+            if ignored_untracked_path or child_path in {
                 ".sandbox.db",
                 ".sandbox.db-shm",
                 ".sandbox.db-wal",
@@ -86,8 +137,6 @@ def capture_read_only_workspace_snapshot(repo_path: Path) -> ReadOnlyWorkspaceSn
             except OSError as exc:
                 raise ReadOnlySnapshotError(f"cannot inspect {path}: {exc}") from exc
 
-    if not repo_path.is_dir():
-        raise ReadOnlySnapshotError(f"repository path is unavailable: {repo_path}")
     try:
         root_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
         root_fd = os.open(repo_path, root_flags)

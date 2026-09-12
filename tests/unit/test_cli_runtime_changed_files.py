@@ -139,6 +139,81 @@ def test_collect_changed_files_runs_git_in_explicit_working_directory() -> None:
     assert [command for command, _ in session.calls] == [status_command]
 
 
+def test_collect_changed_files_ignores_untracked_native_paths() -> None:
+    """Session changed-file collection should exclude internal native runner files."""
+    session = _FakeSession(
+        {
+            "git status --porcelain=v1 -z --untracked-files=all": _command_result(
+                "git status --porcelain=v1 -z --untracked-files=all",
+                output=(
+                    " M src/main.py\0"
+                    "?? .agent_home/.code_agent_env.sh\0"
+                    "?? .agent_home/.profile\0"
+                    "?? .code-agent/native-agent-runner/stdout.txt\0"
+                    "?? .cache/pip/sample.whl\0"
+                    "?? real_untracked.py\0"
+                ),
+            )
+        }
+    )
+
+    changed_files = collect_changed_files(session)
+
+    assert changed_files == ["src/main.py", "real_untracked.py"]
+
+
+def test_collect_changed_files_preserves_tracked_modifications_to_ignored_path_segments() -> None:
+    """Tracked modifications to paths matching noise/runtime segments must never be ignored."""
+    session = _FakeSession(
+        {
+            "git status --porcelain=v1 -z --untracked-files=all": _command_result(
+                "git status --porcelain=v1 -z --untracked-files=all",
+                output=(
+                    " M .cache/tracked_config.json\0"
+                    " M .env\0"
+                    " M .pytest_cache/session.ini\0"
+                    " M __pycache__/tracked.pyc\0"
+                    " M .agent_home/custom_config.json\0"
+                    "?? .cache/noise.whl\0"
+                    "?? .agent_home/.code_agent_env.sh\0"
+                ),
+            )
+        }
+    )
+
+    changed_files = collect_changed_files(session)
+
+    assert changed_files == [
+        ".cache/tracked_config.json",
+        ".env",
+        ".pytest_cache/session.ini",
+        "__pycache__/tracked.pyc",
+        ".agent_home/custom_config.json",
+    ]
+
+
+def test_collect_changed_files_fallback_lines_preserves_tracked_ignored_path_segments() -> None:
+    """Fallback line parser must also retain tracked modifications to noise segments."""
+    session = _FakeSession(
+        {
+            "git status --porcelain=v1 -z --untracked-files=all": DockerShellSessionError("boom"),
+            "git status --porcelain=v1 --untracked-files=all": _command_result(
+                "git status --porcelain=v1 --untracked-files=all",
+                output=(
+                    " M .cache/tracked.json\n"
+                    " M .env\n"
+                    "?? .cache/untracked_noise.txt\n"
+                    "?? .agent_home/.code_agent_env.sh\n"
+                ),
+            ),
+        }
+    )
+
+    changed_files = collect_changed_files(session)
+
+    assert changed_files == [".cache/tracked.json", ".env"]
+
+
 def test_collect_changed_files_from_repo_path_parses_porcelain_z_output(monkeypatch) -> None:
     """Host-side fallback should parse git porcelain output for changed files."""
 
@@ -170,11 +245,14 @@ def test_collect_changed_files_from_repo_path_ignores_only_untracked_native_path
                 b" M README.md\0"
                 b" M .vscode/settings.json\0"
                 b" M .agent_home/.gemini/settings.json\0"
+                b" M .cache/tracked.json\0"
+                b" M .env\0"
                 b"?? .agent_home/.gemini/antigravity-cli/cache.json\0"
                 b"?? .code-agent/native-agent-runner/stdout.txt\0"
                 b"?? .code-agent/native-events.jsonl\0"
                 b"?? .code-agent/native-final-message.json\0"
                 b"?? .code-agent/native-response.schema.json\0"
+                b"?? .cache/noise.whl\0"
                 b" M .code-agent/native-final-message.json\0"
             ),
             stderr=b"",
@@ -188,6 +266,8 @@ def test_collect_changed_files_from_repo_path_ignores_only_untracked_native_path
         "README.md",
         ".vscode/settings.json",
         ".agent_home/.gemini/settings.json",
+        ".cache/tracked.json",
+        ".env",
         ".code-agent/native-final-message.json",
     ]
 
