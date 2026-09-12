@@ -69,6 +69,15 @@ def test_pyproject_dev_dependencies_include_pytest_asyncio() -> None:
     assert isinstance(version_spec, str) and version_spec.startswith(">=")
 
 
+def test_pyproject_dev_dependencies_include_pytest_xdist() -> None:
+    """Parallel unit execution depends on pytest-xdist being installed explicitly."""
+    with Path("pyproject.toml").open("rb") as file:
+        config = tomllib.load(file)
+
+    dev_dependencies = config["tool"]["poetry"]["group"]["dev"]["dependencies"]
+    assert dev_dependencies["pytest-xdist"] == ">=3.8.0,<4.0"
+
+
 def test_pytest_workflow_runs_unit_coverage_and_integration_suite_on_push() -> None:
     """The pytest workflow should validate each push with unit coverage plus integration tests."""
     workflow = _load_yaml(".github/workflows/pytest.yml")
@@ -86,6 +95,7 @@ def test_pytest_workflow_runs_unit_coverage_and_integration_suite_on_push() -> N
     assert workflow["jobs"]["pytest"]["timeout-minutes"] == 15
     assert "import pytest_asyncio" in plugin_step["run"]
     assert "tests/unit" in unit_step["run"]
+    assert "pytest -n 3 tests/unit tests/workers" in unit_step["run"]
     for expected_flag in (
         "--cov=apps",
         "--cov=db",
