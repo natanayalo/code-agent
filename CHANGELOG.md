@@ -46,6 +46,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Changed
 
+- Build(deps-dev): bump vitest from 4.1.5 to 4.1.11 in /dashboard ([#386](https://github.com/natanayalo/code-agent/pull/386))
+
 - WIP: M28 real-worker effectiveness evidence framework ([#368](https://github.com/natanayalo/code-agent/pull/368))
 
 - M25.6: publish pinned real-worker Temporal baseline ([#361](https://github.com/natanayalo/code-agent/pull/361))
