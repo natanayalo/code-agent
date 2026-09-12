@@ -26,7 +26,10 @@ from orchestrator.constants import (
     RISK_ORDER,
     VALID_DELIVERY_MODES,
 )
-from orchestrator.nodes.utils import _dedupe_preserving_order
+from orchestrator.nodes.utils import (
+    _dedupe_preserving_order,
+    _strip_negated_refactor_requests,
+)
 from orchestrator.state import (
     TaskDeliveryMode,
     TaskPlan,
@@ -81,7 +84,11 @@ def _resolve_task_type(task_text: str, task_kind: str | None) -> TaskSpecType:
         return "docs"
     if contains_marker(task_text, REVIEW_FIX_MARKERS):
         return "review_fix"
-    if contains_marker(task_text, REFACTOR_MARKERS) or task_kind == "architecture":
+    active_refactor_text = _strip_negated_refactor_requests(task_text)
+    has_affirmative_refactor = contains_marker(active_refactor_text, REFACTOR_MARKERS)
+    if has_affirmative_refactor or (
+        task_kind == "architecture" and not contains_marker(task_text, REFACTOR_MARKERS)
+    ):
         return "refactor"
     if contains_marker(task_text, INVESTIGATION_MARKERS) or task_kind == "ambiguous":
         return "investigation"
