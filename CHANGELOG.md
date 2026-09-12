@@ -76,6 +76,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Fixed
 
+- Fix(orchestrator): ignore negated refactor instructions in task classification ([#382](https://github.com/natanayalo/code-agent/pull/382))
+
 - Fix: require verification and broker delivery before completing tasks ([#383](https://github.com/natanayalo/code-agent/pull/383))
 
 - Fix: restore AGY authentication in native task sandboxes ([#384](https://github.com/natanayalo/code-agent/pull/384))
