@@ -242,6 +242,18 @@ The dashboard uses HttpOnly cookies for session management. To enable it:
 > [!NOTE]
 > **Stateless Logout**: The dashboard uses stateless JWTs with a 1-hour expiry. Logging out clears the browser cookie, but the token remains technically valid until it expires.
 
+## Native Agent Event Capture (Milestone M28.5C)
+
+Milestone M28.5C introduces a typed, provider-neutral `AgentEvent` foundation for native agent runs (Codex and Antigravity).
+
+- **Typed Event Stream**: 11 canonical event variants (`agent_started`, `agent_progress`, `agent_message`, `tool_requested`, `tool_completed`, `file_changed`, `permission_requested`, `artifact_produced`, `budget_updated`, `agent_failed`, `agent_completed`).
+- **Privacy & Safety**: Provider reasoning and internal chain of thought (`reasoning` in Codex, `thinking` in Antigravity) are suppressed from emitted events. Text fields are redacted with `SecretRedactor` and bounded in length.
+- **Artifact Generation**: When event normalization yields events, an `agent-events-v1.jsonl` artifact (artifact name `agent_event_stream`) is created in the run artifact directory.
+- **Opt-in Only**: Event capture is disabled by default and does not affect the existing `WorkerResult` contract or persistence layer. Enable via:
+  ```bash
+  CODE_AGENT_NATIVE_EVENT_CAPTURE_ENABLED=1
+  ```
+
 ## Verification Commands
 
 The repository coverage target is 90%. During post-Temporal coverage recovery,

@@ -76,6 +76,7 @@ class GeminiCliWorker(GeminiCliWorkerNativeMixin, Worker):
         tool_registry: ToolRegistry | None = None,
         default_runtime_mode: WorkerRuntimeMode = WorkerRuntimeMode.TOOL_LOOP,
         native_sandbox_enabled: bool = DEFAULT_GEMINI_NATIVE_SANDBOX_ENABLED,
+        native_event_capture_enabled: bool = False,
         ephemeral_store: EphemeralSecretStore | None = None,
     ) -> None:
         self.runtime_adapter = runtime_adapter
@@ -95,6 +96,8 @@ class GeminiCliWorker(GeminiCliWorkerNativeMixin, Worker):
         self.runtime_settings = runtime_settings or CliRuntimeSettings()
         self.default_runtime_mode = default_runtime_mode
         self.native_sandbox_enabled = native_sandbox_enabled
+        # Opt-in via CODE_AGENT_NATIVE_EVENT_CAPTURE_ENABLED.
+        self.native_event_capture_enabled = native_event_capture_enabled
 
         self.sandbox_adapter = SandboxSessionAdapter(
             container_manager=self.container_manager,

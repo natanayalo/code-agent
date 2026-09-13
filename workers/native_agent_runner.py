@@ -30,6 +30,11 @@ from sandbox.native_agent_executor import (
 from sandbox.redact import SecretRedactor, sanitize_command
 from sandbox.scratch import node_agent_home, node_run_root
 from workers.adapter_utils import truncate_detail_keep_tail
+from workers.agent_event import AgentEvent, AgentFailed, AgentStarted
+from workers.agent_event_normalizer import (
+    NormalizationStats,
+    normalize_provider_stream,
+)
 from workers.base import ArtifactReference
 from workers.cli_runtime import collect_changed_files_since_ref_from_repo_path
 from workers.failure_taxonomy import find_infra_failure_marker
@@ -494,6 +499,33 @@ def _handle_network_error_retry(
     return False
 
 
+def _build_timeout_events(
+    request: NativeAgentRunRequest,
+    summary: str,
+) -> list[AgentEvent]:
+    if request.normalizer is None:
+        return []
+    run_id = request.task_id or request.session_id or "run"
+    return [
+        AgentStarted(
+            run_id=run_id,
+            sequence=1,
+            task_id=request.task_id,
+            session_id=request.session_id,
+            worker_type=request.worker_type,
+        ),
+        AgentFailed(
+            run_id=run_id,
+            sequence=2,
+            task_id=request.task_id,
+            session_id=request.session_id,
+            worker_type=request.worker_type,
+            failure_summary=summary,
+            failure_kind="timeout",
+        ),
+    ]
+
+
 def _handle_native_agent_timeout(
     request: NativeAgentRunRequest,
     exc: subprocess.TimeoutExpired,
@@ -552,10 +584,11 @@ def _handle_native_agent_timeout(
             )
         )
 
+    timeout_summary = f"Native agent command timed out after {request.timeout_seconds}s."
     return False, _finalize_native_agent_run(
         request=request,
         status="error",
-        summary=f"Native agent command timed out after {request.timeout_seconds}s.",
+        summary=timeout_summary,
         command_text=command_text,
         started_at=started_at,
         timed_out=True,
@@ -563,6 +596,7 @@ def _handle_native_agent_timeout(
         stderr=stderr_text,
         artifacts=artifacts,
         friction_reports=friction_reports,
+        normalized_events=_build_timeout_events(request, timeout_summary),
     )
 
 
@@ -642,6 +676,27 @@ def _execute_native_agent_subprocess(
                     provider_log_path,
                 )
                 if timeout_result is None:
+                    timeout_events: list[AgentEvent] = []
+                    if request.normalizer is not None:
+                        t_run_id = request.task_id or request.session_id or "run"
+                        timeout_events = [
+                            AgentStarted(
+                                run_id=t_run_id,
+                                sequence=1,
+                                task_id=request.task_id,
+                                session_id=request.session_id,
+                                worker_type=request.worker_type,
+                            ),
+                            AgentFailed(
+                                run_id=t_run_id,
+                                sequence=2,
+                                task_id=request.task_id,
+                                session_id=request.session_id,
+                                worker_type=request.worker_type,
+                                failure_summary="Native agent executor timed out.",
+                                failure_kind="timeout",
+                            ),
+                        ]
                     timeout_result = _finalize_native_agent_run(
                         request=request,
                         status="error",
@@ -650,10 +705,33 @@ def _execute_native_agent_subprocess(
                         started_at=started_at,
                         timed_out=True,
                         termination_reason="timeout",
+                        normalized_events=timeout_events,
                     )
                 timeout_result.termination_reason = "timeout"
                 return timeout_result
             if execution.termination_reason == "cancelled":
+                cancelled_events: list[AgentEvent] = []
+                if request.normalizer is not None:
+                    c_run_id = request.task_id or request.session_id or "run"
+                    cancelled_events = [
+                        AgentStarted(
+                            run_id=c_run_id,
+                            sequence=1,
+                            task_id=request.task_id,
+                            session_id=request.session_id,
+                            worker_type=request.worker_type,
+                        ),
+                        AgentFailed(
+                            run_id=c_run_id,
+                            sequence=2,
+                            task_id=request.task_id,
+                            session_id=request.session_id,
+                            failure_summary=(
+                                "Native agent execution was cancelled by the orchestrator."
+                            ),
+                            failure_kind="cancelled",
+                        ),
+                    ]
                 return _finalize_native_agent_run(
                     request=request,
                     status="error",
@@ -673,6 +751,7 @@ def _execute_native_agent_subprocess(
                         redactor=request.redactor,
                     ),
                     termination_reason="cancelled",
+                    normalized_events=cancelled_events,
                 )
             return completed, execution.termination_reason
         except subprocess.TimeoutExpired as exc:
@@ -802,6 +881,77 @@ def _build_native_agent_artifacts(
     return artifacts, final_message, files_changed, diff_text
 
 
+def _process_native_agent_events(
+    request: NativeAgentRunRequest,
+    *,
+    artifact_root: Path,
+    events_path: Path | None,
+    stdout_text: str,
+    files_changed: list[str],
+    exit_code: int | None,
+    artifacts: list[ArtifactReference],
+) -> tuple[list[AgentEvent], NormalizationStats | None]:
+    """Normalize raw provider events, write agent-events-v1.jsonl, and attach to artifacts."""
+    if request.normalizer is None:
+        return [], None
+
+    raw_records: list[str] = []
+    if events_path is not None and events_path.is_file() and events_path.stat().st_size > 0:
+        raw_records = events_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    elif events_path is not None:
+        logger.warning(
+            "Expected provider event stream not found or empty: %s",
+            events_path,
+            extra={"session_id": request.session_id, "task_id": request.task_id},
+        )
+        return [], None
+    elif stdout_text and stdout_text.strip():
+        raw_records = stdout_text.splitlines()
+
+    if not raw_records:
+        return [], None
+
+    run_id = request.task_id or request.session_id or "run"
+    try:
+        normalized_events, stats = normalize_provider_stream(
+            records=raw_records,
+            normalizer=request.normalizer,
+            run_id=run_id,
+            task_id=request.task_id,
+            session_id=request.session_id,
+            worker_type=request.worker_type,
+            redactor=request.redactor,
+            default_exit_code=exit_code,
+            files_changed=files_changed,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Agent event normalization failed: %s",
+            exc,
+            extra={"session_id": request.session_id, "task_id": request.task_id},
+        )
+        return [], None
+
+    if stats.normalized > 0:
+        event_artifact_path = artifact_root / "agent-events-v1.jsonl"
+        try:
+            with event_artifact_path.open("w", encoding="utf-8") as f:
+                for ev in normalized_events:
+                    f.write(ev.model_dump_json() + "\n")
+            artifacts.append(
+                ArtifactReference(
+                    name="agent_event_stream",
+                    uri=event_artifact_path.as_uri(),
+                    artifact_type="agent_event_stream",
+                )
+            )
+        except OSError as exc:
+            logger.warning("Failed to write agent-events-v1.jsonl: %s", exc)
+        return normalized_events, stats
+
+    return [], stats
+
+
 def _collect_native_agent_results(
     request: NativeAgentRunRequest,
     completed: subprocess.CompletedProcess[str],
@@ -831,6 +981,16 @@ def _collect_native_agent_results(
             final_message_path,
             stdout_text,
             stderr_text,
+        )
+
+        normalized_events, normalization_stats = _process_native_agent_events(
+            request,
+            artifact_root=artifact_root,
+            events_path=events_path,
+            stdout_text=stdout_text,
+            files_changed=files_changed,
+            exit_code=completed.returncode,
+            artifacts=artifacts,
         )
 
         status, summary, friction_reports = _determine_exit_status(
@@ -868,6 +1028,8 @@ def _collect_native_agent_results(
             json_payload_source=json_payload_source,
             json_payload_rejected_reason=json_payload_rejected_reason,
             friction_reports=friction_reports,
+            normalized_events=normalized_events,
+            normalization_stats=normalization_stats,
         )
     except (OSError, subprocess.SubprocessError, ValueError, RuntimeError, AttributeError) as exc:
         logger.debug("Failed while collecting artifacts: %s", exc)

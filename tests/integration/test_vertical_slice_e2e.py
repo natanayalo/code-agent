@@ -417,3 +417,76 @@ async def test_vertical_slice_e2e_repairs_in_retained_workspace(
         assert [event.sequence_number for event in timeline] == list(
             range(first_sequence, first_sequence + len(timeline))
         )
+
+
+@pytest.mark.anyio
+async def test_event_stream_smoke_with_normalized_artifact(tmp_path: Path, monkeypatch):
+    """Smoke test ensuring native agent run writes agent-events-v1.jsonl artifact."""
+    import json
+    import sys
+    from unittest.mock import MagicMock, patch
+
+    from db.enums import WorkerRuntimeMode
+    from workers.base import WorkerRequest
+    from workers.codex_cli_worker import CodexCliWorker
+
+    monkeypatch.setattr(native_agent_runner, "DockerNativeAgentExecutor", LocalNativeAgentRunner)
+    monkeypatch.setattr("sandbox.workspace.default_workspace_root", lambda: tmp_path / "ws")
+
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    (repo_path / "README.md").write_text("# Test", encoding="utf-8")
+    _run_git(["git", "init", "--initial-branch=master"], cwd=repo_path)
+    _run_git(["git", "add", "."], cwd=repo_path)
+    _run_git(
+        [
+            "git",
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-m",
+            "init",
+        ],
+        cwd=repo_path,
+    )
+
+    script = (
+        "import json, sys\n"
+        'print(json.dumps({"type": "message_delta", "delta": "Working on task..."}))\n'
+        'print(json.dumps({"type": "session_complete", "summary": "Done editing."}))\n'
+        "sys.exit(0)\n"
+    )
+
+    worker = CodexCliWorker(
+        runtime_adapter=MagicMock(executable=sys.executable, model="test", profile="default"),
+        native_event_capture_enabled=True,
+    )
+
+    request = WorkerRequest(
+        task_text="Run test",
+        repo_url=str(repo_path),
+        runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+        secrets={"OPENAI_API_KEY": "sk-test-key"},
+    )
+
+    with patch.object(
+        worker,
+        "_build_native_command",
+        return_value=([sys.executable, "-c", script], {}),
+    ):
+        result = await worker.run(request)
+
+    assert result.status == "success"
+    event_artifact = next((a for a in result.artifacts if a.name == "agent_event_stream"), None)
+    assert event_artifact is not None
+    assert event_artifact.uri.endswith("agent-events-v1.jsonl")
+    art_path = Path(event_artifact.uri.removeprefix("file://"))
+    assert art_path.is_file()
+    lines = art_path.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) >= 2
+    for line in lines:
+        parsed = json.loads(line)
+        assert "event_type" in parsed
+        assert "sequence" in parsed

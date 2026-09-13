@@ -1,6 +1,7 @@
 import os
 import stat
 import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -32,7 +33,9 @@ from tests.unit.test_gemini_cli_worker import (
     _make_workspace,
 )
 from workers.base import WorkerRequest
+from workers.codex_event_normalizer import CodexStreamNormalizer
 from workers.gemini_cli_worker import GeminiCliWorker
+from workers.native_agent_runner import NativeAgentRunRequest, run_native_agent
 
 
 @pytest.mark.asyncio
@@ -324,3 +327,112 @@ async def test_native_agent_mounts_file_secret_at_declared_destination(tmp_path:
     assert not secret_source.is_relative_to(agent_home)
     assert not secret_source.is_relative_to(artifact_root)
     assert not secret_source.exists()
+
+
+@pytest.mark.asyncio
+async def test_native_runner_writes_event_artifact_on_success(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir(parents=True)
+    ws = tmp_path / "ws"
+    ws.mkdir(parents=True)
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir(parents=True)
+
+    script = (
+        "import json, sys\n"
+        'print(json.dumps({"type": "message_delta", "delta": "Analyzing..."}))\n'
+        'print(json.dumps({"type": "file_edit", "path": "test.txt", "change_kind": "modified"}))\n'
+        'print(json.dumps({"type": "session_complete", "summary": "Done editing."}))\n'
+        "sys.exit(0)\n"
+    )
+    request = NativeAgentRunRequest(
+        command=[sys.executable, "-c", script],
+        prompt="Do task",
+        repo_path=repo,
+        workspace_path=ws,
+        artifact_root=artifact_root,
+        timeout_seconds=10,
+        normalizer=CodexStreamNormalizer(),
+        worker_type="codex",
+        process_runner=LocalNativeAgentRunner(),
+    )
+    result = run_native_agent(request)
+    assert result.status == "success"
+    assert result.normalized_events is not None
+    assert len(result.normalized_events) == 4
+    assert result.normalization_stats is not None
+    assert result.normalization_stats.normalized == 3
+    event_art = next((a for a in result.artifacts if a.name == "agent_event_stream"), None)
+    assert event_art is not None
+    art_path = Path(event_art.uri.removeprefix("file://"))
+    assert art_path.is_file()
+    assert art_path.name == "agent-events-v1.jsonl"
+
+
+@pytest.mark.asyncio
+async def test_native_runner_no_event_artifact_when_disabled(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir(parents=True)
+    ws = tmp_path / "ws"
+    ws.mkdir(parents=True)
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir(parents=True)
+
+    script = (
+        "import json, sys\n"
+        'print(json.dumps({"type": "session_complete", "summary": "Done."}))\n'
+        "sys.exit(0)\n"
+    )
+    request = NativeAgentRunRequest(
+        command=[sys.executable, "-c", script],
+        prompt="Do task",
+        repo_path=repo,
+        workspace_path=ws,
+        artifact_root=artifact_root,
+        timeout_seconds=10,
+        normalizer=None,
+        worker_type=None,
+        process_runner=LocalNativeAgentRunner(),
+    )
+    result = run_native_agent(request)
+    assert result.status == "success"
+    assert result.normalized_events == []
+    assert result.normalization_stats is None
+    assert not any(a.name == "agent_event_stream" for a in result.artifacts)
+
+
+@pytest.mark.asyncio
+async def test_native_runner_timeout_without_event_artifact(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir(parents=True)
+    ws = tmp_path / "ws"
+    ws.mkdir(parents=True)
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir(parents=True)
+
+    class _TimeoutRunner:
+        def run(self, **kwargs):
+            import subprocess
+
+            from sandbox.native_agent_executor import NativeAgentExecution
+
+            proc = subprocess.CompletedProcess(
+                args=["sleep"], returncode=-9, stdout="", stderr="timed out"
+            )
+            return NativeAgentExecution(proc, "timeout", artifact_root / "manifest.json")
+
+    request = NativeAgentRunRequest(
+        command=["sleep", "10"],
+        prompt="Do task",
+        repo_path=repo,
+        workspace_path=ws,
+        artifact_root=artifact_root,
+        timeout_seconds=1,
+        normalizer=CodexStreamNormalizer(),
+        worker_type="codex",
+        process_runner=_TimeoutRunner(),
+    )
+    result = run_native_agent(request)
+    assert result.timed_out is True
+    assert result.status == "error"
+    assert not any(a.name == "agent_event_stream" for a in result.artifacts)

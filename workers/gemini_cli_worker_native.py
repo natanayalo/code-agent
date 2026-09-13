@@ -27,6 +27,7 @@ from workers.antigravity_cli_worker_native import (
     build_antigravity_native_command,
     is_antigravity_native_adapter,
 )
+from workers.antigravity_event_normalizer import AntigravityStreamNormalizer
 from workers.base import (
     ArtifactReference,
     FailureKind,
@@ -512,6 +513,7 @@ class GeminiCliWorkerNativeMixin:
             request, system_prompt=system_prompt, native_prompt=prompt
         )
         events_path: Path | None = None
+        normalizer: AntigravityStreamNormalizer | None = None
         provider_log_path: Path | None = None
         artifact_root: Path | None = None
         command_redactions: list[str] = []
@@ -532,6 +534,9 @@ class GeminiCliWorkerNativeMixin:
             )
             command, provider_log_path, provider_metadata = build_antigravity_native_command(config)
             artifact_root = provider_log_path.parent
+            if getattr(self, "native_event_capture_enabled", False):
+                command.extend(["--output-format", "stream-json"])
+                normalizer = AntigravityStreamNormalizer()
             command_redactions.append(prompt)
             stdin_prompt = False
             native_env = dict(native_env or {})
@@ -672,6 +677,8 @@ class GeminiCliWorkerNativeMixin:
                 command_redactions=command_redactions,
                 response_format=request.response_format,
                 response_schema=request.response_schema,
+                normalizer=normalizer,
+                worker_type="antigravity",
                 read_only_workspace=request.read_only or bool(request.constraints.get("read_only")),
                 context=context,
             ),

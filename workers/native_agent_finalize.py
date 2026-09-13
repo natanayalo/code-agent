@@ -3,7 +3,11 @@ from __future__ import annotations
 import json
 import logging
 import time
-from typing import Any, Final, Literal
+from typing import TYPE_CHECKING, Any, Final, Literal
+
+if TYPE_CHECKING:
+    from workers.agent_event import AgentEvent
+    from workers.agent_event_normalizer import NormalizationStats
 
 from apps.observability import (
     NATIVE_AGENT_DURATION_ATTRIBUTE,
@@ -168,6 +172,8 @@ def _finalize_native_agent_run(
     json_payload_rejected_reason: str | None = None,
     friction_reports: list[dict[str, Any]] | None = None,
     termination_reason: Literal["completed", "timeout", "cancelled", "startup_error"] = "completed",
+    normalized_events: list[AgentEvent] | None = None,
+    normalization_stats: NormalizationStats | None = None,
 ) -> NativeAgentRunResult:
     """Centralize NativeAgentRunResult construction and standardized span metadata recording."""
     elapsed = time.perf_counter() - started_at
@@ -187,6 +193,8 @@ def _finalize_native_agent_run(
         json_payload=json_payload,
         friction_reports=friction_reports or [],
         termination_reason=termination_reason,
+        normalized_events=normalized_events or [],
+        normalization_stats=normalization_stats,
     )
 
     # Standardized Tracing Metadata
