@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: implement native agent event stream foundation (m28.5c) ([#392](https://github.com/natanayalo/code-agent/pull/392))
+
 - Feat: resolve task repo virtualenv in native agent sandbox shell environment ([#381](https://github.com/natanayalo/code-agent/pull/381))
 
 - Feat: support broker-authenticated git operations for private repository provisioning ([#380](https://github.com/natanayalo/code-agent/pull/380))
