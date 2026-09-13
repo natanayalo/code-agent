@@ -17,7 +17,11 @@ from apps.observability import (
     NATIVE_AGENT_TIMED_OUT_ATTRIBUTE,
     NATIVE_AGENT_TRACING_STREAM_MAX_LENGTH,
 )
-from sandbox.redact import redact_and_truncate_output, sanitize_command
+from sandbox.redact import (
+    SecretRedactor,
+    redact_and_truncate_output,
+    sanitize_command,
+)
 from workers.adapter_utils import format_native_run_summary
 from workers.base import ArtifactReference
 from workers.native_agent_artifacts import sanitize_execution_output
@@ -154,6 +158,16 @@ def _record_native_agent_run_completed_telemetry(
     add_current_span_event("code_agent.native_agent.run_completed", run_completed_payload)
 
 
+def _sanitize_durable_text(
+    text: str | None,
+    *,
+    redactor: SecretRedactor | None,
+) -> str | None:
+    if text is None:
+        return None
+    return sanitize_execution_output(text, redactor=redactor)
+
+
 def _finalize_native_agent_run(
     request: NativeAgentRunRequest,
     *,
@@ -179,23 +193,20 @@ def _finalize_native_agent_run(
 ) -> NativeAgentRunResult:
     """Centralize NativeAgentRunResult construction and standardized span metadata recording."""
     elapsed = time.perf_counter() - started_at
-    safe_stdout = stdout
-    safe_stderr = stderr
-    if request.normalizer is not None:
-        safe_stdout = sanitize_execution_output(stdout, redactor=request.redactor)
-        safe_stderr = sanitize_execution_output(stderr, redactor=request.redactor)
-    elif request.redactor is not None:
-        safe_stdout = redact_and_truncate_output(stdout, redactor=request.redactor)
-        safe_stderr = redact_and_truncate_output(stderr, redactor=request.redactor)
+    red = request.redactor
+    safe_stdout = _sanitize_durable_text(stdout, redactor=red) or ""
+    safe_stderr = _sanitize_durable_text(stderr, redactor=red) or ""
+    safe_final_message = _sanitize_durable_text(final_message, redactor=red)
+    safe_summary = _sanitize_durable_text(summary, redactor=red) or summary
 
     result = NativeAgentRunResult(
         status=status,
-        summary=summary,
+        summary=safe_summary,
         command=command_text,
         exit_code=exit_code,
         duration_seconds=elapsed,
         timed_out=timed_out,
-        final_message=final_message,
+        final_message=safe_final_message,
         diff_text=diff_text,
         files_changed=files_changed or [],
         artifacts=artifacts or [],

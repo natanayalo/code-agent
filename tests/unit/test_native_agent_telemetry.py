@@ -128,3 +128,33 @@ def test_telemetry_event_capture_enabled_span_attribute() -> None:
             timed_out=False,
         )
         mock_set_attr.assert_any_call("code_agent.native_agent.event_capture_enabled", True)
+
+
+def test_finalize_native_agent_run_scrubs_final_message_and_summary() -> None:
+    redactor = SecretRedactor(["sk-super-secret-token-xyz"])
+    req = NativeAgentRunRequest(
+        command=["antigravity"],
+        prompt="do task",
+        repo_path=Path("/tmp/repo"),
+        workspace_path=Path("/tmp/ws"),
+        redactor=redactor,
+    )
+    result = _finalize_native_agent_run(
+        request=req,
+        status="success",
+        summary=(
+            "Completed with token sk-super-secret-token-xyz <thought>internal thought</thought>"
+        ),
+        final_message=(
+            "Result with token sk-super-secret-token-xyz <thinking>hidden reasoning</thinking>"
+        ),
+        command_text="antigravity",
+        started_at=time.perf_counter(),
+        timed_out=False,
+    )
+    assert "sk-super-secret-token-xyz" not in (result.summary or "")
+    assert "[REDACTED]" in (result.summary or "")
+    assert "internal thought" not in (result.summary or "")
+    assert "sk-super-secret-token-xyz" not in (result.final_message or "")
+    assert "[REDACTED]" in (result.final_message or "")
+    assert "hidden reasoning" not in (result.final_message or "")

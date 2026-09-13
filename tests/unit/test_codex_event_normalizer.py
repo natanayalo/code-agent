@@ -320,3 +320,112 @@ def test_codex_normalizer_dotted_other_items():
     )
     assert isinstance(file_done, FileChanged)
     assert file_done.path == "foo.py"
+
+
+def test_codex_normalizer_sdk_command_and_files():
+    norm = CodexStreamNormalizer()
+
+    # command_execution with item.updated
+    cmd_up = norm.normalize(
+        {
+            "type": "item.updated",
+            "item": {
+                "type": "command_execution",
+                "command": "npm test",
+                "status": "in_progress",
+            },
+        },
+        sequence=1,
+        run_id="r1",
+    )
+    assert isinstance(cmd_up, AgentProgress)
+    assert cmd_up.phase == "executing"
+    assert cmd_up.message == "npm test"
+
+    # command_execution completed with aggregated_output
+    cmd_done = norm.normalize(
+        {
+            "type": "item.completed",
+            "item": {
+                "type": "command_execution",
+                "command": "npm test",
+                "aggregated_output": "All 42 tests passed",
+                "exit_code": 0,
+            },
+        },
+        sequence=2,
+        run_id="r1",
+    )
+    assert isinstance(cmd_done, ToolCompleted)
+    assert cmd_done.output_summary == "All 42 tests passed"
+    assert cmd_done.exit_code == 0
+
+    # file_change with changes array (add, delete, update)
+    files_ev = norm.normalize(
+        {
+            "type": "item.completed",
+            "item": {
+                "type": "file_change",
+                "changes": [
+                    {"path": "src/new.py", "kind": "add"},
+                    {"path": "src/old.py", "kind": "delete"},
+                    {"path": "src/edit.py", "kind": "update"},
+                ],
+            },
+        },
+        sequence=3,
+        run_id="r1",
+    )
+    assert isinstance(files_ev, list)
+    assert len(files_ev) == 3
+    assert [f.path for f in files_ev] == ["src/new.py", "src/old.py", "src/edit.py"]
+    assert [f.change_kind for f in files_ev] == ["added", "deleted", "modified"]
+
+
+def test_codex_normalizer_sdk_auxiliary_items():
+    norm = CodexStreamNormalizer()
+
+    # web_search item
+    search_ev = norm.normalize(
+        {
+            "type": "item.started",
+            "item": {"type": "web_search", "query": "python typing Protocol"},
+        },
+        sequence=1,
+        run_id="r1",
+    )
+    assert isinstance(search_ev, AgentProgress)
+    assert search_ev.phase == "search"
+    assert search_ev.message == "python typing Protocol"
+
+    # todo_list item
+    todo_ev = norm.normalize(
+        {
+            "type": "item.updated",
+            "item": {
+                "type": "todo_list",
+                "items": [
+                    {"text": "Task 1", "completed": True},
+                    {"text": "Task 2", "completed": False},
+                ],
+            },
+        },
+        sequence=2,
+        run_id="r1",
+    )
+    assert isinstance(todo_ev, AgentProgress)
+    assert todo_ev.phase == "plan"
+    assert todo_ev.message == "1/2 tasks completed"
+
+    # error item
+    err_ev = norm.normalize(
+        {
+            "type": "item.completed",
+            "item": {"type": "error", "message": "Failed to resolve dependency"},
+        },
+        sequence=3,
+        run_id="r1",
+    )
+    assert isinstance(err_ev, AgentProgress)
+    assert err_ev.phase == "error"
+    assert err_ev.message == "Failed to resolve dependency"

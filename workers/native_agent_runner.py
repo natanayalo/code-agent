@@ -1027,6 +1027,12 @@ def _collect_native_agent_results(
             execution_summary=summary,
         )
 
+        terminal_event = normalized_events[-1] if normalized_events else None
+        if isinstance(terminal_event, AgentFailed) and status == "success":
+            status = "failure" if terminal_event.failure_kind == "task_failure" else "error"
+            if terminal_event.failure_summary:
+                summary = terminal_event.failure_summary
+
         json_payload, json_payload_source, json_payload_rejected_reason = (
             _extract_business_json_payload(
                 final_message=final_message,

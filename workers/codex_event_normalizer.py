@@ -33,6 +33,7 @@ CODEX_KNOWN_EVENT_TYPES: Final[frozenset[str]] = frozenset(
         "thread.started",
         "turn.started",
         "item.started",
+        "item.updated",
         "item.completed",
         "turn.completed",
         "turn.failed",
@@ -73,7 +74,7 @@ class CodexStreamNormalizer:
         session_id: str | None = None,
         worker_type: WorkerType | None = "codex",
         redactor: SecretRedactor | None = None,
-    ) -> AgentEvent | None:
+    ) -> AgentEvent | list[AgentEvent] | None:
         event_type = raw.get("type") or raw.get("event")
         if not isinstance(event_type, str) or event_type not in CODEX_KNOWN_EVENT_TYPES:
             return None
@@ -99,12 +100,12 @@ class CodexStreamNormalizer:
         raw: dict[str, Any],
         base_kwargs: dict[str, Any],
         redactor: SecretRedactor | None,
-    ) -> AgentEvent | None:
+    ) -> AgentEvent | list[AgentEvent] | None:
         if event_type in ("session_created", "thread.started"):
             return AgentStarted(command=raw.get("command"), **base_kwargs)
         if event_type == "turn.started":
             return AgentProgress(phase="turn_started", message=None, **base_kwargs)
-        if event_type in ("item.started", "item.completed"):
+        if event_type in ("item.started", "item.updated", "item.completed"):
             return self._normalize_item(event_type, raw, base_kwargs, redactor)
         if event_type == "turn.completed":
             usage = raw.get("usage")
@@ -138,53 +139,99 @@ class CodexStreamNormalizer:
             return self._normalize_complete(raw, base_kwargs, redactor)
         return None
 
+    def _normalize_command_item(
+        self,
+        event_type: str,
+        item: dict[str, Any],
+        base_kwargs: dict[str, Any],
+        redactor: SecretRedactor | None,
+    ) -> AgentEvent | None:
+        tool_name = item.get("tool") or item.get("name") or "execute_bash"
+        call_id = item.get("id") or item.get("call_id")
+        if event_type == "item.started":
+            input_cmd = item.get("command") or item.get("input") or item.get("arguments")
+            input_summary = safe_truncate_text(
+                input_cmd, redactor=redactor, limit=AGENT_EVENT_MAX_TOOL_SUMMARY_CHARS
+            )
+            return ToolRequested(
+                tool_name=str(tool_name),
+                call_id=str(call_id) if call_id else None,
+                input_summary=input_summary,
+                **base_kwargs,
+            )
+        if event_type == "item.updated":
+            input_cmd = item.get("command") or item.get("input") or item.get("arguments")
+            msg = safe_truncate_text(
+                input_cmd, redactor=redactor, limit=AGENT_EVENT_MAX_TOOL_SUMMARY_CHARS
+            )
+            return AgentProgress(phase="executing", message=msg, **base_kwargs)
+
+        raw_out = (
+            item.get("aggregated_output")
+            or item.get("output")
+            or item.get("stdout")
+            or item.get("result")
+            or item.get("summary")
+        )
+        output_summary = safe_truncate_text(
+            raw_out, redactor=redactor, limit=AGENT_EVENT_MAX_TOOL_SUMMARY_CHARS
+        )
+        exit_code = item.get("exit_code")
+        duration = item.get("duration_seconds") or item.get("duration")
+        return ToolCompleted(
+            tool_name=str(tool_name),
+            call_id=str(call_id) if call_id else None,
+            exit_code=int(exit_code) if isinstance(exit_code, int) else None,
+            output_summary=output_summary,
+            duration_seconds=float(duration) if isinstance(duration, int | float) else None,
+            **base_kwargs,
+        )
+
     def _normalize_item(
         self,
         event_type: str,
         raw: dict[str, Any],
         base_kwargs: dict[str, Any],
         redactor: SecretRedactor | None,
-    ) -> AgentEvent | None:
+    ) -> AgentEvent | list[AgentEvent] | None:
         raw_item = raw.get("item")
         item: dict[str, Any] = raw_item if isinstance(raw_item, dict) else raw
         item_type = item.get("type") or item.get("item_type") or ""
 
         if item_type in ("command_execution", "exec_command", "shell") or "command" in item:
-            tool_name = item.get("tool") or item.get("name") or "execute_bash"
-            call_id = item.get("id") or item.get("call_id")
-            if event_type == "item.started":
-                input_cmd = item.get("command") or item.get("input") or item.get("arguments")
-                input_summary = safe_truncate_text(
-                    input_cmd, redactor=redactor, limit=AGENT_EVENT_MAX_TOOL_SUMMARY_CHARS
-                )
-                return ToolRequested(
-                    tool_name=str(tool_name),
-                    call_id=str(call_id) if call_id else None,
-                    input_summary=input_summary,
-                    **base_kwargs,
-                )
-            raw_out = (
-                item.get("output")
-                or item.get("stdout")
-                or item.get("result")
-                or item.get("summary")
-            )
-            output_summary = safe_truncate_text(
-                raw_out, redactor=redactor, limit=AGENT_EVENT_MAX_TOOL_SUMMARY_CHARS
-            )
-            exit_code = item.get("exit_code")
-            duration = item.get("duration_seconds") or item.get("duration")
-            return ToolCompleted(
-                tool_name=str(tool_name),
-                call_id=str(call_id) if call_id else None,
-                exit_code=int(exit_code) if isinstance(exit_code, int) else None,
-                output_summary=output_summary,
-                duration_seconds=float(duration) if isinstance(duration, int | float) else None,
-                **base_kwargs,
-            )
+            return self._normalize_command_item(event_type, item, base_kwargs, redactor)
 
-        if item_type in ("file_edit", "file_change", "file_modify") or "path" in item:
+        if (
+            item_type in ("file_edit", "file_change", "file_modify")
+            or "changes" in item
+            or "path" in item
+        ):
             return self._normalize_file_change(item, base_kwargs)
+
+        if item_type == "web_search":
+            query = item.get("query") or item.get("search_query") or item.get("input") or ""
+            msg = safe_truncate_text(
+                query, redactor=redactor, limit=AGENT_EVENT_MAX_TOOL_SUMMARY_CHARS
+            )
+            return AgentProgress(phase="search", message=msg or None, **base_kwargs)
+
+        if item_type == "todo_list":
+            todos = item.get("items") or item.get("todos") or []
+            total = len(todos) if isinstance(todos, list) else 0
+            completed = (
+                sum(1 for t in todos if isinstance(t, dict) and t.get("completed"))
+                if isinstance(todos, list)
+                else 0
+            )
+            msg = f"{completed}/{total} tasks completed" if total > 0 else "todo list updated"
+            return AgentProgress(phase="plan", message=msg, **base_kwargs)
+
+        if item_type == "error":
+            err_msg = item.get("message") or item.get("error") or "Codex item error"
+            msg = safe_truncate_text(
+                err_msg, redactor=redactor, limit=AGENT_EVENT_MAX_TOOL_SUMMARY_CHARS
+            )
+            return AgentProgress(phase="error", message=msg or "Codex item error", **base_kwargs)
 
         if item_type == "reasoning":
             return AgentProgress(phase="reasoning", message=None, **base_kwargs)
@@ -258,17 +305,35 @@ class CodexStreamNormalizer:
             **base_kwargs,
         )
 
+    def _map_change_kind(self, kind: Any) -> Literal["added", "modified", "deleted"]:
+        if kind in ("add", "added"):
+            return "added"
+        if kind in ("delete", "deleted"):
+            return "deleted"
+        return "modified"
+
     def _normalize_file_change(
         self, raw: dict[str, Any], base_kwargs: dict[str, Any]
-    ) -> FileChanged | None:
+    ) -> FileChanged | list[AgentEvent] | None:
+        raw_changes = raw.get("changes")
+        if isinstance(raw_changes, list) and raw_changes:
+            events: list[AgentEvent] = []
+            for change in raw_changes:
+                if not isinstance(change, dict):
+                    continue
+                path = change.get("path") or change.get("file")
+                if not path or not isinstance(path, str):
+                    continue
+                kind = self._map_change_kind(change.get("kind") or change.get("change_kind"))
+                events.append(FileChanged(path=path[:500], change_kind=kind, **base_kwargs))
+            if events:
+                return events
+
         path = raw.get("path") or raw.get("file")
         if not path or not isinstance(path, str):
             return None
-        kind = raw.get("change_kind")
-        valid_kind: Literal["added", "modified", "deleted"] = (
-            kind if kind in ("added", "deleted") else "modified"
-        )
-        return FileChanged(path=path[:500], change_kind=valid_kind, **base_kwargs)
+        kind = self._map_change_kind(raw.get("change_kind") or raw.get("kind"))
+        return FileChanged(path=path[:500], change_kind=kind, **base_kwargs)
 
     def _normalize_usage(self, raw: dict[str, Any], base_kwargs: dict[str, Any]) -> BudgetUpdated:
         tokens = raw.get("tokens") or raw.get("tokens_used") or raw.get("total_tokens")

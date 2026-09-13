@@ -61,8 +61,11 @@ class ProviderStreamNormalizer(Protocol):
         session_id: str | None = None,
         worker_type: WorkerType | None = None,
         redactor: SecretRedactor | None = None,
-    ) -> AgentEvent | None:
-        """Normalize one provider record into an AgentEvent or return None if malformed/unmapped."""
+    ) -> AgentEvent | list[AgentEvent] | None:
+        """Normalize one provider record into an AgentEvent or list of events.
+
+        Returns None if malformed or unmapped.
+        """
         ...
 
     def is_known_type(self, raw: dict[str, Any]) -> bool:
@@ -244,6 +247,23 @@ def _inject_lifecycle_and_file_evidence(
     return resequenced
 
 
+def _append_stream_event(
+    ev: AgentEvent,
+    events: list[AgentEvent],
+    stats: NormalizationStats,
+    *,
+    non_reserved_limit: int,
+    max_events: int,
+) -> None:
+    is_lifecycle = isinstance(ev, AgentCompleted | AgentFailed)
+    limit = max_events if is_lifecycle else non_reserved_limit
+    if len(events) >= limit:
+        stats.dropped_overflow += 1
+        return
+    events.append(ev)
+    stats.normalized += 1
+
+
 def normalize_provider_stream(
     records: Iterable[dict[str, Any] | str],
     normalizer: ProviderStreamNormalizer,
@@ -300,16 +320,15 @@ def normalize_provider_stream(
             logger.debug("Normalizer rejected raw event of type %s", event_type)
             continue
 
-        is_lifecycle = isinstance(event, AgentCompleted | AgentFailed)
-        if not is_lifecycle and len(events) >= non_reserved_limit:
-            stats.dropped_overflow += 1
-            continue
-        if is_lifecycle and len(events) >= cfg.max_events_per_run:
-            stats.dropped_overflow += 1
-            continue
-
-        events.append(event)
-        stats.normalized += 1
+        produced = event if isinstance(event, list) else [event]
+        for ev in produced:
+            _append_stream_event(
+                ev,
+                events,
+                stats,
+                non_reserved_limit=non_reserved_limit,
+                max_events=cfg.max_events_per_run,
+            )
 
     final_events = _inject_lifecycle_and_file_evidence(
         events,

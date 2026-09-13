@@ -7,6 +7,10 @@ import subprocess
 import textwrap
 from pathlib import Path
 
+from sandbox.redact import SecretRedactor
+from workers.agent_event import AgentFailed
+from workers.antigravity_event_normalizer import AntigravityStreamNormalizer
+from workers.codex_event_normalizer import CodexStreamNormalizer
 from workers.native_agent_runner import NativeAgentRunRequest, run_native_agent
 
 
@@ -148,3 +152,78 @@ raise SystemExit(0)
     assert result.friction_reports[0]["description"].startswith(
         "Native agent exited after reporting an interim status"
     )
+
+
+def test_native_agent_runner_sanitizes_thinking_and_extracts_antigravity_result(
+    tmp_path: Path,
+) -> None:
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    _init_git_repo(repo_path)
+    fake_binary = _write_fake_binary(
+        tmp_path / "fake-antigravity.py",
+        """#!/usr/bin/env python3
+import json
+print(json.dumps({"type": "thinking", "thought": "Internal thought with secret sk-token-123456"}))
+print(json.dumps({"type": "result", "result": "Refactored cleanly with secret sk-token-123456"}))
+raise SystemExit(0)
+""",
+    )
+    redactor = SecretRedactor(["sk-token-123456"])
+    result = run_native_agent(
+        NativeAgentRunRequest(
+            command=[str(fake_binary)],
+            prompt="task",
+            repo_path=repo_path,
+            workspace_path=tmp_path,
+            timeout_seconds=10,
+            normalizer=AntigravityStreamNormalizer(),
+            redactor=redactor,
+        )
+    )
+
+    assert result.status == "success"
+    assert result.final_message == "Refactored cleanly with secret [REDACTED]"
+    assert result.summary == "Refactored cleanly with secret [REDACTED]"
+    assert "sk-token-123456" not in (result.final_message or "")
+    assert "Internal thought" not in (result.final_message or "")
+    assert "Internal thought" not in (result.summary or "")
+
+
+def test_native_agent_runner_reconciles_provider_stream_failure_over_zero_exit(
+    tmp_path: Path,
+) -> None:
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    _init_git_repo(repo_path)
+    fake_binary = _write_fake_binary(
+        tmp_path / "fake-codex-turn-failed.py",
+        """#!/usr/bin/env python3
+import json
+print(json.dumps({"type": "turn.started"}))
+print(json.dumps({
+    "type": "turn.failed",
+    "error": "Context length exceeded limit",
+    "failure_kind": "context_length_exceeded",
+}))
+raise SystemExit(0)
+""",
+    )
+    result = run_native_agent(
+        NativeAgentRunRequest(
+            command=[str(fake_binary)],
+            prompt="task",
+            repo_path=repo_path,
+            workspace_path=tmp_path,
+            timeout_seconds=10,
+            normalizer=CodexStreamNormalizer(),
+        )
+    )
+
+    assert result.status == "error"
+    assert result.summary == "Context length exceeded limit"
+    assert result.normalization_stats is not None
+    assert result.normalization_stats.normalized >= 2
+    assert len(result.normalized_events) >= 2
+    assert isinstance(result.normalized_events[-1], AgentFailed)
+    assert result.normalized_events[-1].failure_summary == "Context length exceeded limit"
