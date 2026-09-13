@@ -472,3 +472,133 @@ def test_codex_normalizer_mcp_tool_update_and_completion():
     assert done_ev.tool_name == "search"
     assert done_ev.output_summary == "found 3 matches"
     assert done_ev.exit_code == 0
+
+
+def test_codex_normalizer_file_change_item_lifecycle():
+    norm = CodexStreamNormalizer()
+
+    # 1. item.started emits AgentProgress(phase="executing"), not FileChanged
+    start_ev = norm.normalize(
+        {
+            "type": "item.started",
+            "item": {"type": "file_change", "path": "src/module.py"},
+        },
+        sequence=1,
+        run_id="r1",
+    )
+    assert isinstance(start_ev, AgentProgress)
+    assert start_ev.phase == "executing"
+    assert "src/module.py" in (start_ev.message or "")
+    assert not isinstance(start_ev, FileChanged)
+
+    # 2. item.updated emits AgentProgress(phase="executing")
+    update_ev = norm.normalize(
+        {
+            "type": "item.updated",
+            "item": {"type": "file_change", "path": "src/module.py"},
+        },
+        sequence=2,
+        run_id="r1",
+    )
+    assert isinstance(update_ev, AgentProgress)
+    assert update_ev.phase == "executing"
+
+    # 3. item.completed with failed/declined/cancelled status emits None
+    failed_ev = norm.normalize(
+        {
+            "type": "item.completed",
+            "item": {"type": "file_change", "path": "src/module.py", "status": "failed"},
+        },
+        sequence=3,
+        run_id="r1",
+    )
+    assert failed_ev is None
+
+    declined_ev = norm.normalize(
+        {
+            "type": "item.completed",
+            "item": {"type": "file_change", "path": "src/module.py", "status": "declined"},
+        },
+        sequence=4,
+        run_id="r1",
+    )
+    assert declined_ev is None
+
+    # 4. item.completed with success emits FileChanged
+    success_ev = norm.normalize(
+        {
+            "type": "item.completed",
+            "item": {
+                "type": "file_change",
+                "path": "src/module.py",
+                "kind": "modified",
+                "status": "completed",
+            },
+        },
+        sequence=5,
+        run_id="r1",
+    )
+    assert isinstance(success_ev, FileChanged)
+    assert success_ev.path == "src/module.py"
+    assert success_ev.change_kind == "modified"
+
+
+def test_codex_normalizer_failed_mcp_tool_call():
+    norm = CodexStreamNormalizer()
+
+    # 1. Failed MCP tool call with error dict
+    failed_call = norm.normalize(
+        {
+            "type": "item.completed",
+            "item": {
+                "type": "mcp_tool_call",
+                "tool": "read_resource",
+                "call_id": "call_123",
+                "status": "failed",
+                "error": {"message": "permission denied"},
+            },
+        },
+        sequence=1,
+        run_id="r1",
+    )
+    assert isinstance(failed_call, ToolCompleted)
+    assert failed_call.tool_name == "read_resource"
+    assert failed_call.call_id == "call_123"
+    assert failed_call.exit_code == 1
+    assert failed_call.output_summary == "permission denied"
+
+    # 2. Status "error" with string error and exit_code=0 overridden to 1
+    err_call = norm.normalize(
+        {
+            "type": "item.completed",
+            "item": {
+                "type": "tool_call",
+                "name": "remote_fetch",
+                "status": "error",
+                "error": "connection timeout",
+                "exit_code": 0,
+            },
+        },
+        sequence=2,
+        run_id="r1",
+    )
+    assert isinstance(err_call, ToolCompleted)
+    assert err_call.exit_code == 1
+    assert err_call.output_summary == "connection timeout"
+
+    # 3. Status "declined" without explicit error message
+    declined_call = norm.normalize(
+        {
+            "type": "item.completed",
+            "item": {
+                "type": "mcp_tool_call",
+                "tool": "write_file",
+                "status": "declined",
+            },
+        },
+        sequence=3,
+        run_id="r1",
+    )
+    assert isinstance(declined_call, ToolCompleted)
+    assert declined_call.exit_code == 1
+    assert declined_call.output_summary == "Tool call declined"

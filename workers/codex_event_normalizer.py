@@ -206,7 +206,9 @@ class CodexStreamNormalizer:
             or "changes" in item
             or "path" in item
         ):
-            return self._normalize_file_change(item, base_kwargs)
+            return self._normalize_file_change_item(
+                event_type, item, base_kwargs, raw_status=raw.get("status")
+            )
 
         if item_type == "web_search":
             query = item.get("query") or item.get("search_query") or item.get("input") or ""
@@ -245,26 +247,41 @@ class CodexStreamNormalizer:
             item_type in ("tool_call", "function_call", "custom_tool", "mcp_tool_call")
             or "tool" in item
         ):
-            if event_type == "item.started":
-                return self._normalize_tool_call(item, base_kwargs, redactor)
-            if event_type == "item.updated":
-                tool_name = (
-                    item.get("tool")
-                    or item.get("name")
-                    or (item.get("function") or {}).get("name")
-                    or "tool"
-                )
-                raw_args = item.get("arguments") or item.get("input") or item.get("args")
-                msg = safe_truncate_text(
-                    raw_args, redactor=redactor, limit=AGENT_EVENT_MAX_TOOL_SUMMARY_CHARS
-                )
-                return AgentProgress(
-                    phase="executing", message=msg or f"Running {tool_name}", **base_kwargs
-                )
-            if event_type == "item.completed":
-                return self._normalize_tool_completed(item, base_kwargs, redactor)
-            return None
+            return self._normalize_tool_call_item(event_type, raw, item, base_kwargs, redactor)
 
+        return None
+
+    def _normalize_tool_call_item(
+        self,
+        event_type: str,
+        raw: dict[str, Any],
+        item: dict[str, Any],
+        base_kwargs: dict[str, Any],
+        redactor: SecretRedactor | None,
+    ) -> AgentEvent | None:
+        if event_type == "item.started":
+            return self._normalize_tool_call(item, base_kwargs, redactor)
+        if event_type == "item.updated":
+            tool_name = (
+                item.get("tool")
+                or item.get("name")
+                or (item.get("function") or {}).get("name")
+                or "tool"
+            )
+            raw_args = item.get("arguments") or item.get("input") or item.get("args")
+            msg = safe_truncate_text(
+                raw_args, redactor=redactor, limit=AGENT_EVENT_MAX_TOOL_SUMMARY_CHARS
+            )
+            return AgentProgress(
+                phase="executing", message=msg or f"Running {tool_name}", **base_kwargs
+            )
+        if event_type == "item.completed":
+            tool_dict = dict(item)
+            if "error" not in tool_dict and "error" in raw:
+                tool_dict["error"] = raw["error"]
+            if "status" not in tool_dict and "status" in raw:
+                tool_dict["status"] = raw["status"]
+            return self._normalize_tool_completed(tool_dict, base_kwargs, redactor)
         return None
 
     def _normalize_message(
@@ -309,16 +326,32 @@ class CodexStreamNormalizer:
             or "unknown_tool"
         )
         call_id = raw.get("call_id") or raw.get("id")
+        raw_error = raw.get("error")
+        err_text: str | None = None
+        if isinstance(raw_error, dict):
+            err_text = raw_error.get("message") or raw_error.get("error") or str(raw_error)
+        elif raw_error:
+            err_text = str(raw_error)
+
+        status = raw.get("status")
+        is_failed = status in ("failed", "declined", "error") or err_text is not None
+
         raw_output = raw.get("output") or raw.get("result") or raw.get("summary")
+        if is_failed and not raw_output:
+            raw_output = err_text or f"Tool call {status}"
+
         output_summary = safe_truncate_text(
             raw_output, redactor=redactor, limit=AGENT_EVENT_MAX_TOOL_SUMMARY_CHARS
         )
         exit_code = raw.get("exit_code")
+        effective_exit_code = exit_code if isinstance(exit_code, int) else None
+        if is_failed and (effective_exit_code is None or effective_exit_code == 0):
+            effective_exit_code = 1
         duration = raw.get("duration_seconds") or raw.get("duration")
         return ToolCompleted(
             tool_name=str(tool_name),
             call_id=str(call_id) if call_id else None,
-            exit_code=exit_code if isinstance(exit_code, int) else None,
+            exit_code=effective_exit_code,
             output_summary=output_summary,
             duration_seconds=float(duration) if isinstance(duration, int | float) else None,
             **base_kwargs,
@@ -330,6 +363,24 @@ class CodexStreamNormalizer:
         if kind in ("delete", "deleted"):
             return "deleted"
         return "modified"
+
+    def _normalize_file_change_item(
+        self,
+        event_type: str,
+        item: dict[str, Any],
+        base_kwargs: dict[str, Any],
+        raw_status: Any = None,
+    ) -> AgentEvent | list[AgentEvent] | None:
+        if event_type in ("item.started", "item.updated"):
+            path = item.get("path") or item.get("file")
+            msg = f"Editing {path}" if path and isinstance(path, str) else "Applying file changes"
+            return AgentProgress(phase="executing", message=msg, **base_kwargs)
+        if event_type == "item.completed":
+            status = item.get("status") or raw_status
+            if status in ("failed", "declined", "cancelled", "error"):
+                return None
+            return self._normalize_file_change(item, base_kwargs)
+        return None
 
     def _normalize_file_change(
         self, raw: dict[str, Any], base_kwargs: dict[str, Any]

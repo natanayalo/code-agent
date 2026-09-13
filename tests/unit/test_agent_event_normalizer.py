@@ -530,3 +530,66 @@ def test_terminal_reconciliation_provider_turn_failed_forces_agent_failed():
     assert isinstance(terminal, AgentFailed)
     assert terminal.exit_code == 1
     assert terminal.failure_summary == "Quota exhausted"
+
+
+def test_terminal_summary_truncation_on_long_execution_summary():
+    normalizer = CodexStreamNormalizer()
+    long_summary = "x" * 10_000
+
+    # 1. Success case: AgentCompleted.final_summary truncated to 4096 chars
+    events_ok, _ = normalize_provider_stream(
+        [],
+        normalizer,
+        run_id="run-long-summary-ok",
+        default_exit_code=0,
+        execution_status="success",
+        execution_summary=long_summary,
+    )
+    terminal_ok = events_ok[-1]
+    assert isinstance(terminal_ok, AgentCompleted)
+    assert len(terminal_ok.final_summary) <= 4096
+    assert "[TRUNCATED:" in terminal_ok.final_summary
+
+    # 2. Failure case: AgentFailed.failure_summary truncated to 4096 chars
+    events_fail, _ = normalize_provider_stream(
+        [],
+        normalizer,
+        run_id="run-long-summary-fail",
+        default_exit_code=1,
+        execution_status="failure",
+        execution_summary=long_summary,
+    )
+    terminal_fail = events_fail[-1]
+    assert isinstance(terminal_fail, AgentFailed)
+    assert len(terminal_fail.failure_summary) <= 4096
+    assert "[TRUNCATED:" in terminal_fail.failure_summary
+
+
+def test_bridged_files_respect_event_cap_and_track_overflow():
+    normalizer = CodexStreamNormalizer()
+    raw_records = [
+        {"type": "message_delta", "delta": "step 1"},
+        {"type": "message_delta", "delta": "step 2"},
+    ]
+    # max 6 events: 2 reserved for lifecycle (started + completed), 4 non-reserved
+    # 2 stream events use 2 non-reserved slots, leaving 2 for bridged files
+    config = NormalizationConfig(max_events_per_run=6, reserved_lifecycle_events=2)
+    files = [f"src/file_{i}.py" for i in range(5)]
+
+    events, stats = normalize_provider_stream(
+        raw_records,
+        normalizer,
+        config=config,
+        run_id="run-capped-files",
+        default_exit_code=0,
+        files_changed=files,
+    )
+
+    assert len(events) == 6
+    assert isinstance(events[0], AgentStarted)
+    assert isinstance(events[-1], AgentCompleted)
+    bridged_files = [e for e in events if isinstance(e, FileChanged)]
+    assert len(bridged_files) == 2
+    assert [f.path for f in bridged_files] == ["src/file_0.py", "src/file_1.py"]
+    assert stats.dropped_overflow == 3
+    assert_event_sequence_monotonic(events, strictly_consecutive=True)

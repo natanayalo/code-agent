@@ -20,6 +20,7 @@ from workers.agent_event import (
 from workers.base import WorkerType
 from workers.constants import (
     AGENT_EVENT_MAX_PER_RUN,
+    AGENT_EVENT_MAX_SUMMARY_CHARS,
     AGENT_EVENT_MAX_TOOL_SUMMARY_CHARS,
     AGENT_EVENT_RESERVED_LIFECYCLE,
 )
@@ -112,6 +113,38 @@ def _parse_raw_record(record: dict[str, Any] | str) -> tuple[dict[str, Any] | No
     return None, True
 
 
+def _resolve_failure_summary(
+    last_failed: AgentFailed | None,
+    *,
+    execution_status: Literal["success", "failure", "error"] | None,
+    execution_summary: str | None,
+    default_exit_code: int | None,
+    redactor: SecretRedactor | None = None,
+) -> str:
+    if (
+        last_failed
+        and last_failed.failure_summary
+        and (execution_status == "success" or not execution_summary)
+    ):
+        raw_summary = last_failed.failure_summary
+    else:
+        raw_summary = (
+            execution_summary
+            or (
+                last_failed.failure_summary if last_failed and last_failed.failure_summary else None
+            )
+            or (
+                f"Process exited with code {default_exit_code}"
+                if default_exit_code is not None
+                else "Execution failed"
+            )
+        )
+    return (
+        safe_truncate_text(raw_summary, redactor=redactor, limit=AGENT_EVENT_MAX_SUMMARY_CHARS)
+        or "Execution failed"
+    )
+
+
 def _reconcile_terminal_event(
     provider_terminals: Sequence[AgentCompleted | AgentFailed],
     *,
@@ -122,6 +155,7 @@ def _reconcile_terminal_event(
     task_id: str | None,
     session_id: str | None,
     worker_type: WorkerType | None,
+    redactor: SecretRedactor | None = None,
 ) -> AgentEvent:
     last_failed = next(
         (e for e in reversed(provider_terminals) if isinstance(e, AgentFailed)),
@@ -133,26 +167,13 @@ def _reconcile_terminal_event(
         or (last_failed is not None)
     )
     if is_failed_run:
-        if (
-            last_failed
-            and last_failed.failure_summary
-            and (execution_status == "success" or not execution_summary)
-        ):
-            summary = last_failed.failure_summary
-        else:
-            summary = (
-                execution_summary
-                or (
-                    last_failed.failure_summary
-                    if last_failed and last_failed.failure_summary
-                    else None
-                )
-                or (
-                    f"Process exited with code {default_exit_code}"
-                    if default_exit_code is not None
-                    else "Execution failed"
-                )
-            )
+        summary = _resolve_failure_summary(
+            last_failed,
+            execution_status=execution_status,
+            execution_summary=execution_summary,
+            default_exit_code=default_exit_code,
+            redactor=redactor,
+        )
         failure_kind = (
             last_failed.failure_kind
             if last_failed and last_failed.failure_kind
@@ -181,15 +202,61 @@ def _reconcile_terminal_event(
         )
     if provider_terminals:
         return provider_terminals[-1]
+    summary = (
+        safe_truncate_text(
+            execution_summary or "Agent run completed.",
+            redactor=redactor,
+            limit=AGENT_EVENT_MAX_SUMMARY_CHARS,
+        )
+        or "Agent run completed."
+    )
     return AgentCompleted(
         run_id=run_id,
         sequence=0,
         task_id=task_id,
         session_id=session_id,
         worker_type=worker_type,
-        final_summary=execution_summary or "Agent run completed.",
+        final_summary=summary,
         exit_code=0,
     )
+
+
+def _append_bridged_files(
+    events: list[AgentEvent],
+    files_changed: list[str],
+    *,
+    run_id: str,
+    task_id: str | None,
+    session_id: str | None,
+    worker_type: WorkerType | None,
+    non_reserved_limit: int,
+    max_events: int | None,
+    stats: NormalizationStats | None,
+) -> None:
+    existing_paths = {e.path for e in events if isinstance(e, FileChanged)}
+    current_non_lifecycle = sum(1 for e in events if not isinstance(e, AgentStarted))
+    for path in files_changed:
+        if path in existing_paths:
+            continue
+        if current_non_lifecycle >= non_reserved_limit or (
+            max_events is not None and len(events) + 1 >= max_events
+        ):
+            if stats is not None:
+                stats.dropped_overflow += 1
+            continue
+        events.append(
+            FileChanged(
+                run_id=run_id,
+                sequence=0,
+                task_id=task_id,
+                session_id=session_id,
+                worker_type=worker_type,
+                path=path[:500],
+                change_kind="modified",
+            )
+        )
+        existing_paths.add(path)
+        current_non_lifecycle += 1
 
 
 def _inject_lifecycle_and_file_evidence(
@@ -203,6 +270,10 @@ def _inject_lifecycle_and_file_evidence(
     files_changed: list[str] | None,
     execution_status: Literal["success", "failure", "error"] | None = None,
     execution_summary: str | None = None,
+    non_reserved_limit: int = AGENT_EVENT_MAX_PER_RUN,
+    max_events: int | None = None,
+    stats: NormalizationStats | None = None,
+    redactor: SecretRedactor | None = None,
 ) -> list[AgentEvent]:
     """Ensure AgentStarted, bridged FileChanged, and terminal events are present."""
     has_started = any(isinstance(e, AgentStarted) for e in events)
@@ -230,23 +301,21 @@ def _inject_lifecycle_and_file_evidence(
         task_id=task_id,
         session_id=session_id,
         worker_type=worker_type,
+        redactor=redactor,
     )
 
     if files_changed:
-        existing_paths = {e.path for e in events if isinstance(e, FileChanged)}
-        for path in files_changed:
-            if path not in existing_paths:
-                events.append(
-                    FileChanged(
-                        run_id=run_id,
-                        sequence=0,
-                        task_id=task_id,
-                        session_id=session_id,
-                        worker_type=worker_type,
-                        path=path[:500],
-                        change_kind="modified",
-                    )
-                )
+        _append_bridged_files(
+            events,
+            files_changed,
+            run_id=run_id,
+            task_id=task_id,
+            session_id=session_id,
+            worker_type=worker_type,
+            non_reserved_limit=non_reserved_limit,
+            max_events=max_events,
+            stats=stats,
+        )
 
     events.append(terminal_event)
     resequenced = [
@@ -271,6 +340,56 @@ def _append_stream_event(
         return
     events.append(ev)
     stats.normalized += 1
+
+
+def _normalize_and_append_record(
+    raw_dict: dict[str, Any],
+    normalizer: ProviderStreamNormalizer,
+    events: list[AgentEvent],
+    stats: NormalizationStats,
+    *,
+    cfg: NormalizationConfig,
+    run_id: str,
+    task_id: str | None,
+    session_id: str | None,
+    worker_type: WorkerType | None,
+    redactor: SecretRedactor | None,
+    non_reserved_limit: int,
+) -> None:
+    event_type = raw_dict.get("type") or raw_dict.get("event")
+    if not event_type or not isinstance(event_type, str):
+        stats.dropped_malformed += 1
+        logger.debug("Dropped raw event missing string event_type: %s", raw_dict)
+        return
+
+    if hasattr(normalizer, "is_known_type") and not normalizer.is_known_type(raw_dict):
+        stats.dropped_unknown += 1
+        logger.debug("Dropped unknown provider event type: %s", event_type)
+        return
+
+    event = normalizer.normalize(
+        raw_dict,
+        sequence=len(events) + 1,
+        run_id=run_id,
+        task_id=task_id,
+        session_id=session_id,
+        worker_type=worker_type,
+        redactor=redactor if cfg.redact_text_fields else None,
+    )
+    if event is None:
+        stats.dropped_malformed += 1
+        logger.debug("Normalizer rejected raw event of type %s", event_type)
+        return
+
+    produced = event if isinstance(event, list) else [event]
+    for ev in produced:
+        _append_stream_event(
+            ev,
+            events,
+            stats,
+            non_reserved_limit=non_reserved_limit,
+            max_events=cfg.max_events_per_run,
+        )
 
 
 def normalize_provider_stream(
@@ -304,40 +423,19 @@ def normalize_provider_stream(
             logger.debug("Dropped malformed raw event record")
             continue
 
-        event_type = raw_dict.get("type") or raw_dict.get("event")
-        if not event_type or not isinstance(event_type, str):
-            stats.dropped_malformed += 1
-            logger.debug("Dropped raw event missing string event_type: %s", raw_dict)
-            continue
-
-        if hasattr(normalizer, "is_known_type") and not normalizer.is_known_type(raw_dict):
-            stats.dropped_unknown += 1
-            logger.debug("Dropped unknown provider event type: %s", event_type)
-            continue
-
-        event = normalizer.normalize(
+        _normalize_and_append_record(
             raw_dict,
-            sequence=len(events) + 1,
+            normalizer,
+            events,
+            stats,
+            cfg=cfg,
             run_id=run_id,
             task_id=task_id,
             session_id=session_id,
             worker_type=worker_type,
-            redactor=redactor if cfg.redact_text_fields else None,
+            redactor=redactor,
+            non_reserved_limit=non_reserved_limit,
         )
-        if event is None:
-            stats.dropped_malformed += 1
-            logger.debug("Normalizer rejected raw event of type %s", event_type)
-            continue
-
-        produced = event if isinstance(event, list) else [event]
-        for ev in produced:
-            _append_stream_event(
-                ev,
-                events,
-                stats,
-                non_reserved_limit=non_reserved_limit,
-                max_events=cfg.max_events_per_run,
-            )
 
     final_events = _inject_lifecycle_and_file_evidence(
         events,
@@ -349,5 +447,9 @@ def normalize_provider_stream(
         files_changed=files_changed,
         execution_status=execution_status,
         execution_summary=execution_summary,
+        non_reserved_limit=non_reserved_limit,
+        max_events=cfg.max_events_per_run,
+        stats=stats,
+        redactor=redactor if cfg.redact_text_fields else None,
     )
     return final_events, stats
