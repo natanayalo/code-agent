@@ -12,6 +12,7 @@ from apps.observability import (
 
 _JSON_DECODER = json.JSONDecoder()
 _FINAL_MESSAGE_FIELDS: Final = (
+    "result",
     "response",
     "error",
     "final_output",
@@ -77,6 +78,20 @@ def _extract_final_message(raw_text: str) -> str | None:
         return value or None
 
     if isinstance(payload, dict):
+        event_type = payload.get("type") or payload.get("event")
+        if event_type in ("reasoning", "thinking") or "thought" in payload:
+            return None
+
+        item = payload.get("item")
+        if isinstance(item, dict):
+            item_type = item.get("type") or item.get("item_type")
+            if item_type in ("reasoning", "thinking") or "thought" in item:
+                return None
+            for field_name in _FINAL_MESSAGE_FIELDS:
+                val = item.get(field_name)
+                if isinstance(val, str) and val.strip():
+                    return val.strip()
+
         for field_name in _FINAL_MESSAGE_FIELDS:
             raw_value = payload.get(field_name)
             if raw_value is None:
@@ -100,7 +115,9 @@ def _extract_final_message(raw_text: str) -> str | None:
             if isinstance(raw_value, dict):
                 return json.dumps(raw_value)
 
-    return candidate
+        return candidate
+
+    return None
 
 
 def _normalize_stream_payload(payload: str | bytes | None) -> str:
@@ -134,26 +151,33 @@ def _stdout_fallback_final_message(stdout_text: str) -> str | None:
     if not candidate:
         return None
 
+    # Line-by-line inspection in reverse for JSONL streams
+    for line in reversed(candidate.splitlines()):
+        line_str = line.strip()
+        if line_str.startswith("{") and line_str.endswith("}"):
+            msg = _extract_final_message(line_str)
+            if msg:
+                return msg
+
     # Limit search space to avoid parsing giant outputs
     search_limit = DEFAULT_STDOUT_FALLBACK_FINAL_MESSAGE_MAX_CHARACTERS
     is_truncated = len(candidate) > search_limit
     search_space = candidate[-search_limit:] if is_truncated else candidate
 
-    # 1. Try parsing the search space as a whole (could be a full JSON response)
-    extracted = _extract_final_message(search_space)
-    if extracted and extracted != search_space:
-        return extracted
+    # 1. Try parsing the search space as a whole
+    msg = _extract_final_message(search_space)
+    if msg and msg != search_space:
+        return msg
 
-    # 2. Try finding a JSON block in the search space (could be logs followed by JSON)
-    # We iterate backwards and use raw_decode to find the last valid JSON object.
+    # 2. Try finding a JSON block in the search space
     pos = search_space.rfind("{")
     while pos != -1:
         try:
             _, end_idx = _JSON_DECODER.raw_decode(search_space[pos:])
             block = search_space[pos : pos + end_idx]
-            extracted = _extract_final_message(block)
-            if extracted and extracted != block:
-                return extracted
+            block_msg = _extract_final_message(block)
+            if block_msg and block_msg != block:
+                return block_msg
         except (json.JSONDecodeError, ValueError) as e:
             logger.debug("Failed to decode JSON block at position %d: %s", pos, e)
         pos = search_space.rfind("{", 0, pos)
@@ -161,4 +185,4 @@ def _stdout_fallback_final_message(stdout_text: str) -> str | None:
     # 3. Fallback to raw text (with truncation note if applicable)
     if is_truncated:
         return f"{_STDOUT_FALLBACK_TRUNCATION_NOTE}{search_space}"
-    return extracted or search_space
+    return search_space

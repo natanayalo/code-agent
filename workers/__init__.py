@@ -1,5 +1,21 @@
 """Worker package boundary."""
 
+from workers.agent_event import (
+    AgentCompleted,
+    AgentEvent,
+    AgentEventBase,
+    AgentFailed,
+    AgentMessage,
+    AgentProgress,
+    AgentStarted,
+    ArtifactProduced,
+    BudgetUpdated,
+    FileChanged,
+    PermissionRequested,
+    ToolCompleted,
+    ToolRequested,
+)
+from workers.agent_event_normalizer import NormalizationStats
 from workers.antigravity_cli_adapter import AntigravityCliRuntimeAdapter
 from workers.base import (
     SUPPORTED_WORKER_TYPES,
@@ -39,21 +55,35 @@ from workers.review import ReviewFinding, ReviewResult
 from workers.shell_worker import ShellWorker
 
 __all__ = [
+    "AgentCompleted",
+    "AgentEvent",
+    "AgentEventBase",
+    "AgentFailed",
+    "AgentMessage",
+    "AgentProgress",
+    "AgentStarted",
+    "ArtifactProduced",
     "ArtifactReference",
     "AntigravityCliRuntimeAdapter",
+    "BudgetUpdated",
     "CodexCliWorker",
     "CodexExecCliRuntimeAdapter",
     "FailureKind",
+    "FileChanged",
     "MaintenanceRequest",
     "GeminiCliRuntimeAdapter",
     "GeminiCliWorker",
     "NativeAgentRunRequest",
     "NativeAgentRunResult",
+    "NormalizationStats",
     "OpenRouterCliRuntimeAdapter",
     "OpenRouterCliWorker",
+    "PermissionRequested",
     "ReviewFinding",
     "ReviewResult",
     "SUPPORTED_WORKER_TYPES",
+    "ToolCompleted",
+    "ToolRequested",
     "WorkerTestResult",
     "Worker",
     "WorkerCapabilityTag",

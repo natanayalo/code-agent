@@ -164,6 +164,7 @@ class CodexCliWorker(CodexCliWorkerNativeMixin, Worker):
         self.runtime_settings = runtime_settings or CliRuntimeSettings()
         self.default_runtime_mode = default_runtime_mode
         self.native_sandbox_mode = native_sandbox_mode.strip() or DEFAULT_CODEX_NATIVE_SANDBOX_MODE
+        # Opt-in via CODE_AGENT_NATIVE_EVENT_CAPTURE_ENABLED.
         self.native_event_capture_enabled = native_event_capture_enabled
         self.trusted_repo_patterns: list[re.Pattern[str]] = []
         if trusted_repo_patterns:

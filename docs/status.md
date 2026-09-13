@@ -4,8 +4,8 @@
 
 Phase 4A: Temporal stabilization, execution architecture foundation, and measured reliability.
 
-Active focus: **M28.5 — Execution Architecture Foundation** (M28.5C
-`AgentEvent`, followed by M28.5D `ContextEnvelope`).
+Active focus: **M28.5 — Execution Architecture Foundation** (M28.5D
+`ContextEnvelope`, following completed M28.5C `AgentEvent`).
 
 ## Current capabilities
 
@@ -89,6 +89,12 @@ Temporal migration and rollback record is in the
   secret definitions (`RegisteredSecretDefinition`), audience intersection rules,
   and ingress secret stripping adapters (`LegacyIngressTaskRequest`,
   `IngressMigrationAdapter`).
+- The completed M28.5C slice implements the provider-neutral `AgentEvent`
+  foundation with 11 canonical event variants, `CodexStreamNormalizer`,
+  `AntigravityStreamNormalizer`, stream capping, secret redaction, reasoning
+  suppression, opt-in `CODE_AGENT_NATIVE_EVENT_CAPTURE_ENABLED` flag wiring,
+  and `agent-events-v1.jsonl` artifact capture while preserving `WorkerResult`
+  contract compatibility and zero DB migration requirements.
 
 ## Known limitations
 
@@ -107,17 +113,17 @@ Temporal migration and rollback record is in the
   intermediate state pruning (Waves 1-3) has eliminated ephemeral notifications,
   candidate metadata, plan models, and node outcomes from snapshots while
   relational projections and markers retain authoritative execution truth
-- the worker boundary is currently terminal `WorkerRequest -> WorkerResult`;
-  provider-neutral streaming `AgentEvent` and `ContextEnvelope` contracts are
-  planned rather than available today
+- the worker boundary maintains terminal `WorkerRequest -> WorkerResult` compatibility;
+  streaming `AgentEvent` capture is opt-in via `CODE_AGENT_NATIVE_EVENT_CAPTURE_ENABLED`
+  and produces an artifact without altering persistence models; `ContextEnvelope`
+  remains the next foundational slice (M28.5D)
 - native-agent command audit and several orchestration/worker adapters remain
   complexity hotspots
 - the repository enforces a 90% Python coverage target in CI
 
 ## Next slices only
 
-1. Continue M28.5 execution-architecture foundation work (M28.5C `AgentEvent`,
-   M28.5D `ContextEnvelope`).
+1. Continue M28.5 execution-architecture foundation work: M28.5D `ContextEnvelope`.
 2. Use the M28 report as a scoped safety/effectiveness signal only; do not
    change routing or add semantic retrieval without further evidence.
 

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
 import logging
+import re
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Any
 
 from sandbox.redact import REDACTED_OUTPUT_LIMIT, SecretRedactor, redact_and_truncate_output
 from workers.base import ArtifactReference
@@ -72,6 +75,59 @@ def _copy_redacted_log_artifact(
     )
 
 
+def _scrub_reasoning_dict(payload: dict[str, Any]) -> bool:
+    """Recursively scrub reasoning and thinking fields from a JSON payload dict."""
+    modified = False
+    event_type = payload.get("type") or payload.get("event")
+    if event_type in ("reasoning", "thinking") or "thought" in payload:
+        for field in ("content", "text", "delta", "thought"):
+            if field in payload:
+                payload[field] = "[REASONING REDACTED]"
+                modified = True
+    item = payload.get("item")
+    if isinstance(item, dict) and _scrub_reasoning_dict(item):
+        payload["item"] = item
+        modified = True
+    return modified
+
+
+def _scrub_reasoning(text: str) -> str:
+    """Scrub reasoning / chain-of-thought blocks from stream output."""
+    if not text:
+        return ""
+    cleaned = re.sub(
+        r"<(thought|reasoning|thinking)>[\s\S]*?</\1>",
+        "[REASONING REDACTED]",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if "{" in cleaned and ("reasoning" in cleaned or "thought" in cleaned or "thinking" in cleaned):
+        lines = []
+        for line in cleaned.splitlines():
+            line_str = line.strip()
+            if line_str.startswith("{") and line_str.endswith("}"):
+                try:
+                    payload = json.loads(line_str)
+                    if isinstance(payload, dict) and _scrub_reasoning_dict(payload):
+                        line = json.dumps(payload)
+                except (ValueError, json.JSONDecodeError):
+                    pass
+            lines.append(line)
+        cleaned = "\n".join(lines)
+    return cleaned
+
+
+def sanitize_execution_output(
+    text: str,
+    redactor: SecretRedactor | None = None,
+    limit_chars: int = REDACTED_OUTPUT_LIMIT,
+) -> str:
+    """Scrub reasoning blocks, redact secrets, and bound length for durable persistence."""
+    return redact_and_truncate_output(
+        _scrub_reasoning(text), redactor=redactor, limit_chars=limit_chars
+    )
+
+
 def _collect_standard_artifacts(
     *,
     artifact_root: Path,
@@ -82,18 +138,20 @@ def _collect_standard_artifacts(
     redactor: SecretRedactor | None,
 ) -> list[ArtifactReference]:
     """Write and return the standard set of execution artifacts."""
+    clean_stdout = sanitize_execution_output(stdout_text, redactor=redactor)
+    clean_stderr = sanitize_execution_output(stderr_text, redactor=redactor)
     artifacts = [
         _write_artifact(
             artifact_root=artifact_root,
             file_name="stdout.txt",
-            content=stdout_text,
+            content=clean_stdout,
             name="native-agent-stdout",
             artifact_type="log",
         ),
         _write_artifact(
             artifact_root=artifact_root,
             file_name="stderr.txt",
-            content=stderr_text,
+            content=clean_stderr,
             name="native-agent-stderr",
             artifact_type="log",
         ),

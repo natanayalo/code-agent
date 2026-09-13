@@ -74,3 +74,73 @@ def test_provider_log_is_written_directly_to_its_per_run_artifact_path(tmp_path:
     assert Path(provider_log.uri.removeprefix("file://")).read_text(encoding="utf-8") == (
         "token=[REDACTED]\n"
     )
+
+
+def test_stdout_and_stderr_redaction_and_reasoning_scrubbing(tmp_path: Path) -> None:
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+
+    stdout_input = (
+        '{"type": "reasoning", "content": "Private thought"}\n'
+        "<thought>Another internal reasoning</thought>\n"
+        "Executing with key=super-secret-key\n"
+    )
+    stderr_input = "Error with key=super-secret-key: <reasoning>debug thought</reasoning>\n"
+
+    artifacts = _collect_standard_artifacts(
+        artifact_root=artifact_root,
+        stdout_text=stdout_input,
+        stderr_text=stderr_input,
+        events_path=None,
+        provider_log_path=None,
+        redactor=SecretRedactor(["super-secret-key"]),
+    )
+
+    stdout_art = next(a for a in artifacts if a.name == "native-agent-stdout")
+    stderr_art = next(a for a in artifacts if a.name == "native-agent-stderr")
+
+    stdout_text = Path(stdout_art.uri.removeprefix("file://")).read_text(encoding="utf-8")
+    stderr_text = Path(stderr_art.uri.removeprefix("file://")).read_text(encoding="utf-8")
+
+    assert "super-secret-key" not in stdout_text
+    assert "[REDACTED]" in stdout_text
+    assert "Private thought" not in stdout_text
+    assert "Another internal reasoning" not in stdout_text
+    assert "[REASONING REDACTED]" in stdout_text
+
+    assert "super-secret-key" not in stderr_text
+    assert "[REDACTED]" in stderr_text
+    assert "debug thought" not in stderr_text
+    assert "[REASONING REDACTED]" in stderr_text
+
+
+def test_antigravity_thinking_and_nested_reasoning_scrubbed(tmp_path: Path) -> None:
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+
+    stdout_input = (
+        '{"type": "thinking", "thought": "Antigravity internal secret plan"}\n'
+        '{"type": "item.completed", "item": {"type": "thinking", "thought": "nested thinking"}}\n'
+        '{"type": "item.started", "item": {"type": "reasoning", "delta": "streaming reasoning"}}\n'
+        "<thinking>Antigravity xml thinking</thinking>\n"
+        "Normal output line\n"
+    )
+
+    artifacts = _collect_standard_artifacts(
+        artifact_root=artifact_root,
+        stdout_text=stdout_input,
+        stderr_text="",
+        events_path=None,
+        provider_log_path=None,
+        redactor=None,
+    )
+
+    stdout_art = next(a for a in artifacts if a.name == "native-agent-stdout")
+    stdout_text = Path(stdout_art.uri.removeprefix("file://")).read_text(encoding="utf-8")
+
+    assert "Antigravity internal secret plan" not in stdout_text
+    assert "nested thinking" not in stdout_text
+    assert "streaming reasoning" not in stdout_text
+    assert "Antigravity xml thinking" not in stdout_text
+    assert "Normal output line" in stdout_text
+    assert "[REASONING REDACTED]" in stdout_text

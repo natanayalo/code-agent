@@ -666,10 +666,9 @@ def test_codex_native_runs_isolate_all_writable_output_paths_by_hashed_namespace
     second_root = node_run_root(workspace.workspace_path, second.scratch_namespace)
     assert first_root != second_root
     assert first_run.final_message_path is not None
-    assert first_run.events_path is not None
+    assert first_run.events_path is None
     assert first_run.artifact_root is not None
     assert first_run.final_message_path.parent == first_root
-    assert first_run.events_path.parent == first_root
     assert first_run.artifact_root.parent == first_root
     assert second_run.final_message_path is not None
     assert second_run.final_message_path.parent == second_root

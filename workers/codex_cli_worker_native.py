@@ -42,6 +42,7 @@ from workers.cli_runtime import (
     CliRuntimeSettings,
     ShellSessionProtocol,
 )
+from workers.codex_event_normalizer import CodexStreamNormalizer
 from workers.failure_taxonomy import classify_failure_kind
 from workers.native_agent_models import NativeAgentRunResult
 from workers.native_agent_runner import (
@@ -405,11 +406,7 @@ class CodexCliWorkerNativeMixin:
         )
         final_message_path = node_root / "native-final-message.json"
         final_message_path.parent.mkdir(parents=True, exist_ok=True)
-        events_path = (
-            node_root / "native-events.jsonl"
-            if self.native_event_capture_enabled  # type: ignore[attr-defined]
-            else None
-        )
+        events_path: Path | None = None
         output_schema_path = (
             node_root / "native-response.schema.json" if request.response_schema else None
         )
@@ -543,6 +540,12 @@ class CodexCliWorkerNativeMixin:
             redactor=redactor,
             response_format=request.response_format,
             response_schema=request.response_schema,
+            normalizer=(
+                CodexStreamNormalizer()
+                if self.native_event_capture_enabled  # type: ignore[attr-defined]
+                else None
+            ),
+            worker_type="codex",
             read_only_workspace=request.read_only or bool(request.constraints.get("read_only")),
             context=context,
         )

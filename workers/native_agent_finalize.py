@@ -3,7 +3,11 @@ from __future__ import annotations
 import json
 import logging
 import time
-from typing import Any, Final, Literal
+from typing import TYPE_CHECKING, Any, Final, Literal
+
+if TYPE_CHECKING:
+    from workers.agent_event import AgentEvent
+    from workers.agent_event_normalizer import NormalizationStats
 
 from apps.observability import (
     NATIVE_AGENT_DURATION_ATTRIBUTE,
@@ -13,9 +17,14 @@ from apps.observability import (
     NATIVE_AGENT_TIMED_OUT_ATTRIBUTE,
     NATIVE_AGENT_TRACING_STREAM_MAX_LENGTH,
 )
-from sandbox.redact import redact_and_truncate_output, sanitize_command
+from sandbox.redact import (
+    SecretRedactor,
+    redact_and_truncate_output,
+    sanitize_command,
+)
 from workers.adapter_utils import format_native_run_summary
 from workers.base import ArtifactReference
+from workers.native_agent_artifacts import sanitize_execution_output
 from workers.native_agent_messages import _detect_reason_code
 
 # We need to import NativeAgentRunRequest and _record_span_data
@@ -56,7 +65,8 @@ def _record_native_agent_telemetry(
     set_current_span_attribute("code_agent.native_agent.timed_out", result.timed_out)
     set_current_span_attribute("code_agent.native_agent.duration_seconds", result.duration_seconds)
     set_current_span_attribute(
-        "code_agent.native_agent.event_capture_enabled", request.events_path is not None
+        "code_agent.native_agent.event_capture_enabled",
+        request.normalizer is not None or request.events_path is not None,
     )
     set_current_span_attribute(
         "code_agent.native_agent.artifact_root_present", bool(result.artifacts)
@@ -148,6 +158,16 @@ def _record_native_agent_run_completed_telemetry(
     add_current_span_event("code_agent.native_agent.run_completed", run_completed_payload)
 
 
+def _sanitize_durable_text(
+    text: str | None,
+    *,
+    redactor: SecretRedactor | None,
+) -> str | None:
+    if text is None:
+        return None
+    return sanitize_execution_output(text, redactor=redactor)
+
+
 def _finalize_native_agent_run(
     request: NativeAgentRunRequest,
     *,
@@ -168,25 +188,35 @@ def _finalize_native_agent_run(
     json_payload_rejected_reason: str | None = None,
     friction_reports: list[dict[str, Any]] | None = None,
     termination_reason: Literal["completed", "timeout", "cancelled", "startup_error"] = "completed",
+    normalized_events: list[AgentEvent] | None = None,
+    normalization_stats: NormalizationStats | None = None,
 ) -> NativeAgentRunResult:
     """Centralize NativeAgentRunResult construction and standardized span metadata recording."""
     elapsed = time.perf_counter() - started_at
+    red = request.redactor
+    safe_stdout = _sanitize_durable_text(stdout, redactor=red) or ""
+    safe_stderr = _sanitize_durable_text(stderr, redactor=red) or ""
+    safe_final_message = _sanitize_durable_text(final_message, redactor=red)
+    safe_summary = _sanitize_durable_text(summary, redactor=red) or summary
+
     result = NativeAgentRunResult(
         status=status,
-        summary=summary,
+        summary=safe_summary,
         command=command_text,
         exit_code=exit_code,
         duration_seconds=elapsed,
         timed_out=timed_out,
-        final_message=final_message,
+        final_message=safe_final_message,
         diff_text=diff_text,
         files_changed=files_changed or [],
         artifacts=artifacts or [],
-        stdout=stdout,
-        stderr=stderr,
+        stdout=safe_stdout,
+        stderr=safe_stderr,
         json_payload=json_payload,
         friction_reports=friction_reports or [],
         termination_reason=termination_reason,
+        normalized_events=normalized_events or [],
+        normalization_stats=normalization_stats,
     )
 
     # Standardized Tracing Metadata

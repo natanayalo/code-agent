@@ -5,7 +5,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from workers.agent_event import AgentEvent
+    from workers.agent_event_normalizer import NormalizationStats, ProviderStreamNormalizer
+    from workers.base import WorkerType
 
 from apps.observability import SPAN_KIND_LLM
 from sandbox.redact import SecretRedactor
@@ -41,6 +46,8 @@ class NativeAgentRunResult:
     json_payload: dict[str, Any] | None = None
     friction_reports: list[dict[str, Any]] = field(default_factory=list)
     termination_reason: Literal["completed", "timeout", "cancelled", "startup_error"] = "completed"
+    normalized_events: list[AgentEvent] = field(default_factory=list)
+    normalization_stats: NormalizationStats | None = None
 
 
 @dataclass(frozen=True)
@@ -74,6 +81,9 @@ class NativeAgentRunRequest:
     read_only_workspace: bool = False
     cancel_requested: Callable[[], bool] | None = None
     process_runner: Any | None = None
+    worker_type: WorkerType | None = None
+    normalizer: ProviderStreamNormalizer | None = field(default=None, hash=False, repr=False)
+    run_id: str | None = None
 
     # Phase 3 Hardening: The context replaces legacy booleans/dicts with a
     # trusted capability grant and a deterministic secret resolver.
