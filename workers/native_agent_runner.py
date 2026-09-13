@@ -939,12 +939,8 @@ def _process_native_agent_events(
             events_path,
             extra={"session_id": request.session_id, "task_id": request.task_id},
         )
-        return [], None
     elif stdout_text and stdout_text.strip():
         raw_records = stdout_text.splitlines()
-
-    if not raw_records:
-        return [], None
 
     run_id = _resolve_run_id(request)
     try:
@@ -969,7 +965,7 @@ def _process_native_agent_events(
         )
         return [], None
 
-    if stats.normalized > 0:
+    if normalized_events:
         _persist_normalized_events_artifact(normalized_events, artifact_root, artifacts)
         return normalized_events, stats
 
@@ -1032,6 +1028,7 @@ def _collect_native_agent_results(
             status = "failure" if terminal_event.failure_kind == "task_failure" else "error"
             if terminal_event.failure_summary:
                 summary = terminal_event.failure_summary
+            final_message = None
 
         json_payload, json_payload_source, json_payload_rejected_reason = (
             _extract_business_json_payload(

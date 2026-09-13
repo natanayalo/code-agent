@@ -133,17 +133,26 @@ def _reconcile_terminal_event(
         or (last_failed is not None)
     )
     if is_failed_run:
-        summary = (
-            execution_summary
-            or (
-                last_failed.failure_summary if last_failed and last_failed.failure_summary else None
+        if (
+            last_failed
+            and last_failed.failure_summary
+            and (execution_status == "success" or not execution_summary)
+        ):
+            summary = last_failed.failure_summary
+        else:
+            summary = (
+                execution_summary
+                or (
+                    last_failed.failure_summary
+                    if last_failed and last_failed.failure_summary
+                    else None
+                )
+                or (
+                    f"Process exited with code {default_exit_code}"
+                    if default_exit_code is not None
+                    else "Execution failed"
+                )
             )
-            or (
-                f"Process exited with code {default_exit_code}"
-                if default_exit_code is not None
-                else "Execution failed"
-            )
-        )
         failure_kind = (
             last_failed.failure_kind
             if last_failed and last_failed.failure_kind

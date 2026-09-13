@@ -241,10 +241,29 @@ class CodexStreamNormalizer:
                 return self._normalize_message(item, base_kwargs, redactor)
             return AgentProgress(phase="generating", message=None, **base_kwargs)
 
-        if item_type in ("tool_call", "function_call", "custom_tool") or "tool" in item:
+        if (
+            item_type in ("tool_call", "function_call", "custom_tool", "mcp_tool_call")
+            or "tool" in item
+        ):
             if event_type == "item.started":
                 return self._normalize_tool_call(item, base_kwargs, redactor)
-            return self._normalize_tool_completed(item, base_kwargs, redactor)
+            if event_type == "item.updated":
+                tool_name = (
+                    item.get("tool")
+                    or item.get("name")
+                    or (item.get("function") or {}).get("name")
+                    or "tool"
+                )
+                raw_args = item.get("arguments") or item.get("input") or item.get("args")
+                msg = safe_truncate_text(
+                    raw_args, redactor=redactor, limit=AGENT_EVENT_MAX_TOOL_SUMMARY_CHARS
+                )
+                return AgentProgress(
+                    phase="executing", message=msg or f"Running {tool_name}", **base_kwargs
+                )
+            if event_type == "item.completed":
+                return self._normalize_tool_completed(item, base_kwargs, redactor)
+            return None
 
         return None
 

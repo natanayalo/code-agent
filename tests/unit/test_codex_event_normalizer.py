@@ -429,3 +429,46 @@ def test_codex_normalizer_sdk_auxiliary_items():
     assert isinstance(err_ev, AgentProgress)
     assert err_ev.phase == "error"
     assert err_ev.message == "Failed to resolve dependency"
+
+
+def test_codex_normalizer_mcp_tool_update_and_completion():
+    norm = CodexStreamNormalizer()
+
+    # 1. in-progress mcp_tool_call item.updated
+    update_ev = norm.normalize(
+        {
+            "type": "item.updated",
+            "item": {
+                "type": "mcp_tool_call",
+                "tool": "search",
+                "arguments": {"q": "test query"},
+                "status": "in_progress",
+            },
+        },
+        sequence=1,
+        run_id="r1",
+    )
+    assert isinstance(update_ev, AgentProgress)
+    assert update_ev.phase == "executing"
+    assert "test query" in (update_ev.message or "")
+    assert not isinstance(update_ev, ToolCompleted)
+
+    # 2. completed mcp_tool_call item.completed
+    done_ev = norm.normalize(
+        {
+            "type": "item.completed",
+            "item": {
+                "type": "mcp_tool_call",
+                "tool": "search",
+                "output": "found 3 matches",
+                "exit_code": 0,
+                "status": "completed",
+            },
+        },
+        sequence=2,
+        run_id="r1",
+    )
+    assert isinstance(done_ev, ToolCompleted)
+    assert done_ev.tool_name == "search"
+    assert done_ev.output_summary == "found 3 matches"
+    assert done_ev.exit_code == 0

@@ -234,9 +234,12 @@ def test_process_native_agent_events_malformed_records_no_divergence(tmp_path: P
     assert stats is not None
     assert stats.normalized == 0
     assert stats.dropped_malformed == 2
-    assert events == []
-    assert len(artifacts) == 0
-    assert not (artifact_root / "agent-events-v1.jsonl").exists()
+    assert len(events) >= 2
+    assert isinstance(events[0], AgentStarted)
+    assert isinstance(events[-1], AgentCompleted)
+    assert len(artifacts) == 1
+    assert artifacts[0].name == "agent_event_stream"
+    assert (artifact_root / "agent-events-v1.jsonl").is_file()
 
 
 def test_process_native_agent_events_valid_records_writes_artifact(tmp_path: Path):
@@ -333,10 +336,14 @@ def test_process_native_agent_events_absent_events_path_logs_warning_and_returns
             artifacts=artifacts,
         )
 
-    assert events == []
-    assert stats is None
-    assert len(artifacts) == 0
-    assert not (artifact_root / "agent-events-v1.jsonl").exists()
+    assert len(events) >= 2
+    assert isinstance(events[0], AgentStarted)
+    assert isinstance(events[-1], AgentCompleted)
+    assert stats is not None
+    assert stats.normalized == 0
+    assert len(artifacts) == 1
+    assert artifacts[0].name == "agent_event_stream"
+    assert (artifact_root / "agent-events-v1.jsonl").is_file()
     assert any(
         "Expected provider event stream not found or empty" in r.message for r in caplog.records
     )
