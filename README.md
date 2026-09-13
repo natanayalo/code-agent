@@ -253,6 +253,7 @@ Milestone M28.5C introduces a typed, provider-neutral `AgentEvent` foundation fo
   ```bash
   CODE_AGENT_NATIVE_EVENT_CAPTURE_ENABLED=1
   ```
+  *(Legacy key `CODE_AGENT_NATIVE_AGENT_EVENT_CAPTURE_ENABLED` is also accepted during rollout migration).*
 
 ## Verification Commands
 

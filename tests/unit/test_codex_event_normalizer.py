@@ -180,3 +180,126 @@ def test_codex_normalizer_malformed_and_unknown():
     assert norm.normalize({"type": "function_call_begin"}, sequence=1, run_id="run_1") is None
     # Missing path for file_edit
     assert norm.normalize({"type": "file_edit"}, sequence=1, run_id="run_1") is None
+
+
+def test_codex_normalizer_dotted_lifecycle_and_turns():
+    norm = CodexStreamNormalizer()
+
+    # thread.started
+    t_start = norm.normalize(
+        {"type": "thread.started", "command": "codex exec ..."}, sequence=1, run_id="r1"
+    )
+    assert isinstance(t_start, AgentStarted)
+    assert t_start.command == "codex exec ..."
+
+    # turn.started
+    turn_start = norm.normalize({"type": "turn.started"}, sequence=2, run_id="r1")
+    assert isinstance(turn_start, AgentProgress)
+    assert turn_start.phase == "turn_started"
+
+    # turn.completed with usage
+    turn_usage = norm.normalize(
+        {"type": "turn.completed", "usage": {"tokens": 120, "cost_usd": 0.02}},
+        sequence=3,
+        run_id="r1",
+    )
+    assert isinstance(turn_usage, BudgetUpdated)
+    assert turn_usage.tokens_used == 120
+
+    # turn.failed
+    turn_fail = norm.normalize(
+        {"type": "turn.failed", "failure_summary": "CLI crashed", "exit_code": 1},
+        sequence=4,
+        run_id="r1",
+    )
+    assert isinstance(turn_fail, AgentFailed)
+    assert turn_fail.exit_code == 1
+    assert turn_fail.failure_summary == "CLI crashed"
+
+
+def test_codex_normalizer_dotted_command_items():
+    norm = CodexStreamNormalizer()
+
+    # item.started & completed - command_execution
+    cmd_start = norm.normalize(
+        {
+            "type": "item.started",
+            "item": {"type": "command_execution", "command": "git status", "id": "cmd_1"},
+        },
+        sequence=1,
+        run_id="r1",
+    )
+    assert isinstance(cmd_start, ToolRequested)
+    assert cmd_start.tool_name == "execute_bash"
+    assert cmd_start.call_id == "cmd_1"
+    assert cmd_start.input_summary == "git status"
+
+    cmd_done = norm.normalize(
+        {
+            "type": "item.completed",
+            "item": {
+                "type": "command_execution",
+                "output": "clean workspace",
+                "exit_code": 0,
+                "duration": 0.12,
+                "id": "cmd_1",
+            },
+        },
+        sequence=2,
+        run_id="r1",
+    )
+    assert isinstance(cmd_done, ToolCompleted)
+    assert cmd_done.exit_code == 0
+    assert cmd_done.output_summary == "clean workspace"
+    assert cmd_done.duration_seconds == 0.12
+
+
+def test_codex_normalizer_dotted_other_items():
+    norm = CodexStreamNormalizer()
+
+    # item.started & item.completed - reasoning suppression
+    reas_start = norm.normalize(
+        {"type": "item.started", "item": {"type": "reasoning"}}, sequence=1, run_id="r1"
+    )
+    assert isinstance(reas_start, AgentProgress)
+    assert reas_start.phase == "reasoning"
+    assert reas_start.message is None
+
+    reas_done = norm.normalize(
+        {"type": "item.completed", "item": {"type": "reasoning", "text": "secret thoughts"}},
+        sequence=2,
+        run_id="r1",
+    )
+    assert isinstance(reas_done, AgentProgress)
+    assert reas_done.phase == "reasoning"
+    assert reas_done.message is None
+
+    # item.started & completed - message
+    msg_start = norm.normalize(
+        {"type": "item.started", "item": {"type": "message"}}, sequence=3, run_id="r1"
+    )
+    assert isinstance(msg_start, AgentProgress)
+    assert msg_start.phase == "generating"
+
+    msg_done = norm.normalize(
+        {
+            "type": "item.completed",
+            "item": {"type": "message", "content": "Done with task", "role": "assistant"},
+        },
+        sequence=4,
+        run_id="r1",
+    )
+    assert isinstance(msg_done, AgentMessage)
+    assert msg_done.content == "Done with task"
+
+    # item.completed - file_change
+    file_done = norm.normalize(
+        {
+            "type": "item.completed",
+            "item": {"type": "file_change", "path": "foo.py", "change_kind": "modified"},
+        },
+        sequence=5,
+        run_id="r1",
+    )
+    assert isinstance(file_done, FileChanged)
+    assert file_done.path == "foo.py"

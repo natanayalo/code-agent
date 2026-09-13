@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
@@ -109,6 +109,53 @@ def _parse_raw_record(record: dict[str, Any] | str) -> tuple[dict[str, Any] | No
     return None, True
 
 
+def _reconcile_terminal_event(
+    provider_terminals: Sequence[AgentCompleted | AgentFailed],
+    *,
+    default_exit_code: int | None,
+    run_id: str,
+    task_id: str | None,
+    session_id: str | None,
+    worker_type: WorkerType | None,
+) -> AgentEvent:
+    if default_exit_code is not None and default_exit_code != 0:
+        last_failed = next(
+            (e for e in reversed(provider_terminals) if isinstance(e, AgentFailed)),
+            None,
+        )
+        summary = (
+            last_failed.failure_summary
+            if last_failed and last_failed.failure_summary
+            else f"Process exited with code {default_exit_code}"
+        )
+        failure_kind = (
+            last_failed.failure_kind
+            if last_failed and last_failed.failure_kind
+            else "process_error"
+        )
+        return AgentFailed(
+            run_id=run_id,
+            sequence=0,
+            task_id=task_id,
+            session_id=session_id,
+            worker_type=worker_type,
+            failure_summary=summary,
+            failure_kind=failure_kind,
+            exit_code=default_exit_code,
+        )
+    if provider_terminals:
+        return provider_terminals[-1]
+    return AgentCompleted(
+        run_id=run_id,
+        sequence=0,
+        task_id=task_id,
+        session_id=session_id,
+        worker_type=worker_type,
+        final_summary="Agent run completed.",
+        exit_code=0,
+    )
+
+
 def _inject_lifecycle_and_file_evidence(
     events: list[AgentEvent],
     *,
@@ -133,33 +180,17 @@ def _inject_lifecycle_and_file_evidence(
             ),
         )
 
-    terminal_event: AgentEvent | None = None
-    if any(isinstance(e, AgentCompleted | AgentFailed) for e in events):
-        terminal_idx = max(
-            i for i, e in enumerate(events) if isinstance(e, AgentCompleted | AgentFailed)
-        )
-        terminal_event = events.pop(terminal_idx)
-    else:
-        if default_exit_code is not None and default_exit_code != 0:
-            terminal_event = AgentFailed(
-                run_id=run_id,
-                sequence=0,
-                task_id=task_id,
-                session_id=session_id,
-                worker_type=worker_type,
-                failure_summary=f"Process exited with code {default_exit_code}",
-                exit_code=default_exit_code,
-            )
-        else:
-            terminal_event = AgentCompleted(
-                run_id=run_id,
-                sequence=0,
-                task_id=task_id,
-                session_id=session_id,
-                worker_type=worker_type,
-                final_summary="Agent run completed.",
-                exit_code=default_exit_code or 0,
-            )
+    provider_terminals = [e for e in events if isinstance(e, AgentCompleted | AgentFailed)]
+    events = [e for e in events if not isinstance(e, AgentCompleted | AgentFailed)]
+
+    terminal_event = _reconcile_terminal_event(
+        provider_terminals,
+        default_exit_code=default_exit_code,
+        run_id=run_id,
+        task_id=task_id,
+        session_id=session_id,
+        worker_type=worker_type,
+    )
 
     if files_changed:
         existing_paths = {e.path for e in events if isinstance(e, FileChanged)}

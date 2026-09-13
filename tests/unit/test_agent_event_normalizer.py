@@ -18,7 +18,12 @@ from workers.agent_event_normalizer import (
 from workers.base import ArtifactReference
 from workers.codex_event_normalizer import CodexStreamNormalizer
 from workers.native_agent_models import NativeAgentRunRequest
-from workers.native_agent_runner import _process_native_agent_events
+from workers.native_agent_runner import (
+    _build_timeout_events,
+    _persist_normalized_events_artifact,
+    _process_native_agent_events,
+    _resolve_run_id,
+)
 
 
 def test_safe_truncate_text_none_and_empty():
@@ -335,3 +340,144 @@ def test_process_native_agent_events_absent_events_path_logs_warning_and_returns
     assert any(
         "Expected provider event stream not found or empty" in r.message for r in caplog.records
     )
+
+
+def test_normalize_provider_stream_reconciles_success_event_with_failed_exit_code():
+    normalizer = CodexStreamNormalizer()
+    raw_records = [
+        {"type": "message_delta", "delta": "Doing work"},
+        {"type": "session_complete", "summary": "Done early", "exit_code": 0},
+    ]
+
+    events, stats = normalize_provider_stream(
+        raw_records,
+        normalizer,
+        run_id="run_reconcile",
+        default_exit_code=2,
+    )
+
+    terminals = [e for e in events if isinstance(e, AgentCompleted | AgentFailed)]
+    assert len(terminals) == 1
+    assert isinstance(terminals[0], AgentFailed)
+    assert terminals[0].exit_code == 2
+    assert_event_sequence_monotonic(events, strictly_consecutive=True)
+
+
+def test_normalize_provider_stream_strips_multiple_intermediate_terminals():
+    normalizer = CodexStreamNormalizer()
+    raw_records = [
+        {"type": "session_complete", "summary": "Turn 1 complete"},
+        {"type": "message_delta", "delta": "Continuing to turn 2"},
+        {"type": "session_complete", "summary": "Turn 2 complete"},
+    ]
+
+    events, stats = normalize_provider_stream(
+        raw_records,
+        normalizer,
+        run_id="run_multi_term",
+        default_exit_code=0,
+    )
+
+    terminals = [e for e in events if isinstance(e, AgentCompleted | AgentFailed)]
+    assert len(terminals) == 1
+    assert isinstance(terminals[0], AgentCompleted)
+    assert terminals[0].final_summary == "Turn 2 complete"
+    assert_event_sequence_monotonic(events, strictly_consecutive=True)
+
+
+def test_process_native_agent_events_run_id_decoupled_from_task_id(tmp_path: Path):
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    artifacts: list[ArtifactReference] = []
+
+    # 1. Explicit run_id provided
+    req_explicit = NativeAgentRunRequest(
+        command=["codex"],
+        prompt="test",
+        repo_path=tmp_path / "repo",
+        workspace_path=tmp_path / "ws",
+        normalizer=CodexStreamNormalizer(),
+        task_id="task-xyz",
+        run_id="run-custom-123",
+    )
+    events, _ = _process_native_agent_events(
+        req_explicit,
+        artifact_root=artifact_root,
+        events_path=None,
+        stdout_text=json.dumps({"type": "message_delta", "delta": "step"}),
+        files_changed=[],
+        exit_code=0,
+        artifacts=artifacts,
+    )
+    assert len(events) > 0
+    assert all(e.run_id == "run-custom-123" for e in events)
+    assert all(e.task_id == "task-xyz" for e in events)
+
+    # 2. Generated unique run_id when not provided (must not equal task_id)
+    artifacts_gen: list[ArtifactReference] = []
+    req_gen = NativeAgentRunRequest(
+        command=["codex"],
+        prompt="test",
+        repo_path=tmp_path / "repo",
+        workspace_path=tmp_path / "ws",
+        normalizer=CodexStreamNormalizer(),
+        task_id="task-xyz",
+        run_id=None,
+    )
+    events_gen, _ = _process_native_agent_events(
+        req_gen,
+        artifact_root=artifact_root,
+        events_path=None,
+        stdout_text=json.dumps({"type": "message_delta", "delta": "step"}),
+        files_changed=[],
+        exit_code=0,
+        artifacts=artifacts_gen,
+    )
+    assert len(events_gen) > 0
+    assert events_gen[0].run_id.startswith("run-")
+    assert events_gen[0].run_id != "task-xyz"
+    assert all(e.task_id == "task-xyz" for e in events_gen)
+
+
+def test_persist_normalized_events_artifact_writes_jsonl_and_attaches_artifact(tmp_path: Path):
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir()
+    artifacts: list[ArtifactReference] = []
+
+    events = [
+        AgentStarted(run_id="run-1", sequence=1, task_id="task-1"),
+        AgentCompleted(
+            run_id="run-1", sequence=2, task_id="task-1", final_summary="Done", exit_code=0
+        ),
+    ]
+
+    _persist_normalized_events_artifact(events, artifact_root, artifacts)
+
+    art = next((a for a in artifacts if a.name == "agent_event_stream"), None)
+    assert art is not None
+    assert art.artifact_type == "agent_event_stream"
+
+    art_file = Path(art.uri.removeprefix("file://"))
+    assert art_file.is_file()
+    assert art_file.name == "agent-events-v1.jsonl"
+    lines = art_file.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 2
+
+
+def test_build_timeout_events_uses_resolved_run_id():
+    req = NativeAgentRunRequest(
+        command=["codex"],
+        prompt="test",
+        repo_path=Path("/tmp/repo"),
+        workspace_path=Path("/tmp/ws"),
+        normalizer=CodexStreamNormalizer(),
+        task_id="task-timeout-test",
+        run_id="run-timeout-fixed",
+    )
+    events = _build_timeout_events(req, "Timed out after 10s")
+    assert _resolve_run_id(req) == "run-timeout-fixed"
+    assert len(events) == 2
+    assert events[0].run_id == "run-timeout-fixed"
+    assert events[0].task_id == "task-timeout-test"
+    assert events[1].run_id == "run-timeout-fixed"
+    assert events[1].failure_kind == "timeout"

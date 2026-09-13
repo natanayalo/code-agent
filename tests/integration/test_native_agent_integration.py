@@ -402,7 +402,7 @@ async def test_native_runner_no_event_artifact_when_disabled(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_native_runner_timeout_without_event_artifact(tmp_path: Path):
+async def test_native_runner_timeout_persists_event_artifact(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir(parents=True)
     ws = tmp_path / "ws"
@@ -435,4 +435,11 @@ async def test_native_runner_timeout_without_event_artifact(tmp_path: Path):
     result = run_native_agent(request)
     assert result.timed_out is True
     assert result.status == "error"
-    assert not any(a.name == "agent_event_stream" for a in result.artifacts)
+    event_art = next((a for a in result.artifacts if a.name == "agent_event_stream"), None)
+    assert event_art is not None
+    art_path = Path(event_art.uri.removeprefix("file://"))
+    assert art_path.is_file()
+    assert art_path.name == "agent-events-v1.jsonl"
+    lines = art_path.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 2
+    assert "timeout" in lines[1]

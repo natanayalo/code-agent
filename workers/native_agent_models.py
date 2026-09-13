@@ -83,6 +83,7 @@ class NativeAgentRunRequest:
     process_runner: Any | None = None
     worker_type: WorkerType | None = None
     normalizer: ProviderStreamNormalizer | None = field(default=None, hash=False, repr=False)
+    run_id: str | None = None
 
     # Phase 3 Hardening: The context replaces legacy booleans/dicts with a
     # trusted capability grant and a deterministic secret resolver.

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import logging
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -72,6 +74,43 @@ def _copy_redacted_log_artifact(
     )
 
 
+def _scrub_reasoning(text: str) -> str:
+    """Scrub reasoning / chain-of-thought blocks from stream output."""
+    if not text:
+        return ""
+    cleaned = re.sub(
+        r"<(thought|reasoning)>[\s\S]*?</\1>", "[REASONING REDACTED]", text, flags=re.IGNORECASE
+    )
+    if "{" in cleaned and ("reasoning" in cleaned or "thought" in cleaned):
+        lines = []
+        for line in cleaned.splitlines():
+            line_str = line.strip()
+            if line_str.startswith("{") and line_str.endswith("}"):
+                try:
+                    payload = json.loads(line_str)
+                    if isinstance(payload, dict):
+                        event_type = payload.get("type") or payload.get("event")
+                        if event_type == "reasoning":
+                            payload["content"] = "[REASONING REDACTED]"
+                            if "text" in payload:
+                                payload["text"] = "[REASONING REDACTED]"
+                            if "delta" in payload:
+                                payload["delta"] = "[REASONING REDACTED]"
+                            line = json.dumps(payload)
+                        item = payload.get("item")
+                        if isinstance(item, dict) and item.get("type") == "reasoning":
+                            item["content"] = "[REASONING REDACTED]"
+                            if "text" in item:
+                                item["text"] = "[REASONING REDACTED]"
+                            payload["item"] = item
+                            line = json.dumps(payload)
+                except (ValueError, json.JSONDecodeError):
+                    pass
+            lines.append(line)
+        cleaned = "\n".join(lines)
+    return cleaned
+
+
 def _collect_standard_artifacts(
     *,
     artifact_root: Path,
@@ -82,18 +121,20 @@ def _collect_standard_artifacts(
     redactor: SecretRedactor | None,
 ) -> list[ArtifactReference]:
     """Write and return the standard set of execution artifacts."""
+    clean_stdout = redact_and_truncate_output(_scrub_reasoning(stdout_text), redactor=redactor)
+    clean_stderr = redact_and_truncate_output(_scrub_reasoning(stderr_text), redactor=redactor)
     artifacts = [
         _write_artifact(
             artifact_root=artifact_root,
             file_name="stdout.txt",
-            content=stdout_text,
+            content=clean_stdout,
             name="native-agent-stdout",
             artifact_type="log",
         ),
         _write_artifact(
             artifact_root=artifact_root,
             file_name="stderr.txt",
-            content=stderr_text,
+            content=clean_stderr,
             name="native-agent-stderr",
             artifact_type="log",
         ),

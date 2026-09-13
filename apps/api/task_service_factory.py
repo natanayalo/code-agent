@@ -73,7 +73,11 @@ SANDBOX_IMAGE_ENV_VAR: Final[str] = "CODE_AGENT_SANDBOX_IMAGE"
 CODEX_RUNTIME_MODE_ENV_VAR: Final[str] = "CODE_AGENT_CODEX_RUNTIME_MODE"
 GEMINI_RUNTIME_MODE_ENV_VAR: Final[str] = "CODE_AGENT_GEMINI_RUNTIME_MODE"
 OPENROUTER_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_OPENROUTER_ENABLED"
-NATIVE_AGENT_EVENT_CAPTURE_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_NATIVE_EVENT_CAPTURE_ENABLED"
+NATIVE_EVENT_CAPTURE_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_NATIVE_EVENT_CAPTURE_ENABLED"
+LEGACY_NATIVE_AGENT_EVENT_CAPTURE_ENABLED_ENV_VAR: Final[str] = (
+    "CODE_AGENT_NATIVE_AGENT_EVENT_CAPTURE_ENABLED"
+)
+NATIVE_AGENT_EVENT_CAPTURE_ENABLED_ENV_VAR: Final[str] = NATIVE_EVENT_CAPTURE_ENABLED_ENV_VAR
 CODEX_TOOL_LOOP_LEGACY_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_CODEX_TOOL_LOOP_LEGACY_ENABLED"
 GEMINI_TOOL_LOOP_LEGACY_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_GEMINI_TOOL_LOOP_LEGACY_ENABLED"
 CODEX_TRUSTED_REPO_PATTERNS_ENV_VAR: Final[str] = "CODE_AGENT_CODEX_TRUSTED_REPO_PATTERNS"
@@ -109,6 +113,17 @@ def _is_enabled(value: str | None) -> bool:
     if value is None:
         return False
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _is_native_event_capture_enabled(resolved_env: Mapping[str, str]) -> bool:
+    """Return whether native event capture is enabled, supporting legacy key during migration."""
+    canonical_val = resolved_env.get(NATIVE_EVENT_CAPTURE_ENABLED_ENV_VAR)
+    if canonical_val is not None:
+        return _is_enabled(canonical_val)
+    legacy_val = resolved_env.get(LEGACY_NATIVE_AGENT_EVENT_CAPTURE_ENABLED_ENV_VAR)
+    if legacy_val is not None:
+        return _is_enabled(legacy_val)
+    return False
 
 
 def _coerce_runtime_mode(
@@ -328,9 +343,7 @@ def _build_codex_worker(
             CODEX_SANDBOX_ENV_VAR,
             "workspace-write",
         ),
-        native_event_capture_enabled=_is_enabled(
-            resolved_env.get(NATIVE_AGENT_EVENT_CAPTURE_ENABLED_ENV_VAR)
-        ),
+        native_event_capture_enabled=_is_native_event_capture_enabled(resolved_env),
         trusted_repo_patterns=(
             [p.strip() for p in s.split(",") if p.strip()]
             if (s := resolved_env.get(CODEX_TRUSTED_REPO_PATTERNS_ENV_VAR))
@@ -387,9 +400,7 @@ def _build_gemini_worker(
         ephemeral_store=ephemeral_store,
         default_runtime_mode=gemini_runtime_mode,
         native_sandbox_enabled=_is_enabled(native_sandbox_value),
-        native_event_capture_enabled=_is_enabled(
-            resolved_env.get(NATIVE_AGENT_EVENT_CAPTURE_ENABLED_ENV_VAR)
-        ),
+        native_event_capture_enabled=_is_native_event_capture_enabled(resolved_env),
     )
 
 

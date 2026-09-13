@@ -2,6 +2,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from apps.api.task_service_factory import (
+    LEGACY_NATIVE_AGENT_EVENT_CAPTURE_ENABLED_ENV_VAR,
     NATIVE_AGENT_EVENT_CAPTURE_ENABLED_ENV_VAR,
     _build_codex_worker,
     _build_gemini_worker,
@@ -131,19 +132,43 @@ def test_gemini_worker_flag_wiring_disabled(tmp_path: Path):
 
 def test_task_service_factory_env_propagation():
     assert NATIVE_AGENT_EVENT_CAPTURE_ENABLED_ENV_VAR == "CODE_AGENT_NATIVE_EVENT_CAPTURE_ENABLED"
+    assert (
+        LEGACY_NATIVE_AGENT_EVENT_CAPTURE_ENABLED_ENV_VAR
+        == "CODE_AGENT_NATIVE_AGENT_EVENT_CAPTURE_ENABLED"
+    )
     cm = MagicMock()
     store = MagicMock()
 
+    # Canonical key
     env_on = {
         NATIVE_AGENT_EVENT_CAPTURE_ENABLED_ENV_VAR: "1",
         ANTIGRAVITY_EXECUTABLE_ENV_VAR: "/usr/local/bin/antigravity",
     }
     codex_on = _build_codex_worker(env_on, cm, store)
     assert codex_on.native_event_capture_enabled is True
-
     gemini_on = _build_gemini_worker(env_on, cm, store)
     assert gemini_on is not None
     assert gemini_on.native_event_capture_enabled is True
+
+    # Legacy key fallback during migration
+    env_legacy_on = {
+        LEGACY_NATIVE_AGENT_EVENT_CAPTURE_ENABLED_ENV_VAR: "1",
+        ANTIGRAVITY_EXECUTABLE_ENV_VAR: "/usr/local/bin/antigravity",
+    }
+    codex_legacy = _build_codex_worker(env_legacy_on, cm, store)
+    assert codex_legacy.native_event_capture_enabled is True
+    gemini_legacy = _build_gemini_worker(env_legacy_on, cm, store)
+    assert gemini_legacy is not None
+    assert gemini_legacy.native_event_capture_enabled is True
+
+    # Precedence: canonical takes precedence over legacy
+    env_precedence = {
+        NATIVE_AGENT_EVENT_CAPTURE_ENABLED_ENV_VAR: "0",
+        LEGACY_NATIVE_AGENT_EVENT_CAPTURE_ENABLED_ENV_VAR: "1",
+        ANTIGRAVITY_EXECUTABLE_ENV_VAR: "/usr/local/bin/antigravity",
+    }
+    codex_prec = _build_codex_worker(env_precedence, cm, store)
+    assert codex_prec.native_event_capture_enabled is False
 
     env_off = {
         NATIVE_AGENT_EVENT_CAPTURE_ENABLED_ENV_VAR: "0",
@@ -151,7 +176,6 @@ def test_task_service_factory_env_propagation():
     }
     codex_off = _build_codex_worker(env_off, cm, store)
     assert codex_off.native_event_capture_enabled is False
-
     gemini_off = _build_gemini_worker(env_off, cm, store)
     assert gemini_off is not None
     assert gemini_off.native_event_capture_enabled is False

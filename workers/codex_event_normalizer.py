@@ -30,6 +30,12 @@ logger = logging.getLogger(__name__)
 
 CODEX_KNOWN_EVENT_TYPES: Final[frozenset[str]] = frozenset(
     {
+        "thread.started",
+        "turn.started",
+        "item.started",
+        "item.completed",
+        "turn.completed",
+        "turn.failed",
         "session_created",
         "message_delta",
         "reasoning",
@@ -94,8 +100,19 @@ class CodexStreamNormalizer:
         base_kwargs: dict[str, Any],
         redactor: SecretRedactor | None,
     ) -> AgentEvent | None:
-        if event_type == "session_created":
+        if event_type in ("session_created", "thread.started"):
             return AgentStarted(command=raw.get("command"), **base_kwargs)
+        if event_type == "turn.started":
+            return AgentProgress(phase="turn_started", message=None, **base_kwargs)
+        if event_type in ("item.started", "item.completed"):
+            return self._normalize_item(event_type, raw, base_kwargs, redactor)
+        if event_type == "turn.completed":
+            usage = raw.get("usage")
+            if isinstance(usage, dict):
+                return self._normalize_usage(usage, base_kwargs)
+            return self._normalize_complete(raw, base_kwargs, redactor)
+        if event_type == "turn.failed":
+            return self._normalize_error(raw, base_kwargs, redactor)
         if event_type == "message_delta":
             msg = safe_truncate_text(
                 raw.get("delta") or raw.get("message") or raw.get("text"),
@@ -119,6 +136,69 @@ class CodexStreamNormalizer:
             return self._normalize_error(raw, base_kwargs, redactor)
         if event_type in ("session_complete", "task_complete"):
             return self._normalize_complete(raw, base_kwargs, redactor)
+        return None
+
+    def _normalize_item(
+        self,
+        event_type: str,
+        raw: dict[str, Any],
+        base_kwargs: dict[str, Any],
+        redactor: SecretRedactor | None,
+    ) -> AgentEvent | None:
+        raw_item = raw.get("item")
+        item: dict[str, Any] = raw_item if isinstance(raw_item, dict) else raw
+        item_type = item.get("type") or item.get("item_type") or ""
+
+        if item_type in ("command_execution", "exec_command", "shell") or "command" in item:
+            tool_name = item.get("tool") or item.get("name") or "execute_bash"
+            call_id = item.get("id") or item.get("call_id")
+            if event_type == "item.started":
+                input_cmd = item.get("command") or item.get("input") or item.get("arguments")
+                input_summary = safe_truncate_text(
+                    input_cmd, redactor=redactor, limit=AGENT_EVENT_MAX_TOOL_SUMMARY_CHARS
+                )
+                return ToolRequested(
+                    tool_name=str(tool_name),
+                    call_id=str(call_id) if call_id else None,
+                    input_summary=input_summary,
+                    **base_kwargs,
+                )
+            raw_out = (
+                item.get("output")
+                or item.get("stdout")
+                or item.get("result")
+                or item.get("summary")
+            )
+            output_summary = safe_truncate_text(
+                raw_out, redactor=redactor, limit=AGENT_EVENT_MAX_TOOL_SUMMARY_CHARS
+            )
+            exit_code = item.get("exit_code")
+            duration = item.get("duration_seconds") or item.get("duration")
+            return ToolCompleted(
+                tool_name=str(tool_name),
+                call_id=str(call_id) if call_id else None,
+                exit_code=int(exit_code) if isinstance(exit_code, int) else None,
+                output_summary=output_summary,
+                duration_seconds=float(duration) if isinstance(duration, int | float) else None,
+                **base_kwargs,
+            )
+
+        if item_type in ("file_edit", "file_change", "file_modify") or "path" in item:
+            return self._normalize_file_change(item, base_kwargs)
+
+        if item_type == "reasoning":
+            return AgentProgress(phase="reasoning", message=None, **base_kwargs)
+
+        if item_type in ("message", "agent_message", "assistant_message"):
+            if event_type == "item.completed":
+                return self._normalize_message(item, base_kwargs, redactor)
+            return AgentProgress(phase="generating", message=None, **base_kwargs)
+
+        if item_type in ("tool_call", "function_call", "custom_tool") or "tool" in item:
+            if event_type == "item.started":
+                return self._normalize_tool_call(item, base_kwargs, redactor)
+            return self._normalize_tool_completed(item, base_kwargs, redactor)
+
         return None
 
     def _normalize_message(
