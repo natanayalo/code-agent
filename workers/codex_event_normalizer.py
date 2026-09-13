@@ -272,6 +272,13 @@ class CodexStreamNormalizer:
 
     def _normalize_usage(self, raw: dict[str, Any], base_kwargs: dict[str, Any]) -> BudgetUpdated:
         tokens = raw.get("tokens") or raw.get("tokens_used") or raw.get("total_tokens")
+        if tokens is None:
+            input_tokens = raw.get("input_tokens")
+            output_tokens = raw.get("output_tokens")
+            if input_tokens is not None or output_tokens is not None:
+                tokens = (int(input_tokens) if isinstance(input_tokens, int | float) else 0) + (
+                    int(output_tokens) if isinstance(output_tokens, int | float) else 0
+                )
         cost = raw.get("cost") or raw.get("cost_usd")
         ratio = raw.get("context_window_ratio")
         return BudgetUpdated(

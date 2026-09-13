@@ -481,3 +481,45 @@ def test_build_timeout_events_uses_resolved_run_id():
     assert events[0].task_id == "task-timeout-test"
     assert events[1].run_id == "run-timeout-fixed"
     assert events[1].failure_kind == "timeout"
+
+
+def test_terminal_reconciliation_runner_status_error_with_zero_exit_code():
+    normalizer = CodexStreamNormalizer()
+    raw_records = [
+        {"type": "turn.started"},
+        {"type": "message_delta", "delta": "Auth failure"},
+        {"type": "turn.completed"},
+    ]
+    events, _ = normalize_provider_stream(
+        raw_records,
+        normalizer,
+        run_id="run-auth-err",
+        default_exit_code=0,
+        execution_status="error",
+        execution_summary="Antigravity CLI failed: not logged into antigravity",
+    )
+
+    terminal = events[-1]
+    assert isinstance(terminal, AgentFailed)
+    assert terminal.exit_code == 1
+    assert terminal.failure_summary == "Antigravity CLI failed: not logged into antigravity"
+
+
+def test_terminal_reconciliation_provider_turn_failed_forces_agent_failed():
+    normalizer = CodexStreamNormalizer()
+    raw_records = [
+        {"type": "turn.started"},
+        {"type": "turn.failed", "failure_summary": "Quota exhausted", "exit_code": 1},
+    ]
+    events, _ = normalize_provider_stream(
+        raw_records,
+        normalizer,
+        run_id="run-turn-fail",
+        default_exit_code=0,
+        execution_status="success",
+    )
+
+    terminal = events[-1]
+    assert isinstance(terminal, AgentFailed)
+    assert terminal.exit_code == 1
+    assert terminal.failure_summary == "Quota exhausted"

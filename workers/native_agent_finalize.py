@@ -20,6 +20,7 @@ from apps.observability import (
 from sandbox.redact import redact_and_truncate_output, sanitize_command
 from workers.adapter_utils import format_native_run_summary
 from workers.base import ArtifactReference
+from workers.native_agent_artifacts import sanitize_execution_output
 from workers.native_agent_messages import _detect_reason_code
 
 # We need to import NativeAgentRunRequest and _record_span_data
@@ -60,7 +61,8 @@ def _record_native_agent_telemetry(
     set_current_span_attribute("code_agent.native_agent.timed_out", result.timed_out)
     set_current_span_attribute("code_agent.native_agent.duration_seconds", result.duration_seconds)
     set_current_span_attribute(
-        "code_agent.native_agent.event_capture_enabled", request.events_path is not None
+        "code_agent.native_agent.event_capture_enabled",
+        request.normalizer is not None or request.events_path is not None,
     )
     set_current_span_attribute(
         "code_agent.native_agent.artifact_root_present", bool(result.artifacts)
@@ -177,6 +179,15 @@ def _finalize_native_agent_run(
 ) -> NativeAgentRunResult:
     """Centralize NativeAgentRunResult construction and standardized span metadata recording."""
     elapsed = time.perf_counter() - started_at
+    safe_stdout = stdout
+    safe_stderr = stderr
+    if request.normalizer is not None:
+        safe_stdout = sanitize_execution_output(stdout, redactor=request.redactor)
+        safe_stderr = sanitize_execution_output(stderr, redactor=request.redactor)
+    elif request.redactor is not None:
+        safe_stdout = redact_and_truncate_output(stdout, redactor=request.redactor)
+        safe_stderr = redact_and_truncate_output(stderr, redactor=request.redactor)
+
     result = NativeAgentRunResult(
         status=status,
         summary=summary,
@@ -188,8 +199,8 @@ def _finalize_native_agent_run(
         diff_text=diff_text,
         files_changed=files_changed or [],
         artifacts=artifacts or [],
-        stdout=stdout,
-        stderr=stderr,
+        stdout=safe_stdout,
+        stderr=safe_stderr,
         json_payload=json_payload,
         friction_reports=friction_reports or [],
         termination_reason=termination_reason,

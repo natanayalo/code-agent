@@ -6,7 +6,7 @@ import json
 import logging
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from sandbox.redact import SecretRedactor, redact_and_truncate_output
 from workers.agent_event import (
@@ -113,25 +113,49 @@ def _reconcile_terminal_event(
     provider_terminals: Sequence[AgentCompleted | AgentFailed],
     *,
     default_exit_code: int | None,
+    execution_status: Literal["success", "failure", "error"] | None = None,
+    execution_summary: str | None = None,
     run_id: str,
     task_id: str | None,
     session_id: str | None,
     worker_type: WorkerType | None,
 ) -> AgentEvent:
-    if default_exit_code is not None and default_exit_code != 0:
-        last_failed = next(
-            (e for e in reversed(provider_terminals) if isinstance(e, AgentFailed)),
-            None,
-        )
+    last_failed = next(
+        (e for e in reversed(provider_terminals) if isinstance(e, AgentFailed)),
+        None,
+    )
+    is_failed_run = (
+        (default_exit_code is not None and default_exit_code != 0)
+        or (execution_status is not None and execution_status != "success")
+        or (last_failed is not None)
+    )
+    if is_failed_run:
         summary = (
-            last_failed.failure_summary
-            if last_failed and last_failed.failure_summary
-            else f"Process exited with code {default_exit_code}"
+            execution_summary
+            or (
+                last_failed.failure_summary if last_failed and last_failed.failure_summary else None
+            )
+            or (
+                f"Process exited with code {default_exit_code}"
+                if default_exit_code is not None
+                else "Execution failed"
+            )
         )
         failure_kind = (
             last_failed.failure_kind
             if last_failed and last_failed.failure_kind
             else "process_error"
+        )
+        effective_exit_code = (
+            default_exit_code
+            if (default_exit_code is not None and default_exit_code != 0)
+            else (
+                last_failed.exit_code
+                if (
+                    last_failed and last_failed.exit_code is not None and last_failed.exit_code != 0
+                )
+                else 1
+            )
         )
         return AgentFailed(
             run_id=run_id,
@@ -141,7 +165,7 @@ def _reconcile_terminal_event(
             worker_type=worker_type,
             failure_summary=summary,
             failure_kind=failure_kind,
-            exit_code=default_exit_code,
+            exit_code=effective_exit_code,
         )
     if provider_terminals:
         return provider_terminals[-1]
@@ -151,7 +175,7 @@ def _reconcile_terminal_event(
         task_id=task_id,
         session_id=session_id,
         worker_type=worker_type,
-        final_summary="Agent run completed.",
+        final_summary=execution_summary or "Agent run completed.",
         exit_code=0,
     )
 
@@ -165,6 +189,8 @@ def _inject_lifecycle_and_file_evidence(
     worker_type: WorkerType | None,
     default_exit_code: int | None,
     files_changed: list[str] | None,
+    execution_status: Literal["success", "failure", "error"] | None = None,
+    execution_summary: str | None = None,
 ) -> list[AgentEvent]:
     """Ensure AgentStarted, bridged FileChanged, and terminal events are present."""
     has_started = any(isinstance(e, AgentStarted) for e in events)
@@ -186,6 +212,8 @@ def _inject_lifecycle_and_file_evidence(
     terminal_event = _reconcile_terminal_event(
         provider_terminals,
         default_exit_code=default_exit_code,
+        execution_status=execution_status,
+        execution_summary=execution_summary,
         run_id=run_id,
         task_id=task_id,
         session_id=session_id,
@@ -228,6 +256,8 @@ def normalize_provider_stream(
     redactor: SecretRedactor | None = None,
     default_exit_code: int | None = None,
     files_changed: list[str] | None = None,
+    execution_status: Literal["success", "failure", "error"] | None = None,
+    execution_summary: str | None = None,
 ) -> tuple[list[AgentEvent], NormalizationStats]:
     """Normalize raw provider event stream records into versioned AgentEvent objects."""
     cfg = config or NormalizationConfig()
@@ -289,5 +319,7 @@ def normalize_provider_stream(
         worker_type=worker_type,
         default_exit_code=default_exit_code,
         files_changed=files_changed,
+        execution_status=execution_status,
+        execution_summary=execution_summary,
     )
     return final_events, stats

@@ -206,10 +206,27 @@ def test_codex_normalizer_dotted_lifecycle_and_turns():
     assert isinstance(turn_usage, BudgetUpdated)
     assert turn_usage.tokens_used == 120
 
+    # turn.completed with official Codex breakdown
+    codex_usage = norm.normalize(
+        {
+            "type": "turn.completed",
+            "usage": {
+                "input_tokens": 1500,
+                "cached_input_tokens": 1000,
+                "output_tokens": 300,
+                "reasoning_output_tokens": 150,
+            },
+        },
+        sequence=4,
+        run_id="r1",
+    )
+    assert isinstance(codex_usage, BudgetUpdated)
+    assert codex_usage.tokens_used == 1800  # 1500 + 300
+
     # turn.failed
     turn_fail = norm.normalize(
         {"type": "turn.failed", "failure_summary": "CLI crashed", "exit_code": 1},
-        sequence=4,
+        sequence=5,
         run_id="r1",
     )
     assert isinstance(turn_fail, AgentFailed)

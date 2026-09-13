@@ -923,6 +923,8 @@ def _process_native_agent_events(
     files_changed: list[str],
     exit_code: int | None,
     artifacts: list[ArtifactReference],
+    execution_status: Literal["success", "failure", "error"] | None = None,
+    execution_summary: str | None = None,
 ) -> tuple[list[AgentEvent], NormalizationStats | None]:
     """Normalize raw provider events, write agent-events-v1.jsonl, and attach to artifacts."""
     if request.normalizer is None:
@@ -956,6 +958,8 @@ def _process_native_agent_events(
             redactor=request.redactor,
             default_exit_code=exit_code,
             files_changed=files_changed,
+            execution_status=execution_status,
+            execution_summary=execution_summary,
         )
     except Exception as exc:
         logger.warning(
@@ -1003,6 +1007,14 @@ def _collect_native_agent_results(
             stderr_text,
         )
 
+        status, summary, friction_reports = _determine_exit_status(
+            completed.returncode,
+            final_message,
+            stderr_text,
+            stdout_text,
+            request.require_observable_result,
+        )
+
         normalized_events, normalization_stats = _process_native_agent_events(
             request,
             artifact_root=artifact_root,
@@ -1011,14 +1023,8 @@ def _collect_native_agent_results(
             files_changed=files_changed,
             exit_code=completed.returncode,
             artifacts=artifacts,
-        )
-
-        status, summary, friction_reports = _determine_exit_status(
-            completed.returncode,
-            final_message,
-            stderr_text,
-            stdout_text,
-            request.require_observable_result,
+            execution_status=status,
+            execution_summary=summary,
         )
 
         json_payload, json_payload_source, json_payload_rejected_reason = (
