@@ -602,3 +602,85 @@ def test_codex_normalizer_failed_mcp_tool_call():
     assert isinstance(declined_call, ToolCompleted)
     assert declined_call.exit_code == 1
     assert declined_call.output_summary == "Tool call declined"
+
+
+def test_codex_normalizer_failed_and_declined_command_item():
+    norm = CodexStreamNormalizer()
+
+    # 1. Authoritative command execution with status="failed" and no exit_code/output
+    failed_cmd = norm.normalize(
+        {
+            "type": "item.completed",
+            "item": {
+                "type": "command_execution",
+                "command": "rm -rf /unauthorized",
+                "call_id": "cmd_fail_1",
+                "status": "failed",
+            },
+        },
+        sequence=1,
+        run_id="r1",
+    )
+    assert isinstance(failed_cmd, ToolCompleted)
+    assert failed_cmd.call_id == "cmd_fail_1"
+    assert failed_cmd.exit_code == 1
+    assert failed_cmd.output_summary == "Command failed"
+
+    # 2. Authoritative command execution with status="declined" (approval denied)
+    declined_cmd = norm.normalize(
+        {
+            "type": "item.completed",
+            "item": {
+                "type": "command_execution",
+                "command": "reboot",
+                "call_id": "cmd_dec_1",
+                "status": "declined",
+            },
+        },
+        sequence=2,
+        run_id="r1",
+    )
+    assert isinstance(declined_cmd, ToolCompleted)
+    assert declined_cmd.call_id == "cmd_dec_1"
+    assert declined_cmd.exit_code == 1
+    assert declined_cmd.output_summary == "Command declined"
+
+    # 3. Command execution with error dict payload
+    err_cmd = norm.normalize(
+        {
+            "type": "item.completed",
+            "item": {
+                "type": "command_execution",
+                "command": "git push --force",
+                "call_id": "cmd_err_1",
+                "status": "failed",
+                "error": {"message": "Command execution timed out after 60s"},
+            },
+        },
+        sequence=3,
+        run_id="r1",
+    )
+    assert isinstance(err_cmd, ToolCompleted)
+    assert err_cmd.call_id == "cmd_err_1"
+    assert err_cmd.exit_code == 1
+    assert err_cmd.output_summary == "Command execution timed out after 60s"
+
+    # 4. Status and error at parent level instead of item level
+    parent_err_cmd = norm.normalize(
+        {
+            "type": "item.completed",
+            "status": "failed",
+            "error": "sandbox execution rejected",
+            "item": {
+                "type": "command_execution",
+                "command": "curl http://external",
+                "call_id": "cmd_parent_1",
+            },
+        },
+        sequence=4,
+        run_id="r1",
+    )
+    assert isinstance(parent_err_cmd, ToolCompleted)
+    assert parent_err_cmd.call_id == "cmd_parent_1"
+    assert parent_err_cmd.exit_code == 1
+    assert parent_err_cmd.output_summary == "sandbox execution rejected"

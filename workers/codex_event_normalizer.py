@@ -145,6 +145,7 @@ class CodexStreamNormalizer:
         item: dict[str, Any],
         base_kwargs: dict[str, Any],
         redactor: SecretRedactor | None,
+        raw: dict[str, Any] | None = None,
     ) -> AgentEvent | None:
         tool_name = item.get("tool") or item.get("name") or "execute_bash"
         call_id = item.get("id") or item.get("call_id")
@@ -166,6 +167,16 @@ class CodexStreamNormalizer:
             )
             return AgentProgress(phase="executing", message=msg, **base_kwargs)
 
+        raw_error = item.get("error") or (raw.get("error") if raw else None)
+        err_text: str | None = None
+        if isinstance(raw_error, dict):
+            err_text = raw_error.get("message") or raw_error.get("error") or str(raw_error)
+        elif raw_error:
+            err_text = str(raw_error)
+
+        status = item.get("status") or (raw.get("status") if raw else None)
+        is_failed = status in ("failed", "declined", "error") or err_text is not None
+
         raw_out = (
             item.get("aggregated_output")
             or item.get("output")
@@ -173,15 +184,21 @@ class CodexStreamNormalizer:
             or item.get("result")
             or item.get("summary")
         )
+        if is_failed and not raw_out:
+            raw_out = err_text or f"Command {status}"
+
         output_summary = safe_truncate_text(
             raw_out, redactor=redactor, limit=AGENT_EVENT_MAX_TOOL_SUMMARY_CHARS
         )
         exit_code = item.get("exit_code")
+        effective_exit_code = int(exit_code) if isinstance(exit_code, int) else None
+        if is_failed and (effective_exit_code is None or effective_exit_code == 0):
+            effective_exit_code = 1
         duration = item.get("duration_seconds") or item.get("duration")
         return ToolCompleted(
             tool_name=str(tool_name),
             call_id=str(call_id) if call_id else None,
-            exit_code=int(exit_code) if isinstance(exit_code, int) else None,
+            exit_code=effective_exit_code,
             output_summary=output_summary,
             duration_seconds=float(duration) if isinstance(duration, int | float) else None,
             **base_kwargs,
@@ -199,7 +216,7 @@ class CodexStreamNormalizer:
         item_type = item.get("type") or item.get("item_type") or ""
 
         if item_type in ("command_execution", "exec_command", "shell") or "command" in item:
-            return self._normalize_command_item(event_type, item, base_kwargs, redactor)
+            return self._normalize_command_item(event_type, item, base_kwargs, redactor, raw=raw)
 
         if (
             item_type in ("file_edit", "file_change", "file_modify")
