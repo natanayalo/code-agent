@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import json
 import logging
 import re
 from collections.abc import Awaitable, Callable, Mapping
+from pathlib import Path
 from typing import Any, Final, Literal, cast
 
 from sqlalchemy import select
@@ -42,6 +44,7 @@ from orchestrator.constants import (
     HIGH_QUALITY_REQUEST_MARKERS,
     LOW_COST_REQUEST_MARKERS,
 )
+from orchestrator.context_envelope import assemble_context_envelope
 from orchestrator.decomposition import decompose_task_plan
 from orchestrator.node_execution import (
     NodeActivityInProgress,
@@ -763,6 +766,7 @@ async def _execute_decomposed_node(
     effective_input_summary: dict[str, Any],
     effective_input_digest: str,
     task_trace_id: str | None,
+    node_envelope_artifact: ArtifactReference | None = None,
 ) -> tuple[WorkerResult | None, NodeOutcome | None]:
     """Dispatch one node through durable persistence or the legacy fallback."""
     if session_factory is not None and state.task.task_id and plan_id is not None:
@@ -784,6 +788,10 @@ async def _execute_decomposed_node(
                 session_id=request.session_id,
                 timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
             )
+            if result is not None and node_envelope_artifact is not None:
+                result = result.model_copy(
+                    update={"artifacts": [*result.artifacts, node_envelope_artifact]}
+                )
             return result
 
         while True:
@@ -804,6 +812,10 @@ async def _execute_decomposed_node(
         session_id=request.session_id,
         timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
     )
+    if result is not None and node_envelope_artifact is not None:
+        result = result.model_copy(
+            update={"artifacts": [*result.artifacts, node_envelope_artifact]}
+        )
     return result, None
 
 
@@ -907,6 +919,9 @@ async def _await_decomposed_nodes(
     state: OrchestratorState,
     worker: Worker,
     session_factory: Callable[[], Session] | None = None,
+    *,
+    workspace_path_resolver: Callable[[str], Path] | None = None,
+    context_envelope_enabled: bool = True,
 ) -> tuple[WorkerResult, list[NodeOutcome], dict[str, Any] | None]:
     """Run ready decomposed nodes one at a time in the shared workspace."""
     plan = state.decomposed_plan
@@ -993,6 +1008,49 @@ async def _await_decomposed_nodes(
                 task_text_override=node_task_text,
                 prior_node_context=prior_context,
             )
+            node_envelope_artifact = None
+            envelope_status = "disabled"
+            if context_envelope_enabled:
+                ws_path = (
+                    workspace_path_resolver(request.workspace_id)
+                    if workspace_path_resolver and request.workspace_id
+                    else None
+                )
+                trusted_git = (
+                    ws_path.parent / ".code-agent-git" / request.workspace_id
+                    if ws_path and request.workspace_id
+                    else None
+                )
+                trusted_dir = trusted_git if trusted_git and trusted_git.is_dir() else None
+                envelope, envelope_status = assemble_context_envelope(
+                    task_id=state.task.task_id or "",
+                    session_id=state.session.session_id if state.session else None,
+                    node_id=ready_node.node_id,
+                    dispatch_role="decomposed_node",
+                    logical_attempt=attempts,
+                    task_spec=ready_node.task_spec,
+                    task_text=node_task_text,
+                    memory_context=state.memory,
+                    worker_request=request,
+                    prior_node_context=prior_context,
+                    workspace_path=ws_path,
+                    trusted_git_dir=trusted_dir,
+                )
+                if envelope is not None:
+                    envelope_dump = envelope.model_dump(mode="json")
+                    request = request.model_copy(
+                        update={"context_envelope": copy.deepcopy(envelope_dump)}
+                    )
+                    node_envelope_artifact = ArtifactReference(
+                        name=f"context_envelope_{ready_node.node_id}",
+                        uri=f"envelope://{envelope.envelope_id}",
+                        artifact_type="context_envelope",
+                        artifact_metadata=copy.deepcopy(envelope_dump),
+                    )
+            current_manifest = dict(request.runtime_manifest or {})
+            current_manifest["context_envelope_status"] = envelope_status
+            request = request.model_copy(update={"runtime_manifest": current_manifest})
+
             evidence, digest = _effective_input_evidence(state, ready_node, prior_context)
             last_manifest = request.runtime_manifest
             result, persisted_outcome = await _execute_decomposed_node(
@@ -1006,6 +1064,7 @@ async def _await_decomposed_nodes(
                 effective_input_summary=evidence,
                 effective_input_digest=digest,
                 task_trace_id=task_trace_id,
+                node_envelope_artifact=node_envelope_artifact,
             )
             if result is None:
                 logger.warning("Node execution result is None, falling back to failure default.")
@@ -1013,6 +1072,9 @@ async def _await_decomposed_nodes(
                     status="failure",
                     summary="Node execution returned no result.",
                     failure_kind="worker_failure",
+                    artifacts=(
+                        [node_envelope_artifact] if node_envelope_artifact is not None else []
+                    ),
                 )
                 break
             if result.status == "success" or result.next_action_hint == "request_higher_permission":
@@ -1025,6 +1087,7 @@ async def _await_decomposed_nodes(
                 status="failure",
                 summary="Node execution returned no result.",
                 failure_kind="worker_failure",
+                artifacts=[node_envelope_artifact] if node_envelope_artifact is not None else [],
             )
         if result.workspace_id is None and state.dispatch.workspace_id:
             result = result.model_copy(update={"workspace_id": state.dispatch.workspace_id})
@@ -3251,6 +3314,8 @@ def build_await_result_node(
     *,
     available_profile_names: frozenset[str] = frozenset(),
     session_factory: Callable[[], Session] | None = None,
+    context_envelope_enabled: bool = True,
+    workspace_path_resolver: Callable[[str], Path] | None = None,
 ) -> Callable[[OrchestratorState], Awaitable[dict[str, Any]]]:
     """Create the await-result node around the workers wired into the graph."""
     available_workers = _available_workers(worker)
@@ -3301,12 +3366,69 @@ def build_await_result_node(
                             state,
                             bound_worker,
                             session_factory=session_factory,
+                            workspace_path_resolver=workspace_path_resolver,
+                            context_envelope_enabled=context_envelope_enabled,
                         )
                         progress_message = "sequential task nodes completed"
                         request = _build_worker_request(state)
-                        request = request.model_copy(update={"runtime_manifest": runtime_manifest})
+                        agg_manifest = dict(runtime_manifest or {})
+                        has_node_envelopes = any(
+                            getattr(a, "artifact_type", None) == "context_envelope"
+                            for outcome in node_outcomes
+                            for a in (getattr(outcome.result, "artifacts", []) or [])
+                        )
+                        if context_envelope_enabled and has_node_envelopes:
+                            agg_manifest["context_envelope_status"] = "decomposed_aggregated"
+                        elif not context_envelope_enabled:
+                            agg_manifest["context_envelope_status"] = "disabled"
+                        request = request.model_copy(update={"runtime_manifest": agg_manifest})
                     else:
                         request = _build_worker_request(state)
+                        envelope_artifact: ArtifactReference | None = None
+                        envelope_status = "disabled"
+                        if context_envelope_enabled:
+                            ws_path = (
+                                workspace_path_resolver(request.workspace_id)
+                                if workspace_path_resolver and request.workspace_id
+                                else None
+                            )
+                            trusted_git = (
+                                ws_path.parent / ".code-agent-git" / request.workspace_id
+                                if ws_path and request.workspace_id
+                                else None
+                            )
+                            trusted_dir = (
+                                trusted_git if trusted_git and trusted_git.is_dir() else None
+                            )
+                            envelope, envelope_status = assemble_context_envelope(
+                                task_id=state.task.task_id or "",
+                                session_id=state.session.session_id if state.session else None,
+                                node_id=None,
+                                dispatch_role="primary",
+                                logical_attempt=state.attempt_count or 1,
+                                task_spec=state.task_spec,
+                                task_text=request.task_text,
+                                memory_context=state.memory,
+                                worker_request=request,
+                                prior_node_context=None,
+                                workspace_path=ws_path,
+                                trusted_git_dir=trusted_dir,
+                            )
+                            if envelope is not None:
+                                envelope_dump = envelope.model_dump(mode="json")
+                                request = request.model_copy(
+                                    update={"context_envelope": copy.deepcopy(envelope_dump)}
+                                )
+                                envelope_artifact = ArtifactReference(
+                                    name="context_envelope",
+                                    uri=f"envelope://{envelope.envelope_id}",
+                                    artifact_type="context_envelope",
+                                    artifact_metadata=copy.deepcopy(envelope_dump),
+                                )
+                        curr_manifest = dict(request.runtime_manifest or {})
+                        curr_manifest["context_envelope_status"] = envelope_status
+                        request = request.model_copy(update={"runtime_manifest": curr_manifest})
+
                         result, progress_message = await _await_worker_with_timeout(
                             bound_worker,
                             request,
@@ -3314,6 +3436,10 @@ def build_await_result_node(
                             session_id=request.session_id,
                             timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
                         )
+                        if result is not None and envelope_artifact is not None:
+                            result = result.model_copy(
+                                update={"artifacts": [*result.artifacts, envelope_artifact]}
+                            )
                     if result.workspace_id is None and state.dispatch.workspace_id:
                         result = result.model_copy(
                             update={"workspace_id": state.dispatch.workspace_id}
