@@ -538,46 +538,31 @@ def _setup_smoke_git_worktree(tmp_path: Path, ws_id: str) -> tuple[Path, Path, s
     return trusted_git_dir, ws_dir, commit_proc.stdout.strip().lower()
 
 
-def _persist_smoke_terminal_run(
-    db_session_factory: sessionmaker[Session],
-    task_id: str,
-    ws_id: str,
+def _drive_smoke_terminal_outcome(
+    service: TaskExecutionService,
+    state: OrchestratorState,
     node_activity_key: str,
 ) -> None:
-    """Helper to persist a terminal worker run containing the node envelope artifact."""
-    with session_scope(db_session_factory) as session:
+    """Drive the production terminal outcome path through
+
+    TaskExecutionService._persist_execution_outcome.
+    """
+    with session_scope(service.session_factory) as session:
         attempt = session.scalar(
             select(ExecutionPlanNodeAttempt).where(
                 ExecutionPlanNodeAttempt.logical_activity_key == node_activity_key
             )
         )
         assert attempt is not None and attempt.result_payload is not None
-        env_art = next(
-            a
-            for a in attempt.result_payload["worker_result"]["artifacts"]
-            if a["artifact_type"] == "context_envelope"
-        )
-        run = WorkerRun(
-            task_id=task_id,
-            session_id="s1",
-            worker_type="antigravity",
-            workspace_id=ws_id,
-            status="success",
-            started_at=utc_now(),
-            finished_at=utc_now(),
-            commands_run=[],
-            files_changed=[],
-            artifact_index=[],
-        )
-        session.add(run)
-        session.flush()
-        ArtifactRepository(session).create(
-            run_id=run.id,
-            artifact_type=ArtifactType.CONTEXT_ENVELOPE,
-            name=env_art["name"],
-            uri=env_art["uri"],
-            artifact_metadata=env_art["artifact_metadata"],
-        )
+        node_result = WorkerResult.model_validate(attempt.result_payload["worker_result"])
+
+    state.result = node_result
+    service._persist_execution_outcome(
+        task_id=state.task.task_id,
+        state=state,
+        started_at=utc_now(),
+        finished_at=utc_now(),
+    )
 
 
 def _build_smoke_decomposed_state(task_id: str, ws_id: str) -> OrchestratorState:
@@ -640,29 +625,32 @@ async def test_temporal_run_decomposed_node_attaches_envelope_smoke(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """End-to-end smoke: TaskExecutionActivities normal init, git resolution, and API projection."""
-    ws_id = "ws-temp-smoke-1"
+    """Production end-to-end smoke test driving genuine TaskExecutionActivities and
+
+    TaskExecutionService._persist_execution_outcome to verify context envelope delivery,
+    trusted git resolution, production artifact persistence, and operator API projection.
+    """
+    monkeypatch.setattr(activities_module.activity, "heartbeat", lambda *a, **kw: None)
+    task_id, ws_id = "task-smoke-e2e", "ws-smoke-e2e"
     _trusted_git_dir, _ws_dir, trusted_sha = _setup_smoke_git_worktree(tmp_path, ws_id)
-    stub_worker = StubWorker(status="success")
+    stub_worker = StubWorker()
     service = TaskExecutionService(
         session_factory=db_session_factory,
         worker=stub_worker,
         workspace_root=tmp_path,
-        context_envelope_enabled=True,
     )
     activities = TaskExecutionActivities(service=service)
 
-    task_id, plan_id = _seed_decomposed_task_and_plan(
-        db_session_factory, task_id="task-temp-1", num_nodes=1
-    )
+    # Seed task state in temporal repository
     state = _build_smoke_decomposed_state(task_id, ws_id)
     with session_scope(db_session_factory) as session:
         TemporalTaskStateRepository(session).upsert(
             task_id=task_id, state=state.model_dump(mode="json")
         )
-    monkeypatch.setattr(activities_module.activity, "heartbeat", lambda *a, **kw: None)
 
-    _, digest = _effective_input_evidence(state, state.decomposed_plan.nodes[0], {})
+    _, plan_id = _seed_decomposed_task_and_plan(db_session_factory, task_id, num_nodes=1)
+    node = state.decomposed_plan.nodes[0]
+    _, digest = _effective_input_evidence(state, node, {})
     node_act = NodeActivityRequest(
         task_id=task_id,
         plan_id=plan_id,
@@ -684,8 +672,8 @@ async def test_temporal_run_decomposed_node_attaches_envelope_smoke(
         == hashlib.sha256(b"clean").hexdigest()
     )
 
-    # 2. Persist terminal worker run with envelope artifact in database
-    _persist_smoke_terminal_run(db_session_factory, task_id, ws_id, node_act.logical_activity_key)
+    # 2. Drive production terminal outcome persistence with envelope artifact
+    _drive_smoke_terminal_outcome(service, state, node_act.logical_activity_key)
 
     # 3. Assert operator API projection via GET /tasks/{task_id} returns context envelope
     _assert_operator_api_envelope(service, task_id, trusted_sha)

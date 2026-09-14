@@ -325,6 +325,98 @@ def _resolve_git_commit_sha(
     return None
 
 
+def _stream_git_diff(target_git_dir: Path, workspace_path: Path) -> tuple[bytes | None, int]:
+    """Stream git diff HEAD into a SHA-256 digest without unbounded memory buffering."""
+    cmd = [
+        "git",
+        "--git-dir",
+        str(target_git_dir),
+        "--work-tree",
+        str(workspace_path),
+        "diff",
+        "HEAD",
+    ]
+    try:
+        with subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        ) as proc:
+            diff_hasher = hashlib.sha256()
+            diff_bytes_count = 0
+            assert proc.stdout is not None
+            while chunk := proc.stdout.read(65536):
+                diff_hasher.update(chunk)
+                diff_bytes_count += len(chunk)
+            _, stderr_bytes = proc.communicate(timeout=10)
+            if proc.returncode != 0:
+                logger.warning(
+                    "git diff HEAD failed with code %s: %s",
+                    proc.returncode,
+                    stderr_bytes.decode("utf-8", errors="replace").strip(),
+                )
+                return None, 0
+            return diff_hasher.digest(), diff_bytes_count
+    except Exception:
+        logger.warning("git diff HEAD execution failed", exc_info=True)
+        return None, 0
+
+
+def _get_git_status_lines(target_git_dir: Path, workspace_path: Path) -> list[str] | None:
+    """Run git status --porcelain=v1 -uall. Returns lines or None on failure."""
+    cmd = [
+        "git",
+        "--git-dir",
+        str(target_git_dir),
+        "--work-tree",
+        str(workspace_path),
+        "status",
+        "--porcelain=v1",
+        "-uall",
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10, check=False)
+        if proc.returncode != 0:
+            logger.warning(
+                "git status failed with code %s: %s",
+                proc.returncode,
+                proc.stderr.strip() if proc.stderr else "",
+            )
+            return None
+        return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+    except Exception:
+        logger.warning("git status execution failed", exc_info=True)
+        return None
+
+
+def _stream_hash_file(target: Path, ws_resolved: Path, hasher: Any) -> bool:
+    """Stream file bytes into hasher if within workspace and not a symlink."""
+    if target.is_symlink():
+        logger.warning("Rejecting symlinked file in worktree digest: %s", target)
+        return False
+    try:
+        resolved = target.resolve()
+    except OSError:
+        logger.warning("Failed to resolve file path: %s", target)
+        return False
+    if not resolved.is_relative_to(ws_resolved):
+        logger.warning("Rejecting out-of-workspace file in worktree digest: %s", target)
+        return False
+    if not resolved.is_file():
+        return True
+    try:
+        file_size = resolved.stat().st_size
+        hasher.update(f"SIZE:{file_size}\nDATA:".encode("ascii"))
+        with resolved.open("rb") as f:
+            while chunk := f.read(65536):
+                hasher.update(chunk)
+        hasher.update(b"\n")
+        return True
+    except OSError:
+        logger.warning("Failed reading file for worktree digest: %s", resolved, exc_info=True)
+        return False
+
+
 def _compute_worktree_state_digest(
     workspace_path: Path | None,
     trusted_git_dir: Path | None = None,
@@ -337,65 +429,31 @@ def _compute_worktree_state_digest(
     if target_git_dir is None:
         return None
 
-    try:
-        diff_proc = subprocess.run(
-            [
-                "git",
-                "--git-dir",
-                str(target_git_dir),
-                "--work-tree",
-                str(workspace_path),
-                "diff",
-                "HEAD",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-        tracked_diff = diff_proc.stdout if diff_proc.returncode == 0 else ""
-
-        status_proc = subprocess.run(
-            [
-                "git",
-                "--git-dir",
-                str(target_git_dir),
-                "--work-tree",
-                str(workspace_path),
-                "status",
-                "--porcelain=v1",
-                "-uall",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-        status_out = status_proc.stdout if status_proc.returncode == 0 else ""
-
-        if not tracked_diff.strip() and not status_out.strip():
-            return hashlib.sha256(b"clean").hexdigest()
-
-        h = hashlib.sha256()
-        h.update(tracked_diff.encode("utf-8"))
-        h.update(b"\n---STATUS---\n")
-        for line in sorted(status_out.splitlines()):
-            if not line.strip():
-                continue
-            h.update(line.strip().encode("utf-8") + b"\n")
-            if line.startswith("?? "):
-                rel = line[3:].strip()
-                content, _, _ = _safe_read_workspace_file(
-                    workspace_path, workspace_path / rel, 65536
-                )
-                if content:
-                    h.update(content.encode("utf-8"))
-        return h.hexdigest()
-    except Exception:
-        logger.debug(
-            "Failed to compute worktree state digest for %s", workspace_path, exc_info=True
-        )
+    diff_digest, diff_bytes = _stream_git_diff(target_git_dir, workspace_path)
+    if diff_digest is None:
         return None
+
+    status_lines = _get_git_status_lines(target_git_dir, workspace_path)
+    if status_lines is None:
+        return None
+
+    if diff_bytes == 0 and not status_lines:
+        return hashlib.sha256(b"clean").hexdigest()
+
+    h = hashlib.sha256()
+    h.update(b"---TRACKED_DIFF---\n")
+    h.update(diff_digest)
+    h.update(b"\n---STATUS---\n")
+    ws_resolved = workspace_path.resolve()
+    for line in sorted(status_lines):
+        h.update(line.encode("utf-8") + b"\n")
+        if line.startswith("?? "):
+            rel = line[3:].strip()
+            h.update(f"---UNTRACKED:{rel}\n".encode())
+            if not _stream_hash_file(workspace_path / rel, ws_resolved, h):
+                return None
+            h.update(b"---END_UNTRACKED---\n")
+    return h.hexdigest()
 
 
 def _discover_repo_skills(
@@ -461,6 +519,21 @@ def _detect_build_systems(workspace_path: Path | None) -> list[str]:
     ]
 
 
+_SCHEMA_ALLOWLIST_KEYS = frozenset({"granted_secret_refs"})
+
+
+def _is_credential_key(key: str) -> bool:
+    lk = str(key).lower().replace("-", "_")
+    if lk in _SCHEMA_ALLOWLIST_KEYS:
+        return False
+    if lk in FORBIDDEN_SECRET_KEYS:
+        return True
+    return any(
+        lk.endswith(f"_{fsk}") or lk.startswith(f"{fsk}_") or f"_{fsk}_" in lk
+        for fsk in FORBIDDEN_SECRET_KEYS
+    )
+
+
 def _sanitize_dict(data: dict[str, Any], legacy_secrets: list[str]) -> dict[str, Any]:
     clean = [
         s
@@ -474,10 +547,14 @@ def _sanitize_dict(data: dict[str, Any], legacy_secrets: list[str]) -> dict[str,
             masked = mask_url_credentials(obj)
             return redactor.redact(masked) if redactor else masked
         if isinstance(obj, dict):
+            res = {}
             for k, v in obj.items():
-                if str(k).lower() in FORBIDDEN_SECRET_KEYS and isinstance(v, str) and len(v) > 8:
-                    logger.warning("Potential credential key %r in context envelope payload", k)
-            return {k: _scan(v) for k, v in obj.items()}
+                if _is_credential_key(str(k)):
+                    logger.warning("Redacting credential key %r in context envelope payload", k)
+                    res[k] = "[REDACTED]"
+                else:
+                    res[k] = _scan(v)
+            return res
         if isinstance(obj, list):
             return [_scan(item) for item in obj]
         return obj

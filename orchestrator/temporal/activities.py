@@ -1738,10 +1738,9 @@ class TaskExecutionActivities:
             return result.model_copy(update={"files_changed": source_files_changed})
 
         active_permit_token: str | None = None
+        _ExecutionOutcomeRef = tuple[NodeActivityResultRef, NodeOutcome | None]
 
-        async def _execute_under_claim_recovery() -> (
-            tuple[NodeActivityResultRef, NodeOutcome | None]
-        ):
+        async def _execute_under_claim_recovery() -> _ExecutionOutcomeRef:
             nonlocal active_permit_token
             while True:
                 permit_token: str | None = None

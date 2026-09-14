@@ -1003,3 +1003,98 @@ def test_compute_worktree_state_digest_nonexistent_workspace() -> None:
     """_compute_worktree_state_digest returns None for non-existent workspace."""
     assert _compute_worktree_state_digest(Path("/nonexistent/path")) is None
     assert _compute_worktree_state_digest(None) is None
+
+
+def test_unknown_credential_keys_redacted_in_envelope() -> None:
+    """Unknown secrets under credential-shaped keys are replaced with [REDACTED]."""
+    wreq = WorkerRequest(
+        task_text="Perform task with sensitive memory",
+        secret_refs=[SecretRef(name="ALLOWED_TOKEN")],
+        secrets={"registered_token": "known-secret-val"},
+    )
+    mem_ctx = MemoryContext(
+        project=[
+            MemoryEntry(
+                memory_key="db_config",
+                value={
+                    "host": "db.internal",
+                    "api_key": "unregistered-super-secret-value",
+                    "auth_token": "unknown-token-12345",
+                    "db_password": "super-secret-pw",
+                },
+                source="vault",
+                gate_status="accepted",
+            )
+        ]
+    )
+    env, status = assemble_context_envelope(
+        task_id="t_cred",
+        session_id="s1",
+        task_spec=TaskSpec(goal="Task"),
+        task_text="Perform task",
+        memory_context=mem_ctx,
+        worker_request=wreq,
+    )
+    assert status == "assembled"
+    assert env is not None
+    assert len(env.gated_memory_entries) == 1
+    mem_val = env.gated_memory_entries[0].value
+    assert mem_val["host"] == "db.internal"
+    assert mem_val["api_key"] == "[REDACTED]"
+    assert mem_val["auth_token"] == "[REDACTED]"
+    assert mem_val["db_password"] == "[REDACTED]"
+    assert env.capability_summary.granted_secret_refs == ["ALLOWED_TOKEN", "registered_token"]
+
+
+def test_worktree_state_digest_git_failure_returns_none(tmp_path: Path) -> None:
+    """Git failures (e.g. invalid git dir) return None and do not report clean worktree."""
+    ws = tmp_path / "ws_invalid_git"
+    ws.mkdir()
+    (ws / "code.py").write_text("print(1)")
+    invalid_git = tmp_path / "corrupt_git_dir"
+    invalid_git.mkdir()
+    # Directory exists but is not a valid git repository
+    digest = _compute_worktree_state_digest(ws, trusted_git_dir=invalid_git)
+    assert digest is None
+
+
+def test_worktree_state_digest_untracked_large_files_no_collision(tmp_path: Path) -> None:
+    """Large untracked files with identical prefixes but different suffixes
+
+    produce distinct digests.
+    """
+
+    def _make_ws(name: str, suffix: bytes) -> Path:
+        ws = tmp_path / name
+        ws.mkdir()
+        subprocess.run(["git", "init", str(ws)], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(ws), "config", "user.email", "test@example.com"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(ws), "config", "user.name", "Test"],
+            check=True,
+            capture_output=True,
+        )
+        (ws / "base.txt").write_text("base content")
+        subprocess.run(["git", "-C", str(ws), "add", "base.txt"], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(ws), "commit", "-m", "init"], check=True, capture_output=True
+        )
+        # Write large untracked file (>65536 bytes) with shared prefix
+        large_prefix = b"X" * 70000
+        (ws / "untracked_large.dat").write_bytes(large_prefix + suffix)
+        return ws
+
+    ws1 = _make_ws("ws1", b"_DIFFERING_SUFFIX_ONE")
+    ws2 = _make_ws("ws2", b"_DIFFERING_SUFFIX_TWO")
+
+    digest1 = _compute_worktree_state_digest(ws1)
+    digest2 = _compute_worktree_state_digest(ws2)
+
+    clean_digest = hashlib.sha256(b"clean").hexdigest()
+    assert digest1 is not None and digest1 != clean_digest
+    assert digest2 is not None and digest2 != clean_digest
+    assert digest1 != digest2
