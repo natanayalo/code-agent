@@ -62,13 +62,21 @@ def _assert_completed_task_response(
     assert latest_run["commands_run"][0]["stdout_artifact_uri"] == "artifacts/stdout.log"
     assert latest_run["commands_run"][0]["stderr_artifact_uri"] == "artifacts/stderr.log"
     assert "id" in latest_run["commands_run"][0]
-    assert len(latest_run["artifact_index"]) == 1
-    assert latest_run["artifact_index"][0]["name"] == "workspace"
-    assert latest_run["artifact_index"][0]["uri"] == "/tmp/workspace-task-44-1234"
-    assert latest_run["artifact_index"][0]["artifact_type"] == "workspace"
-    assert "id" in latest_run["artifact_index"][0]
-    assert latest_run["artifacts"][0]["artifact_type"] == "workspace"
-    assert latest_run["artifacts"][0]["name"] == "workspace"
+    artifacts_by_type = {
+        artifact["artifact_type"]: artifact for artifact in latest_run["artifact_index"]
+    }
+    assert set(artifacts_by_type) == {"workspace", "context_envelope"}
+    workspace_artifact = artifacts_by_type["workspace"]
+    assert workspace_artifact["name"] == "workspace"
+    assert workspace_artifact["uri"] == "/tmp/workspace-task-44-1234"
+    assert "id" in workspace_artifact
+    envelope_artifact = artifacts_by_type["context_envelope"]
+    assert envelope_artifact["artifact_metadata"]["schema_version"] == 1
+    assert envelope_artifact["artifact_metadata"]["context_content_digest"]
+    assert {artifact["artifact_type"] for artifact in latest_run["artifacts"]} == {
+        "workspace",
+        "context_envelope",
+    }
 
     assert len(worker.requests) == 1
     assert worker.requests[0].session_id == payload["session_id"]
@@ -102,8 +110,17 @@ def _assert_task_persistence_records(session_factory, task_id: str, payload: dic
         assert worker_run.files_changed_count == 1
 
         artifacts = artifact_repo.list_by_run(worker_run.id)
-        assert len(artifacts) == 1
-        assert artifacts[0].artifact_type is ArtifactType.WORKSPACE
+        assert {artifact.artifact_type for artifact in artifacts} == {
+            ArtifactType.WORKSPACE,
+            ArtifactType.CONTEXT_ENVELOPE,
+        }
+        envelope = next(
+            artifact
+            for artifact in artifacts
+            if artifact.artifact_type is ArtifactType.CONTEXT_ENVELOPE
+        )
+        assert envelope.artifact_metadata["schema_version"] == 1
+        assert envelope.artifact_metadata["context_content_digest"]
 
 
 def test_submit_task_persists_execution_path_and_allows_polling(

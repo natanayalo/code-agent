@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import subprocess
+import time
 from datetime import UTC
 from pathlib import Path
 from typing import Any
@@ -23,9 +25,13 @@ from orchestrator.context_envelope import (
     _compute_worktree_state_digest,
     _detect_build_systems,
     _discover_repo_skills,
+    _hash_git_status_stream,
     _project_intent_and_repo,
     _resolve_git_commit_sha,
     _safe_read_workspace_file,
+    _stream_git_diff,
+    _stream_git_status,
+    _stream_hash_file,
     assemble_context_envelope,
 )
 from orchestrator.state import MemoryContext, MemoryEntry, TaskSpec
@@ -1021,6 +1027,9 @@ def test_unknown_credential_keys_redacted_in_envelope() -> None:
                     "api_key": "unregistered-super-secret-value",
                     "auth_token": "unknown-token-12345",
                     "db_password": "super-secret-pw",
+                    "accessToken": "camel-access-token",
+                    "apiKey": "camel-api-key",
+                    "clientSecret": "camel-client-secret",
                 },
                 source="vault",
                 gate_status="accepted",
@@ -1043,6 +1052,9 @@ def test_unknown_credential_keys_redacted_in_envelope() -> None:
     assert mem_val["api_key"] == "[REDACTED]"
     assert mem_val["auth_token"] == "[REDACTED]"
     assert mem_val["db_password"] == "[REDACTED]"
+    assert mem_val["accessToken"] == "[REDACTED]"
+    assert mem_val["apiKey"] == "[REDACTED]"
+    assert mem_val["clientSecret"] == "[REDACTED]"
     assert env.capability_summary.granted_secret_refs == ["ALLOWED_TOKEN", "registered_token"]
 
 
@@ -1098,3 +1110,158 @@ def test_worktree_state_digest_untracked_large_files_no_collision(tmp_path: Path
     assert digest1 is not None and digest1 != clean_digest
     assert digest2 is not None and digest2 != clean_digest
     assert digest1 != digest2
+
+
+def test_worktree_state_digest_hashes_git_quoted_filenames(tmp_path: Path) -> None:
+    """Untracked paths requiring Git quoting still bind their complete contents."""
+    trusted_git, ws = _setup_git_worktree(tmp_path, "ws_quoted_path")
+    unusual_path = ws / "line\nbreak.txt"
+    unusual_path.write_text("version A", encoding="utf-8")
+
+    digest_a = _compute_worktree_state_digest(ws, trusted_git_dir=trusted_git)
+    unusual_path.write_text("version B", encoding="utf-8")
+    digest_b = _compute_worktree_state_digest(ws, trusted_git_dir=trusted_git)
+
+    assert digest_a is not None
+    assert digest_b is not None
+    assert digest_a != digest_b
+
+
+def test_worktree_state_digest_git_timeout_returns_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A timed-out Git command fails evidence assembly without blocking indefinitely."""
+    trusted_git, ws = _setup_git_worktree(tmp_path, "ws_git_timeout")
+
+    def _timeout(*args: Any, **kwargs: Any) -> None:
+        raise subprocess.TimeoutExpired(cmd="git", timeout=0.01)
+
+    monkeypatch.setattr("orchestrator.context_envelope.subprocess.run", _timeout)
+
+    assert _compute_worktree_state_digest(ws, trusted_git_dir=trusted_git) is None
+
+
+def test_worktree_state_digest_status_failure_returns_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed status command cannot be mistaken for a valid worktree digest."""
+    trusted_git, ws = _setup_git_worktree(tmp_path, "ws_status_failure")
+
+    real_run = subprocess.run
+
+    def _dispatch(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        if "status" in cmd:
+            kwargs["stderr"].write(b"status failed")
+            return subprocess.CompletedProcess(cmd, 1)
+        return real_run(cmd, **kwargs)
+
+    monkeypatch.setattr("orchestrator.context_envelope.subprocess.run", _dispatch)
+
+    assert _compute_worktree_state_digest(ws, trusted_git_dir=trusted_git) is None
+
+
+def test_worktree_state_digest_handles_rename_records(tmp_path: Path) -> None:
+    """NUL-delimited rename source records are consumed without path ambiguity."""
+    trusted_git, ws = _setup_git_worktree(tmp_path, "ws_rename")
+    subprocess.run(
+        [
+            "git",
+            "--git-dir",
+            str(trusted_git),
+            "--work-tree",
+            str(ws),
+            "mv",
+            "app.py",
+            "renamed.py",
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    digest = _compute_worktree_state_digest(ws, trusted_git_dir=trusted_git)
+
+    assert digest is not None
+    assert digest != hashlib.sha256(b"clean").hexdigest()
+
+
+def test_status_stream_and_file_hash_fail_closed(tmp_path: Path) -> None:
+    """Malformed status records and unreadable paths fail evidence assembly closed."""
+    ws = tmp_path / "ws_status_stream"
+    ws.mkdir()
+    hasher = hashlib.sha256()
+    deadline = time.monotonic() + 1
+
+    assert _hash_git_status_stream(io.BytesIO(b"?\0"), ws, hasher, deadline=deadline) is None
+    assert (
+        _hash_git_status_stream(io.BytesIO(b"R  renamed.py\0"), ws, hasher, deadline=deadline)
+        is None
+    )
+    assert not _stream_hash_file(ws / "missing.txt", ws.resolve(), hasher)
+
+    large_file = ws / "deadline.txt"
+    large_file.write_bytes(b"x" * 70000)
+    assert not _stream_hash_file(large_file, ws.resolve(), hasher, deadline=0)
+
+
+def test_worktree_stream_helpers_bound_failures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Git spooling and file hashing reject timeouts, unsafe paths, and I/O failures."""
+    ws = tmp_path / "ws_stream_failures"
+    ws.mkdir()
+    git_dir = ws / ".git"
+    git_dir.mkdir()
+
+    def _successful_diff(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        kwargs["stdout"].write(b"diff payload")
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr("orchestrator.context_envelope.subprocess.run", _successful_diff)
+    monkeypatch.setattr("orchestrator.context_envelope.time.monotonic", lambda: 2.0)
+    assert _stream_git_diff(git_dir, ws, deadline=1.0) == (None, 0)
+
+    def _io_failure(*args: Any, **kwargs: Any) -> None:
+        raise OSError("git unavailable")
+
+    monkeypatch.setattr("orchestrator.context_envelope.subprocess.run", _io_failure)
+    assert _stream_git_diff(git_dir, ws, deadline=3.0) == (None, 0)
+
+    def _status_timeout(*args: Any, **kwargs: Any) -> None:
+        raise subprocess.TimeoutExpired(cmd="git status", timeout=0.01)
+
+    monkeypatch.setattr("orchestrator.context_envelope.subprocess.run", _status_timeout)
+    assert _stream_git_status(git_dir, ws, hashlib.sha256(), deadline=3.0) is None
+
+    target = ws / "target.txt"
+    target.write_text("content", encoding="utf-8")
+    symlink = ws / "target-link.txt"
+    symlink.symlink_to(target)
+    assert not _stream_hash_file(symlink, ws.resolve(), hashlib.sha256())
+
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside", encoding="utf-8")
+    assert not _stream_hash_file(outside, ws.resolve(), hashlib.sha256())
+
+    with monkeypatch.context() as path_patch:
+        path_patch.setattr(Path, "open", lambda *args, **kwargs: (_ for _ in ()).throw(OSError()))
+        assert not _stream_hash_file(target, ws.resolve(), hashlib.sha256())
+
+
+def test_status_stream_deadline_and_missing_untracked_file(tmp_path: Path) -> None:
+    """Status parsing stops at its deadline and rejects missing untracked files."""
+    ws = tmp_path / "ws_status_failures"
+    ws.mkdir()
+
+    assert (
+        _hash_git_status_stream(io.BytesIO(b"?? pending.txt\0"), ws, hashlib.sha256(), deadline=0)
+        is None
+    )
+    assert (
+        _hash_git_status_stream(
+            io.BytesIO(b"?? missing.txt\0"),
+            ws,
+            hashlib.sha256(),
+            deadline=time.monotonic() + 1,
+        )
+        is None
+    )

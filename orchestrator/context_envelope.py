@@ -5,7 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
+import re
 import subprocess
+import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -29,6 +33,9 @@ MAX_BUILD_SYSTEMS, MAX_FILES_TOUCHED, MAX_SELECTED_REFERENCES = 10, 200, 200
 FORBIDDEN_SECRET_KEYS = frozenset(
     {"password", "token", "secret", "api_key", "private_key", "credential"}
 )
+_GIT_STATE_TIMEOUT_SECONDS = 10.0
+_GIT_STREAM_CHUNK_BYTES = 65536
+_GIT_STDERR_LIMIT_BYTES = 8192
 
 
 class RepoFacts(OrchestratorModel):
@@ -325,8 +332,25 @@ def _resolve_git_commit_sha(
     return None
 
 
-def _stream_git_diff(target_git_dir: Path, workspace_path: Path) -> tuple[bytes | None, int]:
+def _remaining_git_timeout(deadline: float) -> float:
+    """Return the positive time remaining for a worktree-state Git operation."""
+    return max(deadline - time.monotonic(), 0.001)
+
+
+def _read_git_stderr(stream: Any) -> str:
+    """Read a bounded diagnostic from a temporary Git stderr stream."""
+    stream.seek(0)
+    return stream.read(_GIT_STDERR_LIMIT_BYTES).decode("utf-8", errors="replace").strip()
+
+
+def _stream_git_diff(
+    target_git_dir: Path,
+    workspace_path: Path,
+    *,
+    deadline: float | None = None,
+) -> tuple[bytes | None, int]:
     """Stream git diff HEAD into a SHA-256 digest without unbounded memory buffering."""
+    effective_deadline = deadline or (time.monotonic() + _GIT_STATE_TIMEOUT_SECONDS)
     cmd = [
         "git",
         "--git-dir",
@@ -334,62 +358,59 @@ def _stream_git_diff(target_git_dir: Path, workspace_path: Path) -> tuple[bytes 
         "--work-tree",
         str(workspace_path),
         "diff",
+        "--no-ext-diff",
+        "--no-textconv",
         "HEAD",
     ]
     try:
-        with subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        ) as proc:
-            diff_hasher = hashlib.sha256()
-            diff_bytes_count = 0
-            assert proc.stdout is not None
-            while chunk := proc.stdout.read(65536):
-                diff_hasher.update(chunk)
-                diff_bytes_count += len(chunk)
-            _, stderr_bytes = proc.communicate(timeout=10)
+        with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
+            proc = subprocess.run(
+                cmd,
+                stdout=stdout_file,
+                stderr=stderr_file,
+                timeout=_remaining_git_timeout(effective_deadline),
+                check=False,
+            )
             if proc.returncode != 0:
                 logger.warning(
                     "git diff HEAD failed with code %s: %s",
                     proc.returncode,
-                    stderr_bytes.decode("utf-8", errors="replace").strip(),
+                    _read_git_stderr(stderr_file),
                 )
                 return None, 0
+
+            diff_hasher = hashlib.sha256()
+            diff_bytes_count = 0
+            stdout_file.seek(0)
+            while chunk := stdout_file.read(_GIT_STREAM_CHUNK_BYTES):
+                if time.monotonic() >= effective_deadline:
+                    logger.warning("git diff HEAD digest exceeded the worktree-state deadline")
+                    return None, 0
+                diff_hasher.update(chunk)
+                diff_bytes_count += len(chunk)
             return diff_hasher.digest(), diff_bytes_count
-    except Exception:
+    except subprocess.TimeoutExpired:
+        logger.warning("git diff HEAD exceeded the worktree-state deadline")
+        return None, 0
+    except (OSError, ValueError):
         logger.warning("git diff HEAD execution failed", exc_info=True)
         return None, 0
 
 
-def _get_git_status_lines(target_git_dir: Path, workspace_path: Path) -> list[str] | None:
-    """Run git status --porcelain=v1 -uall. Returns lines or None on failure."""
-    cmd = [
-        "git",
-        "--git-dir",
-        str(target_git_dir),
-        "--work-tree",
-        str(workspace_path),
-        "status",
-        "--porcelain=v1",
-        "-uall",
-    ]
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10, check=False)
-        if proc.returncode != 0:
-            logger.warning(
-                "git status failed with code %s: %s",
-                proc.returncode,
-                proc.stderr.strip() if proc.stderr else "",
-            )
-            return None
-        return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
-    except Exception:
-        logger.warning("git status execution failed", exc_info=True)
-        return None
+def _hash_status_record(hasher: Any, record: bytes, *, source_path: bool = False) -> None:
+    """Hash one length-delimited porcelain record without decoding its path."""
+    hasher.update(b"SOURCE\0" if source_path else b"ENTRY\0")
+    hasher.update(len(record).to_bytes(8, "big"))
+    hasher.update(record)
 
 
-def _stream_hash_file(target: Path, ws_resolved: Path, hasher: Any) -> bool:
+def _stream_hash_file(
+    target: Path,
+    ws_resolved: Path,
+    hasher: Any,
+    *,
+    deadline: float | None = None,
+) -> bool:
     """Stream file bytes into hasher if within workspace and not a symlink."""
     if target.is_symlink():
         logger.warning("Rejecting symlinked file in worktree digest: %s", target)
@@ -403,18 +424,125 @@ def _stream_hash_file(target: Path, ws_resolved: Path, hasher: Any) -> bool:
         logger.warning("Rejecting out-of-workspace file in worktree digest: %s", target)
         return False
     if not resolved.is_file():
-        return True
+        logger.warning("Expected regular file is missing from worktree digest: %s", target)
+        return False
     try:
         file_size = resolved.stat().st_size
         hasher.update(f"SIZE:{file_size}\nDATA:".encode("ascii"))
         with resolved.open("rb") as f:
-            while chunk := f.read(65536):
+            while chunk := f.read(_GIT_STREAM_CHUNK_BYTES):
+                if deadline is not None and time.monotonic() >= deadline:
+                    logger.warning(
+                        "File hashing exceeded the worktree-state deadline: %s", resolved
+                    )
+                    return False
                 hasher.update(chunk)
         hasher.update(b"\n")
         return True
     except OSError:
         logger.warning("Failed reading file for worktree digest: %s", resolved, exc_info=True)
         return False
+
+
+def _hash_git_status_stream(
+    stream: Any,
+    workspace_path: Path,
+    hasher: Any,
+    *,
+    deadline: float,
+) -> int | None:
+    """Hash NUL-delimited status records and complete untracked file contents."""
+    pending = b""
+    record_count = 0
+    expecting_source_path = False
+    ws_resolved = workspace_path.resolve()
+    while chunk := stream.read(_GIT_STREAM_CHUNK_BYTES):
+        if time.monotonic() >= deadline:
+            logger.warning("git status digest exceeded the worktree-state deadline")
+            return None
+        pending += chunk
+        records = pending.split(b"\0")
+        pending = records.pop()
+        for record in records:
+            if expecting_source_path:
+                _hash_status_record(hasher, record, source_path=True)
+                expecting_source_path = False
+                record_count += 1
+                continue
+            if len(record) < 3 or record[2:3] != b" ":
+                logger.warning("Malformed git status porcelain record")
+                return None
+            status, path_bytes = record[:2], record[3:]
+            _hash_status_record(hasher, record)
+            record_count += 1
+            if status == b"??":
+                hasher.update(b"UNTRACKED\0")
+                hasher.update(len(path_bytes).to_bytes(8, "big"))
+                hasher.update(path_bytes)
+                if not _stream_hash_file(
+                    workspace_path / Path(os.fsdecode(path_bytes)),
+                    ws_resolved,
+                    hasher,
+                    deadline=deadline,
+                ):
+                    return None
+                hasher.update(b"END_UNTRACKED\0")
+            expecting_source_path = b"R" in status or b"C" in status
+    if pending or expecting_source_path:
+        logger.warning("Incomplete git status porcelain output")
+        return None
+    return record_count
+
+
+def _stream_git_status(
+    target_git_dir: Path,
+    workspace_path: Path,
+    hasher: Any,
+    *,
+    deadline: float,
+) -> int | None:
+    """Stream NUL-delimited porcelain status records and hash untracked file contents."""
+    cmd = [
+        "git",
+        "--git-dir",
+        str(target_git_dir),
+        "--work-tree",
+        str(workspace_path),
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--untracked-files=all",
+    ]
+    try:
+        with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
+            proc = subprocess.run(
+                cmd,
+                stdout=stdout_file,
+                stderr=stderr_file,
+                timeout=_remaining_git_timeout(deadline),
+                check=False,
+            )
+            if proc.returncode != 0:
+                logger.warning(
+                    "git status failed with code %s: %s",
+                    proc.returncode,
+                    _read_git_stderr(stderr_file),
+                )
+                return None
+
+            stdout_file.seek(0)
+            return _hash_git_status_stream(
+                stdout_file,
+                workspace_path,
+                hasher,
+                deadline=deadline,
+            )
+    except subprocess.TimeoutExpired:
+        logger.warning("git status exceeded the worktree-state deadline")
+        return None
+    except (OSError, ValueError):
+        logger.warning("git status execution failed", exc_info=True)
+        return None
 
 
 def _compute_worktree_state_digest(
@@ -429,30 +557,29 @@ def _compute_worktree_state_digest(
     if target_git_dir is None:
         return None
 
-    diff_digest, diff_bytes = _stream_git_diff(target_git_dir, workspace_path)
+    deadline = time.monotonic() + _GIT_STATE_TIMEOUT_SECONDS
+    diff_digest, diff_bytes = _stream_git_diff(
+        target_git_dir,
+        workspace_path,
+        deadline=deadline,
+    )
     if diff_digest is None:
         return None
-
-    status_lines = _get_git_status_lines(target_git_dir, workspace_path)
-    if status_lines is None:
-        return None
-
-    if diff_bytes == 0 and not status_lines:
-        return hashlib.sha256(b"clean").hexdigest()
 
     h = hashlib.sha256()
     h.update(b"---TRACKED_DIFF---\n")
     h.update(diff_digest)
     h.update(b"\n---STATUS---\n")
-    ws_resolved = workspace_path.resolve()
-    for line in sorted(status_lines):
-        h.update(line.encode("utf-8") + b"\n")
-        if line.startswith("?? "):
-            rel = line[3:].strip()
-            h.update(f"---UNTRACKED:{rel}\n".encode())
-            if not _stream_hash_file(workspace_path / rel, ws_resolved, h):
-                return None
-            h.update(b"---END_UNTRACKED---\n")
+    status_records = _stream_git_status(
+        target_git_dir,
+        workspace_path,
+        h,
+        deadline=deadline,
+    )
+    if status_records is None:
+        return None
+    if diff_bytes == 0 and status_records == 0:
+        return hashlib.sha256(b"clean").hexdigest()
     return h.hexdigest()
 
 
@@ -523,7 +650,9 @@ _SCHEMA_ALLOWLIST_KEYS = frozenset({"granted_secret_refs"})
 
 
 def _is_credential_key(key: str) -> bool:
-    lk = str(key).lower().replace("-", "_")
+    normalized = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", str(key))
+    normalized = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", normalized)
+    lk = re.sub(r"[^a-zA-Z0-9]+", "_", normalized).strip("_").lower()
     if lk in _SCHEMA_ALLOWLIST_KEYS:
         return False
     if lk in FORBIDDEN_SECRET_KEYS:
