@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import hashlib
 import inspect
 import json
 import logging
+import os
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
@@ -28,6 +30,7 @@ from db.enums import (
 from db.models import ExecutionPlanNodeAttempt, HumanInteraction, Task
 from db.utils import compute_interaction_content_hash
 from orchestrator.acceptance import enforce_task_acceptance, task_acceptance_rejection
+from orchestrator.context_envelope import assemble_context_envelope
 from orchestrator.decomposition import is_read_only_fanout_eligible
 from orchestrator.execution_graph_input import build_orchestrator_graph_input
 from orchestrator.execution_policy import _apply_execution_budget_policy
@@ -681,9 +684,28 @@ def _source_file_changes(files_changed: list[str], logical_activity_key: str) ->
 def _project_decomposed_runtime_manifest(state: OrchestratorState) -> None:
     """Carry the effective node-wave deployment contract into parent persistence."""
     request = _build_worker_request(state)
-    state.dispatch = state.dispatch.model_copy(
-        update={"runtime_manifest": request.runtime_manifest}
+    manifest = dict(request.runtime_manifest or {})
+    env_enabled = os.environ.get("CODE_AGENT_CONTEXT_ENVELOPE_ENABLED", "true").lower() not in (
+        "false",
+        "0",
     )
+    has_node_envelopes = any(
+        getattr(a, "artifact_type", None) == "context_envelope"
+        for outcome in state.node_outcomes
+        for a in (getattr(outcome.result, "artifacts", []) or [])
+    )
+    existing_status = (
+        (state.dispatch.runtime_manifest or {}).get("context_envelope_status")
+        if state.dispatch
+        else None
+    )
+    if not env_enabled:
+        manifest["context_envelope_status"] = "disabled"
+    elif has_node_envelopes or existing_status not in (None, "disabled"):
+        manifest["context_envelope_status"] = "decomposed_aggregated"
+    else:
+        manifest["context_envelope_status"] = "disabled"
+    state.dispatch = state.dispatch.model_copy(update={"runtime_manifest": manifest})
 
 
 def _restore_task_trace_context(func: Any) -> Any:
@@ -759,10 +781,17 @@ class TaskExecutionActivities:
             if self.service.workspace_manager
             else None
         )
+        ws_root = (
+            self.service.workspace_manager.root_dir
+            if getattr(self.service, "workspace_manager", None)
+            else None
+        )
         self.await_result_node = build_await_result_node(
             self.service.worker,
             available_profile_names=profile_names,
             session_factory=self.service.session_factory,
+            context_envelope_enabled=getattr(self.service, "context_envelope_enabled", True),
+            workspace_path_resolver=(lambda ws_id: ws_root / ws_id) if ws_root else None,
         )
         self.verify_result_node = build_verify_result_node(
             enable_independent_verifier=self.service.enable_independent_verifier,
@@ -1631,6 +1660,50 @@ class TaskExecutionActivities:
         request = request.model_copy(
             update={"scratch_namespace": node_activity.logical_activity_key}
         )
+        node_envelope_artifact = None
+        envelope_status = "disabled"
+        if getattr(self.service, "context_envelope_enabled", True):
+            ws_root = (
+                self.service.workspace_manager.root_dir
+                if getattr(self.service, "workspace_manager", None)
+                else None
+            )
+            ws_path = ws_root / request.workspace_id if ws_root and request.workspace_id else None
+            trusted_git = (
+                ws_root / ".code-agent-git" / request.workspace_id
+                if ws_root and request.workspace_id
+                else None
+            )
+            envelope, envelope_status = assemble_context_envelope(
+                task_id=task_id,
+                session_id=state.session.session_id if state.session else None,
+                node_id=node.node_id,
+                dispatch_role="decomposed_node",
+                logical_attempt=node_activity.logical_attempt,
+                task_spec=node.task_spec,
+                task_text=task_text,
+                memory_context=state.memory,
+                worker_request=request,
+                prior_node_context=prior_context,
+                workspace_path=ws_path,
+                trusted_git_dir=trusted_git if trusted_git and trusted_git.is_dir() else None,
+            )
+            if envelope is not None:
+                envelope_dump = envelope.model_dump(mode="json")
+                request = request.model_copy(
+                    update={"context_envelope": copy.deepcopy(envelope_dump)}
+                )
+                node_envelope_artifact = ArtifactReference(
+                    name=f"context_envelope_{node.node_id}",
+                    uri=f"envelope://{envelope.envelope_id}",
+                    artifact_type="context_envelope",
+                    artifact_metadata=copy.deepcopy(envelope_dump),
+                )
+
+        current_manifest = dict(request.runtime_manifest or {})
+        current_manifest["context_envelope_status"] = envelope_status
+        request = request.model_copy(update={"runtime_manifest": current_manifest})
+
         evidence, digest = _effective_input_evidence(state, node, prior_context)
         if digest != node_activity.effective_input_digest:
             raise ValueError("Node activity input digest changed before execution.")
@@ -1643,6 +1716,10 @@ class TaskExecutionActivities:
                 session_id=request.session_id,
                 timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
             )
+            if result is not None and node_envelope_artifact is not None:
+                result = result.model_copy(
+                    update={"artifacts": [*result.artifacts, node_envelope_artifact]}
+                )
             source_files_changed = _source_file_changes(
                 result.files_changed, node_activity.logical_activity_key
             )

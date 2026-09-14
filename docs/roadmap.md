@@ -302,9 +302,9 @@ supports progress, audit, stuck detection, cancellation, memory evidence,
 budget/cost accounting, debugging, and reliability evaluation; it must not
 become a custom provider-independent reasoning loop.
 
-### M28.5D — Versioned `ContextEnvelope`
+### M28.5D — Versioned `ContextEnvelope` [COMPLETED]
 
-Design a bounded, inspectable, reproducible context contract containing:
+Designed and implemented a bounded, inspectable, reproducible context contract containing:
 
 - objective and acceptance criteria
 - relevant repository facts and selected file/context references
@@ -314,9 +314,12 @@ Design a bounded, inspectable, reproducible context contract containing:
 - applicable repository skills/instructions
 - capability summary and explicit exclusions
 
-Persist or reference the envelope as execution evidence. Memory remains
-advisory. M28 typed compact-session state is an input; copying the entire parent
-conversation is not a `ContextEnvelope`.
+Assembled immediately prior to dispatch and passed via `WorkerRequest.context_envelope`.
+Persisted as execution evidence inline in `artifact_metadata` on an `ArtifactReference`
+of type `context_envelope` attached to `WorkerResult.artifacts`. Features dual digests
+(`context_content_digest` for reproducibility, `evidence_digest` for audit lineage),
+progressive string and list truncation with explicit `truncation_records`, secret
+redaction via `SecretRedactor`, and a full operator dashboard inspection panel.
 
 ### Incremental Contract Direction
 

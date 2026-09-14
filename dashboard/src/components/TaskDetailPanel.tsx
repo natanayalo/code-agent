@@ -11,6 +11,7 @@ import {
   VerifierOutcomeSnapshot,
 } from '../types/task';
 import { TaskApprovalSection } from './TaskApprovalSection';
+import { ContextEnvelopeSection } from './ContextEnvelopeSection';
 import { formatLabel } from '../utils/formatters';
 import { api } from '../services/api';
 
@@ -1089,6 +1090,8 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
               <p className="task-detail-muted">No trace metadata available yet.</p>
             )}
           </section>
+
+          <ContextEnvelopeSection artifacts={artifacts} />
 
           <section className="task-detail-section">
             <h4>Artifacts</h4>

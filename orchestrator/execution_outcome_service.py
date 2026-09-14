@@ -273,6 +273,7 @@ def _persist_artifacts_for_run(
             artifact_type=artifact_type,
             name=artifact.name,
             uri=artifact.uri,
+            artifact_metadata=getattr(artifact, "artifact_metadata", None),
         )
     for review_artifact_type, review_entry in review_artifact_entries:
         artifact_repo.create(

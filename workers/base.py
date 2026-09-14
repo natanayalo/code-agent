@@ -116,6 +116,7 @@ class WorkerRequest(WorkerModel):
     image: str | None = None
     # Internal per-node writable namespace for read-only fan-out containers.
     scratch_namespace: str | None = None
+    context_envelope: dict[str, Any] | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -208,6 +209,7 @@ class ArtifactReference(WorkerModel):
     name: str
     uri: str
     artifact_type: str | None = None
+    artifact_metadata: dict[str, Any] | None = None
 
 
 MaintenanceActionType = Literal[

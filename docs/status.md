@@ -4,8 +4,10 @@
 
 Phase 4A: Temporal stabilization, execution architecture foundation, and measured reliability.
 
-Active focus: **M28.5 — Execution Architecture Foundation** (M28.5D
-`ContextEnvelope`, following completed M28.5C `AgentEvent`).
+Active focus: **M28.5 — Execution Architecture Foundation** completed
+(M28.5A capability grants, M28.5B task-contract split, M28.5C `AgentEvent`,
+M28.5D `ContextEnvelope`). Transitioning to **M29 — Provider Reliability
+and Evidence-Driven Routing**.
 
 ## Current capabilities
 
@@ -114,16 +116,17 @@ Temporal migration and rollback record is in the
   candidate metadata, plan models, and node outcomes from snapshots while
   relational projections and markers retain authoritative execution truth
 - the worker boundary maintains terminal `WorkerRequest -> WorkerResult` compatibility;
-  streaming `AgentEvent` capture is opt-in via `CODE_AGENT_NATIVE_EVENT_CAPTURE_ENABLED`
-  and produces an artifact without altering persistence models; `ContextEnvelope`
-  remains the next foundational slice (M28.5D)
+  streaming `AgentEvent` capture is opt-in via `CODE_AGENT_NATIVE_EVENT_CAPTURE_ENABLED`;
+  versioned pre-dispatch `ContextEnvelope` context assembly and artifact persistence
+  is enabled by default (M28.5D)
 - native-agent command audit and several orchestration/worker adapters remain
   complexity hotspots
 - the repository enforces a 90% Python coverage target in CI
 
 ## Next slices only
 
-1. Continue M28.5 execution-architecture foundation work: M28.5D `ContextEnvelope`.
+1. Begin M29 — Provider Reliability and Evidence-Driven Routing: extract real-task
+   outcome evidence into explainable worker-profile recommendations.
 2. Use the M28 report as a scoped safety/effectiveness signal only; do not
    change routing or add semantic retrieval without further evidence.
 

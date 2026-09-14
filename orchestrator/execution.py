@@ -127,6 +127,7 @@ class TaskExecutionService:
         decomposed_fanout_enabled: bool = False,
         enforce_temporal_availability: bool = False,
         temporal_operational_probe: TemporalOperationalProbeProtocol | None = None,
+        context_envelope_enabled: bool = True,
     ) -> None:
         self.session_factory = session_factory
         self.worker = worker
@@ -150,6 +151,7 @@ class TaskExecutionService:
         self.decomposed_fanout_enabled = decomposed_fanout_enabled
         self.enforce_temporal_availability = enforce_temporal_availability
         self.temporal_operational_probe = temporal_operational_probe
+        self.context_envelope_enabled = context_envelope_enabled
 
     async def __aenter__(self) -> TaskExecutionService:
         """Enter the service lifecycle."""

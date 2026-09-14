@@ -155,6 +155,7 @@ EXPECTED_CHECK_CONSTRAINTS = {
             "workspace",
             "review_result",
             "independent_review_result",
+            "context_envelope",
         },
     },
     "human_interactions": {
