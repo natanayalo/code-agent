@@ -313,7 +313,9 @@ def _resolve_git_commit_sha(
             if len(sha) == 40 and all(c in "0123456789abcdefABCDEF" for c in sha):
                 return sha.lower()
     except Exception:
-        logger.debug("Failed to run git rev-parse for %s", target_git_dir, exc_info=True)
+        # The Git directory may be derived from worker/request context. Avoid
+        # placing it in logs because path segments can contain credential data.
+        logger.debug("Failed to run git rev-parse", exc_info=True)
 
     try:
         head_file = target_git_dir / "HEAD" if target_git_dir.is_dir() else None

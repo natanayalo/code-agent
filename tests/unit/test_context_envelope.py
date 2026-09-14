@@ -558,13 +558,14 @@ def test_discover_repo_skills_rejects_symlinked_skill_dir(tmp_path: Path) -> Non
 
 
 def test_resolve_git_commit_sha_and_fallback(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """_resolve_git_commit_sha returns commit SHA via git or fallback to .git/HEAD."""
+    """Git fallback resolves HEAD without logging a potentially sensitive path."""
     import subprocess
 
-    ws = tmp_path / "repo"
-    ws.mkdir()
+    sensitive_path_segment = "api-key-super-secret"
+    ws = tmp_path / sensitive_path_segment / "repo"
+    ws.mkdir(parents=True)
     assert _resolve_git_commit_sha(ws) is None
 
     git_dir = ws / ".git"
@@ -580,8 +581,11 @@ def test_resolve_git_commit_sha_and_fallback(
         "run",
         lambda *args, **kwargs: (_ for _ in ()).throw(FileNotFoundError("no git")),
     )
-    resolved = _resolve_git_commit_sha(ws)
+    with caplog.at_level("DEBUG", logger="orchestrator.context_envelope"):
+        resolved = _resolve_git_commit_sha(ws)
     assert resolved == sha_value
+    assert "Failed to run git rev-parse" in caplog.text
+    assert sensitive_path_segment not in caplog.text
 
 
 def test_semantic_digest_changes_on_commit_sha(tmp_path: Path) -> None:
