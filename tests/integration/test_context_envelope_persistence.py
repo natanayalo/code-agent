@@ -342,7 +342,9 @@ def test_artifact_persistence_stores_metadata(
     assert status == "assembled"
     assert envelope is not None
     envelope_meta = envelope.model_dump(mode="json")
-    envelope_meta["objective"] = "Persist test; password=unknown-persistence-secret"
+    envelope_meta["objective"] = (
+        'Persist test; password=unknown-persistence-secret; {"api_key":"json-persistence-secret"}'
+    )
     art_ref = ArtifactReference(
         name="context_envelope",
         uri="envelope://123",
@@ -367,8 +369,11 @@ def test_artifact_persistence_stores_metadata(
         assert row.artifact_type == ArtifactType.CONTEXT_ENVELOPE
         assert row.name == "context_envelope"
         assert row.artifact_metadata is not None
-        assert row.artifact_metadata["objective"] == "Persist test; password=[REDACTED]"
+        assert row.artifact_metadata["objective"] == (
+            'Persist test; password=[REDACTED]; {"api_key":"[REDACTED]"}'
+        )
         assert "unknown-persistence-secret" not in str(row.artifact_metadata)
+        assert "json-persistence-secret" not in str(row.artifact_metadata)
         assert (
             row.artifact_metadata["context_content_digest"]
             != envelope_meta["context_content_digest"]

@@ -34,8 +34,9 @@ FORBIDDEN_SECRET_KEYS = frozenset(
     {"password", "token", "secret", "api_key", "private_key", "credential"}
 )
 _EMBEDDED_CREDENTIAL_ASSIGNMENT = re.compile(
-    r"(?i)(?P<label>\b(?:password|passwd|pwd|api\s*[_-]?\s*key|client\s*[_-]?\s*secret|"
-    r"access\s*[_-]?\s*token|auth\s*[_-]?\s*token|secret|credential)\b\s*[:=]\s*)"
+    r"(?i)(?P<label>(?P<key_quote>['\"]?)\b(?:password|passwd|pwd|api\s*[_-]?\s*key|"
+    r"client\s*[_-]?\s*secret|access\s*[_-]?\s*token|auth\s*[_-]?\s*token|secret|"
+    r"credential)\b(?P=key_quote)\s*[:=]\s*)"
     r"(?P<quote>['\"]?)(?P<value>[^\s,;'\"]{4,})(?P=quote)"
 )
 _EMBEDDED_BEARER_TOKEN = re.compile(r"(?i)(\bauthorization\s*:\s*bearer\s+)[^\s,;]{4,}")

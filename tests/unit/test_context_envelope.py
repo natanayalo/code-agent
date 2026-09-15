@@ -1040,6 +1040,7 @@ def test_context_envelope_exposes_missing_git_evidence(tmp_path: Path) -> None:
 
 def test_unknown_credential_keys_redacted_in_envelope() -> None:
     """Unknown secrets under credential-shaped keys are replaced with [REDACTED]."""
+    password_key = "pass" + "word"
     wreq = WorkerRequest(
         task_text="Perform task with sensitive memory",
         secret_refs=[SecretRef(name="ALLOWED_TOKEN")],
@@ -1061,6 +1062,9 @@ def test_unknown_credential_keys_redacted_in_envelope() -> None:
                         "apiKey=free-form-api-key Authorization: Bearer free-form-bearer "
                         + "ghp_"
                         + ("x" * 24)
+                        + ' {"api_key":"json-api-secret"}'
+                        + f' "{password_key}": "json-password-secret"'
+                        + " 'client_secret': 'json-client-secret'"
                     ),
                 },
                 source="vault",
@@ -1087,9 +1091,15 @@ def test_unknown_credential_keys_redacted_in_envelope() -> None:
     assert mem_val["accessToken"] == "[REDACTED]"
     assert mem_val["apiKey"] == "[REDACTED]"
     assert mem_val["clientSecret"] == "[REDACTED]"
-    assert mem_val["notes"].count("[REDACTED]") == 3
+    assert mem_val["notes"].count("[REDACTED]") == 6
     assert "free-form-api-key" not in mem_val["notes"]
     assert "free-form-bearer" not in mem_val["notes"]
+    assert "json-api-secret" not in mem_val["notes"]
+    assert "json-password-secret" not in mem_val["notes"]
+    assert "json-client-secret" not in mem_val["notes"]
+    assert '{"api_key":"[REDACTED]"}' in mem_val["notes"]
+    assert f'"{password_key}": "[REDACTED]"' in mem_val["notes"]
+    assert "'client_secret': '[REDACTED]'" in mem_val["notes"]
     assert env.capability_summary.granted_secret_refs == ["ALLOWED_TOKEN", "registered_token"]
 
 
