@@ -29,8 +29,12 @@ from db.models import (
     WorkerRun,
 )
 from db.models import Session as DBSession
+from orchestrator.context_envelope import _compute_digests, assemble_context_envelope
 from orchestrator.execution import TaskExecutionService
-from orchestrator.execution_outcome_service import _persist_artifacts_for_run
+from orchestrator.execution_outcome_service import (
+    _build_artifact_index,
+    _persist_artifacts_for_run,
+)
 from orchestrator.graph import _effective_input_evidence, build_await_result_node
 from orchestrator.node_execution import NodeActivityRequest, logical_activity_key
 from orchestrator.state import (
@@ -327,11 +331,18 @@ def test_artifact_persistence_stores_metadata(
     """_persist_artifacts_for_run must persist artifact_metadata to the DB artifacts table."""
     task_id, run_id = _seed_db_run(db_session_factory)
 
-    envelope_meta = {
-        "schema_version": 1,
-        "objective": "Persist test",
-        "context_content_digest": "sha-abc",
-    }
+    envelope, status = assemble_context_envelope(
+        task_id=task_id,
+        session_id="s-persist",
+        task_spec=TaskSpec(goal="Persist test"),
+        task_text="Persist test",
+        memory_context=None,
+        worker_request=WorkerRequest(task_text="Persist test"),
+    )
+    assert status == "assembled"
+    assert envelope is not None
+    envelope_meta = envelope.model_dump(mode="json")
+    envelope_meta["objective"] = "Persist test; password=unknown-persistence-secret"
     art_ref = ArtifactReference(
         name="context_envelope",
         uri="envelope://123",
@@ -355,7 +366,31 @@ def test_artifact_persistence_stores_metadata(
         row = persisted[0]
         assert row.artifact_type == ArtifactType.CONTEXT_ENVELOPE
         assert row.name == "context_envelope"
-        assert row.artifact_metadata == envelope_meta
+        assert row.artifact_metadata is not None
+        assert row.artifact_metadata["objective"] == "Persist test; password=[REDACTED]"
+        assert "unknown-persistence-secret" not in str(row.artifact_metadata)
+        assert (
+            row.artifact_metadata["context_content_digest"]
+            != envelope_meta["context_content_digest"]
+        )
+        content_digest, evidence_digest = _compute_digests(row.artifact_metadata)
+        assert row.artifact_metadata["context_content_digest"] == content_digest
+        assert row.artifact_metadata["evidence_digest"] == evidence_digest
+
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_id": task_id, "task_text": "Persist test"},
+            "result": WorkerResult(
+                status="success",
+                summary="Persistence completed successfully with durable evidence.",
+                artifacts=[art_ref],
+            ),
+        }
+    )
+    artifact_index, _review_entries = _build_artifact_index(state, [art_ref])
+    assert len(artifact_index) == 1
+    assert artifact_index[0]["artifact_type"] == "context_envelope"
+    assert "artifact_metadata" not in artifact_index[0]
 
 
 @pytest.mark.asyncio

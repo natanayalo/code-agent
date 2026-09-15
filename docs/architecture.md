@@ -423,9 +423,22 @@ The envelope contains:
   - `context_content_digest`: canonical SHA-256 excluding volatile runtime IDs (`envelope_id`, `task_id`, `session_id`, `node_id`, `assembled_at`, `evidence_digest`), binding the Git HEAD commit SHA and worktree mutation digest, enabling exact semantic reproducibility and resubmission verification.
   - `evidence_digest`: canonical SHA-256 over the entire assembled envelope for audit lineage.
 - **Boundedness Guarantees**: strict count limits on lists, progressive string truncation, and a 256 KB hard cap. Envelopes exceeding 256 KB after truncation are omitted to protect database rows and recorded as `omitted_oversize`.
-- **Secret Safety**: recursive sanitization scrubs known legacy secrets using `SecretRedactor`, checks for credential keys, and guarantees no raw secret leakage.
+- **Secret Safety**: recursive sanitization scrubs known legacy secrets using `SecretRedactor`, rejects credential-shaped keys, masks high-confidence credentials embedded in free-form strings, and re-applies validation/redaction at the artifact persistence boundary.
 - **Lifecycle & Boundaries**: primary envelopes assemble strictly in monolithic and repair execution; DAG node envelopes assemble per-node in `run_decomposed_node` / `_execute_decomposed_node`. DAG aggregation does not synthesize primary envelopes and records `decomposed_aggregated`.
 - **Feature Flag**: `CODE_AGENT_CONTEXT_ENVELOPE_ENABLED` provides opt-out capability (default `true`). Status is recorded in `runtime_manifest["context_envelope_status"]`.
+- **Canonical Persistence**: the `artifacts` row is the canonical durable envelope. `worker_runs.artifact_index` retains only discovery fields for context envelopes, avoiding a second full metadata copy.
+- **Git Provenance**: tracked diffs use binary patches with full object IDs, and `repo_facts.git_evidence_status` distinguishes complete evidence from missing workspace, repository, commit, or bounded worktree capture.
+- **Snapshot Serialization**: envelope assembly runs after the execution claim is acquired and immediately before worker dispatch. Mutating work is serialized per workspace; the only bounded fan-out path is read-only. Out-of-band writers are unsupported because they can invalidate any pre-dispatch snapshot.
+
+**Deployment compatibility:** migration `20260913_0051` must complete before any
+new instance is allowed to persist context envelopes, and old instances must not
+serve reads after new envelope rows are written. The supported Compose deployment
+enforces migration completion through `service_completed_successfully`. For an
+external rolling deployment, set `CODE_AGENT_CONTEXT_ENVELOPE_ENABLED=false`
+across the fleet, deploy the migration and new code, drain old instances, and
+only then enable envelope capture. Downgrading the migration intentionally
+deletes `context_envelope` artifact rows and therefore requires an export or
+explicit acceptance of that data loss.
 
 ### Incremental Task-Contract Cleanup
 

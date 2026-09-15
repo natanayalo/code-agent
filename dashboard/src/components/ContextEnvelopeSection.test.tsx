@@ -269,6 +269,29 @@ describe('ContextEnvelopeSection', () => {
     expect(screen.getByText(/Contains DB config/)).toBeInTheDocument();
   });
 
+  it('shows unsupported schema versions as raw metadata without interpreting fields', () => {
+    render(
+      <ContextEnvelopeSection
+        artifacts={[
+          {
+            type: 'context_envelope',
+            metadata: {
+              schema_version: 2,
+              envelope_id: 'env-v2',
+              objective: 'Future objective',
+              future_contract: { mode: 'new' },
+            },
+          },
+        ]}
+      />
+    );
+
+    const warning = screen.getByTestId('unsupported-envelope-version');
+    expect(warning).toHaveTextContent('Unsupported ContextEnvelope schema version.');
+    expect(warning).toHaveTextContent('"future_contract"');
+    expect(screen.queryByText('Intent & Verification Plan')).not.toBeInTheDocument();
+  });
+
   it('correctly handles group sorting when primary is encountered after DAG nodes', () => {
     const artifacts: ArtifactItem[] = [
       {
@@ -360,6 +383,8 @@ describe('ContextEnvelopeSection', () => {
         branch: 'feat/backend-test',
         workspace_mode: 'isolated_workspace',
         workspace_id: 'ws-backend-100',
+        git_evidence_status: 'worktree_unavailable',
+        git_evidence_reason: 'worktree state could not be captured within safety bounds',
         has_agents_md: true,
         detected_build_systems: ['poetry'],
         workspace_identity_omission_reason: 'orchestrator_dispatch_boundary',
@@ -417,6 +442,7 @@ describe('ContextEnvelopeSection', () => {
           original_length: 5000,
           truncated_length: 4000,
           reason: 'exceeded_limit',
+          unit: 'characters',
         },
       ],
     };
@@ -435,6 +461,10 @@ describe('ContextEnvelopeSection', () => {
     // Repo facts with workspace_mode & branch
     expect(screen.getByText('isolated_workspace')).toBeInTheDocument();
     expect(screen.getByText('feat/backend-test')).toBeInTheDocument();
+    expect(screen.getByText('worktree_unavailable')).toHaveAttribute(
+      'title',
+      'worktree state could not be captured within safety bounds'
+    );
 
     // Repo skills with relative_path
     expect(screen.getByText('backend-skill')).toBeInTheDocument();
@@ -460,6 +490,6 @@ describe('ContextEnvelopeSection', () => {
     // Truncations with field, original_length, truncated_length, reason
     const truncAlert = screen.getByTestId('truncation-warnings');
     expect(truncAlert).toHaveTextContent('objective');
-    expect(truncAlert).toHaveTextContent('retained 4000 of 5000 items (exceeded_limit)');
+    expect(truncAlert).toHaveTextContent('retained 4000 of 5000 characters (exceeded_limit)');
   });
 });

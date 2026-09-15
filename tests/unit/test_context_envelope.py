@@ -33,6 +33,7 @@ from orchestrator.context_envelope import (
     _stream_git_status,
     _stream_hash_file,
     assemble_context_envelope,
+    sanitize_context_envelope_metadata,
 )
 from orchestrator.state import MemoryContext, MemoryEntry, TaskSpec
 from workers.base import ArtifactReference, SecretRef, WorkerRequest
@@ -938,6 +939,8 @@ def test_worktree_state_digest_tracks_retained_mutations(tmp_path: Path) -> None
     assert env_clean is not None
     assert env_clean.repo_facts.commit_sha is not None
     assert env_clean.repo_facts.worktree_state_digest == hashlib.sha256(b"clean").hexdigest()
+    assert env_clean.repo_facts.git_evidence_status == "complete"
+    assert env_clean.repo_facts.git_evidence_reason is None
 
     # Mutate tracked file
     (ws / "app.py").write_text("print('repair mutation 1')", encoding="utf-8")
@@ -1015,6 +1018,26 @@ def test_compute_worktree_state_digest_nonexistent_workspace() -> None:
     assert _compute_worktree_state_digest(None) is None
 
 
+def test_context_envelope_exposes_missing_git_evidence(tmp_path: Path) -> None:
+    """Assembled envelopes explicitly identify unavailable Git provenance."""
+    ws = tmp_path / "not-a-repository"
+    ws.mkdir()
+    env, status = assemble_context_envelope(
+        task_id="t-missing-git",
+        session_id="s1",
+        task_spec=TaskSpec(goal="Inspect workspace"),
+        task_text="Inspect workspace",
+        memory_context=None,
+        worker_request=WorkerRequest(task_text="Inspect workspace"),
+        workspace_path=ws,
+    )
+
+    assert status == "assembled"
+    assert env is not None
+    assert env.repo_facts.git_evidence_status == "missing_git_repository"
+    assert env.repo_facts.git_evidence_reason == "no trusted Git directory was available"
+
+
 def test_unknown_credential_keys_redacted_in_envelope() -> None:
     """Unknown secrets under credential-shaped keys are replaced with [REDACTED]."""
     wreq = WorkerRequest(
@@ -1034,6 +1057,11 @@ def test_unknown_credential_keys_redacted_in_envelope() -> None:
                     "accessToken": "camel-access-token",
                     "apiKey": "camel-api-key",
                     "clientSecret": "camel-client-secret",
+                    "notes": (
+                        "apiKey=free-form-api-key Authorization: Bearer free-form-bearer "
+                        + "ghp_"
+                        + ("x" * 24)
+                    ),
                 },
                 source="vault",
                 gate_status="accepted",
@@ -1059,7 +1087,29 @@ def test_unknown_credential_keys_redacted_in_envelope() -> None:
     assert mem_val["accessToken"] == "[REDACTED]"
     assert mem_val["apiKey"] == "[REDACTED]"
     assert mem_val["clientSecret"] == "[REDACTED]"
+    assert mem_val["notes"].count("[REDACTED]") == 3
+    assert "free-form-api-key" not in mem_val["notes"]
+    assert "free-form-bearer" not in mem_val["notes"]
     assert env.capability_summary.granted_secret_refs == ["ALLOWED_TOKEN", "registered_token"]
+
+
+def test_persistence_sanitizer_rejects_oversized_envelope() -> None:
+    """The durable boundary cannot be bypassed with oversized worker metadata."""
+    env, status = assemble_context_envelope(
+        task_id="t-oversized-persistence",
+        session_id="s1",
+        task_spec=TaskSpec(goal="Safe objective"),
+        task_text="Safe objective",
+        memory_context=None,
+        worker_request=WorkerRequest(task_text="Safe objective"),
+    )
+    assert status == "assembled"
+    assert env is not None
+    metadata = env.model_dump(mode="json")
+    metadata["objective"] = "x" * (MAX_ENVELOPE_BYTES + 1)
+
+    with pytest.raises(ValueError, match="exceeds the persistence size limit"):
+        sanitize_context_envelope_metadata(metadata)
 
 
 def test_worktree_state_digest_git_failure_returns_none(tmp_path: Path) -> None:
@@ -1114,6 +1164,45 @@ def test_worktree_state_digest_untracked_large_files_no_collision(tmp_path: Path
     assert digest1 is not None and digest1 != clean_digest
     assert digest2 is not None and digest2 != clean_digest
     assert digest1 != digest2
+
+
+def test_worktree_state_digest_binds_tracked_binary_contents(tmp_path: Path) -> None:
+    """Same-size tracked binary mutations produce distinct worktree digests."""
+    trusted_git, ws = _setup_git_worktree(tmp_path, "ws_binary")
+    binary_path = ws / "asset.bin"
+    binary_path.write_bytes(b"\x00" + (b"A" * 4096))
+    subprocess.run(
+        ["git", "--git-dir", str(trusted_git), "--work-tree", str(ws), "add", "asset.bin"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "--git-dir",
+            str(trusted_git),
+            "--work-tree",
+            str(ws),
+            "-c",
+            "user.name=test",
+            "-c",
+            "user.email=t@e.com",
+            "commit",
+            "-m",
+            "add binary",
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    binary_path.write_bytes(b"\x00" + (b"B" * 4096))
+    digest_b = _compute_worktree_state_digest(ws, trusted_git_dir=trusted_git)
+    binary_path.write_bytes(b"\x00" + (b"C" * 4096))
+    digest_c = _compute_worktree_state_digest(ws, trusted_git_dir=trusted_git)
+
+    assert digest_b is not None
+    assert digest_c is not None
+    assert digest_b != digest_c
 
 
 def test_worktree_state_digest_hashes_git_quoted_filenames(tmp_path: Path) -> None:

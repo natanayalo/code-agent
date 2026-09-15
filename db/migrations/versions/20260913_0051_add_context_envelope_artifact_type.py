@@ -1,5 +1,8 @@
 """Add context_envelope to artifact_type constraint.
 
+WARNING: downgrade is intentionally destructive and deletes all persisted
+context_envelope artifact rows before restoring the previous constraint.
+
 Revision ID: 20260913_0051
 Revises: 20260817_0050
 Create Date: 2026-09-13 22:00:00.000000

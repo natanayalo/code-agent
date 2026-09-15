@@ -71,12 +71,17 @@ def _assert_completed_task_response(
     assert workspace_artifact["uri"] == "/tmp/workspace-task-44-1234"
     assert "id" in workspace_artifact
     envelope_artifact = artifacts_by_type["context_envelope"]
-    assert envelope_artifact["artifact_metadata"]["schema_version"] == 1
-    assert envelope_artifact["artifact_metadata"]["context_content_digest"]
-    assert {artifact["artifact_type"] for artifact in latest_run["artifacts"]} == {
+    assert "artifact_metadata" not in envelope_artifact
+    canonical_artifacts = {
+        artifact["artifact_type"]: artifact for artifact in latest_run["artifacts"]
+    }
+    assert set(canonical_artifacts) == {
         "workspace",
         "context_envelope",
     }
+    canonical_envelope = canonical_artifacts["context_envelope"]
+    assert canonical_envelope["artifact_metadata"]["schema_version"] == 1
+    assert canonical_envelope["artifact_metadata"]["context_content_digest"]
 
     assert len(worker.requests) == 1
     assert worker.requests[0].session_id == payload["session_id"]
@@ -108,6 +113,12 @@ def _assert_task_persistence_records(session_factory, task_id: str, payload: dic
         assert worker_run.budget_usage == {"iterations_used": 2, "tool_calls_used": 1}
         assert worker_run.verifier_outcome["status"] == "warning"
         assert worker_run.files_changed_count == 1
+        indexed_envelope = next(
+            artifact
+            for artifact in worker_run.artifact_index
+            if artifact["artifact_type"] == "context_envelope"
+        )
+        assert "artifact_metadata" not in indexed_envelope
 
         artifacts = artifact_repo.list_by_run(worker_run.id)
         assert {artifact.artifact_type for artifact in artifacts} == {

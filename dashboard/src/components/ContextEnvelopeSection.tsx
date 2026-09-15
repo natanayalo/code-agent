@@ -14,6 +14,7 @@ export interface TruncationRecordData {
   original_length?: number;
   truncated_length?: number;
   reason?: string;
+  unit?: 'characters' | 'items';
   // Backward compatibility / aliases
   section?: string;
   original_count?: number;
@@ -27,6 +28,8 @@ export interface RepoFactsData {
   workspace_id?: string | null;
   commit_sha?: string | null;
   worktree_state_digest?: string | null;
+  git_evidence_status?: string;
+  git_evidence_reason?: string | null;
   has_agents_md?: boolean | null;
   detected_build_systems?: string[];
   workspace_identity_omission_reason?: string;
@@ -227,6 +230,38 @@ export function ContextEnvelopeSection({ artifacts = [] }: ContextEnvelopeSectio
                   const contentDigest = env.context_content_digest || '';
                   const evidenceDigest = env.evidence_digest || '';
                   const truncations = env.truncations || env.truncation_records;
+                  const schemaVersion = env.schema_version ?? 1;
+
+                  if (schemaVersion !== 1) {
+                    return (
+                      <article
+                        key={env.envelope_id || `${nodeKey}-${attempt}-${idx}`}
+                        className="context-envelope-card"
+                        data-testid={`envelope-card-${nodeKey}-${attempt}`}
+                      >
+                        <header className="context-envelope-card-header">
+                          <div className="context-envelope-card-badges">
+                            <span className="badge badge-attempt">Attempt {attempt}</span>
+                            <span className="badge badge-neutral">Schema v{schemaVersion}</span>
+                          </div>
+                        </header>
+                        <div
+                          className="context-envelope-truncation-alert"
+                          data-testid="unsupported-envelope-version"
+                        >
+                          <AlertTriangle size={15} />
+                          <div>
+                            <strong>Unsupported ContextEnvelope schema version.</strong>
+                            <p>
+                              This dashboard renders structured fields for schema v1 only. Raw
+                              metadata is shown below without interpretation.
+                            </p>
+                            {renderJson(env)}
+                          </div>
+                        </div>
+                      </article>
+                    );
+                  }
 
                   return (
                     <article
@@ -242,6 +277,7 @@ export function ContextEnvelopeSection({ artifacts = [] }: ContextEnvelopeSectio
                           <span className="badge badge-role" title={`Role: ${role}`}>
                             {role}
                           </span>
+                          <span className="badge badge-neutral">Schema v{schemaVersion}</span>
                           {contentDigest && (
                             <span
                               className="badge badge-digest"
@@ -285,10 +321,11 @@ export function ContextEnvelopeSection({ artifacts = [] }: ContextEnvelopeSectio
                                 const orig = rec.original_length ?? rec.original_count ?? 0;
                                 const trunc = rec.truncated_length ?? rec.retained_count ?? 0;
                                 const reason = rec.reason || 'exceeded limit';
+                                const unit = rec.unit || (rec.original_count != null ? 'items' : 'units');
                                 return (
                                   <li key={rIdx}>
                                     <code>{field}</code>: retained {trunc} of{' '}
-                                    {orig} items ({reason})
+                                    {orig} {unit} ({reason})
                                   </li>
                                 );
                               })}
@@ -382,6 +419,21 @@ export function ContextEnvelopeSection({ artifacts = [] }: ContextEnvelopeSectio
                               <div>
                                 <span className="context-envelope-meta-label">Worktree:</span>
                                 <code>{env.repo_facts.worktree_state_digest.slice(0, 8)}</code>
+                              </div>
+                            )}
+                            {env.repo_facts?.git_evidence_status && (
+                              <div>
+                                <span className="context-envelope-meta-label">Git evidence:</span>
+                                <span
+                                  title={env.repo_facts.git_evidence_reason || undefined}
+                                  className={
+                                    env.repo_facts.git_evidence_status === 'complete'
+                                      ? 'badge badge-neutral'
+                                      : 'badge badge-warning'
+                                  }
+                                >
+                                  {env.repo_facts.git_evidence_status}
+                                </span>
                               </div>
                             )}
                           </div>

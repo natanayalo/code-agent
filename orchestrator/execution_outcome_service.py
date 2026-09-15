@@ -22,6 +22,7 @@ from db.enums import (
     TaskStatus,
     WorkerType,
 )
+from orchestrator.context_envelope import sanitize_context_envelope_metadata
 from orchestrator.execution_improvement_proposal_service import (
     _persist_friction_proposals_if_needed,
 )
@@ -172,7 +173,15 @@ def _build_artifact_index(
     artifacts: list[Any],
 ) -> tuple[list[dict[str, Any]], list[tuple[str, dict[str, Any]]]]:
     result = state.result
-    artifact_index = [artifact.model_dump(mode="json") for artifact in artifacts]
+    artifact_index: list[dict[str, Any]] = []
+    for artifact in artifacts:
+        entry = artifact.model_dump(mode="json")
+        if artifact.artifact_type == ArtifactType.CONTEXT_ENVELOPE.value:
+            # The artifacts table is the canonical envelope store. Keep only
+            # discovery metadata in WorkerRun.artifact_index to avoid retaining
+            # a second full 256 KiB envelope on the same run.
+            entry.pop("artifact_metadata", None)
+        artifact_index.append(entry)
     review_sources = (
         (
             result.review_result if result is not None else None,
@@ -268,12 +277,17 @@ def _persist_artifacts_for_run(
         artifact_type = _artifact_type_for_persistence(artifact)
         if artifact_type is None:
             continue
+        artifact_metadata = getattr(artifact, "artifact_metadata", None)
+        if artifact_type == ArtifactType.CONTEXT_ENVELOPE.value and isinstance(
+            artifact_metadata, dict
+        ):
+            artifact_metadata = sanitize_context_envelope_metadata(artifact_metadata)
         artifact_repo.create(
             run_id=worker_run_id,
             artifact_type=artifact_type,
             name=artifact.name,
             uri=artifact.uri,
-            artifact_metadata=getattr(artifact, "artifact_metadata", None),
+            artifact_metadata=artifact_metadata,
         )
     for review_artifact_type, review_entry in review_artifact_entries:
         artifact_repo.create(

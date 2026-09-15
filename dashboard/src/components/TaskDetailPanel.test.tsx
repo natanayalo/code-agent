@@ -744,6 +744,40 @@ describe('TaskDetailPanel', () => {
     expect(screen.getByText('No artifacts persisted for the latest run.')).toBeInTheDocument();
   });
 
+  it('prefers canonical artifact metadata when the artifact index is metadata-light', () => {
+    const task = buildTask({
+      latest_run: buildLatestRun({
+        artifact_index: [
+          {
+            id: 'env-index',
+            name: 'context_envelope',
+            uri: 'envelope://env-canonical',
+            artifact_type: 'context_envelope',
+          },
+        ],
+        artifacts: [
+          {
+            artifact_id: 'env-row',
+            artifact_type: 'context_envelope',
+            name: 'context_envelope',
+            uri: 'envelope://env-canonical',
+            artifact_metadata: {
+              schema_version: 1,
+              envelope_id: 'env-canonical',
+              objective: 'Canonical envelope objective',
+              logical_attempt: 1,
+            },
+          },
+        ],
+      }),
+    });
+
+    render(<TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />);
+
+    expect(screen.getAllByText(/Canonical envelope objective/)).toHaveLength(2);
+    expect(screen.getByTestId('envelope-count-badge')).toHaveTextContent('1 envelope');
+  });
+
   it('covers sparse payload fallbacks and event-type tie-break ordering', () => {
     const task = buildTask({
       task_spec: {

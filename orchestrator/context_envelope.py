@@ -33,6 +33,16 @@ MAX_BUILD_SYSTEMS, MAX_FILES_TOUCHED, MAX_SELECTED_REFERENCES = 10, 200, 200
 FORBIDDEN_SECRET_KEYS = frozenset(
     {"password", "token", "secret", "api_key", "private_key", "credential"}
 )
+_EMBEDDED_CREDENTIAL_ASSIGNMENT = re.compile(
+    r"(?i)(?P<label>\b(?:password|passwd|pwd|api\s*[_-]?\s*key|client\s*[_-]?\s*secret|"
+    r"access\s*[_-]?\s*token|auth\s*[_-]?\s*token|secret|credential)\b\s*[:=]\s*)"
+    r"(?P<quote>['\"]?)(?P<value>[^\s,;'\"]{4,})(?P=quote)"
+)
+_EMBEDDED_BEARER_TOKEN = re.compile(r"(?i)(\bauthorization\s*:\s*bearer\s+)[^\s,;]{4,}")
+_EMBEDDED_PROVIDER_TOKEN = re.compile(
+    r"(?<![A-Za-z0-9])(?:gh[pousr]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{16,}|"
+    r"AKIA[0-9A-Z]{16})(?![A-Za-z0-9])"
+)
 _GIT_STATE_TIMEOUT_SECONDS = 10.0
 _GIT_STREAM_CHUNK_BYTES = 65536
 _GIT_STDERR_LIMIT_BYTES = 8192
@@ -43,6 +53,14 @@ class RepoFacts(OrchestratorModel):
     branch: str | None = None
     commit_sha: str | None = None
     worktree_state_digest: str | None = None
+    git_evidence_status: Literal[
+        "complete",
+        "missing_workspace",
+        "missing_git_repository",
+        "missing_commit",
+        "worktree_unavailable",
+    ] = "missing_workspace"
+    git_evidence_reason: str | None = None
     workspace_mode: str | None = None
     workspace_id: str | None = None
     has_agents_md: bool | None = None
@@ -111,6 +129,7 @@ class TruncationRecord(OrchestratorModel):
     original_length: int
     truncated_length: int
     reason: str = "exceeded_limit"
+    unit: Literal["characters", "items"] = "characters"
 
 
 class ContextEnvelope(OrchestratorModel):
@@ -143,10 +162,24 @@ class ContextEnvelope(OrchestratorModel):
 
 
 def _add_trunc(
-    tr: list[TruncationRecord] | None, f: str, orig: int, trunc: int, r: str = "exceeded_limit"
+    tr: list[TruncationRecord] | None,
+    f: str,
+    orig: int,
+    trunc: int,
+    r: str = "exceeded_limit",
+    *,
+    unit: Literal["characters", "items"] = "characters",
 ) -> None:
     if tr is not None and f:
-        tr.append(TruncationRecord(field=f, original_length=orig, truncated_length=trunc, reason=r))
+        tr.append(
+            TruncationRecord(
+                field=f,
+                original_length=orig,
+                truncated_length=trunc,
+                reason=r,
+                unit=unit,
+            )
+        )
 
 
 def _bound_str(
@@ -170,7 +203,7 @@ def _bound_string_list(
     truncations: list[TruncationRecord] | None = None,
 ) -> list[str]:
     if len(items) > max_items:
-        _add_trunc(truncations, f"{field}_count", len(items), max_items)
+        _add_trunc(truncations, f"{field}_count", len(items), max_items, unit="items")
     out: list[str] = []
     for idx, s in enumerate(items[:max_items]):
         if len(s) > max_chars:
@@ -201,7 +234,7 @@ def _bound_json_value(
         return value
     if isinstance(value, list):
         if len(value) > max_list:
-            _add_trunc(truncations, f"{field}_count", len(value), max_list)
+            _add_trunc(truncations, f"{field}_count", len(value), max_list, unit="items")
         return [
             _bound_json_value(
                 x,
@@ -218,7 +251,7 @@ def _bound_json_value(
     if isinstance(value, dict):
         keys = sorted(str(k) for k in value.keys())
         if len(keys) > max_keys:
-            _add_trunc(truncations, f"{field}_keys", len(keys), max_keys)
+            _add_trunc(truncations, f"{field}_keys", len(keys), max_keys, unit="items")
         return {
             k: _bound_json_value(
                 value[k],
@@ -362,6 +395,8 @@ def _stream_git_diff(
         "diff",
         "--no-ext-diff",
         "--no-textconv",
+        "--binary",
+        "--full-index",
         "HEAD",
     ]
     try:
@@ -627,7 +662,7 @@ def _discover_repo_skills(
         except Exception:
             logger.debug("Failed to inspect skill file %s", skill_file, exc_info=True)
     if len(skills) > MAX_SKILLS:
-        _add_trunc(tr, "repo_skills", len(skills), MAX_SKILLS)
+        _add_trunc(tr, "repo_skills", len(skills), MAX_SKILLS, unit="items")
         return skills[:MAX_SKILLS]
     return skills
 
@@ -665,6 +700,18 @@ def _is_credential_key(key: str) -> bool:
     )
 
 
+def _mask_embedded_credentials(value: str) -> str:
+    """Redact high-confidence credential literals embedded in free-form text."""
+
+    def _replace_assignment(match: re.Match[str]) -> str:
+        quote = match.group("quote")
+        return f"{match.group('label')}{quote}[REDACTED]{quote}"
+
+    masked = _EMBEDDED_CREDENTIAL_ASSIGNMENT.sub(_replace_assignment, value)
+    masked = _EMBEDDED_BEARER_TOKEN.sub(r"\1[REDACTED]", masked)
+    return _EMBEDDED_PROVIDER_TOKEN.sub("[REDACTED]", masked)
+
+
 def _sanitize_dict(data: dict[str, Any], legacy_secrets: list[str]) -> dict[str, Any]:
     clean = [
         s
@@ -675,7 +722,7 @@ def _sanitize_dict(data: dict[str, Any], legacy_secrets: list[str]) -> dict[str,
 
     def _scan(obj: Any) -> Any:
         if isinstance(obj, str):
-            masked = mask_url_credentials(obj)
+            masked = mask_url_credentials(_mask_embedded_credentials(obj))
             return redactor.redact(masked) if redactor else masked
         if isinstance(obj, dict):
             res = {}
@@ -691,6 +738,25 @@ def _sanitize_dict(data: dict[str, Any], legacy_secrets: list[str]) -> dict[str,
         return obj
 
     return _scan(data)
+
+
+def sanitize_context_envelope_metadata(data: dict[str, Any]) -> dict[str, Any]:
+    """Validate and re-sanitize envelope metadata at the durable persistence boundary."""
+    sanitized = _sanitize_dict(data, [])
+    sanitized["context_content_digest"] = "0" * 64
+    sanitized["evidence_digest"] = "0" * 64
+    candidate = ContextEnvelope.model_validate(sanitized)
+    candidate_json = candidate.model_dump(mode="json")
+    content_digest, evidence_digest = _compute_digests(candidate_json)
+    final_metadata = candidate.model_copy(
+        update={
+            "context_content_digest": content_digest,
+            "evidence_digest": evidence_digest,
+        }
+    ).model_dump(mode="json")
+    if len(json.dumps(final_metadata).encode("utf-8")) > MAX_ENVELOPE_BYTES:
+        raise ValueError("context envelope metadata exceeds the persistence size limit")
+    return final_metadata
 
 
 def _compute_canonical_bytes(
@@ -744,7 +810,7 @@ def _apply_progressive_truncation(data: dict[str, Any], tr: list[TruncationRecor
             return True
     mems = data.get("gated_memory_entries", [])
     if len(mems) > 25:
-        _add_trunc(tr, "gated_memory_entries_stage2", len(mems), 25)
+        _add_trunc(tr, "gated_memory_entries_stage2", len(mems), 25, unit="items")
         data["gated_memory_entries"] = mems[:25]
         if _envelope_size(data, tr) <= MAX_ENVELOPE_BYTES:
             return True
@@ -756,7 +822,14 @@ def _apply_progressive_truncation(data: dict[str, Any], tr: list[TruncationRecor
     if deps and _envelope_size(data, tr) <= MAX_ENVELOPE_BYTES:
         return True
     if gd := data.get("gate_diagnostics_summary"):
-        _add_trunc(tr, "gate_diagnostics_summary_stage4", len(gd), 0, "cleared_for_envelope_budget")
+        _add_trunc(
+            tr,
+            "gate_diagnostics_summary_stage4",
+            len(gd),
+            0,
+            "cleared_for_envelope_budget",
+            unit="items",
+        )
         data["gate_diagnostics_summary"] = {}
     return _envelope_size(data, tr) <= MAX_ENVELOPE_BYTES
 
@@ -796,7 +869,13 @@ def _extract_gated_memories(
 
     entries.sort(key=lambda e: float(cast(float, e.get("advisory_strength") or 0.0)), reverse=True)
     if len(entries) > MAX_GATED_MEMORY_ENTRIES:
-        _add_trunc(tr, "gated_memory_entries", len(entries), MAX_GATED_MEMORY_ENTRIES)
+        _add_trunc(
+            tr,
+            "gated_memory_entries",
+            len(entries),
+            MAX_GATED_MEMORY_ENTRIES,
+            unit="items",
+        )
         return entries[:MAX_GATED_MEMORY_ENTRIES]
     return entries
 
@@ -823,9 +902,9 @@ def _extract_dependencies(
             for a in (payload.get("artifacts") or [])
         ]
         if len(rf) > 50:
-            _add_trunc(tr, f"{prefix}.files_changed", len(rf), 50)
+            _add_trunc(tr, f"{prefix}.files_changed", len(rf), 50, unit="items")
         if len(ra) > 20:
-            _add_trunc(tr, f"{prefix}.artifact_names", len(ra), 20)
+            _add_trunc(tr, f"{prefix}.artifact_names", len(ra), 20, unit="items")
         deps.append(
             {
                 "node_id": str(node_id),
@@ -836,9 +915,59 @@ def _extract_dependencies(
             }
         )
     if len(deps) > MAX_DEPENDENCY_OUTPUTS:
-        _add_trunc(tr, "dependency_outputs", len(deps), MAX_DEPENDENCY_OUTPUTS)
+        _add_trunc(
+            tr,
+            "dependency_outputs",
+            len(deps),
+            MAX_DEPENDENCY_OUTPUTS,
+            unit="items",
+        )
         return deps[:MAX_DEPENDENCY_OUTPUTS]
     return deps
+
+
+def _project_git_evidence(
+    workspace_path: Path | None,
+    worker_request: WorkerRequest,
+    trusted_git_dir: Path | None,
+) -> dict[str, Any]:
+    """Capture Git provenance and make bounded evidence failures explicit."""
+    target_git_dir = _find_git_dir(
+        workspace_path,
+        trusted_git_dir=trusted_git_dir,
+        workspace_id=worker_request.workspace_id,
+    )
+    commit_sha = _resolve_git_commit_sha(
+        workspace_path,
+        trusted_git_dir=target_git_dir,
+        workspace_id=worker_request.workspace_id,
+    )
+    worktree_state_digest = _compute_worktree_state_digest(
+        workspace_path,
+        trusted_git_dir=target_git_dir,
+        workspace_id=worker_request.workspace_id,
+    )
+    if workspace_path is None or not workspace_path.exists():
+        status = "missing_workspace"
+        reason = "workspace was unavailable at the dispatch boundary"
+    elif target_git_dir is None:
+        status = "missing_git_repository"
+        reason = "no trusted Git directory was available"
+    elif commit_sha is None:
+        status = "missing_commit"
+        reason = "trusted Git HEAD could not be resolved"
+    elif worktree_state_digest is None:
+        status = "worktree_unavailable"
+        reason = "worktree state could not be captured within safety bounds"
+    else:
+        status = "complete"
+        reason = None
+    return {
+        "commit_sha": commit_sha,
+        "worktree_state_digest": worktree_state_digest,
+        "git_evidence_status": status,
+        "git_evidence_reason": reason,
+    }
 
 
 def _project_intent_and_repo(
@@ -879,16 +1008,7 @@ def _project_intent_and_repo(
     repo_facts = {
         "repo_url": r_url,
         "branch": worker_request.branch,
-        "commit_sha": _resolve_git_commit_sha(
-            workspace_path,
-            trusted_git_dir=trusted_git_dir,
-            workspace_id=worker_request.workspace_id,
-        ),
-        "worktree_state_digest": _compute_worktree_state_digest(
-            workspace_path,
-            trusted_git_dir=trusted_git_dir,
-            workspace_id=worker_request.workspace_id,
-        ),
+        **_project_git_evidence(workspace_path, worker_request, trusted_git_dir),
         "workspace_mode": task_spec.workspace_mode if task_spec else "clone",
         "workspace_id": worker_request.workspace_id,
         "has_agents_md": has_agents,
@@ -926,7 +1046,13 @@ def _project_context_sections(
     raw_session = (memory_context.session if memory_context else {}) or {}
     raw_files = list(raw_session.get("files_touched") or [])
     if len(raw_files) > MAX_FILES_TOUCHED:
-        _add_trunc(tr, "session_context.files_touched", len(raw_files), MAX_FILES_TOUCHED)
+        _add_trunc(
+            tr,
+            "session_context.files_touched",
+            len(raw_files),
+            MAX_FILES_TOUCHED,
+            unit="items",
+        )
     dm = _bound_json_value(
         raw_session.get("decisions_made") or {},
         field="session_context.decisions_made",
@@ -979,7 +1105,13 @@ def _project_context_sections(
             seen.add(r["path"])
             selected_refs.append(r)
     if len(selected_refs) > MAX_SELECTED_REFERENCES:
-        _add_trunc(tr, "selected_references", len(selected_refs), MAX_SELECTED_REFERENCES)
+        _add_trunc(
+            tr,
+            "selected_references",
+            len(selected_refs),
+            MAX_SELECTED_REFERENCES,
+            unit="items",
+        )
         selected_refs = selected_refs[:MAX_SELECTED_REFERENCES]
     return session_context, cap_summary, selected_refs
 
