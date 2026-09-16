@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: add versioned ContextEnvelope audit contract ([#398](https://github.com/natanayalo/code-agent/pull/398))
+
 - Feat: implement native agent event stream foundation (m28.5c) ([#392](https://github.com/natanayalo/code-agent/pull/392))
 
 - Feat: resolve task repo virtualenv in native agent sandbox shell environment ([#381](https://github.com/natanayalo/code-agent/pull/381))
