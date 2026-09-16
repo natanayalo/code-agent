@@ -23,6 +23,8 @@ file_exceptions:
   orchestrator/temporal/activities.py: Temporal activity adapters keep the product projection and worker handoff contract together.
   tests/unit/test_memory_observation.py: Contains comprehensive unit tests for all memory observation, candidate extraction, and trace-bridging rules.
   sandbox/secrets.py: Consolidated secret resolution and typing logic to keep policy boundary cohesive.
+  orchestrator/context_envelope.py: Versioned ContextEnvelope contracts, validation, redaction, and assembly kept cohesive to preserve the pre-dispatch audit boundary.
+  tests/unit/test_context_envelope.py: Comprehensive unit test suite covering ContextEnvelope contracts, assembly, truncation, redaction, git revision, and digest reproducibility.
   orchestrator/nodes/delivery.py: Delivery logic orchestrates broker-owned secret resolution and Git commands.
 function_exceptions:
   sandbox/ingress.py:

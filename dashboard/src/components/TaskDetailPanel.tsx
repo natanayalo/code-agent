@@ -11,6 +11,7 @@ import {
   VerifierOutcomeSnapshot,
 } from '../types/task';
 import { TaskApprovalSection } from './TaskApprovalSection';
+import { ContextEnvelopeSection } from './ContextEnvelopeSection';
 import { formatLabel } from '../utils/formatters';
 import { api } from '../services/api';
 
@@ -94,25 +95,42 @@ function hasRecordValues(value: unknown): value is Record<string, unknown> {
 
 function artifactRows(run: TaskSnapshot['latest_run']) {
   if (!run) return [];
-  if (Array.isArray(run.artifact_index) && run.artifact_index.length > 0) {
-    return run.artifact_index.map((artifact) => ({
-      key: artifact.id || artifact.uri || artifact.name || 'artifact',
-      name: artifact.name || 'artifact',
-      type: artifact.artifact_type || 'unknown',
-      uri: artifact.uri || '',
-      metadata: artifact.artifact_metadata,
-    }));
-  }
-  if (Array.isArray(run.artifacts) && run.artifacts.length > 0) {
-    return run.artifacts.map((artifact) => ({
-      key: artifact.artifact_id,
-      name: artifact.name,
-      type: artifact.artifact_type,
-      uri: artifact.uri,
-      metadata: artifact.artifact_metadata,
-    }));
-  }
-  return [];
+  const canonicalArtifacts = Array.isArray(run.artifacts)
+    ? run.artifacts.map((artifact) => ({
+        key: artifact.artifact_id,
+        name: artifact.name,
+        type: artifact.artifact_type,
+        uri: artifact.uri,
+        metadata: artifact.artifact_metadata,
+      }))
+    : [];
+  const canonicalByIdentity = new Map(
+    canonicalArtifacts.map((artifact) => [`${artifact.type}:${artifact.uri}`, artifact])
+  );
+  const seenCanonical = new Set<string>();
+  const indexedArtifacts = Array.isArray(run.artifact_index)
+    ? run.artifact_index.map((artifact) => {
+        const identity = `${artifact.artifact_type || 'unknown'}:${artifact.uri || ''}`;
+        const canonical = canonicalByIdentity.get(identity);
+        if (canonical) {
+          seenCanonical.add(identity);
+          return canonical;
+        }
+        return {
+          key: artifact.id || artifact.uri || artifact.name || 'artifact',
+          name: artifact.name || 'artifact',
+          type: artifact.artifact_type || 'unknown',
+          uri: artifact.uri || '',
+          metadata: artifact.artifact_metadata,
+        };
+      })
+    : [];
+  return [
+    ...indexedArtifacts,
+    ...canonicalArtifacts.filter(
+      (artifact) => !seenCanonical.has(`${artifact.type}:${artifact.uri}`)
+    ),
+  ];
 }
 
 function normalizeToken(value: string): string {
@@ -1089,6 +1107,8 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
               <p className="task-detail-muted">No trace metadata available yet.</p>
             )}
           </section>
+
+          <ContextEnvelopeSection artifacts={artifacts} />
 
           <section className="task-detail-section">
             <h4>Artifacts</h4>

@@ -117,6 +117,7 @@ class ArtifactType(StrEnum):
     WORKSPACE = "workspace"
     REVIEW_RESULT = "review_result"
     INDEPENDENT_REVIEW_RESULT = "independent_review_result"
+    CONTEXT_ENVELOPE = "context_envelope"
 
 
 class TimelineEventType(StrEnum):

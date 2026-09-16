@@ -402,21 +402,43 @@ provider-independent reasoning loop.
 
 ### Versioned `ContextEnvelope`
 
-**Planned M28.5D direction:** give each worker a bounded, inspectable,
-reproducible context contract containing only what execution needs:
+**Implemented M28.5D contract:** each worker receives a bounded, inspectable,
+reproducible context contract assembled immediately prior to dispatch and passed
+via `WorkerRequest.context_envelope`. Following worker execution, the retained
+envelope is persisted inline in `artifact_metadata` on an `ArtifactReference` of type
+`context_envelope` attached to `WorkerResult.artifacts`.
 
-- objective and acceptance criteria
-- relevant repository facts and selected file/context references
-- dependency outputs
-- accepted/gated memory with provenance
-- compact session decisions and known risks
-- applicable repository skills/instructions
-- capability summary
-- explicit exclusions
+The envelope contains:
+- **Objective and Intent**: objective, acceptance criteria, verification plan, assumptions, non-goals
+- **Repository Facts & Guidance**: detected build systems, AGENTS.md presence, git HEAD commit SHA, deterministic worktree state digest (tracked and untracked changes), repository skills (from `.agents/skills/*/SKILL.md`), instructions snapshot
+- **Gated Memory**: accepted/gated memory entries with provenance, confidence, advisory strength, and gate status (excluding suppressed/stale entries)
+- **Compact Session Context**: active goal, files touched in session, decisions made, and identified risks
+- **Capabilities & Exclusions**: granted tools, granted secret refs, network enablement, read-only status, approval capabilities, maintenance actions
+- **Dependencies**: upstream node outputs (summary, status, files changed, artifact refs) for decomposed DAG execution
+- **Selected References**: deduplicated files from session and dependencies
+- **Truncation Warnings**: explicit truncation records detailing section, original count, retained count, and reason
 
-The envelope should be persisted or referenceable as evidence. Memory remains
-advisory and provenance-aware. M28's typed compact session state is an input;
-`ContextEnvelope` is not a copy of the entire parent conversation.
+**Safety, Boundedness, and Dual Digests**:
+- **Dual Digest Semantics**:
+  - `context_content_digest`: canonical SHA-256 excluding volatile runtime IDs (`envelope_id`, `task_id`, `session_id`, `node_id`, `assembled_at`, `evidence_digest`), binding the Git HEAD commit SHA and worktree mutation digest, enabling exact semantic reproducibility and resubmission verification.
+  - `evidence_digest`: canonical SHA-256 over the entire assembled envelope for audit lineage.
+- **Boundedness Guarantees**: strict count limits on lists, progressive string truncation, and a 256 KB hard cap. Envelopes exceeding 256 KB after truncation are omitted to protect database rows and recorded as `omitted_oversize`.
+- **Secret Safety**: recursive sanitization scrubs known legacy secrets using `SecretRedactor`, rejects credential-shaped keys, masks high-confidence credentials embedded in free-form strings, and re-applies validation/redaction at the artifact persistence boundary.
+- **Lifecycle & Boundaries**: primary envelopes assemble strictly in monolithic and repair execution; DAG node envelopes assemble per-node in `run_decomposed_node` / `_execute_decomposed_node`. DAG aggregation does not synthesize primary envelopes and records `decomposed_aggregated`.
+- **Feature Flag**: `CODE_AGENT_CONTEXT_ENVELOPE_ENABLED` provides opt-out capability (default `true`). Status is recorded in `runtime_manifest["context_envelope_status"]`.
+- **Canonical Persistence**: the `artifacts` row is the canonical durable envelope. `worker_runs.artifact_index` retains only discovery fields for context envelopes, avoiding a second full metadata copy.
+- **Git Provenance**: tracked diffs use binary patches with full object IDs, and `repo_facts.git_evidence_status` distinguishes complete evidence from missing workspace, repository, commit, or bounded worktree capture.
+- **Snapshot Serialization**: envelope assembly runs after the execution claim is acquired and immediately before worker dispatch. Mutating work is serialized per workspace; the only bounded fan-out path is read-only. Out-of-band writers are unsupported because they can invalidate any pre-dispatch snapshot.
+
+**Deployment compatibility:** migration `20260913_0051` must complete before any
+new instance is allowed to persist context envelopes, and old instances must not
+serve reads after new envelope rows are written. The supported Compose deployment
+enforces migration completion through `service_completed_successfully`. For an
+external rolling deployment, set `CODE_AGENT_CONTEXT_ENVELOPE_ENABLED=false`
+across the fleet, deploy the migration and new code, drain old instances, and
+only then enable envelope capture. Downgrading the migration intentionally
+deletes `context_envelope` artifact rows and therefore requires an export or
+explicit acceptance of that data loss.
 
 ### Incremental Task-Contract Cleanup
 

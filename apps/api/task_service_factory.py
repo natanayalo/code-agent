@@ -82,6 +82,7 @@ CODEX_TOOL_LOOP_LEGACY_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_CODEX_TOOL_LOOP
 GEMINI_TOOL_LOOP_LEGACY_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_GEMINI_TOOL_LOOP_LEGACY_ENABLED"
 CODEX_TRUSTED_REPO_PATTERNS_ENV_VAR: Final[str] = "CODE_AGENT_CODEX_TRUSTED_REPO_PATTERNS"
 GEMINI_NATIVE_SANDBOX_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_GEMINI_NATIVE_SANDBOX_ENABLED"
+CONTEXT_ENVELOPE_ENABLED_ENV_VAR: Final[str] = "CODE_AGENT_CONTEXT_ENVELOPE_ENABLED"
 
 ANTIGRAVITY_CONFIG_ENV_VARS: Final[tuple[str, ...]] = (
     ANTIGRAVITY_EXECUTABLE_ENV_VAR,
@@ -117,13 +118,16 @@ def _is_enabled(value: str | None) -> bool:
 
 def _is_native_event_capture_enabled(resolved_env: Mapping[str, str]) -> bool:
     """Return whether native event capture is enabled, supporting legacy key during migration."""
-    canonical_val = resolved_env.get(NATIVE_EVENT_CAPTURE_ENABLED_ENV_VAR)
-    if canonical_val is not None:
-        return _is_enabled(canonical_val)
-    legacy_val = resolved_env.get(LEGACY_NATIVE_AGENT_EVENT_CAPTURE_ENABLED_ENV_VAR)
-    if legacy_val is not None:
-        return _is_enabled(legacy_val)
-    return False
+    val = resolved_env.get(NATIVE_EVENT_CAPTURE_ENABLED_ENV_VAR)
+    if val is None:
+        val = resolved_env.get(LEGACY_NATIVE_AGENT_EVENT_CAPTURE_ENABLED_ENV_VAR)
+    return _is_enabled(val)
+
+
+def _is_context_envelope_enabled(resolved_env: Mapping[str, str]) -> bool:
+    """Return whether context envelope capture is enabled (opt-out, default True)."""
+    val = resolved_env.get(CONTEXT_ENVELOPE_ENABLED_ENV_VAR)
+    return True if val is None else _is_enabled(val)
 
 
 def _coerce_runtime_mode(
@@ -592,4 +596,5 @@ def build_task_service_from_env(
             resolved_env.get("CODE_AGENT_DECOMPOSED_FANOUT_ENABLED")
         ),
         enforce_temporal_availability=True,
+        context_envelope_enabled=_is_context_envelope_enabled(resolved_env),
     )

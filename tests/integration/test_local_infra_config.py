@@ -186,6 +186,18 @@ def test_api_and_worker_share_optional_deployment_identity_overrides(
     assert worker_env["CODE_AGENT_ENV"] == "${CODE_AGENT_ENV:-local}"
 
 
+def test_api_and_worker_expose_context_envelope_rollout_flag(
+    compose_config: dict[str, Any],
+) -> None:
+    """The supported stack must honor the documented envelope rollback switch."""
+    api_env = compose_config["services"]["api"]["environment"]
+    worker_env = compose_config["services"]["worker"]["environment"]
+    expected = "${CODE_AGENT_CONTEXT_ENVELOPE_ENABLED:-true}"
+
+    assert api_env["CODE_AGENT_CONTEXT_ENVELOPE_ENABLED"] == expected
+    assert worker_env["CODE_AGENT_CONTEXT_ENVELOPE_ENABLED"] == expected
+
+
 def test_api_and_worker_share_antigravity_profile_configuration(
     compose_config: dict[str, Any],
 ) -> None:
