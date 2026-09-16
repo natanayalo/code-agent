@@ -4,10 +4,10 @@
 
 Phase 4A: Temporal stabilization, execution architecture foundation, and measured reliability.
 
-Active focus: **M28.5 — Execution Architecture Foundation** completed
-(M28.5A capability grants, M28.5B task-contract split, M28.5C `AgentEvent`,
-M28.5D `ContextEnvelope`). Transitioning to **M29 — Provider Reliability
-and Evidence-Driven Routing**.
+Active focus: **M29 — Provider Reliability and Evidence-Driven Routing**
+(offline advisory provider reliability report from persisted real-task
+outcomes with Wilson confidence intervals, candidate ranking, and public
+allowlist redaction).
 
 ## Current capabilities
 
@@ -41,6 +41,10 @@ and Evidence-Driven Routing**.
 - an incremental M25.6 evidence collector that pins deployment identity,
   captures Postgres and Temporal proof, rejects duplicate cases, and emits a
   sanitized aggregate without changing routing automatically
+- an offline read-only M29 provider reliability advisory report CLI and versioned
+  contract aggregating real-task outcomes by task class, profile, and mutation
+  mode with 95% Wilson confidence intervals, fallback recommendations, and
+  public allowlist redaction
 
 Completed work remains in [`CHANGELOG.md`](../CHANGELOG.md). The historical
 Temporal migration and rollback record is in the
@@ -98,6 +102,12 @@ Temporal migration and rollback record is in the
   and `agent-events-v1.jsonl` artifact capture while preserving `WorkerResult`
   contract compatibility and zero DB migration requirements.
 
+- The M29 provider reliability advisory report extracts real-task
+  Temporal/native-agent evidence from PostgreSQL, enforces a 90-day window and
+  10-task minimum per cell, computes 95% Wilson score confidence intervals,
+  requires >= 2 eligible compatible candidates for recommendations, and validates
+  public-field sanitization without modifying live routing.
+
 ## Known limitations
 
 - bounded fan-out remains an explicit read-only pilot and is disabled by
@@ -125,8 +135,9 @@ Temporal migration and rollback record is in the
 
 ## Next slices only
 
-1. Begin M29 — Provider Reliability and Evidence-Driven Routing: extract real-task
-   outcome evidence into explainable worker-profile recommendations.
+1. Advance M29 — Provider Reliability and Evidence-Driven Routing: inspect
+   real-task advisory evidence reports and evaluate candidate profile thresholds
+   for evidence-backed routing.
 2. Use the M28 report as a scoped safety/effectiveness signal only; do not
    change routing or add semantic retrieval without further evidence.
 

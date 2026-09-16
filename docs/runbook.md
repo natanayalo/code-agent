@@ -575,6 +575,65 @@ used to close M28. When reproducing that evaluation, use
 `cleanup --repo-url <disposable-repo-url>` to remove only evaluator-owned
 fixtures.
 
+### M29 provider reliability advisory report
+
+The M29 provider reliability report is an offline, read-only analysis tool that
+evaluates persisted real-task outcomes from PostgreSQL without modifying live
+routing, creating database migrations, or updating `evaluation/routing_metrics.json`.
+
+Generate the report using the operator CLI:
+
+```bash
+export DATABASE_URL="postgresql+psycopg://..."
+
+.venv/bin/python scripts/e2e/run_provider_reliability_report.py \
+  --database-url-env DATABASE_URL \
+  --lookback-days 90 \
+  --min-samples 10 \
+  --json-output artifacts/evaluations/m29-provider-reliability-report.json \
+  --markdown-output artifacts/evaluations/m29-provider-reliability-report.md
+```
+
+#### CLI options and policy parameters
+
+- `--database-url-env`: Name of the environment variable storing the database
+  connection URL. In PostgreSQL environments, the transaction is executed with
+  `SET TRANSACTION READ ONLY`.
+- `--as-of`: Optional ISO 8601 reference timestamp (defaults to current UTC).
+- `--lookback-days`: Evidence observation window in days (default: 90). Tasks with
+  terminal timestamps outside `[as_of - lookback_days, as_of]` are reported under
+  exclusions as `outside_window`.
+- `--min-samples`: Minimum completed/failed task count required per
+  `(task_class, profile, mutation_mode)` cell (default: 10). Cells with fewer samples
+  are marked ineligible with stable reason `insufficient_sample_size`.
+- `--json-output` / `--markdown-output`: Optional file paths to write deterministic
+  sanitized outputs. If neither is specified, the Markdown report is printed to stdout.
+
+#### Data handling and interpretation
+
+- **Task-level aggregation**: Each task is counted exactly once regardless of
+  retry attempts or number of worker runs, preventing retry loops from inflating sample sizes.
+- **Inclusion criteria**: Requires terminal (`completed` or `failed`) Temporal tasks
+  running in `native_agent` mode with a valid `TaskSpec`, pinned profile, and
+  consistent terminal timeline events. Cancelled, in-progress, malformed, or
+  inconsistent tasks are categorized under exclusions.
+- **Stage applicability**: Unconfigured verification, independent review, and
+  delivery stages are treated as not applicable (`None`) rather than failures.
+- **Manual overrides**: Tasks executed with manual worker overrides are included as
+  valid empirical evidence but tracked and reported separately.
+- **Candidate ranking**: Eligible candidates are ranked by:
+  1. Accepted task rate Wilson 95% confidence interval lower bound (descending).
+  2. Median time to terminal in seconds (ascending).
+  3. Profile name (ascending) for deterministic tie-breaking.
+- **Actionable recommendation fallbacks**: A recommendation is emitted only when
+  at least two eligible compatible profiles exist for a given `(task_class, mutation_mode)`.
+  If fewer than two eligible candidates exist, `recommended_profile` remains `None`
+  and an actionable fallback reason is recorded.
+- **Public data boundary**: Generated outputs pass through an explicit allowlist
+  validator that forbids task IDs, task text, repository URLs, branch names, summaries,
+  logs, artifact URIs, and secrets.
+
+
 ## 10) Antigravity Migration Guide
 
 When migrating existing workspaces and settings to Antigravity:
