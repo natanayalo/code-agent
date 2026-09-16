@@ -175,7 +175,15 @@ def _create_task(
     )
 
     _add_worker_run(
-        task, profile, mode, runtime, status, created_at, updated_at, failure_kind, budget
+        task,
+        profile if with_profile else None,
+        mode,
+        runtime,
+        status,
+        created_at,
+        updated_at,
+        failure_kind,
+        budget,
     )
     _add_timeline_events(task, status, created_at, updated_at, inconsistent_timeline)
     _add_clarifications(task, clarifications, created_at)
@@ -381,3 +389,295 @@ def test_cli_failure_modes(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cli.main(["--database-url-env", "TEST_EMPTY_URL", "--as-of", "not-a-date"]) == 1
     assert cli.main(["--database-url-env", "TEST_EMPTY_URL", "--lookback-days", "0"]) == 1
     assert cli.main(["--database-url-env", "TEST_EMPTY_URL", "--min-samples", "0"]) == 1
+
+
+def test_verification_passes_delivery_fails(tmp_path: Path) -> None:
+    """Ensure verification pass is preserved when delivery subsequently fails."""
+    db_path = tmp_path / "test_stage_outcomes.db"
+    db_url = f"sqlite+pysqlite:///{db_path}"
+    engine = create_engine_from_url(db_url)
+    Base.metadata.create_all(engine)
+
+    task = _create_task(
+        task_id="v-pass-d-fail",
+        status=TaskStatus.FAILED,
+        verification_cmds=["pytest"],
+        delivery_mode="branch",
+    )
+    task.timeline_events.append(
+        TaskTimelineEvent(
+            attempt_number=0,
+            sequence_number=len(task.timeline_events),
+            event_type=TimelineEventType.VERIFICATION_COMPLETED,
+            created_at=task.created_at + timedelta(minutes=2),
+            payload={"status": "passed"},
+        )
+    )
+    task.timeline_events.append(
+        TaskTimelineEvent(
+            attempt_number=0,
+            sequence_number=len(task.timeline_events),
+            event_type=TimelineEventType.DELIVERY_FAILED,
+            created_at=task.created_at + timedelta(minutes=4),
+            payload={"error": "push rejected"},
+        )
+    )
+    task.worker_runs[0].status = WorkerRunStatus.SUCCESS
+
+    with Session(engine) as session:
+        session.add(task)
+        session.commit()
+
+    policy = ReliabilityReportPolicy(
+        as_of=NOW,
+        window_start_at=NOW - timedelta(days=30),
+        window_end_at=NOW + timedelta(days=1),
+        min_samples=1,
+    )
+    report = extract_provider_reliability_report(db_url, policy)
+    cell = [c for c in report.evidence_cells if c.profile == "codex-native-executor"][0]
+    assert cell.sample_size == 1
+    assert cell.accepted_count == 0
+    assert cell.stage_outcome_rates.verification_pass_rate == 1.0
+    assert cell.stage_outcome_rates.delivery_pass_rate == 0.0
+
+
+def test_default_independent_review_executes(tmp_path: Path) -> None:
+    """Ensure completed mutation task defaults to independent review applicable and passed."""
+    db_path = tmp_path / "test_review_default.db"
+    db_url = f"sqlite+pysqlite:///{db_path}"
+    engine = create_engine_from_url(db_url)
+    Base.metadata.create_all(engine)
+
+    task = _create_task(
+        task_id="default-review",
+        status=TaskStatus.COMPLETED,
+        verification_cmds=["pytest"],
+    )
+    with Session(engine) as session:
+        session.add(task)
+        session.commit()
+
+    policy = ReliabilityReportPolicy(
+        as_of=NOW,
+        window_start_at=NOW - timedelta(days=30),
+        window_end_at=NOW + timedelta(days=1),
+        min_samples=1,
+    )
+    report = extract_provider_reliability_report(db_url, policy)
+    cell = [c for c in report.evidence_cells if c.profile == "codex-native-executor"][0]
+    assert cell.stage_outcome_rates.review_pass_rate == 1.0
+
+
+def test_branch_task_lacking_delivery_completed_not_delivery_pass(tmp_path: Path) -> None:
+    """Ensure branch task without DELIVERY_COMPLETED is not reported as delivery pass."""
+    db_path = tmp_path / "test_delivery_missing.db"
+    db_url = f"sqlite+pysqlite:///{db_path}"
+    engine = create_engine_from_url(db_url)
+    Base.metadata.create_all(engine)
+
+    task = _create_task(
+        task_id="no-deliv-event",
+        status=TaskStatus.COMPLETED,
+        delivery_mode="branch",
+    )
+    task.worker_runs[0].delivery_metadata = {}
+    with Session(engine) as session:
+        session.add(task)
+        session.commit()
+
+    policy = ReliabilityReportPolicy(
+        as_of=NOW,
+        window_start_at=NOW - timedelta(days=30),
+        window_end_at=NOW + timedelta(days=1),
+        min_samples=1,
+    )
+    report = extract_provider_reliability_report(db_url, policy)
+    cell = [c for c in report.evidence_cells if c.profile == "codex-native-executor"][0]
+    assert cell.stage_outcome_rates.delivery_pass_rate == 0.0
+
+
+def test_mixed_profile_execution_excluded(tmp_path: Path) -> None:
+    """Ensure multi-profile retries are excluded under mixed_profile_execution."""
+    db_path = tmp_path / "test_mixed_profile.db"
+    db_url = f"sqlite+pysqlite:///{db_path}"
+    engine = create_engine_from_url(db_url)
+    Base.metadata.create_all(engine)
+
+    task = _create_task(
+        task_id="mixed-task",
+        status=TaskStatus.COMPLETED,
+        profile="antigravity-native-executor",
+    )
+    task.worker_runs.insert(
+        0,
+        WorkerRun(
+            worker_type=WorkerType.CODEX,
+            worker_profile="codex-native-executor",
+            runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+            orchestration_runtime=OrchestrationRuntime.TEMPORAL,
+            started_at=task.created_at - timedelta(minutes=20),
+            finished_at=task.created_at - timedelta(minutes=15),
+            status=WorkerRunStatus.FAILURE,
+            verifier_outcome={"status": "failed", "failure_kind": "test_failure"},
+            budget_usage={"tokens": 50},
+        ),
+    )
+    with Session(engine) as session:
+        session.add(task)
+        session.commit()
+
+    policy = ReliabilityReportPolicy(
+        as_of=NOW,
+        window_start_at=NOW - timedelta(days=30),
+        window_end_at=NOW + timedelta(days=1),
+        min_samples=1,
+    )
+    report = extract_provider_reliability_report(db_url, policy)
+    assert report.exclusions.by_reason.get("mixed_profile_execution") == 1
+    assert report.exclusions.included_tasks_count == 0
+
+
+def test_zero_sample_enabled_profile_appears_in_cells_and_rankings(tmp_path: Path) -> None:
+    """Ensure enabled profiles with zero tasks appear with is_eligible=False and 0 samples."""
+    db_path = tmp_path / "test_zero_sample.db"
+    db_url = f"sqlite+pysqlite:///{db_path}"
+    engine = create_engine_from_url(db_url)
+    Base.metadata.create_all(engine)
+
+    for idx in range(10):
+        t = _create_task(
+            task_id=f"codex-{idx}",
+            status=TaskStatus.COMPLETED,
+            profile="codex-native-executor",
+        )
+        with Session(engine) as session:
+            session.add(t)
+            session.commit()
+
+    policy = ReliabilityReportPolicy(
+        as_of=NOW,
+        window_start_at=NOW - timedelta(days=30),
+        window_end_at=NOW + timedelta(days=1),
+        min_samples=10,
+    )
+    report = extract_provider_reliability_report(db_url, policy)
+    cells_by_profile = {c.profile: c for c in report.evidence_cells}
+    assert "antigravity-native-executor" in cells_by_profile
+    ag_cell = cells_by_profile["antigravity-native-executor"]
+    assert ag_cell.sample_size == 0
+    assert ag_cell.is_eligible is False
+    assert any("insufficient_sample_size: 0 tasks" in r for r in ag_cell.insufficiency_reasons)
+
+
+def test_manual_profile_override_counted(tmp_path: Path) -> None:
+    """Ensure manual_profile_override route reason is counted in overrides."""
+    db_path = tmp_path / "test_override.db"
+    db_url = f"sqlite+pysqlite:///{db_path}"
+    engine = create_engine_from_url(db_url)
+    Base.metadata.create_all(engine)
+
+    task = _create_task(
+        task_id="profile-override-task",
+        status=TaskStatus.COMPLETED,
+    )
+    task.route_reason = "manual_profile_override"
+    with Session(engine) as session:
+        session.add(task)
+        session.commit()
+
+    policy = ReliabilityReportPolicy(
+        as_of=NOW,
+        window_start_at=NOW - timedelta(days=30),
+        window_end_at=NOW + timedelta(days=1),
+        min_samples=1,
+    )
+    report = extract_provider_reliability_report(db_url, policy)
+    cell = [c for c in report.evidence_cells if c.profile == "codex-native-executor"][0]
+    assert cell.manual_overrides_count == 1
+    assert cell.manual_override_rate == 1.0
+
+
+def test_unordered_multiple_worker_runs_deterministic_failure(tmp_path: Path) -> None:
+    """Ensure worker runs are sorted by (started_at, id) for deterministic failure resolution."""
+    db_path = tmp_path / "test_sort_runs.db"
+    db_url = f"sqlite+pysqlite:///{db_path}"
+    engine = create_engine_from_url(db_url)
+    Base.metadata.create_all(engine)
+
+    task = _create_task(
+        task_id="multi-run-task",
+        status=TaskStatus.FAILED,
+    )
+    task.worker_runs.clear()
+    run_later = WorkerRun(
+        id="run-b",
+        worker_type=WorkerType.CODEX,
+        worker_profile="codex-native-executor",
+        runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+        orchestration_runtime=OrchestrationRuntime.TEMPORAL,
+        started_at=task.created_at + timedelta(minutes=5),
+        finished_at=task.created_at + timedelta(minutes=8),
+        status=WorkerRunStatus.FAILURE,
+        verifier_outcome={"status": "failed", "failure_kind": "latest_failure"},
+    )
+    run_earlier = WorkerRun(
+        id="run-a",
+        worker_type=WorkerType.CODEX,
+        worker_profile="codex-native-executor",
+        runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+        orchestration_runtime=OrchestrationRuntime.TEMPORAL,
+        started_at=task.created_at + timedelta(minutes=1),
+        finished_at=task.created_at + timedelta(minutes=3),
+        status=WorkerRunStatus.FAILURE,
+        verifier_outcome={"status": "failed", "failure_kind": "earlier_failure"},
+    )
+    task.worker_runs.extend([run_later, run_earlier])
+    with Session(engine) as session:
+        session.add(task)
+        session.commit()
+
+    policy = ReliabilityReportPolicy(
+        as_of=NOW,
+        window_start_at=NOW - timedelta(days=30),
+        window_end_at=NOW + timedelta(days=1),
+        min_samples=1,
+    )
+    report = extract_provider_reliability_report(db_url, policy)
+    cell = [c for c in report.evidence_cells if c.profile == "codex-native-executor"][0]
+    assert "latest_failure" in cell.typed_failures
+    assert "earlier_failure" not in cell.typed_failures
+
+
+def test_failed_task_with_cancelled_event_rejected(tmp_path: Path) -> None:
+    """Ensure task with FAILED status and TASK_CANCELLED event is rejected."""
+    db_path = tmp_path / "test_cancelled_timeline.db"
+    db_url = f"sqlite+pysqlite:///{db_path}"
+    engine = create_engine_from_url(db_url)
+    Base.metadata.create_all(engine)
+
+    task = _create_task(
+        task_id="failed-but-cancelled",
+        status=TaskStatus.FAILED,
+    )
+    task.timeline_events.append(
+        TaskTimelineEvent(
+            attempt_number=0,
+            sequence_number=len(task.timeline_events),
+            event_type=TimelineEventType.TASK_CANCELLED,
+            created_at=task.created_at + timedelta(minutes=4),
+        )
+    )
+    with Session(engine) as session:
+        session.add(task)
+        session.commit()
+
+    policy = ReliabilityReportPolicy(
+        as_of=NOW,
+        window_start_at=NOW - timedelta(days=30),
+        window_end_at=NOW + timedelta(days=1),
+        min_samples=1,
+    )
+    report = extract_provider_reliability_report(db_url, policy)
+    assert report.exclusions.by_reason.get("malformed_inconsistent_timeline") == 1
+    assert report.exclusions.included_tasks_count == 0

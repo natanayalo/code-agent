@@ -7,8 +7,15 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-ReportStatus = Literal["complete", "insufficient_data"]
+ReportStatus = Literal["complete", "partial", "insufficient_data"]
 MutationMode = Literal["read_only", "mutation"]
+
+DEFAULT_ENABLED_PROFILES: tuple[str, ...] = (
+    "codex-native-executor",
+    "codex-native-executor-read-only",
+    "antigravity-native-executor",
+    "antigravity-native-executor-read-only",
+)
 
 
 class StrictModel(BaseModel):
@@ -105,6 +112,11 @@ class CandidateRanking(StrictModel):
     median_latency_seconds: float | None = Field(default=None, ge=0.0)
     rank: int | None = Field(default=None, ge=1)
     insufficiency_reasons: list[str] = Field(default_factory=list)
+    sample_size: int = Field(default=0, ge=0)
+    accepted_count: int = Field(default=0, ge=0)
+    oldest_evidence_timestamp: datetime | None = None
+    newest_evidence_timestamp: datetime | None = None
+    evidence_age_days: float | None = Field(default=None, ge=0.0)
 
 
 class TaskClassRecommendation(StrictModel):
@@ -136,6 +148,7 @@ class ReliabilityReportPolicy(StrictModel):
     as_of: datetime
     window_start_at: datetime
     window_end_at: datetime
+    enabled_profiles: list[str] = Field(default_factory=lambda: list(DEFAULT_ENABLED_PROFILES))
 
 
 class ProviderReliabilityReport(StrictModel):

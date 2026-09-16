@@ -3,40 +3,191 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from evaluation.provider_reliability_models import (
     ProviderReliabilityReport,
 )
 
-FORBIDDEN_KEYS = frozenset(
-    {
-        "task_id",
-        "task_text",
-        "repo_url",
-        "branch",
-        "delivery_branch",
-        "callback_url",
-        "summary",
-        "commands_run",
-        "files_changed",
-        "raw_history",
-        "logs",
-        "uri",
-        "artifact_uri",
-        "secret",
-        "secrets",
-        "access_token",
-        "password",
-        "session_id",
-        "workspace_id",
-        "process_identity",
-    }
-)
+SAFE_IDENTIFIER_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+SAFE_CLASS_PATTERN = re.compile(r"^[a-z0-9_]+$")
+UNSAFE_VALUE_SUBSTRINGS = ("://", "/Users/", "/home/", "/root/", "/tmp/")
+
+ALLOWED_KEYS_BY_LEVEL: dict[str, frozenset[str]] = {
+    "root": frozenset(
+        {
+            "schema_version",
+            "generated_at",
+            "status",
+            "policy",
+            "exclusions",
+            "evidence_cells",
+            "recommendations",
+        }
+    ),
+    "policy": frozenset(
+        {
+            "schema_version",
+            "lookback_days",
+            "min_samples",
+            "confidence_level",
+            "as_of",
+            "window_start_at",
+            "window_end_at",
+            "enabled_profiles",
+        }
+    ),
+    "exclusions": frozenset(
+        {
+            "total_tasks_scanned",
+            "included_tasks_count",
+            "excluded_tasks_count",
+            "by_reason",
+        }
+    ),
+    "cell": frozenset(
+        {
+            "task_class",
+            "profile",
+            "mutation_mode",
+            "sample_size",
+            "oldest_evidence_timestamp",
+            "newest_evidence_timestamp",
+            "accepted_count",
+            "accepted_task_rate",
+            "accepted_task_rate_ci",
+            "failure_count",
+            "failure_rate",
+            "stage_outcome_rates",
+            "typed_failures",
+            "repairs",
+            "interventions",
+            "manual_overrides_count",
+            "manual_override_rate",
+            "terminal_latency",
+            "budget_field_coverage",
+            "is_eligible",
+            "insufficiency_reasons",
+        }
+    ),
+    "ci": frozenset({"lower", "center", "upper"}),
+    "stages": frozenset(
+        {
+            "dispatch_rate",
+            "execution_success_rate",
+            "verification_pass_rate",
+            "review_pass_rate",
+            "delivery_pass_rate",
+        }
+    ),
+    "repairs": frozenset(
+        {
+            "verifier_repairs_count",
+            "review_repairs_count",
+            "total_repaired_tasks",
+            "repair_rate",
+        }
+    ),
+    "interventions": frozenset(
+        {
+            "human_interventions_count",
+            "clarification_questions_count",
+            "approvals_count",
+            "intervention_rate",
+        }
+    ),
+    "latency": frozenset(
+        {
+            "median_seconds",
+            "mean_seconds",
+            "min_seconds",
+            "max_seconds",
+            "p90_seconds",
+        }
+    ),
+    "budget": frozenset({"budget_reported_count", "budget_coverage_rate"}),
+    "recommendation": frozenset(
+        {
+            "task_class",
+            "mutation_mode",
+            "recommended_profile",
+            "rankings",
+            "fallback_reason",
+        }
+    ),
+    "ranking": frozenset(
+        {
+            "profile",
+            "is_eligible",
+            "accepted_rate_wilson_lower",
+            "median_latency_seconds",
+            "rank",
+            "insufficiency_reasons",
+            "sample_size",
+            "accepted_count",
+            "oldest_evidence_timestamp",
+            "newest_evidence_timestamp",
+            "evidence_age_days",
+        }
+    ),
+}
+
+
+def _validate_domain_value(key: str, val: Any) -> None:
+    """Validate string values against domain boundaries and reject unsafe substrings."""
+    if isinstance(val, str):
+        for sub in UNSAFE_VALUE_SUBSTRINGS:
+            if sub in val:
+                raise ValueError(f"Unsafe substring '{sub}' detected in field {key}: {val}")
+        if key == "profile" and not SAFE_IDENTIFIER_PATTERN.match(val):
+            raise ValueError(f"Invalid profile identifier format: {val}")
+        if key in ("task_class", "mutation_mode") and not SAFE_CLASS_PATTERN.match(val):
+            raise ValueError(f"Invalid {key} identifier format: {val}")
+
+
+def _validate_dict_keys(data: dict[str, Any], allowed: frozenset[str], path: str) -> None:
+    """Ensure dictionary keys strictly match the defined allowlist."""
+    unknown = set(data.keys()) - allowed
+    if unknown:
+        keys_list = sorted(unknown)
+        raise ValueError(
+            f"Forbidden key detected: unauthorized keys in public report at '{path}': {keys_list}"
+        )
+
+
+def _validate_cell_structure(cell: dict[str, Any], path: str) -> None:
+    """Validate keys and nested structures of an evidence cell."""
+    _validate_dict_keys(cell, ALLOWED_KEYS_BY_LEVEL["cell"], path)
+    if "accepted_task_rate_ci" in cell:
+        _validate_dict_keys(
+            cell["accepted_task_rate_ci"], ALLOWED_KEYS_BY_LEVEL["ci"], f"{path}.ci"
+        )
+    if "stage_outcome_rates" in cell:
+        _validate_dict_keys(
+            cell["stage_outcome_rates"], ALLOWED_KEYS_BY_LEVEL["stages"], f"{path}.stages"
+        )
+    if "repairs" in cell:
+        _validate_dict_keys(cell["repairs"], ALLOWED_KEYS_BY_LEVEL["repairs"], f"{path}.repairs")
+    if "interventions" in cell:
+        _validate_dict_keys(
+            cell["interventions"], ALLOWED_KEYS_BY_LEVEL["interventions"], f"{path}.interventions"
+        )
+    if "terminal_latency" in cell:
+        _validate_dict_keys(
+            cell["terminal_latency"], ALLOWED_KEYS_BY_LEVEL["latency"], f"{path}.latency"
+        )
+    if "budget_field_coverage" in cell:
+        _validate_dict_keys(
+            cell["budget_field_coverage"], ALLOWED_KEYS_BY_LEVEL["budget"], f"{path}.budget"
+        )
+    for fk in cell.get("typed_failures", {}):
+        if not SAFE_CLASS_PATTERN.match(fk):
+            raise ValueError(f"Invalid typed failure key in {path}: {fk}")
 
 
 def assert_sanitized_report(payload: dict[str, Any] | str) -> None:
-    """Validate that serialized evidence conforms strictly to the public allowlist."""
+    """Validate that report conforms strictly to public allowlists and safe domains."""
     if isinstance(payload, str):
         try:
             data = json.loads(payload)
@@ -45,18 +196,44 @@ def assert_sanitized_report(payload: dict[str, Any] | str) -> None:
     else:
         data = payload
 
-    def _scan(item: Any, path: str = "") -> None:
-        if isinstance(item, dict):
-            for k, v in item.items():
-                normalized_key = k.lower().strip()
-                if normalized_key in FORBIDDEN_KEYS:
-                    raise ValueError(f"Forbidden key detected in public report: {path}.{k}")
-                _scan(v, f"{path}.{k}" if path else k)
-        elif isinstance(item, list):
-            for idx, entry in enumerate(item):
-                _scan(entry, f"{path}[{idx}]")
+    _validate_dict_keys(data, ALLOWED_KEYS_BY_LEVEL["root"], "root")
+    if "policy" in data:
+        _validate_dict_keys(data["policy"], ALLOWED_KEYS_BY_LEVEL["policy"], "policy")
+    if "exclusions" in data:
+        _validate_dict_keys(data["exclusions"], ALLOWED_KEYS_BY_LEVEL["exclusions"], "exclusions")
+        for rk in data["exclusions"].get("by_reason", {}):
+            if not SAFE_CLASS_PATTERN.match(rk):
+                raise ValueError(f"Invalid exclusion reason key: {rk}")
 
-    _scan(data)
+    for idx, cell in enumerate(data.get("evidence_cells", [])):
+        _validate_cell_structure(cell, f"evidence_cells[{idx}]")
+
+    for idx, rec in enumerate(data.get("recommendations", [])):
+        _validate_dict_keys(rec, ALLOWED_KEYS_BY_LEVEL["recommendation"], f"recommendations[{idx}]")
+        for c_idx, cand in enumerate(rec.get("rankings", [])):
+            _validate_dict_keys(
+                cand, ALLOWED_KEYS_BY_LEVEL["ranking"], f"recommendations[{idx}].rankings[{c_idx}]"
+            )
+
+    def _scan_values(item: Any, key_context: str = "") -> None:
+        if isinstance(item, str):
+            _validate_domain_value(key_context, item)
+        elif isinstance(item, dict):
+            for k, v in item.items():
+                _scan_values(v, k)
+        elif isinstance(item, list):
+            for entry in item:
+                _scan_values(entry, key_context)
+
+    _scan_values(data)
+
+
+def escape_markdown(val: Any) -> str:
+    """Escape pipe characters and strip newlines for safe Markdown table cells."""
+    if val is None:
+        return "N/A"
+    text_val = str(val).replace("\n", " ").replace("\r", " ").replace("|", "\\|").strip()
+    return text_val
 
 
 def render_json_report(report: ProviderReliabilityReport) -> str:
@@ -101,7 +278,7 @@ def _render_exclusions(report: ProviderReliabilityReport) -> list[str]:
             ]
         )
         for reason, count in sorted(ex.by_reason.items()):
-            lines.append(f"| `{reason}` | {count} |")
+            lines.append(f"| `{escape_markdown(reason)}` | {count} |")
         lines.append("")
     return lines
 
@@ -117,22 +294,26 @@ def _render_recommendations(report: ProviderReliabilityReport) -> list[str]:
         return lines
 
     for rec in report.recommendations:
-        title = f"### Task Class: `{rec.task_class}` ({rec.mutation_mode})"
+        title = (
+            f"### Task Class: `{escape_markdown(rec.task_class)}` "
+            f"({escape_markdown(rec.mutation_mode)})"
+        )
         lines.append(title)
         lines.append("")
         if rec.recommended_profile:
-            lines.append(f"- **Recommended Profile**: `{rec.recommended_profile}`")
+            lines.append(f"- **Recommended Profile**: `{escape_markdown(rec.recommended_profile)}`")
         else:
             lines.append("- **Recommended Profile**: _None_")
         if rec.fallback_reason:
-            lines.append(f"- **Fallback Reason**: {rec.fallback_reason}")
+            lines.append(f"- **Fallback Reason**: {escape_markdown(rec.fallback_reason)}")
         lines.append("")
 
         if rec.rankings:
             lines.extend(
                 [
-                    "| Rank | Profile | Eligible | Wilson 95% Lower | Median Latency | Notes |",
-                    "|---|---|---|---|---|---|",
+                    "| Rank | Profile | Eligible | N (Acc) | Wilson 95% Lower | "
+                    "Med Latency | Recency | Notes |",
+                    "|---|---|---|---|---|---|---|---|",
                 ]
             )
             for cand in rec.rankings:
@@ -142,14 +323,22 @@ def _render_recommendations(report: ProviderReliabilityReport) -> list[str]:
                     if cand.median_latency_seconds is not None
                     else "N/A"
                 )
+                recency_str = (
+                    f"{cand.evidence_age_days:.1f}d ago"
+                    if cand.evidence_age_days is not None
+                    else "N/A"
+                )
                 notes = (
                     ", ".join(cand.insufficiency_reasons)
                     if cand.insufficiency_reasons
                     else "eligible"
                 )
                 lines.append(
-                    f"| {rank_str} | `{cand.profile}` | {'yes' if cand.is_eligible else 'no'} | "
-                    f"{cand.accepted_rate_wilson_lower:.4f} | {lat_str} | {notes} |"
+                    f"| {rank_str} | `{escape_markdown(cand.profile)}` | "
+                    f"{'yes' if cand.is_eligible else 'no'} | "
+                    f"{cand.sample_size} ({cand.accepted_count}) | "
+                    f"{cand.accepted_rate_wilson_lower:.4f} | {lat_str} | "
+                    f"{recency_str} | {escape_markdown(notes)} |"
                 )
             lines.append("")
     return lines
@@ -190,8 +379,9 @@ def _render_evidence_cells(report: ProviderReliabilityReport) -> list[str]:
             else "none"
         )
         lines.append(
-            f"| `{c.task_class}` | `{c.profile}` | `{c.mutation_mode}` | {c.sample_size} | "
-            f"{ci_str} | {fail_summary} | {rep_str} | {int_str} | "
+            f"| `{escape_markdown(c.task_class)}` | `{escape_markdown(c.profile)}` | "
+            f"`{escape_markdown(c.mutation_mode)}` | {c.sample_size} | "
+            f"{ci_str} | {escape_markdown(fail_summary)} | {rep_str} | {int_str} | "
             f"{c.manual_overrides_count} | {lat_str} | "
             f"{c.budget_field_coverage.budget_coverage_rate:.2f} |"
         )
@@ -209,3 +399,12 @@ def render_markdown_report(report: ProviderReliabilityReport) -> str:
     content = "\n".join(lines)
     assert_sanitized_report(report.model_dump(mode="json"))
     return content
+
+
+__all__ = [
+    "ALLOWED_KEYS_BY_LEVEL",
+    "assert_sanitized_report",
+    "escape_markdown",
+    "render_json_report",
+    "render_markdown_report",
+]

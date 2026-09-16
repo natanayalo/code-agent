@@ -6,24 +6,20 @@ import logging
 import math
 import statistics
 from dataclasses import dataclass
-from datetime import UTC, datetime
-from typing import Any
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, load_only, selectinload
 
 from db.enums import (
     HumanInteractionType,
     OrchestrationRuntime,
     TaskStatus,
-    TimelineEventType,
-    WorkerRunStatus,
     WorkerRuntimeMode,
 )
-from db.models import Task
+from db.models import HumanInteraction, Task, TaskTimelineEvent, WorkerRun
 from evaluation.provider_reliability_models import (
     BudgetCoverageMetrics,
-    CandidateRanking,
     InterventionMetrics,
     LatencyMetrics,
     MutationMode,
@@ -32,9 +28,22 @@ from evaluation.provider_reliability_models import (
     ReliabilityReportPolicy,
     RepairMetrics,
     StageOutcomeRates,
-    TaskClassRecommendation,
     TaskExclusionSummary,
     WilsonConfidenceInterval,
+)
+from evaluation.provider_reliability_recommendation import (
+    determine_report_status,
+    generate_recommendations,
+)
+from evaluation.provider_reliability_stages import (
+    check_delivery_stage,
+    check_review_stage,
+    check_task_stages,
+    check_verification_stage,
+    determine_task_mutation_mode,
+    is_profile_compatible_with_mode,
+    resolve_failure_kind,
+    verify_timeline_consistency,
 )
 from repositories import create_engine_from_url
 
@@ -90,63 +99,6 @@ def compute_wilson_interval(
     )
 
 
-def is_profile_compatible_with_mode(profile: str, mode: MutationMode) -> bool:
-    """Check if worker profile capabilities match the requested execution mode."""
-    is_read_only_profile = profile.endswith("-read-only")
-    return is_read_only_profile if mode == "read_only" else not is_read_only_profile
-
-
-def determine_task_mutation_mode(
-    task_spec: dict[str, Any] | None,
-    constraints: dict[str, Any] | None,
-    profile: str | None,
-) -> MutationMode | None:
-    """Determine task mutation mode using TaskSpec allowed actions and constraints."""
-    if task_spec:
-        if task_spec.get("task_type") == "scout":
-            return "read_only"
-        allowed_actions = task_spec.get("allowed_actions")
-        if isinstance(allowed_actions, list) and allowed_actions:
-            return "mutation" if "modify_workspace_files" in allowed_actions else "read_only"
-
-    c = constraints or {}
-    if c.get("read_only") is True or c.get("task_type") == "scout":
-        return "read_only"
-    if profile and profile.endswith("-read-only"):
-        return "read_only"
-    return "mutation"
-
-
-def _verify_timeline_consistency(
-    status: TaskStatus,
-    timeline_events: list[Any],
-    updated_at: datetime | None,
-) -> tuple[bool, datetime | None]:
-    """Verify terminal event consistency and return terminal timestamp."""
-    completed_event = None
-    failed_event = None
-    cancelled_event = None
-
-    for ev in timeline_events:
-        etype = ev.event_type
-        if etype == TimelineEventType.TASK_COMPLETED:
-            completed_event = ev
-        elif etype == TimelineEventType.TASK_FAILED:
-            failed_event = ev
-        elif etype == TimelineEventType.TASK_CANCELLED:
-            cancelled_event = ev
-
-    if status == TaskStatus.COMPLETED:
-        if completed_event is None or failed_event is not None or cancelled_event is not None:
-            return False, None
-        return True, completed_event.created_at or updated_at
-    if status == TaskStatus.FAILED:
-        if failed_event is None or completed_event is not None:
-            return False, None
-        return True, failed_event.created_at or updated_at
-    return False, None
-
-
 def _calculate_latencies(values: list[float]) -> LatencyMetrics:
     """Compute summary statistics for task latencies in seconds."""
     if not values:
@@ -163,110 +115,66 @@ def _calculate_latencies(values: list[float]) -> LatencyMetrics:
     )
 
 
-def _check_task_stages(
-    task: Task, accepted: bool
-) -> tuple[bool, bool, bool, bool, bool, bool, bool, bool]:
-    """Inspect dispatch, execution, verification, review, and delivery stage outcomes."""
-    dispatched = len(task.worker_runs) > 0
-    exec_success = any(r.status == WorkerRunStatus.SUCCESS for r in task.worker_runs)
-
-    spec = task.task_spec or {}
-    c = task.constraints or {}
-    v_cmds = spec.get("verification_commands") or c.get("verification_commands") or []
-    has_v_events = any("verification" in str(e.event_type) for e in task.timeline_events)
-    v_skipped = any(
-        e.event_type == TimelineEventType.VERIFICATION_SKIPPED for e in task.timeline_events
-    )
-    v_applicable = bool(v_cmds or has_v_events) and not v_skipped
-    v_passed = accepted if v_applicable else False
-
-    rev_applicable = bool(c.get("requires_review") or c.get("independent_review"))
-    rev_passed = accepted if rev_applicable else False
-
-    deliv_mode = spec.get("delivery_mode")
-    d_applicable = deliv_mode in ("branch", "draft_pr") or any(
-        "delivery" in str(e.event_type) for e in task.timeline_events
-    )
-    deliv_events_pass = any(
-        e.event_type == TimelineEventType.DELIVERY_COMPLETED for e in task.timeline_events
-    )
-    d_passed = (deliv_events_pass or accepted) if d_applicable else False
-
-    return (
-        dispatched,
-        exec_success,
-        v_applicable,
-        v_passed,
-        rev_applicable,
-        rev_passed,
-        d_applicable,
-        d_passed,
-    )
-
-
 def _validate_task_candidate(
     task: Task, policy: ReliabilityReportPolicy
-) -> tuple[str | None, MutationMode | None, datetime | None]:
+) -> tuple[str | None, MutationMode | None, datetime | None, str | None]:
     """Check task eligibility criteria and return exclusion reason if invalid."""
     if task.status == TaskStatus.CANCELLED:
-        return "cancelled", None, None
+        return "cancelled", None, None, None
     if task.status in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS):
-        return "incomplete", None, None
+        return "incomplete", None, None, None
     if task.orchestration_runtime != OrchestrationRuntime.TEMPORAL:
-        return "non_temporal_runtime", None, None
+        return "non_temporal_runtime", None, None, None
     if task.runtime_mode != WorkerRuntimeMode.NATIVE_AGENT:
-        return "non_native_agent_mode", None, None
+        return "non_native_agent_mode", None, None, None
 
     if not task.task_spec or not isinstance(task.task_spec, dict):
-        return "malformed_missing_task_spec", None, None
+        return "malformed_missing_task_spec", None, None, None
     if not task.task_spec.get("task_type") or not isinstance(task.task_spec.get("task_type"), str):
-        return "malformed_missing_task_spec", None, None
-    if not task.chosen_profile:
-        return "malformed_missing_profile", None, None
+        return "malformed_missing_task_spec", None, None, None
 
-    mode = determine_task_mutation_mode(task.task_spec, task.constraints, task.chosen_profile)
+    run_profiles = {r.worker_profile for r in task.worker_runs if r.worker_profile}
+    if len(run_profiles) > 1:
+        return "mixed_profile_execution", None, None, None
+
+    profile = next(iter(run_profiles)) if run_profiles else task.chosen_profile
+    if not profile:
+        return "malformed_missing_profile", None, None, None
+
+    mode = determine_task_mutation_mode(task.task_spec, task.constraints, profile)
     if not mode:
-        return "malformed_missing_mode", None, None
-    if not is_profile_compatible_with_mode(task.chosen_profile, mode):
-        return "incompatible_profile_mode", None, None
+        return "malformed_missing_mode", None, None, None
+    if not is_profile_compatible_with_mode(profile, mode):
+        return "incompatible_profile_mode", None, None, None
 
-    consistent, terminal_ts = _verify_timeline_consistency(
+    consistent, terminal_ts = verify_timeline_consistency(
         task.status, task.timeline_events, task.updated_at
     )
     if not consistent or terminal_ts is None:
-        return "malformed_inconsistent_timeline", None, None
+        return "malformed_inconsistent_timeline", None, None, None
 
     if terminal_ts.tzinfo is None:
         terminal_ts = terminal_ts.replace(tzinfo=UTC)
     if not (policy.window_start_at <= terminal_ts <= policy.window_end_at):
-        return "outside_window", None, None
+        return "outside_window", None, None, None
 
-    return None, mode, terminal_ts
-
-
-def _resolve_failure_kind(task: Task, accepted: bool) -> str | None:
-    """Resolve typed failure cause from worker runs or error message."""
-    if accepted:
-        return None
-    for r in reversed(task.worker_runs):
-        outcome = r.verifier_outcome or {}
-        if outcome.get("failure_kind"):
-            return str(outcome["failure_kind"])
-    if task.last_error:
-        return "task_error"
-    return "unknown"
+    return None, mode, terminal_ts, profile
 
 
 def _extract_single_task(
     task: Task, policy: ReliabilityReportPolicy
 ) -> tuple[ExtractedTaskEvidence | None, str | None]:
     """Extract and validate one task, returning evidence or an exclusion reason."""
-    reason, mode, terminal_ts = _validate_task_candidate(task, policy)
-    if reason or not mode or not terminal_ts:
+    reason, mode, terminal_ts, profile = _validate_task_candidate(task, policy)
+    if reason or not mode or not terminal_ts or not profile:
         return None, reason
 
+    runs = sorted(
+        task.worker_runs,
+        key=lambda r: (r.started_at or datetime.min.replace(tzinfo=UTC), r.id or ""),
+    )
+
     task_class = str(task.task_spec["task_type"])  # type: ignore[index]
-    profile = str(task.chosen_profile)
     accepted = task.status == TaskStatus.COMPLETED
     c = task.constraints or {}
 
@@ -285,12 +193,19 @@ def _extract_single_task(
         )
     )
 
+    has_override = bool(
+        task.worker_override is not None
+        or c.get("worker_override") is not None
+        or c.get("worker_profile_override") is not None
+        or task.route_reason in ("manual_override", "manual_profile_override")
+    )
+
     start_ts = task.created_at
     if start_ts and start_ts.tzinfo is None:
         start_ts = start_ts.replace(tzinfo=UTC)
     duration = max(0.0, (terminal_ts - start_ts).total_seconds()) if start_ts else None
 
-    stages = _check_task_stages(task, accepted)
+    stages = check_task_stages(task, runs)
 
     return (
         ExtractedTaskEvidence(
@@ -300,18 +215,14 @@ def _extract_single_task(
             accepted=accepted,
             terminal_timestamp=terminal_ts,
             duration_seconds=duration,
-            failure_kind=_resolve_failure_kind(task, accepted),
+            failure_kind=resolve_failure_kind(task, accepted, runs),
             verifier_repaired=c.get("independent_verifier_repair_passes_used", 0) > 0,
             review_repaired=c.get("independent_review_repair_passes_used", 0) > 0,
             clarification_count=clarifications,
             approval_count=approvals,
             has_intervention=bool(interactions),
-            has_override=bool(
-                task.worker_override
-                or c.get("worker_override")
-                or task.route_reason == "manual_override"
-            ),
-            has_budget=any(bool(r.budget_usage) for r in task.worker_runs),
+            has_override=has_override,
+            has_budget=any(bool(r.budget_usage) for r in runs),
             dispatched=stages[0],
             execution_success=stages[1],
             verification_applicable=stages[2],
@@ -325,12 +236,24 @@ def _extract_single_task(
     )
 
 
-def load_and_classify_tasks(
-    session: Session, policy: ReliabilityReportPolicy
-) -> tuple[list[ExtractedTaskEvidence], TaskExclusionSummary]:
-    """Query tasks in read-only session and classify into evidence or exclusions."""
-    stmt = (
+def _query_boundary_counts(
+    session: Session, cutoff_start: datetime, cutoff_end: datetime
+) -> tuple[int, int]:
+    """Count tasks strictly outside the window boundaries."""
+    older_count = (
+        session.scalar(select(func.count(Task.id)).where(Task.created_at < cutoff_start)) or 0
+    )
+    newer_count = (
+        session.scalar(select(func.count(Task.id)).where(Task.created_at > cutoff_end)) or 0
+    )
+    return older_count, newer_count
+
+
+def _build_tasks_query(cutoff_start: datetime, cutoff_end: datetime):
+    """Build bounded SQL query with narrow column loading."""
+    return (
         select(Task)
+        .where(Task.created_at >= cutoff_start, Task.created_at <= cutoff_end)
         .options(
             load_only(
                 Task.id,
@@ -348,15 +271,60 @@ def load_and_classify_tasks(
                 Task.worker_override,
                 Task.route_reason,
             ),
-            selectinload(Task.worker_runs),
-            selectinload(Task.timeline_events),
-            selectinload(Task.human_interactions),
+            selectinload(Task.worker_runs).options(
+                load_only(
+                    WorkerRun.id,
+                    WorkerRun.task_id,
+                    WorkerRun.worker_profile,
+                    WorkerRun.worker_type,
+                    WorkerRun.runtime_mode,
+                    WorkerRun.orchestration_runtime,
+                    WorkerRun.started_at,
+                    WorkerRun.finished_at,
+                    WorkerRun.status,
+                    WorkerRun.verifier_outcome,
+                    WorkerRun.budget_usage,
+                    WorkerRun.artifact_index,
+                    WorkerRun.delivery_metadata,
+                )
+            ),
+            selectinload(Task.timeline_events).options(
+                load_only(
+                    TaskTimelineEvent.id,
+                    TaskTimelineEvent.task_id,
+                    TaskTimelineEvent.event_type,
+                    TaskTimelineEvent.created_at,
+                    TaskTimelineEvent.payload,
+                )
+            ),
+            selectinload(Task.human_interactions).options(
+                load_only(
+                    HumanInteraction.id,
+                    HumanInteraction.task_id,
+                    HumanInteraction.interaction_type,
+                    HumanInteraction.status,
+                    HumanInteraction.created_at,
+                )
+            ),
         )
         .order_by(Task.created_at.asc())
     )
-    tasks = session.execute(stmt).scalars().all()
+
+
+def load_and_classify_tasks(
+    session: Session, policy: ReliabilityReportPolicy
+) -> tuple[list[ExtractedTaskEvidence], TaskExclusionSummary]:
+    """Query tasks within bounded window and classify into evidence or exclusions."""
+    cutoff_start = policy.window_start_at - timedelta(days=30)
+    cutoff_end = policy.window_end_at + timedelta(days=1)
+
+    older_count, newer_count = _query_boundary_counts(session, cutoff_start, cutoff_end)
+    tasks = session.execute(_build_tasks_query(cutoff_start, cutoff_end)).scalars().all()
+
     included: list[ExtractedTaskEvidence] = []
     exclusions: dict[str, int] = {}
+    if older_count + newer_count > 0:
+        exclusions["outside_window"] = older_count + newer_count
 
     for task in tasks:
         evidence, reason = _extract_single_task(task, policy)
@@ -365,8 +333,9 @@ def load_and_classify_tasks(
         elif evidence:
             included.append(evidence)
 
+    total_scanned = len(tasks) + older_count + newer_count
     summary = TaskExclusionSummary(
-        total_tasks_scanned=len(tasks),
+        total_tasks_scanned=total_scanned,
         included_tasks_count=len(included),
         excluded_tasks_count=sum(exclusions.values()),
         by_reason=dict(sorted(exclusions.items())),
@@ -376,6 +345,9 @@ def load_and_classify_tasks(
 
 def _compute_stage_rates(tasks: list[ExtractedTaskEvidence], n: int) -> StageOutcomeRates:
     """Compute stage-specific rates handling inapplicable optional stages."""
+    if n <= 0:
+        return StageOutcomeRates(dispatch_rate=0.0, execution_success_rate=0.0)
+
     v_app = [t for t in tasks if t.verification_applicable]
     v_rate = (
         round(sum(1 for t in v_app if t.verification_passed) / len(v_app), 4) if v_app else None
@@ -388,10 +360,8 @@ def _compute_stage_rates(tasks: list[ExtractedTaskEvidence], n: int) -> StageOut
     d_rate = round(sum(1 for t in d_app if t.delivery_passed) / len(d_app), 4) if d_app else None
 
     return StageOutcomeRates(
-        dispatch_rate=round(sum(1 for t in tasks if t.dispatched) / n, 4) if n else 0.0,
-        execution_success_rate=round(sum(1 for t in tasks if t.execution_success) / n, 4)
-        if n
-        else 0.0,
+        dispatch_rate=round(sum(1 for t in tasks if t.dispatched) / n, 4),
+        execution_success_rate=round(sum(1 for t in tasks if t.execution_success) / n, 4),
         verification_pass_rate=v_rate,
         review_pass_rate=r_rate,
         delivery_pass_rate=d_rate,
@@ -402,6 +372,22 @@ def _compute_cell_repairs_and_interventions(
     tasks: list[ExtractedTaskEvidence], n: int
 ) -> tuple[RepairMetrics, InterventionMetrics]:
     """Compute aggregate repair and human intervention metrics for a cell."""
+    if n <= 0:
+        return (
+            RepairMetrics(
+                verifier_repairs_count=0,
+                review_repairs_count=0,
+                total_repaired_tasks=0,
+                repair_rate=0.0,
+            ),
+            InterventionMetrics(
+                human_interventions_count=0,
+                clarification_questions_count=0,
+                approvals_count=0,
+                intervention_rate=0.0,
+            ),
+        )
+
     v_repairs = sum(1 for t in tasks if t.verifier_repaired)
     r_repairs = sum(1 for t in tasks if t.review_repaired)
     tot_repaired = sum(1 for t in tasks if t.verifier_repaired or t.review_repaired)
@@ -409,7 +395,7 @@ def _compute_cell_repairs_and_interventions(
         verifier_repairs_count=v_repairs,
         review_repairs_count=r_repairs,
         total_repaired_tasks=tot_repaired,
-        repair_rate=round(tot_repaired / n, 4) if n else 0.0,
+        repair_rate=round(tot_repaired / n, 4),
     )
 
     h_count = sum(1 for t in tasks if t.has_intervention)
@@ -419,7 +405,7 @@ def _compute_cell_repairs_and_interventions(
         human_interventions_count=h_count,
         clarification_questions_count=clar_count,
         approvals_count=appr_count,
-        intervention_rate=round(h_count / n, 4) if n else 0.0,
+        intervention_rate=round(h_count / n, 4),
     )
     return repairs, interventions
 
@@ -477,84 +463,6 @@ def _aggregate_cell(
     )
 
 
-def generate_recommendations(
-    cells: list[ProviderReliabilityEvidenceCell],
-) -> list[TaskClassRecommendation]:
-    """Rank candidates and generate recommendations requiring >= 2 eligible candidates."""
-    groups: dict[tuple[str, MutationMode], list[ProviderReliabilityEvidenceCell]] = {}
-    for cell in cells:
-        groups.setdefault((cell.task_class, cell.mutation_mode), []).append(cell)
-
-    recommendations: list[TaskClassRecommendation] = []
-    for (task_class, mode), cell_list in sorted(groups.items()):
-        rankings: list[CandidateRanking] = []
-        eligible: list[ProviderReliabilityEvidenceCell] = []
-
-        for c in cell_list:
-            if c.is_eligible:
-                eligible.append(c)
-            else:
-                rankings.append(
-                    CandidateRanking(
-                        profile=c.profile,
-                        is_eligible=False,
-                        accepted_rate_wilson_lower=c.accepted_task_rate_ci.lower,
-                        median_latency_seconds=c.terminal_latency.median_seconds,
-                        rank=None,
-                        insufficiency_reasons=list(c.insufficiency_reasons),
-                    )
-                )
-
-        eligible.sort(
-            key=lambda item: (
-                -item.accepted_task_rate_ci.lower,
-                item.terminal_latency.median_seconds
-                if item.terminal_latency.median_seconds is not None
-                else float("inf"),
-                item.profile,
-            )
-        )
-
-        for rank_idx, item in enumerate(eligible, start=1):
-            rankings.append(
-                CandidateRanking(
-                    profile=item.profile,
-                    is_eligible=True,
-                    accepted_rate_wilson_lower=item.accepted_task_rate_ci.lower,
-                    median_latency_seconds=item.terminal_latency.median_seconds,
-                    rank=rank_idx,
-                    insufficiency_reasons=[],
-                )
-            )
-
-        rankings.sort(key=lambda r: (0 if r.is_eligible else 1, r.rank or 999, r.profile))
-
-        rec_profile = None
-        fallback = None
-        if len(eligible) >= 2:
-            rec_profile = eligible[0].profile
-        elif len(eligible) == 1:
-            candidate_name = eligible[0].profile
-            fallback = (
-                f"insufficient_eligible_candidates: only 1 eligible candidate ('{candidate_name}') "
-                "available; at least 2 required"
-            )
-        else:
-            fallback = "no_eligible_candidates: all candidates lack sufficient samples"
-
-        recommendations.append(
-            TaskClassRecommendation(
-                task_class=task_class,
-                mutation_mode=mode,
-                recommended_profile=rec_profile,
-                rankings=rankings,
-                fallback_reason=fallback,
-            )
-        )
-
-    return recommendations
-
-
 def extract_provider_reliability_report(
     database_url: str, policy: ReliabilityReportPolicy
 ) -> ProviderReliabilityReport:
@@ -569,21 +477,49 @@ def extract_provider_reliability_report(
         engine.dispose()
 
     grouped: dict[tuple[str, str, MutationMode], list[ExtractedTaskEvidence]] = {}
+    observed_groups: set[tuple[str, MutationMode]] = set()
     for task in tasks:
+        observed_groups.add((task.task_class, task.mutation_mode))
         grouped.setdefault((task.task_class, task.profile, task.mutation_mode), []).append(task)
 
-    cells = [_aggregate_cell(key, task_list, policy) for key, task_list in sorted(grouped.items())]
-    recommendations = generate_recommendations(cells)
+    if not observed_groups:
+        observed_groups = {("feature", "mutation"), ("scout", "read_only")}
 
-    has_recommendation = any(r.recommended_profile is not None for r in recommendations)
-    status = "complete" if has_recommendation else "insufficient_data"
+    for t_class, m_typed in sorted(observed_groups):
+        comp_profiles = [
+            p for p in policy.enabled_profiles if is_profile_compatible_with_mode(p, m_typed)
+        ]
+        for p in comp_profiles:
+            if (t_class, p, m_typed) not in grouped:
+                grouped[(t_class, p, m_typed)] = []
+
+    cells = [_aggregate_cell(key, task_list, policy) for key, task_list in sorted(grouped.items())]
+    recommendations = generate_recommendations(cells, as_of=policy.as_of)
 
     return ProviderReliabilityReport(
         schema_version=1,
         generated_at=datetime.now(UTC),
-        status=status,
+        status=determine_report_status(recommendations),
         policy=policy,
         exclusions=exclusions,
         evidence_cells=cells,
         recommendations=recommendations,
     )
+
+
+__all__ = [
+    "ExtractedTaskEvidence",
+    "check_delivery_stage",
+    "check_review_stage",
+    "check_task_stages",
+    "check_verification_stage",
+    "compute_wilson_interval",
+    "determine_report_status",
+    "determine_task_mutation_mode",
+    "extract_provider_reliability_report",
+    "generate_recommendations",
+    "is_profile_compatible_with_mode",
+    "load_and_classify_tasks",
+    "resolve_failure_kind",
+    "verify_timeline_consistency",
+]

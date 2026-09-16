@@ -9,6 +9,7 @@ import pytest
 
 from evaluation.provider_reliability_extractor import (
     compute_wilson_interval,
+    determine_report_status,
     determine_task_mutation_mode,
     generate_recommendations,
     is_profile_compatible_with_mode,
@@ -22,11 +23,13 @@ from evaluation.provider_reliability_models import (
     ReliabilityReportPolicy,
     RepairMetrics,
     StageOutcomeRates,
+    TaskClassRecommendation,
     TaskExclusionSummary,
     WilsonConfidenceInterval,
 )
 from evaluation.provider_reliability_report import (
     assert_sanitized_report,
+    escape_markdown,
     render_json_report,
     render_markdown_report,
 )
@@ -140,15 +143,19 @@ def _make_dummy_cell(
     wilson_lower: float,
     median_latency: float | None,
     is_eligible: bool = True,
+    sample_size: int | None = None,
+    accepted: int | None = None,
 ) -> ProviderReliabilityEvidenceCell:
     """Helper to construct dummy evidence cell for recommendation testing."""
+    s_size = sample_size if sample_size is not None else (10 if is_eligible else 5)
+    a_count = accepted if accepted is not None else (10 if is_eligible else 5)
     return ProviderReliabilityEvidenceCell(
         task_class="feature",
         profile=profile,
         mutation_mode="mutation",
-        sample_size=10 if is_eligible else 5,
-        accepted_count=10 if is_eligible else 5,
-        accepted_task_rate=1.0,
+        sample_size=s_size,
+        accepted_count=a_count,
+        accepted_task_rate=round(a_count / s_size, 4) if s_size else 0.0,
         accepted_task_rate_ci=WilsonConfidenceInterval(
             lower=wilson_lower, center=wilson_lower + 0.1, upper=1.0
         ),
@@ -331,3 +338,163 @@ def test_render_markdown_empty_tables() -> None:
     md_str = render_markdown_report(report)
     assert "_No recommendations generated._" in md_str
     assert "_No evidence cells observed._" in md_str
+
+
+def test_sanitizer_rejects_unsafe_values_and_unknown_domains() -> None:
+    """Ensure assert_sanitized_report rejects unsafe substrings, URLs, and paths."""
+    valid_payload = {
+        "status": "complete",
+        "evidence_cells": [
+            {
+                "task_class": "feature",
+                "profile": "codex-native-executor",
+                "mutation_mode": "mutation",
+                "sample_size": 10,
+                "accepted_count": 10,
+                "accepted_task_rate": 1.0,
+                "failure_count": 0,
+                "failure_rate": 0.0,
+                "manual_overrides_count": 0,
+                "manual_override_rate": 0.0,
+                "is_eligible": True,
+                "insufficiency_reasons": [],
+            }
+        ],
+    }
+    assert_sanitized_report(valid_payload)
+
+    for unsafe in [
+        "https://github.com/org/repo.git",
+        "http://internal.service/api",
+        "/Users/alice/dev/project",
+        "/home/ubuntu/repo",
+        "/tmp/scratch.txt",
+    ]:
+        bad_payload = {
+            "status": "complete",
+            "evidence_cells": [
+                {
+                    "task_class": "feature",
+                    "profile": "codex-native-executor",
+                    "insufficiency_reasons": [unsafe],
+                }
+            ],
+        }
+        with pytest.raises(ValueError, match="Unsafe substring"):
+            assert_sanitized_report(bad_payload)
+
+    for bad_profile in ["codex;rm -rf /", "profile with spaces", "INVALID_UPPERCASE"]:
+        bad_profile_payload = {
+            "status": "complete",
+            "evidence_cells": [{"profile": bad_profile}],
+        }
+        with pytest.raises(ValueError, match="Invalid profile identifier format"):
+            assert_sanitized_report(bad_profile_payload)
+
+
+def test_markdown_escaping() -> None:
+    """Ensure escape_markdown escapes pipes and cleans newlines."""
+    assert escape_markdown("a|b|c") == r"a\|b\|c"
+    assert escape_markdown("line1\nline2") == "line1 line2"
+    assert escape_markdown(None) == "N/A"
+    assert escape_markdown(123) == "123"
+
+
+def test_candidate_ranking_recency_and_counts() -> None:
+    """Verify CandidateRanking includes recency, sample size, and accepted counts."""
+    ref_as_of = datetime(2026, 9, 16, 12, 0, tzinfo=UTC)
+    cell = _make_dummy_cell(
+        "codex-native-executor",
+        sample_size=15,
+        accepted=12,
+        wilson_lower=0.75,
+        median_latency=45.0,
+    )
+    object.__setattr__(cell, "newest_evidence_timestamp", ref_as_of - timedelta(days=2))
+    object.__setattr__(cell, "oldest_evidence_timestamp", ref_as_of - timedelta(days=30))
+
+    recs = generate_recommendations([cell], as_of=ref_as_of)
+    assert len(recs) == 1
+    ranking = recs[0].rankings[0]
+
+    assert ranking.sample_size == 15
+    assert ranking.accepted_count == 12
+    assert ranking.evidence_age_days == 2.0
+    assert ranking.newest_evidence_timestamp == ref_as_of - timedelta(days=2)
+    assert ranking.oldest_evidence_timestamp == ref_as_of - timedelta(days=30)
+
+
+def test_determine_report_status_states() -> None:
+    """Verify report status logic across complete, partial, and insufficient_data."""
+    assert determine_report_status([]) == "insufficient_data"
+
+    rec_completed = TaskClassRecommendation(
+        task_class="feature",
+        mutation_mode="mutation",
+        recommended_profile="codex-native-executor",
+    )
+    rec_insufficient = TaskClassRecommendation(
+        task_class="scout",
+        mutation_mode="read_only",
+        recommended_profile=None,
+        fallback_reason="no_eligible_candidates",
+    )
+
+    assert determine_report_status([rec_completed]) == "complete"
+    assert determine_report_status([rec_insufficient]) == "insufficient_data"
+    assert determine_report_status([rec_completed, rec_insufficient]) == "partial"
+
+
+def test_provider_reliability_stages_direct() -> None:
+    """Direct unit tests for stage checking, artifact extraction, and failure kinds."""
+    from db.enums import ArtifactType, TaskStatus, WorkerRunStatus
+    from db.models import Task, WorkerRun
+    from evaluation.provider_reliability_stages import (
+        check_delivery_stage,
+        check_review_stage,
+        check_verification_stage,
+        resolve_failure_kind,
+        verify_timeline_consistency,
+    )
+
+    consistent, ts = verify_timeline_consistency(TaskStatus.IN_PROGRESS, [], None)
+    assert not consistent and ts is None
+
+    consistent, ts = verify_timeline_consistency(TaskStatus.FAILED, [], None)
+    assert not consistent and ts is None
+
+    task = Task(status=TaskStatus.COMPLETED, task_spec={"verification_commands": ["test"]})
+    run_passed = WorkerRun(status=WorkerRunStatus.SUCCESS, verifier_outcome={"status": "passed"})
+    run_failed = WorkerRun(status=WorkerRunStatus.FAILURE, verifier_outcome={"status": "failed"})
+    assert check_verification_stage(task, [run_passed]) == (True, True)
+    assert check_verification_stage(task, [run_failed]) == (True, False)
+
+    run_with_review = WorkerRun(
+        status=WorkerRunStatus.SUCCESS,
+        artifact_index=[
+            {
+                "artifact_type": ArtifactType.INDEPENDENT_REVIEW_RESULT.value,
+                "artifact_metadata": {"review": {"approved": True}},
+            }
+        ],
+    )
+    assert check_review_stage(task, [run_with_review], v_passed=True) == (True, True)
+
+    task_repair = Task(
+        status=TaskStatus.COMPLETED,
+        task_spec={"allowed_actions": ["modify_workspace_files"]},
+        constraints={"independent_review_repair_passes_used": 1},
+    )
+    assert check_review_stage(task_repair, [], v_passed=True) == (True, True)
+
+    run_delivery = WorkerRun(
+        status=WorkerRunStatus.SUCCESS,
+        delivery_metadata={"branch": "refs/heads/feature"},
+    )
+    task_branch = Task(status=TaskStatus.COMPLETED, task_spec={"delivery_mode": "branch"})
+    assert check_delivery_stage(task_branch, [run_delivery]) == (True, True)
+
+    task_err = Task(status=TaskStatus.FAILED, last_error="boom")
+    assert resolve_failure_kind(task_err, accepted=False, runs=[]) == "task_error"
+    task_unknown = Task(status=TaskStatus.FAILED, last_error=None)
+    assert resolve_failure_kind(task_unknown, accepted=False, runs=[]) == "unknown"
