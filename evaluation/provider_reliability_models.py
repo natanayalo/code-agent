@@ -16,6 +16,10 @@ DEFAULT_ENABLED_PROFILES: tuple[str, ...] = (
     "antigravity-native-executor",
     "antigravity-native-executor-read-only",
 )
+DEFAULT_EXPECTED_GROUPS: tuple[tuple[str, MutationMode], ...] = (
+    ("feature", "mutation"),
+    ("scout", "read_only"),
+)
 
 
 class StrictModel(BaseModel):
@@ -138,6 +142,16 @@ class TaskExclusionSummary(StrictModel):
     by_reason: dict[str, int] = Field(default_factory=dict)
 
 
+class ProfileCoverageSummary(StrictModel):
+    """Catalog coverage status for one enabled profile."""
+
+    profile: str = Field(min_length=1)
+    mutation_mode: MutationMode
+    has_evidence: bool
+    sample_size: int = Field(ge=0)
+    is_eligible: bool
+
+
 class ReliabilityReportPolicy(StrictModel):
     """Sampling and statistical policy used to generate the report."""
 
@@ -149,6 +163,9 @@ class ReliabilityReportPolicy(StrictModel):
     window_start_at: datetime
     window_end_at: datetime
     enabled_profiles: list[str] = Field(default_factory=lambda: list(DEFAULT_ENABLED_PROFILES))
+    expected_groups: list[tuple[str, MutationMode]] = Field(
+        default_factory=lambda: list(DEFAULT_EXPECTED_GROUPS)
+    )
 
 
 class ProviderReliabilityReport(StrictModel):
@@ -158,6 +175,7 @@ class ProviderReliabilityReport(StrictModel):
     generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     status: ReportStatus
     policy: ReliabilityReportPolicy
+    profile_coverage: list[ProfileCoverageSummary] = Field(default_factory=list)
     exclusions: TaskExclusionSummary
     evidence_cells: list[ProviderReliabilityEvidenceCell]
     recommendations: list[TaskClassRecommendation]

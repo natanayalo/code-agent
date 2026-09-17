@@ -21,6 +21,7 @@ ALLOWED_KEYS_BY_LEVEL: dict[str, frozenset[str]] = {
             "generated_at",
             "status",
             "policy",
+            "profile_coverage",
             "exclusions",
             "evidence_cells",
             "recommendations",
@@ -36,6 +37,16 @@ ALLOWED_KEYS_BY_LEVEL: dict[str, frozenset[str]] = {
             "window_start_at",
             "window_end_at",
             "enabled_profiles",
+            "expected_groups",
+        }
+    ),
+    "profile_coverage": frozenset(
+        {
+            "profile",
+            "mutation_mode",
+            "has_evidence",
+            "sample_size",
+            "is_eligible",
         }
     ),
     "exclusions": frozenset(
@@ -134,6 +145,55 @@ ALLOWED_KEYS_BY_LEVEL: dict[str, frozenset[str]] = {
 }
 
 
+VALID_TASK_CLASSES: frozenset[str] = frozenset(
+    {"docs", "bugfix", "feature", "refactor", "investigation", "review_fix", "maintenance", "scout"}
+)
+VALID_MUTATION_MODES: frozenset[str] = frozenset({"mutation", "read_only"})
+VALID_FAILURE_KINDS: frozenset[str] = frozenset(
+    {
+        "compile_error",
+        "test_failure",
+        "syntax_error",
+        "lint",
+        "type_check",
+        "test",
+        "tool_runtime",
+        "sandbox_infra",
+        "timeout",
+        "budget_exceeded",
+        "permission_denied",
+        "context_window",
+        "provider_error",
+        "provider_auth",
+        "incomplete_delivery",
+        "test_regression",
+        "scope_mismatch",
+        "infra_verifier_unavailable",
+        "risky_command",
+        "worker_failure",
+        "interaction",
+        "read_only_violation",
+        "task_error",
+        "unknown",
+    }
+)
+VALID_EXCLUSION_REASONS: frozenset[str] = frozenset(
+    {
+        "cancelled",
+        "incomplete",
+        "non_temporal_runtime",
+        "non_native_agent_mode",
+        "outside_window",
+        "malformed_missing_task_spec",
+        "malformed_missing_profile",
+        "malformed_inconsistent_timeline",
+        "mixed_profile_execution",
+        "incompatible_profile_mode",
+        "malformed_missing_mode",
+    }
+)
+
+
 def _validate_domain_value(key: str, val: Any) -> None:
     """Validate string values against domain boundaries and reject unsafe substrings."""
     if isinstance(val, str):
@@ -142,8 +202,12 @@ def _validate_domain_value(key: str, val: Any) -> None:
                 raise ValueError(f"Unsafe substring '{sub}' detected in field {key}: {val}")
         if key == "profile" and not SAFE_IDENTIFIER_PATTERN.match(val):
             raise ValueError(f"Invalid profile identifier format: {val}")
-        if key in ("task_class", "mutation_mode") and not SAFE_CLASS_PATTERN.match(val):
-            raise ValueError(f"Invalid {key} identifier format: {val}")
+        if key == "task_class":
+            if not SAFE_CLASS_PATTERN.match(val) or val not in VALID_TASK_CLASSES:
+                raise ValueError(f"Invalid task_class domain value: {val}")
+        if key == "mutation_mode":
+            if not SAFE_CLASS_PATTERN.match(val) or val not in VALID_MUTATION_MODES:
+                raise ValueError(f"Invalid mutation_mode domain value: {val}")
 
 
 def _validate_dict_keys(data: dict[str, Any], allowed: frozenset[str], path: str) -> None:
@@ -182,7 +246,7 @@ def _validate_cell_structure(cell: dict[str, Any], path: str) -> None:
             cell["budget_field_coverage"], ALLOWED_KEYS_BY_LEVEL["budget"], f"{path}.budget"
         )
     for fk in cell.get("typed_failures", {}):
-        if not SAFE_CLASS_PATTERN.match(fk):
+        if not SAFE_CLASS_PATTERN.match(fk) or fk not in VALID_FAILURE_KINDS:
             raise ValueError(f"Invalid typed failure key in {path}: {fk}")
 
 
@@ -202,8 +266,13 @@ def assert_sanitized_report(payload: dict[str, Any] | str) -> None:
     if "exclusions" in data:
         _validate_dict_keys(data["exclusions"], ALLOWED_KEYS_BY_LEVEL["exclusions"], "exclusions")
         for rk in data["exclusions"].get("by_reason", {}):
-            if not SAFE_CLASS_PATTERN.match(rk):
+            if not SAFE_CLASS_PATTERN.match(rk) or rk not in VALID_EXCLUSION_REASONS:
                 raise ValueError(f"Invalid exclusion reason key: {rk}")
+
+    for idx, cov in enumerate(data.get("profile_coverage", [])):
+        _validate_dict_keys(
+            cov, ALLOWED_KEYS_BY_LEVEL["profile_coverage"], f"profile_coverage[{idx}]"
+        )
 
     for idx, cell in enumerate(data.get("evidence_cells", [])):
         _validate_cell_structure(cell, f"evidence_cells[{idx}]")
@@ -389,10 +458,31 @@ def _render_evidence_cells(report: ProviderReliabilityReport) -> list[str]:
     return lines
 
 
+def _render_profile_coverage(report: ProviderReliabilityReport) -> list[str]:
+    """Render summary table of enabled profile catalog coverage."""
+    if not report.profile_coverage:
+        return []
+    lines = [
+        "## Enabled Profile Catalog Coverage",
+        "",
+        "| Profile | Mode | Evidence Present | Total Samples | Eligible |",
+        "|---|---|---|---|---|",
+    ]
+    for cov in report.profile_coverage:
+        lines.append(
+            f"| `{escape_markdown(cov.profile)}` | `{escape_markdown(cov.mutation_mode)}` | "
+            f"{'yes' if cov.has_evidence else 'no'} | {cov.sample_size} | "
+            f"{'yes' if cov.is_eligible else 'no'} |"
+        )
+    lines.append("")
+    return lines
+
+
 def render_markdown_report(report: ProviderReliabilityReport) -> str:
     """Render deterministic public markdown report."""
     lines: list[str] = []
     lines.extend(_render_header(report))
+    lines.extend(_render_profile_coverage(report))
     lines.extend(_render_exclusions(report))
     lines.extend(_render_recommendations(report))
     lines.extend(_render_evidence_cells(report))

@@ -469,23 +469,44 @@ def test_provider_reliability_stages_direct() -> None:
     assert check_verification_stage(task, [run_passed]) == (True, True)
     assert check_verification_stage(task, [run_failed]) == (True, False)
 
-    run_with_review = WorkerRun(
+    run_with_review_pass = WorkerRun(
         status=WorkerRunStatus.SUCCESS,
         artifact_index=[
             {
                 "artifact_type": ArtifactType.INDEPENDENT_REVIEW_RESULT.value,
-                "artifact_metadata": {"review": {"approved": True}},
+                "artifact_metadata": {
+                    ArtifactType.INDEPENDENT_REVIEW_RESULT.value: {
+                        "outcome": "no_findings",
+                        "findings": [],
+                    }
+                },
             }
         ],
     )
-    assert check_review_stage(task, [run_with_review], v_passed=True) == (True, True)
+    assert check_review_stage(task, [run_with_review_pass], v_passed=True) == (True, True)
+
+    run_with_review_fail = WorkerRun(
+        status=WorkerRunStatus.SUCCESS,
+        artifact_index=[
+            {
+                "artifact_type": ArtifactType.INDEPENDENT_REVIEW_RESULT.value,
+                "artifact_metadata": {
+                    ArtifactType.INDEPENDENT_REVIEW_RESULT.value: {
+                        "outcome": "findings",
+                        "findings": [{"message": "bug"}],
+                    }
+                },
+            }
+        ],
+    )
+    assert check_review_stage(task, [run_with_review_fail], v_passed=True) == (True, False)
 
     task_repair = Task(
         status=TaskStatus.COMPLETED,
         task_spec={"allowed_actions": ["modify_workspace_files"]},
         constraints={"independent_review_repair_passes_used": 1},
     )
-    assert check_review_stage(task_repair, [], v_passed=True) == (True, True)
+    assert check_review_stage(task_repair, [], v_passed=True) == (False, False)
 
     run_delivery = WorkerRun(
         status=WorkerRunStatus.SUCCESS,
@@ -498,3 +519,93 @@ def test_provider_reliability_stages_direct() -> None:
     assert resolve_failure_kind(task_err, accepted=False, runs=[]) == "task_error"
     task_unknown = Task(status=TaskStatus.FAILED, last_error=None)
     assert resolve_failure_kind(task_unknown, accepted=False, runs=[]) == "unknown"
+
+
+def test_sanitizer_rejects_invalid_domains() -> None:
+    """Ensure assert_sanitized_report strictly validates against finite allowed domains."""
+    # Invalid task_class
+    with pytest.raises(ValueError, match="Invalid task_class domain value"):
+        assert_sanitized_report({"evidence_cells": [{"task_class": "arbitrary_unknown_class"}]})
+
+    # Invalid mutation_mode
+    with pytest.raises(ValueError, match="Invalid mutation_mode domain value"):
+        assert_sanitized_report({"evidence_cells": [{"mutation_mode": "arbitrary_unknown_mode"}]})
+
+    # Invalid typed_failures key
+    with pytest.raises(ValueError, match="Invalid typed failure key"):
+        assert_sanitized_report(
+            {"evidence_cells": [{"typed_failures": {"unauthorized_failure_kind": 1}}]}
+        )
+
+    # Invalid exclusions.by_reason key
+    with pytest.raises(ValueError, match="Invalid exclusion reason key"):
+        assert_sanitized_report({"exclusions": {"by_reason": {"unauthorized_exclusion_reason": 1}}})
+
+
+def test_provider_reliability_timeline_stage_branches() -> None:
+    """Test stage outcome edge branches: timeline failures and custom metadata keys."""
+    from db.enums import ArtifactType, TaskStatus, TimelineEventType, WorkerRunStatus
+    from db.models import Task, TaskTimelineEvent, WorkerRun
+    from evaluation.provider_reliability_stages import (
+        check_delivery_stage,
+        check_review_stage,
+        check_verification_stage,
+    )
+
+    # Verification stage with failed timeline event
+    task_v_fail = Task(
+        status=TaskStatus.FAILED,
+        task_spec={"verification_commands": ["test"]},
+        timeline_events=[
+            TaskTimelineEvent(
+                attempt_number=0,
+                sequence_number=0,
+                event_type=TimelineEventType.VERIFICATION_COMPLETED,
+                payload={"status": "failed"},
+            )
+        ],
+    )
+    assert check_verification_stage(task_v_fail, []) == (True, False)
+
+    # Verification stage with empty run verifier_outcome fallback
+    task_v_empty = Task(status=TaskStatus.COMPLETED, task_spec={"verification_commands": ["test"]})
+    run_empty = WorkerRun(status=WorkerRunStatus.SUCCESS, verifier_outcome={})
+    assert check_verification_stage(task_v_empty, [run_empty]) == (True, False)
+
+    # Review stage with custom dict metadata key and approved: True
+    run_approved = WorkerRun(
+        status=WorkerRunStatus.SUCCESS,
+        artifact_index=[
+            {
+                "artifact_type": ArtifactType.INDEPENDENT_REVIEW_RESULT.value,
+                "artifact_metadata": {"custom_result": {"approved": True}},
+            }
+        ],
+    )
+    assert check_review_stage(task_v_empty, [run_approved], v_passed=True) == (True, True)
+
+    # Review stage with custom dict metadata key and rejected status
+    run_rejected = WorkerRun(
+        status=WorkerRunStatus.SUCCESS,
+        artifact_index=[
+            {
+                "artifact_type": ArtifactType.INDEPENDENT_REVIEW_RESULT.value,
+                "artifact_metadata": {"custom_result": {"status": "rejected"}},
+            }
+        ],
+    )
+    assert check_review_stage(task_v_empty, [run_rejected], v_passed=True) == (True, False)
+
+    # Delivery stage with DELIVERY_FAILED timeline event
+    task_d_fail = Task(
+        status=TaskStatus.FAILED,
+        task_spec={"delivery_mode": "branch"},
+        timeline_events=[
+            TaskTimelineEvent(
+                attempt_number=0,
+                sequence_number=0,
+                event_type=TimelineEventType.DELIVERY_FAILED,
+            )
+        ],
+    )
+    assert check_delivery_stage(task_d_fail, []) == (True, False)

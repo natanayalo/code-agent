@@ -6,7 +6,7 @@ import logging
 import math
 import statistics
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, load_only, selectinload
@@ -23,6 +23,7 @@ from evaluation.provider_reliability_models import (
     InterventionMetrics,
     LatencyMetrics,
     MutationMode,
+    ProfileCoverageSummary,
     ProviderReliabilityEvidenceCell,
     ProviderReliabilityReport,
     ReliabilityReportPolicy,
@@ -237,23 +238,23 @@ def _extract_single_task(
 
 
 def _query_boundary_counts(
-    session: Session, cutoff_start: datetime, cutoff_end: datetime
+    session: Session, window_start_at: datetime, window_end_at: datetime
 ) -> tuple[int, int]:
     """Count tasks strictly outside the window boundaries."""
     older_count = (
-        session.scalar(select(func.count(Task.id)).where(Task.created_at < cutoff_start)) or 0
+        session.scalar(select(func.count(Task.id)).where(Task.updated_at < window_start_at)) or 0
     )
     newer_count = (
-        session.scalar(select(func.count(Task.id)).where(Task.created_at > cutoff_end)) or 0
+        session.scalar(select(func.count(Task.id)).where(Task.created_at > window_end_at)) or 0
     )
     return older_count, newer_count
 
 
-def _build_tasks_query(cutoff_start: datetime, cutoff_end: datetime):
+def _build_tasks_query(window_start_at: datetime, window_end_at: datetime):
     """Build bounded SQL query with narrow column loading."""
     return (
         select(Task)
-        .where(Task.created_at >= cutoff_start, Task.created_at <= cutoff_end)
+        .where(Task.created_at <= window_end_at, Task.updated_at >= window_start_at)
         .options(
             load_only(
                 Task.id,
@@ -315,11 +316,14 @@ def load_and_classify_tasks(
     session: Session, policy: ReliabilityReportPolicy
 ) -> tuple[list[ExtractedTaskEvidence], TaskExclusionSummary]:
     """Query tasks within bounded window and classify into evidence or exclusions."""
-    cutoff_start = policy.window_start_at - timedelta(days=30)
-    cutoff_end = policy.window_end_at + timedelta(days=1)
-
-    older_count, newer_count = _query_boundary_counts(session, cutoff_start, cutoff_end)
-    tasks = session.execute(_build_tasks_query(cutoff_start, cutoff_end)).scalars().all()
+    older_count, newer_count = _query_boundary_counts(
+        session, policy.window_start_at, policy.window_end_at
+    )
+    tasks = (
+        session.execute(_build_tasks_query(policy.window_start_at, policy.window_end_at))
+        .scalars()
+        .all()
+    )
 
     included: list[ExtractedTaskEvidence] = []
     exclusions: dict[str, int] = {}
@@ -482,10 +486,8 @@ def extract_provider_reliability_report(
         observed_groups.add((task.task_class, task.mutation_mode))
         grouped.setdefault((task.task_class, task.profile, task.mutation_mode), []).append(task)
 
-    if not observed_groups:
-        observed_groups = {("feature", "mutation"), ("scout", "read_only")}
-
-    for t_class, m_typed in sorted(observed_groups):
+    target_groups = set(policy.expected_groups) | observed_groups
+    for t_class, m_typed in sorted(target_groups):
         comp_profiles = [
             p for p in policy.enabled_profiles if is_profile_compatible_with_mode(p, m_typed)
         ]
@@ -496,11 +498,28 @@ def extract_provider_reliability_report(
     cells = [_aggregate_cell(key, task_list, policy) for key, task_list in sorted(grouped.items())]
     recommendations = generate_recommendations(cells, as_of=policy.as_of)
 
+    profile_coverage: list[ProfileCoverageSummary] = []
+    for p in policy.enabled_profiles:
+        p_mode: MutationMode = "read_only" if p.endswith("-read-only") else "mutation"
+        p_cells = [c for c in cells if c.profile == p]
+        tot_samples = sum(c.sample_size for c in p_cells)
+        is_elig = any(c.is_eligible for c in p_cells)
+        profile_coverage.append(
+            ProfileCoverageSummary(
+                profile=p,
+                mutation_mode=p_mode,
+                has_evidence=tot_samples > 0,
+                sample_size=tot_samples,
+                is_eligible=is_elig,
+            )
+        )
+
     return ProviderReliabilityReport(
         schema_version=1,
         generated_at=datetime.now(UTC),
         status=determine_report_status(recommendations),
         policy=policy,
+        profile_coverage=profile_coverage,
         exclusions=exclusions,
         evidence_cells=cells,
         recommendations=recommendations,

@@ -112,51 +112,54 @@ def check_verification_stage(task: Task, runs: list[WorkerRun]) -> tuple[bool, b
 
 
 def _check_review_artifacts(runs: list[WorkerRun]) -> tuple[bool, bool]:
+    """Parse persisted ReviewResult artifacts to determine applicability and pass/fail."""
     has_review_artifact = False
-    review_approved = False
+    review_passed = False
+
     for r in runs:
         for entry in r.artifact_index or []:
-            if entry.get("artifact_type") in (
+            atype = entry.get("artifact_type")
+            if atype in (
                 ArtifactType.INDEPENDENT_REVIEW_RESULT.value,
                 ArtifactType.REVIEW_RESULT.value,
             ):
-                has_review_artifact = True
                 meta = entry.get("artifact_metadata", {})
-                for content in meta.values():
-                    if isinstance(content, dict):
-                        if content.get("approved") is True or content.get("status") in (
-                            "approved",
-                            "passed",
-                        ):
-                            review_approved = True
-    return has_review_artifact, review_approved
+                content = meta.get(atype) if isinstance(meta.get(atype), dict) else None
+                if content is None:
+                    for v in meta.values():
+                        if isinstance(v, dict):
+                            content = v
+                            break
+                if content is None:
+                    content = {}
+
+                has_review_artifact = True
+                outcome = content.get("outcome")
+                findings = content.get("findings")
+                if outcome == "no_findings":
+                    review_passed = True
+                elif outcome == "findings" or bool(findings):
+                    review_passed = False
+                elif content.get("approved") is True or content.get("status") in (
+                    "approved",
+                    "passed",
+                ):
+                    review_passed = True
+                elif content.get("approved") is False or content.get("status") in (
+                    "rejected",
+                    "failed",
+                ):
+                    review_passed = False
+
+    return has_review_artifact, review_passed
 
 
 def check_review_stage(task: Task, runs: list[WorkerRun], v_passed: bool) -> tuple[bool, bool]:
     """Inspect review applicability and pass/fail outcome independently."""
-    c = task.constraints or {}
-    mode = determine_task_mutation_mode(task.task_spec, task.constraints, task.chosen_profile)
-
-    has_review_artifact, review_approved = _check_review_artifacts(runs)
-    skip_review = bool(c.get("skip_independent_review"))
-    rev_configured = bool(c.get("requires_review") or c.get("independent_review"))
-    default_review_app = mode == "mutation" and v_passed and not skip_review
-    rev_applicable = has_review_artifact or rev_configured or default_review_app
-
-    if not rev_applicable:
+    has_review_artifact, review_passed = _check_review_artifacts(runs)
+    if not has_review_artifact:
         return False, False
-
-    if review_approved:
-        return True, True
-    if (
-        c.get("independent_review_repair_passes_used", 0) > 0
-        and task.status == TaskStatus.COMPLETED
-    ):
-        return True, True
-    if not has_review_artifact and default_review_app and task.status == TaskStatus.COMPLETED:
-        return True, True
-
-    return True, False
+    return True, review_passed
 
 
 def check_delivery_stage(task: Task, runs: list[WorkerRun]) -> tuple[bool, bool]:
