@@ -13,6 +13,7 @@ from evaluation.provider_reliability_extractor import (
     build_evidence_cells,
 )
 from evaluation.provider_reliability_models import (
+    BootstrapCandidateResult,
     MutationMode,
     ProviderReliabilityRobustnessPolicy,
     ReliabilityReportPolicy,
@@ -384,6 +385,228 @@ def test_schema_strictness_and_lookback_validation() -> None:
             window_end_at=AS_OF,
             unknown_parameter="unexpected",  # type: ignore[call-arg]
         )
+
+
+def test_policy_invariant_enforcement() -> None:
+    """Validate ProviderReliabilityRobustnessPolicy invariants on windows and dates."""
+    # window_end_at != as_of
+    with pytest.raises(ValidationError, match="window_end_at .* must match as_of"):
+        ProviderReliabilityRobustnessPolicy(
+            as_of=AS_OF,
+            window_start_at=AS_OF - timedelta(days=90),
+            window_end_at=AS_OF - timedelta(days=1),
+        )
+
+    # window_start_at != as_of - 90d
+    with pytest.raises(ValidationError, match=r"window_start_at .* must match as_of - 90d"):
+        ProviderReliabilityRobustnessPolicy(
+            as_of=AS_OF,
+            window_start_at=AS_OF - timedelta(days=30),
+            window_end_at=AS_OF,
+        )
+
+    # windows_days != (30, 60, 90)
+    with pytest.raises(ValidationError, match=r"windows_days must be exactly \(30, 60, 90\)"):
+        ProviderReliabilityRobustnessPolicy(
+            as_of=AS_OF,
+            window_start_at=AS_OF - timedelta(days=90),
+            window_end_at=AS_OF,
+            windows_days=(30, 60),
+        )
+
+    # temporal_split_days <= 0 or >= 90
+    with pytest.raises(
+        ValidationError, match=r"greater than or equal to 1|temporal_split_days .* must be between"
+    ):
+        ProviderReliabilityRobustnessPolicy(
+            as_of=AS_OF,
+            window_start_at=AS_OF - timedelta(days=90),
+            window_end_at=AS_OF,
+            temporal_split_days=0,
+        )
+    with pytest.raises(ValidationError, match="temporal_split_days .* must be between"):
+        ProviderReliabilityRobustnessPolicy(
+            as_of=AS_OF,
+            window_start_at=AS_OF - timedelta(days=90),
+            window_end_at=AS_OF,
+            temporal_split_days=90,
+        )
+    with pytest.raises(ValidationError, match="temporal_split_days .* must be between"):
+        ProviderReliabilityRobustnessPolicy(
+            as_of=AS_OF,
+            window_start_at=AS_OF - timedelta(days=90),
+            window_end_at=AS_OF,
+            temporal_split_days=120,
+        )
+
+
+def test_bootstrap_candidate_rank_validation() -> None:
+    """Validate BootstrapCandidateResult model rejects invalid rank keys and counts/probs."""
+    valid_cand = BootstrapCandidateResult(
+        profile="codex-native-executor",
+        sample_size=10,
+        win_count=8,
+        win_probability=0.8,
+        rank_counts={"1": 8, "2": 2},
+        rank_probabilities={"1": 0.8, "2": 0.2},
+    )
+    assert valid_cand.win_count == 8
+
+    with pytest.raises(ValidationError, match="Invalid rank key in rank_counts"):
+        BootstrapCandidateResult(
+            profile="codex-native-executor",
+            sample_size=10,
+            win_count=8,
+            win_probability=0.8,
+            rank_counts={"rank_1": 8},
+        )
+
+    with pytest.raises(ValidationError, match="Invalid rank key in rank_counts"):
+        BootstrapCandidateResult(
+            profile="codex-native-executor",
+            sample_size=10,
+            win_count=8,
+            win_probability=0.8,
+            rank_counts={"0": 8},
+        )
+
+    with pytest.raises(ValidationError, match="Invalid rank count"):
+        BootstrapCandidateResult(
+            profile="codex-native-executor",
+            sample_size=10,
+            win_count=8,
+            win_probability=0.8,
+            rank_counts={"1": -1},
+        )
+
+    with pytest.raises(ValidationError, match="Invalid rank key in rank_probabilities"):
+        BootstrapCandidateResult(
+            profile="codex-native-executor",
+            sample_size=10,
+            win_count=8,
+            win_probability=0.8,
+            rank_probabilities={"top": 0.8},
+        )
+
+    with pytest.raises(ValidationError, match="Invalid rank probability"):
+        BootstrapCandidateResult(
+            profile="codex-native-executor",
+            sample_size=10,
+            win_count=8,
+            win_probability=0.8,
+            rank_probabilities={"1": 1.5},
+        )
+
+
+def _build_sanitizer_base_payload() -> dict:
+    """Construct minimal valid report payload for sanitizer testing."""
+    return {
+        "schema_version": 1,
+        "generated_at": AS_OF.isoformat(),
+        "status": "complete",
+        "policy": {
+            "schema_version": 1,
+            "lookback_days": 90,
+            "min_samples": 10,
+            "confidence_level": 0.95,
+            "as_of": AS_OF.isoformat(),
+            "window_start_at": (AS_OF - timedelta(days=90)).isoformat(),
+            "window_end_at": AS_OF.isoformat(),
+            "windows_days": [30, 60, 90],
+            "temporal_split_days": 45,
+            "bootstrap_iterations": 10000,
+            "bootstrap_seed": 29,
+            "enabled_profiles": ["codex-native-executor"],
+            "expected_groups": [["feature", "mutation"]],
+        },
+        "exclusions": {
+            "total_tasks_scanned": 10,
+            "included_tasks_count": 10,
+            "excluded_tasks_count": 0,
+            "by_reason": {},
+        },
+        "windows": [],
+        "temporal_cohorts": [],
+        "bootstrap_results": [
+            {
+                "task_class": "feature",
+                "mutation_mode": "mutation",
+                "status": "complete",
+                "eligible_profiles": ["codex-native-executor"],
+                "candidates": [
+                    {
+                        "profile": "codex-native-executor",
+                        "sample_size": 10,
+                        "win_count": 10,
+                        "win_probability": 1.0,
+                        "rank_counts": {"1": 10},
+                        "rank_probabilities": {"1": 1.0},
+                    }
+                ],
+                "fallback_reason": None,
+            }
+        ],
+    }
+
+
+def test_sanitization_policy_and_group_adversarial_validation() -> None:
+    """Test sanitizer rejects adversarial injection in policy and expected groups."""
+    base = _build_sanitizer_base_payload()
+
+    p1 = json.loads(json.dumps(base))
+    p1["policy"]["enabled_profiles"] = ["invalid profile; rm -rf"]
+    with pytest.raises(ValueError, match="Invalid enabled_profiles identifier format"):
+        assert_sanitized_robustness_report(p1)
+
+    p2 = json.loads(json.dumps(base))
+    p2["policy"]["expected_groups"] = [["malicious_task_class", "mutation"]]
+    with pytest.raises(ValueError, match="Invalid expected_groups entry"):
+        assert_sanitized_robustness_report(p2)
+
+    p3 = json.loads(json.dumps(base))
+    p3["policy"]["expected_groups"] = [["feature", "arbitrary_mode"]]
+    with pytest.raises(ValueError, match="Invalid expected_groups entry"):
+        assert_sanitized_robustness_report(p3)
+
+    p4 = json.loads(json.dumps(base))
+    p4["policy"]["expected_groups"] = [["feature"]]
+    with pytest.raises(ValueError, match="Invalid expected_groups entry"):
+        assert_sanitized_robustness_report(p4)
+
+
+def test_sanitization_bootstrap_candidates_adversarial_validation() -> None:
+    """Test sanitizer rejects adversarial injection in bootstrap candidates and ranks."""
+    base = _build_sanitizer_base_payload()
+
+    p1 = json.loads(json.dumps(base))
+    p1["bootstrap_results"][0]["eligible_profiles"] = ["../../etc/passwd"]
+    with pytest.raises(ValueError, match="Unsafe substring|Invalid eligible_profiles identifier"):
+        assert_sanitized_robustness_report(p1)
+
+    p2 = json.loads(json.dumps(base))
+    p2["bootstrap_results"][0]["candidates"][0]["rank_counts"] = {"rank_one": 10}
+    with pytest.raises(ValueError, match="Invalid rank key in rank_counts"):
+        assert_sanitized_robustness_report(p2)
+
+    p3 = json.loads(json.dumps(base))
+    p3["bootstrap_results"][0]["candidates"][0]["rank_counts"] = {"1": -5}
+    with pytest.raises(ValueError, match="Invalid rank count"):
+        assert_sanitized_robustness_report(p3)
+
+    p4 = json.loads(json.dumps(base))
+    p4["bootstrap_results"][0]["candidates"][0]["rank_probabilities"] = {"0": 1.0}
+    with pytest.raises(ValueError, match="Invalid rank key in rank_probabilities"):
+        assert_sanitized_robustness_report(p4)
+
+    p5 = json.loads(json.dumps(base))
+    p5["bootstrap_results"][0]["candidates"][0]["rank_probabilities"] = {"1": 1.5}
+    with pytest.raises(ValueError, match="Invalid rank probability"):
+        assert_sanitized_robustness_report(p5)
+
+    p6 = json.loads(json.dumps(base))
+    p6["bootstrap_results"][0]["candidates"][0]["rank_counts"] = "not_a_dict"
+    with pytest.raises(ValueError, match="rank_counts must be a dict"):
+        assert_sanitized_robustness_report(p6)
 
 
 def test_sanitization_public_allowlist_validator() -> None:

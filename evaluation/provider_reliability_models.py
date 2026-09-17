@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import re
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+SAFE_RANK_KEY_PATTERN = re.compile(r"^[1-9][0-9]*$")
 
 ReportStatus = Literal["complete", "partial", "insufficient_data"]
 MutationMode = Literal["read_only", "mutation"]
@@ -200,6 +203,27 @@ class ProviderReliabilityRobustnessPolicy(StrictModel):
         default_factory=lambda: list(DEFAULT_EXPECTED_GROUPS)
     )
 
+    @model_validator(mode="after")
+    def _validate_policy_invariants(self) -> ProviderReliabilityRobustnessPolicy:
+        if self.window_end_at != self.as_of:
+            raise ValueError(
+                f"window_end_at ({self.window_end_at}) must match as_of ({self.as_of})"
+            )
+        expected_start = self.as_of - timedelta(days=self.lookback_days)
+        if self.window_start_at != expected_start:
+            raise ValueError(
+                f"window_start_at ({self.window_start_at}) must match "
+                f"as_of - {self.lookback_days}d ({expected_start})"
+            )
+        if tuple(self.windows_days) != (30, 60, 90):
+            raise ValueError(f"windows_days must be exactly (30, 60, 90), got {self.windows_days}")
+        if not (0 < self.temporal_split_days < self.lookback_days):
+            raise ValueError(
+                f"temporal_split_days ({self.temporal_split_days}) must be "
+                f"between 1 and {self.lookback_days - 1}"
+            )
+        return self
+
 
 class WindowRecommendationResult(StrictModel):
     """Recommendation decision outcomes across a specific lookback window."""
@@ -230,6 +254,22 @@ class BootstrapCandidateResult(StrictModel):
     win_probability: float = Field(ge=0.0, le=1.0)
     rank_counts: dict[str, int] = Field(default_factory=dict)
     rank_probabilities: dict[str, float] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_rank_dictionaries(self) -> BootstrapCandidateResult:
+        for k, v in self.rank_counts.items():
+            if not SAFE_RANK_KEY_PATTERN.match(k):
+                raise ValueError(f"Invalid rank key in rank_counts: {k}")
+            if v < 0:
+                raise ValueError(f"Invalid rank count in rank_counts for rank {k}: {v}")
+        for k, v in self.rank_probabilities.items():
+            if not SAFE_RANK_KEY_PATTERN.match(k):
+                raise ValueError(f"Invalid rank key in rank_probabilities: {k}")
+            if not (0.0 <= v <= 1.0):
+                raise ValueError(
+                    f"Invalid rank probability in rank_probabilities for rank {k}: {v}"
+                )
+        return self
 
 
 class BootstrapGroupResult(StrictModel):

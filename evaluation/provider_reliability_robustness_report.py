@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from evaluation.provider_reliability_models import (
+    SAFE_RANK_KEY_PATTERN,
     ProviderReliabilityRobustnessReport,
 )
 from evaluation.provider_reliability_report import (
@@ -127,7 +128,11 @@ def _validate_domain_value(key: str, val: Any) -> None:
         for sub in UNSAFE_VALUE_SUBSTRINGS:
             if sub in val:
                 raise ValueError(f"Unsafe substring '{sub}' detected in field {key}: {val}")
-        if key == "profile" and not SAFE_IDENTIFIER_PATTERN.match(val):
+        if key in (
+            "profile",
+            "enabled_profiles",
+            "eligible_profiles",
+        ) and not SAFE_IDENTIFIER_PATTERN.match(val):
             raise ValueError(f"Invalid profile identifier format: {val}")
         if key == "task_class":
             if not SAFE_CLASS_PATTERN.match(val) or val not in VALID_TASK_CLASSES:
@@ -145,6 +150,52 @@ def _validate_dict_keys(data: dict[str, Any], allowed: frozenset[str], path: str
         raise ValueError(
             f"Forbidden key detected: unauthorized keys in public report at '{path}': {keys_list}"
         )
+
+
+def _validate_policy_structure(policy_data: dict[str, Any]) -> None:
+    """Validate policy dictionary keys, profile identifiers, and expected group tuples."""
+    _validate_dict_keys(policy_data, ROBUSTNESS_ALLOWED_KEYS_BY_LEVEL["policy"], "policy")
+    for p in policy_data.get("enabled_profiles", []):
+        if not isinstance(p, str) or not SAFE_IDENTIFIER_PATTERN.match(p):
+            raise ValueError(f"Invalid enabled_profiles identifier format: {p}")
+    for grp in policy_data.get("expected_groups", []):
+        if (
+            not isinstance(grp, list | tuple)
+            or len(grp) != 2
+            or not isinstance(grp[0], str)
+            or not isinstance(grp[1], str)
+            or grp[0] not in VALID_TASK_CLASSES
+            or not SAFE_CLASS_PATTERN.match(grp[0])
+            or grp[1] not in VALID_MUTATION_MODES
+            or not SAFE_CLASS_PATTERN.match(grp[1])
+        ):
+            raise ValueError(f"Invalid expected_groups entry: {grp}")
+
+
+def _validate_bootstrap_candidate(cand: dict[str, Any], path: str) -> None:
+    """Validate bootstrap candidate fields and nested rank counts/probabilities dictionaries."""
+    _validate_dict_keys(
+        cand,
+        ROBUSTNESS_ALLOWED_KEYS_BY_LEVEL["bootstrap_candidate"],
+        path,
+    )
+    rank_counts = cand.get("rank_counts", {})
+    if not isinstance(rank_counts, dict):
+        raise ValueError(f"rank_counts must be a dict at {path}")
+    for rk, cnt in rank_counts.items():
+        if not isinstance(rk, str) or not SAFE_RANK_KEY_PATTERN.match(rk):
+            raise ValueError(f"Invalid rank key in rank_counts at {path}: {rk}")
+        if not isinstance(cnt, int) or cnt < 0:
+            raise ValueError(f"Invalid rank count in rank_counts at {path}: {cnt}")
+
+    rank_probs = cand.get("rank_probabilities", {})
+    if not isinstance(rank_probs, dict):
+        raise ValueError(f"rank_probabilities must be a dict at {path}")
+    for rk, prob in rank_probs.items():
+        if not isinstance(rk, str) or not SAFE_RANK_KEY_PATTERN.match(rk):
+            raise ValueError(f"Invalid rank key in rank_probabilities at {path}: {rk}")
+        if not isinstance(prob, int | float) or not (0.0 <= prob <= 1.0):
+            raise ValueError(f"Invalid rank probability in rank_probabilities at {path}: {prob}")
 
 
 def _validate_recommendations(recs: list[dict[str, Any]], path: str) -> None:
@@ -173,7 +224,7 @@ def assert_sanitized_robustness_report(payload: dict[str, Any] | str) -> None:
 
     _validate_dict_keys(data, ROBUSTNESS_ALLOWED_KEYS_BY_LEVEL["root"], "root")
     if "policy" in data:
-        _validate_dict_keys(data["policy"], ROBUSTNESS_ALLOWED_KEYS_BY_LEVEL["policy"], "policy")
+        _validate_policy_structure(data["policy"])
     if "exclusions" in data:
         _validate_dict_keys(
             data["exclusions"], ROBUSTNESS_ALLOWED_KEYS_BY_LEVEL["exclusions"], "exclusions"
@@ -195,15 +246,13 @@ def assert_sanitized_robustness_report(payload: dict[str, Any] | str) -> None:
         )
 
     for idx, bg in enumerate(data.get("bootstrap_results", [])):
-        _validate_dict_keys(
-            bg, ROBUSTNESS_ALLOWED_KEYS_BY_LEVEL["bootstrap_group"], f"bootstrap_results[{idx}]"
-        )
+        bg_path = f"bootstrap_results[{idx}]"
+        _validate_dict_keys(bg, ROBUSTNESS_ALLOWED_KEYS_BY_LEVEL["bootstrap_group"], bg_path)
+        for ep in bg.get("eligible_profiles", []):
+            if not isinstance(ep, str) or not SAFE_IDENTIFIER_PATTERN.match(ep):
+                raise ValueError(f"Invalid eligible_profiles identifier format at {bg_path}: {ep}")
         for c_idx, cand in enumerate(bg.get("candidates", [])):
-            _validate_dict_keys(
-                cand,
-                ROBUSTNESS_ALLOWED_KEYS_BY_LEVEL["bootstrap_candidate"],
-                f"bootstrap_results[{idx}].candidates[{c_idx}]",
-            )
+            _validate_bootstrap_candidate(cand, f"{bg_path}.candidates[{c_idx}]")
 
     def _scan_values(item: Any, key_context: str = "") -> None:
         if isinstance(item, str):
