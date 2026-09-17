@@ -640,6 +640,21 @@ def test_provider_reliability_delivery_branches() -> None:
     )
     assert check_delivery_stage(task_deliv, [run_deliv_meta]) == (True, True)
 
+    # Stale attempt delivery event does not satisfy current attempt (regression test)
+    task_stale = Task(
+        status=TaskStatus.COMPLETED,
+        attempt_count=1,
+        task_spec={"delivery_mode": "branch"},
+        timeline_events=[
+            TaskTimelineEvent(
+                attempt_number=0,
+                sequence_number=0,
+                event_type=TimelineEventType.DELIVERY_COMPLETED,
+            )
+        ],
+    )
+    assert check_delivery_stage(task_stale, []) == (True, False)
+
     # Delivery stage with DELIVERY_FAILED timeline event returns False
     task_d_fail = Task(
         status=TaskStatus.FAILED,

@@ -177,14 +177,6 @@ def check_delivery_stage(task: Task, runs: list[WorkerRun]) -> tuple[bool, bool]
         in (TimelineEventType.DELIVERY_COMPLETED, TimelineEventType.DELIVERY_FAILED)
     ]
     if not d_events:
-        d_events = [
-            e
-            for e in task.timeline_events
-            if e.event_type
-            in (TimelineEventType.DELIVERY_COMPLETED, TimelineEventType.DELIVERY_FAILED)
-        ]
-
-    if not d_events:
         return True, False
 
     last_event = d_events[-1]

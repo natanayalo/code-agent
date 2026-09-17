@@ -334,6 +334,41 @@ def test_branch_task_lacking_delivery_completed_not_delivery_pass(tmp_path: Path
     assert cell.stage_outcome_rates.delivery_pass_rate == 0.0
 
 
+def test_branch_task_stale_attempt_delivery_not_passed(tmp_path: Path) -> None:
+    """Ensure DELIVERY_COMPLETED on earlier attempt does not count for current attempt."""
+    db_path = tmp_path / "test_delivery_stale.db"
+    db_url = f"sqlite+pysqlite:///{db_path}"
+    engine = create_engine_from_url(db_url)
+    Base.metadata.create_all(engine)
+
+    task = _create_task(
+        task_id="stale-deliv-event",
+        status=TaskStatus.COMPLETED,
+        delivery_mode="branch",
+    )
+    task.attempt_count = 1
+    task.timeline_events.append(
+        TaskTimelineEvent(
+            attempt_number=0,
+            sequence_number=10,
+            event_type=TimelineEventType.DELIVERY_COMPLETED,
+        )
+    )
+    with Session(engine) as session:
+        session.add(task)
+        session.commit()
+
+    policy = ReliabilityReportPolicy(
+        as_of=NOW,
+        window_start_at=NOW - timedelta(days=30),
+        window_end_at=NOW + timedelta(days=1),
+        min_samples=1,
+    )
+    report = extract_provider_reliability_report(db_url, policy)
+    cell = [c for c in report.evidence_cells if c.profile == "codex-native-executor"][0]
+    assert cell.stage_outcome_rates.delivery_pass_rate == 0.0
+
+
 def test_compile_failure_kind_extraction_and_render(tmp_path: Path) -> None:
     """Ensure failure_kind='compile' extracts, aggregates, and renders valid sanitized report."""
     db_path = tmp_path / "test_compile_failure.db"
