@@ -84,6 +84,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Documentation
 
+- Docs: publish M29 provider reliability threshold baseline ([#400](https://github.com/natanayalo/code-agent/pull/400))
+
 - Docs: consolidate active project documentation ([#390](https://github.com/natanayalo/code-agent/pull/390))
 
 - Docs(architecture): add M28.5B field-level state ownership contract and reduction plan ([#370](https://github.com/natanayalo/code-agent/pull/370))
