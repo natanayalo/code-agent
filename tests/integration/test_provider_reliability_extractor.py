@@ -28,7 +28,10 @@ from evaluation.provider_reliability_extractor import (
     extract_provider_reliability_report,
 )
 from evaluation.provider_reliability_models import ReliabilityReportPolicy
-from evaluation.provider_reliability_report import assert_sanitized_report
+from evaluation.provider_reliability_report import (
+    assert_sanitized_report,
+    render_json_report,
+)
 from repositories import create_engine_from_url
 from scripts.e2e import run_provider_reliability_report as cli
 from tests.integration.provider_reliability_support import (
@@ -235,6 +238,22 @@ def test_review_stage_outcome_and_applicability(tmp_path: Path) -> None:
         status=TaskStatus.COMPLETED,
         verification_cmds=["pytest"],
     )
+    task_self_review = _create_task(
+        task_id="self-review-only",
+        status=TaskStatus.COMPLETED,
+        verification_cmds=["pytest"],
+    )
+    task_self_review.worker_runs[0].artifact_index = [
+        {
+            "artifact_type": ArtifactType.REVIEW_RESULT.value,
+            "artifact_metadata": {
+                ArtifactType.REVIEW_RESULT.value: {
+                    "outcome": "no_findings",
+                    "findings": [],
+                }
+            },
+        }
+    ]
     task_pass = _create_task(
         task_id="review-pass",
         status=TaskStatus.COMPLETED,
@@ -268,7 +287,7 @@ def test_review_stage_outcome_and_applicability(tmp_path: Path) -> None:
         }
     ]
     with Session(engine) as session:
-        session.add_all([task_no_review, task_pass, task_fail])
+        session.add_all([task_no_review, task_self_review, task_pass, task_fail])
         session.commit()
 
     policy = ReliabilityReportPolicy(
@@ -279,12 +298,13 @@ def test_review_stage_outcome_and_applicability(tmp_path: Path) -> None:
     )
     report = extract_provider_reliability_report(db_url, policy)
     cell = [c for c in report.evidence_cells if c.profile == "codex-native-executor"][0]
-    assert cell.sample_size == 3
+    # 4 tasks total, only 2 have independent review: 1 pass, 1 fail -> 0.5 rate
+    assert cell.sample_size == 4
     assert cell.stage_outcome_rates.review_pass_rate == 0.5
 
 
 def test_branch_task_lacking_delivery_completed_not_delivery_pass(tmp_path: Path) -> None:
-    """Ensure branch task without DELIVERY_COMPLETED is not reported as delivery pass."""
+    """Ensure branch task without DELIVERY_COMPLETED is not a delivery pass even with metadata."""
     db_path = tmp_path / "test_delivery_missing.db"
     db_url = f"sqlite+pysqlite:///{db_path}"
     engine = create_engine_from_url(db_url)
@@ -295,7 +315,10 @@ def test_branch_task_lacking_delivery_completed_not_delivery_pass(tmp_path: Path
         status=TaskStatus.COMPLETED,
         delivery_mode="branch",
     )
-    task.worker_runs[0].delivery_metadata = {}
+    task.worker_runs[0].delivery_metadata = {
+        "branch": "refs/heads/feature",
+        "pr_url": "https://github.invalid/org/repo/pull/1",
+    }
     with Session(engine) as session:
         session.add(task)
         session.commit()
@@ -309,6 +332,38 @@ def test_branch_task_lacking_delivery_completed_not_delivery_pass(tmp_path: Path
     report = extract_provider_reliability_report(db_url, policy)
     cell = [c for c in report.evidence_cells if c.profile == "codex-native-executor"][0]
     assert cell.stage_outcome_rates.delivery_pass_rate == 0.0
+
+
+def test_compile_failure_kind_extraction_and_render(tmp_path: Path) -> None:
+    """Ensure failure_kind='compile' extracts, aggregates, and renders valid sanitized report."""
+    db_path = tmp_path / "test_compile_failure.db"
+    db_url = f"sqlite+pysqlite:///{db_path}"
+    engine = create_engine_from_url(db_url)
+    Base.metadata.create_all(engine)
+
+    task = _create_task(
+        task_id="compile-fail-task",
+        status=TaskStatus.FAILED,
+        failure_kind="compile",
+    )
+    with Session(engine) as session:
+        session.add(task)
+        session.commit()
+
+    policy = ReliabilityReportPolicy(
+        as_of=NOW,
+        window_start_at=NOW - timedelta(days=30),
+        window_end_at=NOW + timedelta(days=1),
+        min_samples=1,
+    )
+    report = extract_provider_reliability_report(db_url, policy)
+    cell = [c for c in report.evidence_cells if c.profile == "codex-native-executor"][0]
+    assert "compile" in cell.typed_failures
+    assert cell.typed_failures["compile"] == 1
+
+    json_str = render_json_report(report)
+    assert '"compile": 1' in json_str
+    assert_sanitized_report(json_str)
 
 
 def test_mixed_profile_execution_excluded(tmp_path: Path) -> None:

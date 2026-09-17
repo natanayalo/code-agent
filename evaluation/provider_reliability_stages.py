@@ -119,10 +119,7 @@ def _check_review_artifacts(runs: list[WorkerRun]) -> tuple[bool, bool]:
     for r in runs:
         for entry in r.artifact_index or []:
             atype = entry.get("artifact_type")
-            if atype in (
-                ArtifactType.INDEPENDENT_REVIEW_RESULT.value,
-                ArtifactType.REVIEW_RESULT.value,
-            ):
+            if atype == ArtifactType.INDEPENDENT_REVIEW_RESULT.value:
                 meta = entry.get("artifact_metadata", {})
                 content = meta.get(atype) if isinstance(meta.get(atype), dict) else None
                 if content is None:
@@ -171,21 +168,28 @@ def check_delivery_stage(task: Task, runs: list[WorkerRun]) -> tuple[bool, bool]
     if not d_applicable:
         return False, False
 
-    deliv_completed = any(
-        e.event_type == TimelineEventType.DELIVERY_COMPLETED for e in task.timeline_events
-    )
-    deliv_failed = any(
-        e.event_type == TimelineEventType.DELIVERY_FAILED for e in task.timeline_events
-    )
-    if deliv_failed:
-        return True, False
-    if deliv_completed:
-        return True, True
+    attempt_num = task.attempt_count
+    d_events = [
+        e
+        for e in task.timeline_events
+        if (attempt_num is None or e.attempt_number == attempt_num)
+        and e.event_type
+        in (TimelineEventType.DELIVERY_COMPLETED, TimelineEventType.DELIVERY_FAILED)
+    ]
+    if not d_events:
+        d_events = [
+            e
+            for e in task.timeline_events
+            if e.event_type
+            in (TimelineEventType.DELIVERY_COMPLETED, TimelineEventType.DELIVERY_FAILED)
+        ]
 
-    for r in reversed(runs):
-        meta = r.delivery_metadata or {}
-        if meta.get("pr_url") or meta.get("branch"):
-            return True, True
+    if not d_events:
+        return True, False
+
+    last_event = d_events[-1]
+    if last_event.event_type == TimelineEventType.DELIVERY_COMPLETED:
+        return True, True
 
     return True, False
 

@@ -513,7 +513,7 @@ def test_provider_reliability_stages_direct() -> None:
         delivery_metadata={"branch": "refs/heads/feature"},
     )
     task_branch = Task(status=TaskStatus.COMPLETED, task_spec={"delivery_mode": "branch"})
-    assert check_delivery_stage(task_branch, [run_delivery]) == (True, True)
+    assert check_delivery_stage(task_branch, [run_delivery]) == (True, False)
 
     task_err = Task(status=TaskStatus.FAILED, last_error="boom")
     assert resolve_failure_kind(task_err, accepted=False, runs=[]) == "task_error"
@@ -537,17 +537,19 @@ def test_sanitizer_rejects_invalid_domains() -> None:
             {"evidence_cells": [{"typed_failures": {"unauthorized_failure_kind": 1}}]}
         )
 
+    # Valid typed_failures key with canonical worker failure "compile"
+    assert_sanitized_report({"evidence_cells": [{"typed_failures": {"compile": 1}}]})
+
     # Invalid exclusions.by_reason key
     with pytest.raises(ValueError, match="Invalid exclusion reason key"):
         assert_sanitized_report({"exclusions": {"by_reason": {"unauthorized_exclusion_reason": 1}}})
 
 
-def test_provider_reliability_timeline_stage_branches() -> None:
-    """Test stage outcome edge branches: timeline failures and custom metadata keys."""
+def test_provider_reliability_verification_and_review_branches() -> None:
+    """Test verification and independent review edge branches."""
     from db.enums import ArtifactType, TaskStatus, TimelineEventType, WorkerRunStatus
     from db.models import Task, TaskTimelineEvent, WorkerRun
     from evaluation.provider_reliability_stages import (
-        check_delivery_stage,
         check_review_stage,
         check_verification_stage,
     )
@@ -572,7 +574,24 @@ def test_provider_reliability_timeline_stage_branches() -> None:
     run_empty = WorkerRun(status=WorkerRunStatus.SUCCESS, verifier_outcome={})
     assert check_verification_stage(task_v_empty, [run_empty]) == (True, False)
 
-    # Review stage with custom dict metadata key and approved: True
+    # Worker self-review (REVIEW_RESULT) does NOT make independent review applicable
+    run_self_review = WorkerRun(
+        status=WorkerRunStatus.SUCCESS,
+        artifact_index=[
+            {
+                "artifact_type": ArtifactType.REVIEW_RESULT.value,
+                "artifact_metadata": {
+                    ArtifactType.REVIEW_RESULT.value: {
+                        "outcome": "no_findings",
+                        "findings": [],
+                    }
+                },
+            }
+        ],
+    )
+    assert check_review_stage(task_v_empty, [run_self_review], v_passed=True) == (False, False)
+
+    # Independent review stage with custom dict metadata key and approved: True
     run_approved = WorkerRun(
         status=WorkerRunStatus.SUCCESS,
         artifact_index=[
@@ -584,7 +603,7 @@ def test_provider_reliability_timeline_stage_branches() -> None:
     )
     assert check_review_stage(task_v_empty, [run_approved], v_passed=True) == (True, True)
 
-    # Review stage with custom dict metadata key and rejected status
+    # Independent review stage with custom dict metadata key and rejected status
     run_rejected = WorkerRun(
         status=WorkerRunStatus.SUCCESS,
         artifact_index=[
@@ -596,7 +615,32 @@ def test_provider_reliability_timeline_stage_branches() -> None:
     )
     assert check_review_stage(task_v_empty, [run_rejected], v_passed=True) == (True, False)
 
-    # Delivery stage with DELIVERY_FAILED timeline event
+
+def test_provider_reliability_delivery_branches() -> None:
+    """Test delivery stage: metadata without broker event fails, event succeeds or fails."""
+    from db.enums import TaskStatus, TimelineEventType, WorkerRunStatus
+    from db.models import Task, TaskTimelineEvent, WorkerRun
+    from evaluation.provider_reliability_stages import check_delivery_stage
+
+    # Delivery stage with metadata only (no DELIVERY_COMPLETED event) returns False
+    run_deliv_meta = WorkerRun(
+        status=WorkerRunStatus.SUCCESS,
+        delivery_metadata={"branch": "refs/heads/feature", "pr_url": "https://example.com/pr/1"},
+    )
+    task_deliv = Task(status=TaskStatus.COMPLETED, task_spec={"delivery_mode": "branch"})
+    assert check_delivery_stage(task_deliv, [run_deliv_meta]) == (True, False)
+
+    # Delivery stage with DELIVERY_COMPLETED timeline event returns True
+    task_deliv.timeline_events.append(
+        TaskTimelineEvent(
+            attempt_number=0,
+            sequence_number=0,
+            event_type=TimelineEventType.DELIVERY_COMPLETED,
+        )
+    )
+    assert check_delivery_stage(task_deliv, [run_deliv_meta]) == (True, True)
+
+    # Delivery stage with DELIVERY_FAILED timeline event returns False
     task_d_fail = Task(
         status=TaskStatus.FAILED,
         task_spec={"delivery_mode": "branch"},
@@ -609,3 +653,47 @@ def test_provider_reliability_timeline_stage_branches() -> None:
         ],
     )
     assert check_delivery_stage(task_d_fail, []) == (True, False)
+
+
+def test_valid_failure_kinds_covers_canonical_and_renders_compile() -> None:
+    """Verify VALID_FAILURE_KINDS covers all canonical worker failures and renders clean JSON."""
+    from typing import get_args
+
+    from evaluation.provider_reliability_report import VALID_FAILURE_KINDS
+    from workers.base import FailureKind
+
+    canonical_kinds = set(get_args(FailureKind))
+    missing = canonical_kinds - VALID_FAILURE_KINDS
+    assert not missing, f"Missing canonical FailureKind: {missing}"
+
+    policy = ReliabilityReportPolicy(
+        as_of=datetime.now(UTC),
+        window_start_at=datetime.now(UTC) - timedelta(days=90),
+        window_end_at=datetime.now(UTC),
+    )
+    cell = _make_dummy_cell(
+        "codex-native-executor", 0.5, 45.0, is_eligible=True, sample_size=10, accepted=8
+    ).model_copy(
+        update={
+            "failure_count": 2,
+            "failure_rate": 0.2,
+            "typed_failures": {"compile": 2},
+        }
+    )
+    report = ProviderReliabilityReport(
+        schema_version=1,
+        generated_at=datetime.now(UTC),
+        status="complete",
+        policy=policy,
+        exclusions=TaskExclusionSummary(
+            total_tasks_scanned=10,
+            included_tasks_count=10,
+            excluded_tasks_count=0,
+            by_reason={},
+        ),
+        evidence_cells=[cell],
+        recommendations=[],
+    )
+    rendered_json = render_json_report(report)
+    assert '"compile": 2' in rendered_json
+    assert_sanitized_report(rendered_json)

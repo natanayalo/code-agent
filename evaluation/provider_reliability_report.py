@@ -151,11 +151,8 @@ VALID_TASK_CLASSES: frozenset[str] = frozenset(
 VALID_MUTATION_MODES: frozenset[str] = frozenset({"mutation", "read_only"})
 VALID_FAILURE_KINDS: frozenset[str] = frozenset(
     {
-        "compile_error",
-        "test_failure",
-        "syntax_error",
-        "lint",
-        "type_check",
+        # Canonical worker failure kinds (workers.base.FailureKind)
+        "compile",
         "test",
         "tool_runtime",
         "sandbox_infra",
@@ -173,6 +170,14 @@ VALID_FAILURE_KINDS: frozenset[str] = frozenset(
         "worker_failure",
         "interaction",
         "read_only_violation",
+        # Verification failure kinds and legacy taxonomy markers
+        "compile_error",
+        "test_failure",
+        "syntax_error",
+        "syntax",
+        "lint",
+        "type_check",
+        # Extractor synthesized failure kinds
         "task_error",
         "unknown",
     }
