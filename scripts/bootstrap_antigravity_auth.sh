@@ -47,6 +47,8 @@ docker run -d --rm \
   --mount "type=bind,source=${logs_dir},target=/logs" \
   --env CODE_AGENT_PROXY_AUDIT_PATH=/logs/egress-audit.jsonl \
   --env CODE_AGENT_PROXY_TASK_ID=operator-antigravity-auth \
+  --env CODE_AGENT_NETWORK_POLICY=allowlisted_hosts \
+  --env CODE_AGENT_ALLOWED_HOSTS=cloudcode-pa.googleapis.com,oauth2.googleapis.com,daily-cloudcode-pa.googleapis.com,www.googleapis.com,lh3.googleusercontent.com,accounts.google.com \
   "${image}" python /app/sandbox/native_agent_proxy.py >/dev/null
 docker network connect bridge "${proxy_name}"
 
