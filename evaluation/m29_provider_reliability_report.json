@@ -1,0 +1,1536 @@
+{
+  "evidence_cells": [
+    {
+      "accepted_count": 1,
+      "accepted_task_rate": 0.5,
+      "accepted_task_rate_ci": {
+        "center": 0.5,
+        "lower": 0.0945,
+        "upper": 0.9055
+      },
+      "budget_field_coverage": {
+        "budget_coverage_rate": 1.0,
+        "budget_reported_count": 2
+      },
+      "failure_count": 1,
+      "failure_rate": 0.5,
+      "insufficiency_reasons": [
+        "insufficient_sample_size: 2 tasks (minimum 10)"
+      ],
+      "interventions": {
+        "approvals_count": 0,
+        "clarification_questions_count": 1,
+        "human_interventions_count": 1,
+        "intervention_rate": 0.5
+      },
+      "is_eligible": false,
+      "manual_override_rate": 0.5,
+      "manual_overrides_count": 1,
+      "mutation_mode": "mutation",
+      "newest_evidence_timestamp": "2026-09-05T17:20:50.948284Z",
+      "oldest_evidence_timestamp": "2026-08-05T21:42:12.242704Z",
+      "profile": "antigravity-native-executor",
+      "repairs": {
+        "repair_rate": 0.0,
+        "review_repairs_count": 0,
+        "total_repaired_tasks": 0,
+        "verifier_repairs_count": 0
+      },
+      "sample_size": 2,
+      "stage_outcome_rates": {
+        "delivery_pass_rate": 0.0,
+        "dispatch_rate": 1.0,
+        "execution_success_rate": 0.5,
+        "review_pass_rate": null,
+        "verification_pass_rate": 0.0
+      },
+      "task_class": "bugfix",
+      "terminal_latency": {
+        "max_seconds": 87.27,
+        "mean_seconds": 46.15,
+        "median_seconds": 46.15,
+        "min_seconds": 5.03,
+        "p90_seconds": 87.27
+      },
+      "typed_failures": {
+        "worker_failure": 1
+      }
+    },
+    {
+      "accepted_count": 4,
+      "accepted_task_rate": 0.8,
+      "accepted_task_rate_ci": {
+        "center": 0.6697,
+        "lower": 0.3755,
+        "upper": 0.9638
+      },
+      "budget_field_coverage": {
+        "budget_coverage_rate": 1.0,
+        "budget_reported_count": 5
+      },
+      "failure_count": 1,
+      "failure_rate": 0.2,
+      "insufficiency_reasons": [
+        "insufficient_sample_size: 5 tasks (minimum 10)"
+      ],
+      "interventions": {
+        "approvals_count": 0,
+        "clarification_questions_count": 0,
+        "human_interventions_count": 0,
+        "intervention_rate": 0.0
+      },
+      "is_eligible": false,
+      "manual_override_rate": 1.0,
+      "manual_overrides_count": 5,
+      "mutation_mode": "mutation",
+      "newest_evidence_timestamp": "2026-09-05T17:22:53.673990Z",
+      "oldest_evidence_timestamp": "2026-09-05T13:10:07.423833Z",
+      "profile": "codex-native-executor",
+      "repairs": {
+        "repair_rate": 0.0,
+        "review_repairs_count": 0,
+        "total_repaired_tasks": 0,
+        "verifier_repairs_count": 0
+      },
+      "sample_size": 5,
+      "stage_outcome_rates": {
+        "delivery_pass_rate": 0.6,
+        "dispatch_rate": 1.0,
+        "execution_success_rate": 0.8,
+        "review_pass_rate": null,
+        "verification_pass_rate": 0.0
+      },
+      "task_class": "bugfix",
+      "terminal_latency": {
+        "max_seconds": 752.42,
+        "mean_seconds": 418.67,
+        "median_seconds": 395.4,
+        "min_seconds": 116.81,
+        "p90_seconds": 752.42
+      },
+      "typed_failures": {
+        "worker_failure": 1
+      }
+    },
+    {
+      "accepted_count": 2,
+      "accepted_task_rate": 1.0,
+      "accepted_task_rate_ci": {
+        "center": 0.6712,
+        "lower": 0.3424,
+        "upper": 1.0
+      },
+      "budget_field_coverage": {
+        "budget_coverage_rate": 1.0,
+        "budget_reported_count": 2
+      },
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "insufficiency_reasons": [
+        "insufficient_sample_size: 2 tasks (minimum 10)"
+      ],
+      "interventions": {
+        "approvals_count": 0,
+        "clarification_questions_count": 0,
+        "human_interventions_count": 0,
+        "intervention_rate": 0.0
+      },
+      "is_eligible": false,
+      "manual_override_rate": 0.5,
+      "manual_overrides_count": 1,
+      "mutation_mode": "mutation",
+      "newest_evidence_timestamp": "2026-08-05T19:20:01.378955Z",
+      "oldest_evidence_timestamp": "2026-07-26T21:39:42.548252Z",
+      "profile": "antigravity-native-executor",
+      "repairs": {
+        "repair_rate": 0.0,
+        "review_repairs_count": 0,
+        "total_repaired_tasks": 0,
+        "verifier_repairs_count": 0
+      },
+      "sample_size": 2,
+      "stage_outcome_rates": {
+        "delivery_pass_rate": null,
+        "dispatch_rate": 1.0,
+        "execution_success_rate": 1.0,
+        "review_pass_rate": null,
+        "verification_pass_rate": 0.0
+      },
+      "task_class": "docs",
+      "terminal_latency": {
+        "max_seconds": 78.58,
+        "mean_seconds": 70.37,
+        "median_seconds": 70.37,
+        "min_seconds": 62.16,
+        "p90_seconds": 78.58
+      },
+      "typed_failures": {}
+    },
+    {
+      "accepted_count": 8,
+      "accepted_task_rate": 0.6667,
+      "accepted_task_rate_ci": {
+        "center": 0.6263,
+        "lower": 0.3906,
+        "upper": 0.8619
+      },
+      "budget_field_coverage": {
+        "budget_coverage_rate": 0.9167,
+        "budget_reported_count": 11
+      },
+      "failure_count": 4,
+      "failure_rate": 0.3333,
+      "insufficiency_reasons": [],
+      "interventions": {
+        "approvals_count": 2,
+        "clarification_questions_count": 2,
+        "human_interventions_count": 4,
+        "intervention_rate": 0.3333
+      },
+      "is_eligible": true,
+      "manual_override_rate": 1.0,
+      "manual_overrides_count": 12,
+      "mutation_mode": "read_only",
+      "newest_evidence_timestamp": "2026-09-07T06:51:19.374548Z",
+      "oldest_evidence_timestamp": "2026-07-21T19:49:54.708077Z",
+      "profile": "antigravity-native-executor-read-only",
+      "repairs": {
+        "repair_rate": 0.0,
+        "review_repairs_count": 0,
+        "total_repaired_tasks": 0,
+        "verifier_repairs_count": 0
+      },
+      "sample_size": 12,
+      "stage_outcome_rates": {
+        "delivery_pass_rate": null,
+        "dispatch_rate": 0.9167,
+        "execution_success_rate": 0.6667,
+        "review_pass_rate": null,
+        "verification_pass_rate": 0.0
+      },
+      "task_class": "docs",
+      "terminal_latency": {
+        "max_seconds": 152.22,
+        "mean_seconds": 52.15,
+        "median_seconds": 44.95,
+        "min_seconds": 5.46,
+        "p90_seconds": 98.8
+      },
+      "typed_failures": {
+        "task_error": 1,
+        "worker_failure": 3
+      }
+    },
+    {
+      "accepted_count": 3,
+      "accepted_task_rate": 1.0,
+      "accepted_task_rate_ci": {
+        "center": 0.7193,
+        "lower": 0.4385,
+        "upper": 1.0
+      },
+      "budget_field_coverage": {
+        "budget_coverage_rate": 1.0,
+        "budget_reported_count": 3
+      },
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "insufficiency_reasons": [
+        "insufficient_sample_size: 3 tasks (minimum 10)"
+      ],
+      "interventions": {
+        "approvals_count": 0,
+        "clarification_questions_count": 0,
+        "human_interventions_count": 0,
+        "intervention_rate": 0.0
+      },
+      "is_eligible": false,
+      "manual_override_rate": 1.0,
+      "manual_overrides_count": 3,
+      "mutation_mode": "mutation",
+      "newest_evidence_timestamp": "2026-08-05T19:18:03.625235Z",
+      "oldest_evidence_timestamp": "2026-08-05T18:59:06.942689Z",
+      "profile": "codex-native-executor",
+      "repairs": {
+        "repair_rate": 0.0,
+        "review_repairs_count": 0,
+        "total_repaired_tasks": 0,
+        "verifier_repairs_count": 0
+      },
+      "sample_size": 3,
+      "stage_outcome_rates": {
+        "delivery_pass_rate": null,
+        "dispatch_rate": 1.0,
+        "execution_success_rate": 1.0,
+        "review_pass_rate": null,
+        "verification_pass_rate": 0.0
+      },
+      "task_class": "docs",
+      "terminal_latency": {
+        "max_seconds": 296.22,
+        "mean_seconds": 274.55,
+        "median_seconds": 266.27,
+        "min_seconds": 261.17,
+        "p90_seconds": 296.22
+      },
+      "typed_failures": {}
+    },
+    {
+      "accepted_count": 8,
+      "accepted_task_rate": 0.6667,
+      "accepted_task_rate_ci": {
+        "center": 0.6263,
+        "lower": 0.3906,
+        "upper": 0.8619
+      },
+      "budget_field_coverage": {
+        "budget_coverage_rate": 1.0,
+        "budget_reported_count": 12
+      },
+      "failure_count": 4,
+      "failure_rate": 0.3333,
+      "insufficiency_reasons": [],
+      "interventions": {
+        "approvals_count": 0,
+        "clarification_questions_count": 2,
+        "human_interventions_count": 2,
+        "intervention_rate": 0.1667
+      },
+      "is_eligible": true,
+      "manual_override_rate": 1.0,
+      "manual_overrides_count": 12,
+      "mutation_mode": "read_only",
+      "newest_evidence_timestamp": "2026-09-05T22:38:01.393789Z",
+      "oldest_evidence_timestamp": "2026-07-21T22:12:59.347804Z",
+      "profile": "codex-native-executor-read-only",
+      "repairs": {
+        "repair_rate": 0.0,
+        "review_repairs_count": 0,
+        "total_repaired_tasks": 0,
+        "verifier_repairs_count": 0
+      },
+      "sample_size": 12,
+      "stage_outcome_rates": {
+        "delivery_pass_rate": 0.0,
+        "dispatch_rate": 1.0,
+        "execution_success_rate": 0.6667,
+        "review_pass_rate": null,
+        "verification_pass_rate": 0.0
+      },
+      "task_class": "docs",
+      "terminal_latency": {
+        "max_seconds": 586.4,
+        "mean_seconds": 225.89,
+        "median_seconds": 210.85,
+        "min_seconds": 63.17,
+        "p90_seconds": 394.3
+      },
+      "typed_failures": {
+        "scope_mismatch": 1,
+        "test_regression": 1,
+        "unknown": 1,
+        "worker_failure": 1
+      }
+    },
+    {
+      "accepted_count": 58,
+      "accepted_task_rate": 0.7838,
+      "accepted_task_rate_ci": {
+        "center": 0.7698,
+        "lower": 0.6773,
+        "upper": 0.8623
+      },
+      "budget_field_coverage": {
+        "budget_coverage_rate": 1.0,
+        "budget_reported_count": 74
+      },
+      "failure_count": 16,
+      "failure_rate": 0.2162,
+      "insufficiency_reasons": [],
+      "interventions": {
+        "approvals_count": 4,
+        "clarification_questions_count": 0,
+        "human_interventions_count": 4,
+        "intervention_rate": 0.0541
+      },
+      "is_eligible": true,
+      "manual_override_rate": 1.0,
+      "manual_overrides_count": 74,
+      "mutation_mode": "mutation",
+      "newest_evidence_timestamp": "2026-09-15T21:26:09.900723Z",
+      "oldest_evidence_timestamp": "2026-07-13T17:49:32.338269Z",
+      "profile": "antigravity-native-executor",
+      "repairs": {
+        "repair_rate": 0.0811,
+        "review_repairs_count": 1,
+        "total_repaired_tasks": 6,
+        "verifier_repairs_count": 5
+      },
+      "sample_size": 74,
+      "stage_outcome_rates": {
+        "delivery_pass_rate": 0.75,
+        "dispatch_rate": 1.0,
+        "execution_success_rate": 0.7838,
+        "review_pass_rate": 1.0,
+        "verification_pass_rate": 0.0
+      },
+      "task_class": "feature",
+      "terminal_latency": {
+        "max_seconds": 496.51,
+        "mean_seconds": 61.81,
+        "median_seconds": 43.88,
+        "min_seconds": 2.29,
+        "p90_seconds": 113.57
+      },
+      "typed_failures": {
+        "test_regression": 4,
+        "worker_failure": 12
+      }
+    },
+    {
+      "accepted_count": 9,
+      "accepted_task_rate": 0.9,
+      "accepted_task_rate_ci": {
+        "center": 0.789,
+        "lower": 0.5958,
+        "upper": 0.9821
+      },
+      "budget_field_coverage": {
+        "budget_coverage_rate": 1.0,
+        "budget_reported_count": 10
+      },
+      "failure_count": 1,
+      "failure_rate": 0.1,
+      "insufficiency_reasons": [],
+      "interventions": {
+        "approvals_count": 0,
+        "clarification_questions_count": 0,
+        "human_interventions_count": 0,
+        "intervention_rate": 0.0
+      },
+      "is_eligible": true,
+      "manual_override_rate": 0.9,
+      "manual_overrides_count": 9,
+      "mutation_mode": "read_only",
+      "newest_evidence_timestamp": "2026-09-05T14:17:48.128676Z",
+      "oldest_evidence_timestamp": "2026-08-05T18:50:51.197540Z",
+      "profile": "antigravity-native-executor-read-only",
+      "repairs": {
+        "repair_rate": 0.0,
+        "review_repairs_count": 0,
+        "total_repaired_tasks": 0,
+        "verifier_repairs_count": 0
+      },
+      "sample_size": 10,
+      "stage_outcome_rates": {
+        "delivery_pass_rate": null,
+        "dispatch_rate": 1.0,
+        "execution_success_rate": 0.9,
+        "review_pass_rate": null,
+        "verification_pass_rate": 0.0
+      },
+      "task_class": "feature",
+      "terminal_latency": {
+        "max_seconds": 90.24,
+        "mean_seconds": 49.07,
+        "median_seconds": 38.11,
+        "min_seconds": 4.87,
+        "p90_seconds": 79.31
+      },
+      "typed_failures": {
+        "worker_failure": 1
+      }
+    },
+    {
+      "accepted_count": 16,
+      "accepted_task_rate": 0.64,
+      "accepted_task_rate_ci": {
+        "center": 0.6214,
+        "lower": 0.4452,
+        "upper": 0.7975
+      },
+      "budget_field_coverage": {
+        "budget_coverage_rate": 0.96,
+        "budget_reported_count": 24
+      },
+      "failure_count": 9,
+      "failure_rate": 0.36,
+      "insufficiency_reasons": [],
+      "interventions": {
+        "approvals_count": 2,
+        "clarification_questions_count": 0,
+        "human_interventions_count": 2,
+        "intervention_rate": 0.08
+      },
+      "is_eligible": true,
+      "manual_override_rate": 1.0,
+      "manual_overrides_count": 25,
+      "mutation_mode": "mutation",
+      "newest_evidence_timestamp": "2026-09-15T16:17:57.302357Z",
+      "oldest_evidence_timestamp": "2026-07-13T18:34:11.422912Z",
+      "profile": "codex-native-executor",
+      "repairs": {
+        "repair_rate": 0.16,
+        "review_repairs_count": 0,
+        "total_repaired_tasks": 4,
+        "verifier_repairs_count": 4
+      },
+      "sample_size": 25,
+      "stage_outcome_rates": {
+        "delivery_pass_rate": 0.5714,
+        "dispatch_rate": 1.0,
+        "execution_success_rate": 0.64,
+        "review_pass_rate": null,
+        "verification_pass_rate": 0.0
+      },
+      "task_class": "feature",
+      "terminal_latency": {
+        "max_seconds": 701.28,
+        "mean_seconds": 158.01,
+        "median_seconds": 102.76,
+        "min_seconds": 1.6,
+        "p90_seconds": 357.06
+      },
+      "typed_failures": {
+        "test_regression": 1,
+        "unknown": 2,
+        "worker_failure": 6
+      }
+    },
+    {
+      "accepted_count": 24,
+      "accepted_task_rate": 0.7059,
+      "accepted_task_rate_ci": {
+        "center": 0.685,
+        "lower": 0.5383,
+        "upper": 0.8317
+      },
+      "budget_field_coverage": {
+        "budget_coverage_rate": 0.9706,
+        "budget_reported_count": 33
+      },
+      "failure_count": 10,
+      "failure_rate": 0.2941,
+      "insufficiency_reasons": [],
+      "interventions": {
+        "approvals_count": 0,
+        "clarification_questions_count": 0,
+        "human_interventions_count": 0,
+        "intervention_rate": 0.0
+      },
+      "is_eligible": true,
+      "manual_override_rate": 1.0,
+      "manual_overrides_count": 34,
+      "mutation_mode": "read_only",
+      "newest_evidence_timestamp": "2026-09-05T15:05:38.461409Z",
+      "oldest_evidence_timestamp": "2026-08-01T22:58:59.627686Z",
+      "profile": "codex-native-executor-read-only",
+      "repairs": {
+        "repair_rate": 0.0294,
+        "review_repairs_count": 0,
+        "total_repaired_tasks": 1,
+        "verifier_repairs_count": 1
+      },
+      "sample_size": 34,
+      "stage_outcome_rates": {
+        "delivery_pass_rate": null,
+        "dispatch_rate": 0.9706,
+        "execution_success_rate": 0.7059,
+        "review_pass_rate": null,
+        "verification_pass_rate": 0.0
+      },
+      "task_class": "feature",
+      "terminal_latency": {
+        "max_seconds": 601.7,
+        "mean_seconds": 189.87,
+        "median_seconds": 153.95,
+        "min_seconds": 0.69,
+        "p90_seconds": 336.3
+      },
+      "typed_failures": {
+        "scope_mismatch": 2,
+        "task_error": 1,
+        "worker_failure": 7
+      }
+    },
+    {
+      "accepted_count": 0,
+      "accepted_task_rate": 0.0,
+      "accepted_task_rate_ci": {
+        "center": 0.0,
+        "lower": 0.0,
+        "upper": 0.0
+      },
+      "budget_field_coverage": {
+        "budget_coverage_rate": 0.0,
+        "budget_reported_count": 0
+      },
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "insufficiency_reasons": [
+        "insufficient_sample_size: 0 tasks (minimum 10)"
+      ],
+      "interventions": {
+        "approvals_count": 0,
+        "clarification_questions_count": 0,
+        "human_interventions_count": 0,
+        "intervention_rate": 0.0
+      },
+      "is_eligible": false,
+      "manual_override_rate": 0.0,
+      "manual_overrides_count": 0,
+      "mutation_mode": "mutation",
+      "newest_evidence_timestamp": null,
+      "oldest_evidence_timestamp": null,
+      "profile": "antigravity-native-executor",
+      "repairs": {
+        "repair_rate": 0.0,
+        "review_repairs_count": 0,
+        "total_repaired_tasks": 0,
+        "verifier_repairs_count": 0
+      },
+      "sample_size": 0,
+      "stage_outcome_rates": {
+        "delivery_pass_rate": null,
+        "dispatch_rate": 0.0,
+        "execution_success_rate": 0.0,
+        "review_pass_rate": null,
+        "verification_pass_rate": null
+      },
+      "task_class": "investigation",
+      "terminal_latency": {
+        "max_seconds": null,
+        "mean_seconds": null,
+        "median_seconds": null,
+        "min_seconds": null,
+        "p90_seconds": null
+      },
+      "typed_failures": {}
+    },
+    {
+      "accepted_count": 8,
+      "accepted_task_rate": 1.0,
+      "accepted_task_rate_ci": {
+        "center": 0.8378,
+        "lower": 0.6756,
+        "upper": 1.0
+      },
+      "budget_field_coverage": {
+        "budget_coverage_rate": 1.0,
+        "budget_reported_count": 8
+      },
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "insufficiency_reasons": [
+        "insufficient_sample_size: 8 tasks (minimum 10)"
+      ],
+      "interventions": {
+        "approvals_count": 0,
+        "clarification_questions_count": 0,
+        "human_interventions_count": 0,
+        "intervention_rate": 0.0
+      },
+      "is_eligible": false,
+      "manual_override_rate": 1.0,
+      "manual_overrides_count": 8,
+      "mutation_mode": "read_only",
+      "newest_evidence_timestamp": "2026-08-15T07:18:00.616107Z",
+      "oldest_evidence_timestamp": "2026-08-14T21:51:38.160034Z",
+      "profile": "antigravity-native-executor-read-only",
+      "repairs": {
+        "repair_rate": 0.0,
+        "review_repairs_count": 0,
+        "total_repaired_tasks": 0,
+        "verifier_repairs_count": 0
+      },
+      "sample_size": 8,
+      "stage_outcome_rates": {
+        "delivery_pass_rate": null,
+        "dispatch_rate": 1.0,
+        "execution_success_rate": 1.0,
+        "review_pass_rate": null,
+        "verification_pass_rate": 0.0
+      },
+      "task_class": "investigation",
+      "terminal_latency": {
+        "max_seconds": 104.17,
+        "mean_seconds": 68.4,
+        "median_seconds": 78.75,
+        "min_seconds": 36.74,
+        "p90_seconds": 104.17
+      },
+      "typed_failures": {}
+    },
+    {
+      "accepted_count": 3,
+      "accepted_task_rate": 0.75,
+      "accepted_task_rate_ci": {
+        "center": 0.6275,
+        "lower": 0.3006,
+        "upper": 0.9544
+      },
+      "budget_field_coverage": {
+        "budget_coverage_rate": 0.75,
+        "budget_reported_count": 3
+      },
+      "failure_count": 1,
+      "failure_rate": 0.25,
+      "insufficiency_reasons": [
+        "insufficient_sample_size: 4 tasks (minimum 10)"
+      ],
+      "interventions": {
+        "approvals_count": 0,
+        "clarification_questions_count": 0,
+        "human_interventions_count": 0,
+        "intervention_rate": 0.0
+      },
+      "is_eligible": false,
+      "manual_override_rate": 1.0,
+      "manual_overrides_count": 4,
+      "mutation_mode": "mutation",
+      "newest_evidence_timestamp": "2026-09-05T13:34:37.313288Z",
+      "oldest_evidence_timestamp": "2026-09-05T12:13:02.386308Z",
+      "profile": "codex-native-executor",
+      "repairs": {
+        "repair_rate": 0.0,
+        "review_repairs_count": 0,
+        "total_repaired_tasks": 0,
+        "verifier_repairs_count": 0
+      },
+      "sample_size": 4,
+      "stage_outcome_rates": {
+        "delivery_pass_rate": 0.0,
+        "dispatch_rate": 1.0,
+        "execution_success_rate": 0.75,
+        "review_pass_rate": null,
+        "verification_pass_rate": null
+      },
+      "task_class": "investigation",
+      "terminal_latency": {
+        "max_seconds": 534.42,
+        "mean_seconds": 352.7,
+        "median_seconds": 340.8,
+        "min_seconds": 194.76,
+        "p90_seconds": 534.42
+      },
+      "typed_failures": {
+        "unknown": 1
+      }
+    },
+    {
+      "accepted_count": 15,
+      "accepted_task_rate": 1.0,
+      "accepted_task_rate_ci": {
+        "center": 0.8981,
+        "lower": 0.7961,
+        "upper": 1.0
+      },
+      "budget_field_coverage": {
+        "budget_coverage_rate": 1.0,
+        "budget_reported_count": 15
+      },
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "insufficiency_reasons": [],
+      "interventions": {
+        "approvals_count": 0,
+        "clarification_questions_count": 0,
+        "human_interventions_count": 0,
+        "intervention_rate": 0.0
+      },
+      "is_eligible": true,
+      "manual_override_rate": 1.0,
+      "manual_overrides_count": 15,
+      "mutation_mode": "read_only",
+      "newest_evidence_timestamp": "2026-09-05T15:32:54.671949Z",
+      "oldest_evidence_timestamp": "2026-08-13T19:22:11.807940Z",
+      "profile": "codex-native-executor-read-only",
+      "repairs": {
+        "repair_rate": 0.0,
+        "review_repairs_count": 0,
+        "total_repaired_tasks": 0,
+        "verifier_repairs_count": 0
+      },
+      "sample_size": 15,
+      "stage_outcome_rates": {
+        "delivery_pass_rate": null,
+        "dispatch_rate": 1.0,
+        "execution_success_rate": 1.0,
+        "review_pass_rate": null,
+        "verification_pass_rate": 0.0
+      },
+      "task_class": "investigation",
+      "terminal_latency": {
+        "max_seconds": 582.81,
+        "mean_seconds": 173.88,
+        "median_seconds": 136.86,
+        "min_seconds": 51.33,
+        "p90_seconds": 270.49
+      },
+      "typed_failures": {}
+    },
+    {
+      "accepted_count": 5,
+      "accepted_task_rate": 1.0,
+      "accepted_task_rate_ci": {
+        "center": 0.7828,
+        "lower": 0.5655,
+        "upper": 1.0
+      },
+      "budget_field_coverage": {
+        "budget_coverage_rate": 1.0,
+        "budget_reported_count": 5
+      },
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "insufficiency_reasons": [
+        "insufficient_sample_size: 5 tasks (minimum 10)"
+      ],
+      "interventions": {
+        "approvals_count": 0,
+        "clarification_questions_count": 0,
+        "human_interventions_count": 0,
+        "intervention_rate": 0.0
+      },
+      "is_eligible": false,
+      "manual_override_rate": 1.0,
+      "manual_overrides_count": 5,
+      "mutation_mode": "mutation",
+      "newest_evidence_timestamp": "2026-08-05T20:45:44.794328Z",
+      "oldest_evidence_timestamp": "2026-08-05T20:27:49.997709Z",
+      "profile": "antigravity-native-executor",
+      "repairs": {
+        "repair_rate": 0.0,
+        "review_repairs_count": 0,
+        "total_repaired_tasks": 0,
+        "verifier_repairs_count": 0
+      },
+      "sample_size": 5,
+      "stage_outcome_rates": {
+        "delivery_pass_rate": null,
+        "dispatch_rate": 1.0,
+        "execution_success_rate": 1.0,
+        "review_pass_rate": null,
+        "verification_pass_rate": 0.0
+      },
+      "task_class": "maintenance",
+      "terminal_latency": {
+        "max_seconds": 147.33,
+        "mean_seconds": 84.59,
+        "median_seconds": 73.46,
+        "min_seconds": 52.13,
+        "p90_seconds": 147.33
+      },
+      "typed_failures": {}
+    },
+    {
+      "accepted_count": 0,
+      "accepted_task_rate": 0.0,
+      "accepted_task_rate_ci": {
+        "center": 0.0,
+        "lower": 0.0,
+        "upper": 0.0
+      },
+      "budget_field_coverage": {
+        "budget_coverage_rate": 0.0,
+        "budget_reported_count": 0
+      },
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "insufficiency_reasons": [
+        "insufficient_sample_size: 0 tasks (minimum 10)"
+      ],
+      "interventions": {
+        "approvals_count": 0,
+        "clarification_questions_count": 0,
+        "human_interventions_count": 0,
+        "intervention_rate": 0.0
+      },
+      "is_eligible": false,
+      "manual_override_rate": 0.0,
+      "manual_overrides_count": 0,
+      "mutation_mode": "mutation",
+      "newest_evidence_timestamp": null,
+      "oldest_evidence_timestamp": null,
+      "profile": "codex-native-executor",
+      "repairs": {
+        "repair_rate": 0.0,
+        "review_repairs_count": 0,
+        "total_repaired_tasks": 0,
+        "verifier_repairs_count": 0
+      },
+      "sample_size": 0,
+      "stage_outcome_rates": {
+        "delivery_pass_rate": null,
+        "dispatch_rate": 0.0,
+        "execution_success_rate": 0.0,
+        "review_pass_rate": null,
+        "verification_pass_rate": null
+      },
+      "task_class": "maintenance",
+      "terminal_latency": {
+        "max_seconds": null,
+        "mean_seconds": null,
+        "median_seconds": null,
+        "min_seconds": null,
+        "p90_seconds": null
+      },
+      "typed_failures": {}
+    },
+    {
+      "accepted_count": 0,
+      "accepted_task_rate": 0.0,
+      "accepted_task_rate_ci": {
+        "center": 0.0,
+        "lower": 0.0,
+        "upper": 0.0
+      },
+      "budget_field_coverage": {
+        "budget_coverage_rate": 0.0,
+        "budget_reported_count": 0
+      },
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "insufficiency_reasons": [
+        "insufficient_sample_size: 0 tasks (minimum 10)"
+      ],
+      "interventions": {
+        "approvals_count": 0,
+        "clarification_questions_count": 0,
+        "human_interventions_count": 0,
+        "intervention_rate": 0.0
+      },
+      "is_eligible": false,
+      "manual_override_rate": 0.0,
+      "manual_overrides_count": 0,
+      "mutation_mode": "mutation",
+      "newest_evidence_timestamp": null,
+      "oldest_evidence_timestamp": null,
+      "profile": "antigravity-native-executor",
+      "repairs": {
+        "repair_rate": 0.0,
+        "review_repairs_count": 0,
+        "total_repaired_tasks": 0,
+        "verifier_repairs_count": 0
+      },
+      "sample_size": 0,
+      "stage_outcome_rates": {
+        "delivery_pass_rate": null,
+        "dispatch_rate": 0.0,
+        "execution_success_rate": 0.0,
+        "review_pass_rate": null,
+        "verification_pass_rate": null
+      },
+      "task_class": "refactor",
+      "terminal_latency": {
+        "max_seconds": null,
+        "mean_seconds": null,
+        "median_seconds": null,
+        "min_seconds": null,
+        "p90_seconds": null
+      },
+      "typed_failures": {}
+    },
+    {
+      "accepted_count": 0,
+      "accepted_task_rate": 0.0,
+      "accepted_task_rate_ci": {
+        "center": 0.3967,
+        "lower": 0.0,
+        "upper": 0.7935
+      },
+      "budget_field_coverage": {
+        "budget_coverage_rate": 1.0,
+        "budget_reported_count": 1
+      },
+      "failure_count": 1,
+      "failure_rate": 1.0,
+      "insufficiency_reasons": [
+        "insufficient_sample_size: 1 tasks (minimum 10)"
+      ],
+      "interventions": {
+        "approvals_count": 0,
+        "clarification_questions_count": 0,
+        "human_interventions_count": 0,
+        "intervention_rate": 0.0
+      },
+      "is_eligible": false,
+      "manual_override_rate": 1.0,
+      "manual_overrides_count": 1,
+      "mutation_mode": "mutation",
+      "newest_evidence_timestamp": "2026-09-05T15:58:32.123268Z",
+      "oldest_evidence_timestamp": "2026-09-05T15:58:32.123268Z",
+      "profile": "codex-native-executor",
+      "repairs": {
+        "repair_rate": 0.0,
+        "review_repairs_count": 0,
+        "total_repaired_tasks": 0,
+        "verifier_repairs_count": 0
+      },
+      "sample_size": 1,
+      "stage_outcome_rates": {
+        "delivery_pass_rate": 0.0,
+        "dispatch_rate": 1.0,
+        "execution_success_rate": 0.0,
+        "review_pass_rate": null,
+        "verification_pass_rate": 0.0
+      },
+      "task_class": "refactor",
+      "terminal_latency": {
+        "max_seconds": 847.0,
+        "mean_seconds": 847.0,
+        "median_seconds": 847.0,
+        "min_seconds": 847.0,
+        "p90_seconds": 847.0
+      },
+      "typed_failures": {
+        "worker_failure": 1
+      }
+    },
+    {
+      "accepted_count": 0,
+      "accepted_task_rate": 0.0,
+      "accepted_task_rate_ci": {
+        "center": 0.0,
+        "lower": 0.0,
+        "upper": 0.0
+      },
+      "budget_field_coverage": {
+        "budget_coverage_rate": 0.0,
+        "budget_reported_count": 0
+      },
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "insufficiency_reasons": [
+        "insufficient_sample_size: 0 tasks (minimum 10)"
+      ],
+      "interventions": {
+        "approvals_count": 0,
+        "clarification_questions_count": 0,
+        "human_interventions_count": 0,
+        "intervention_rate": 0.0
+      },
+      "is_eligible": false,
+      "manual_override_rate": 0.0,
+      "manual_overrides_count": 0,
+      "mutation_mode": "read_only",
+      "newest_evidence_timestamp": null,
+      "oldest_evidence_timestamp": null,
+      "profile": "antigravity-native-executor-read-only",
+      "repairs": {
+        "repair_rate": 0.0,
+        "review_repairs_count": 0,
+        "total_repaired_tasks": 0,
+        "verifier_repairs_count": 0
+      },
+      "sample_size": 0,
+      "stage_outcome_rates": {
+        "delivery_pass_rate": null,
+        "dispatch_rate": 0.0,
+        "execution_success_rate": 0.0,
+        "review_pass_rate": null,
+        "verification_pass_rate": null
+      },
+      "task_class": "scout",
+      "terminal_latency": {
+        "max_seconds": null,
+        "mean_seconds": null,
+        "median_seconds": null,
+        "min_seconds": null,
+        "p90_seconds": null
+      },
+      "typed_failures": {}
+    },
+    {
+      "accepted_count": 0,
+      "accepted_task_rate": 0.0,
+      "accepted_task_rate_ci": {
+        "center": 0.0,
+        "lower": 0.0,
+        "upper": 0.0
+      },
+      "budget_field_coverage": {
+        "budget_coverage_rate": 0.0,
+        "budget_reported_count": 0
+      },
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "insufficiency_reasons": [
+        "insufficient_sample_size: 0 tasks (minimum 10)"
+      ],
+      "interventions": {
+        "approvals_count": 0,
+        "clarification_questions_count": 0,
+        "human_interventions_count": 0,
+        "intervention_rate": 0.0
+      },
+      "is_eligible": false,
+      "manual_override_rate": 0.0,
+      "manual_overrides_count": 0,
+      "mutation_mode": "read_only",
+      "newest_evidence_timestamp": null,
+      "oldest_evidence_timestamp": null,
+      "profile": "codex-native-executor-read-only",
+      "repairs": {
+        "repair_rate": 0.0,
+        "review_repairs_count": 0,
+        "total_repaired_tasks": 0,
+        "verifier_repairs_count": 0
+      },
+      "sample_size": 0,
+      "stage_outcome_rates": {
+        "delivery_pass_rate": null,
+        "dispatch_rate": 0.0,
+        "execution_success_rate": 0.0,
+        "review_pass_rate": null,
+        "verification_pass_rate": null
+      },
+      "task_class": "scout",
+      "terminal_latency": {
+        "max_seconds": null,
+        "mean_seconds": null,
+        "median_seconds": null,
+        "min_seconds": null,
+        "p90_seconds": null
+      },
+      "typed_failures": {}
+    }
+  ],
+  "exclusions": {
+    "by_reason": {
+      "cancelled": 9,
+      "malformed_inconsistent_timeline": 10,
+      "non_native_agent_mode": 2,
+      "non_temporal_runtime": 81
+    },
+    "excluded_tasks_count": 102,
+    "included_tasks_count": 212,
+    "total_tasks_scanned": 314
+  },
+  "generated_at": "2026-09-17T10:06:32.954342Z",
+  "policy": {
+    "as_of": "2026-09-17T10:10:00Z",
+    "confidence_level": 0.95,
+    "enabled_profiles": [
+      "codex-native-executor",
+      "codex-native-executor-read-only",
+      "antigravity-native-executor",
+      "antigravity-native-executor-read-only"
+    ],
+    "expected_groups": [
+      [
+        "feature",
+        "mutation"
+      ],
+      [
+        "scout",
+        "read_only"
+      ]
+    ],
+    "lookback_days": 90,
+    "min_samples": 10,
+    "schema_version": 1,
+    "window_end_at": "2026-09-17T10:10:00Z",
+    "window_start_at": "2026-06-19T10:10:00Z"
+  },
+  "profile_coverage": [
+    {
+      "has_evidence": true,
+      "is_eligible": true,
+      "mutation_mode": "mutation",
+      "profile": "codex-native-executor",
+      "sample_size": 38
+    },
+    {
+      "has_evidence": true,
+      "is_eligible": true,
+      "mutation_mode": "read_only",
+      "profile": "codex-native-executor-read-only",
+      "sample_size": 61
+    },
+    {
+      "has_evidence": true,
+      "is_eligible": true,
+      "mutation_mode": "mutation",
+      "profile": "antigravity-native-executor",
+      "sample_size": 83
+    },
+    {
+      "has_evidence": true,
+      "is_eligible": true,
+      "mutation_mode": "read_only",
+      "profile": "antigravity-native-executor-read-only",
+      "sample_size": 30
+    }
+  ],
+  "recommendations": [
+    {
+      "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
+      "mutation_mode": "mutation",
+      "rankings": [
+        {
+          "accepted_count": 1,
+          "accepted_rate_wilson_lower": 0.0945,
+          "evidence_age_days": 11.7,
+          "insufficiency_reasons": [
+            "insufficient_sample_size: 2 tasks (minimum 10)"
+          ],
+          "is_eligible": false,
+          "median_latency_seconds": 46.15,
+          "newest_evidence_timestamp": "2026-09-05T17:20:50.948284Z",
+          "oldest_evidence_timestamp": "2026-08-05T21:42:12.242704Z",
+          "profile": "antigravity-native-executor",
+          "rank": null,
+          "sample_size": 2
+        },
+        {
+          "accepted_count": 4,
+          "accepted_rate_wilson_lower": 0.3755,
+          "evidence_age_days": 11.7,
+          "insufficiency_reasons": [
+            "insufficient_sample_size: 5 tasks (minimum 10)"
+          ],
+          "is_eligible": false,
+          "median_latency_seconds": 395.4,
+          "newest_evidence_timestamp": "2026-09-05T17:22:53.673990Z",
+          "oldest_evidence_timestamp": "2026-09-05T13:10:07.423833Z",
+          "profile": "codex-native-executor",
+          "rank": null,
+          "sample_size": 5
+        }
+      ],
+      "recommended_profile": null,
+      "task_class": "bugfix"
+    },
+    {
+      "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
+      "mutation_mode": "mutation",
+      "rankings": [
+        {
+          "accepted_count": 2,
+          "accepted_rate_wilson_lower": 0.3424,
+          "evidence_age_days": 42.6,
+          "insufficiency_reasons": [
+            "insufficient_sample_size: 2 tasks (minimum 10)"
+          ],
+          "is_eligible": false,
+          "median_latency_seconds": 70.37,
+          "newest_evidence_timestamp": "2026-08-05T19:20:01.378955Z",
+          "oldest_evidence_timestamp": "2026-07-26T21:39:42.548252Z",
+          "profile": "antigravity-native-executor",
+          "rank": null,
+          "sample_size": 2
+        },
+        {
+          "accepted_count": 3,
+          "accepted_rate_wilson_lower": 0.4385,
+          "evidence_age_days": 42.6,
+          "insufficiency_reasons": [
+            "insufficient_sample_size: 3 tasks (minimum 10)"
+          ],
+          "is_eligible": false,
+          "median_latency_seconds": 266.27,
+          "newest_evidence_timestamp": "2026-08-05T19:18:03.625235Z",
+          "oldest_evidence_timestamp": "2026-08-05T18:59:06.942689Z",
+          "profile": "codex-native-executor",
+          "rank": null,
+          "sample_size": 3
+        }
+      ],
+      "recommended_profile": null,
+      "task_class": "docs"
+    },
+    {
+      "fallback_reason": null,
+      "mutation_mode": "read_only",
+      "rankings": [
+        {
+          "accepted_count": 8,
+          "accepted_rate_wilson_lower": 0.3906,
+          "evidence_age_days": 10.1,
+          "insufficiency_reasons": [],
+          "is_eligible": true,
+          "median_latency_seconds": 44.95,
+          "newest_evidence_timestamp": "2026-09-07T06:51:19.374548Z",
+          "oldest_evidence_timestamp": "2026-07-21T19:49:54.708077Z",
+          "profile": "antigravity-native-executor-read-only",
+          "rank": 1,
+          "sample_size": 12
+        },
+        {
+          "accepted_count": 8,
+          "accepted_rate_wilson_lower": 0.3906,
+          "evidence_age_days": 11.5,
+          "insufficiency_reasons": [],
+          "is_eligible": true,
+          "median_latency_seconds": 210.85,
+          "newest_evidence_timestamp": "2026-09-05T22:38:01.393789Z",
+          "oldest_evidence_timestamp": "2026-07-21T22:12:59.347804Z",
+          "profile": "codex-native-executor-read-only",
+          "rank": 2,
+          "sample_size": 12
+        }
+      ],
+      "recommended_profile": "antigravity-native-executor-read-only",
+      "task_class": "docs"
+    },
+    {
+      "fallback_reason": null,
+      "mutation_mode": "mutation",
+      "rankings": [
+        {
+          "accepted_count": 58,
+          "accepted_rate_wilson_lower": 0.6773,
+          "evidence_age_days": 1.5,
+          "insufficiency_reasons": [],
+          "is_eligible": true,
+          "median_latency_seconds": 43.88,
+          "newest_evidence_timestamp": "2026-09-15T21:26:09.900723Z",
+          "oldest_evidence_timestamp": "2026-07-13T17:49:32.338269Z",
+          "profile": "antigravity-native-executor",
+          "rank": 1,
+          "sample_size": 74
+        },
+        {
+          "accepted_count": 16,
+          "accepted_rate_wilson_lower": 0.4452,
+          "evidence_age_days": 1.7,
+          "insufficiency_reasons": [],
+          "is_eligible": true,
+          "median_latency_seconds": 102.76,
+          "newest_evidence_timestamp": "2026-09-15T16:17:57.302357Z",
+          "oldest_evidence_timestamp": "2026-07-13T18:34:11.422912Z",
+          "profile": "codex-native-executor",
+          "rank": 2,
+          "sample_size": 25
+        }
+      ],
+      "recommended_profile": "antigravity-native-executor",
+      "task_class": "feature"
+    },
+    {
+      "fallback_reason": null,
+      "mutation_mode": "read_only",
+      "rankings": [
+        {
+          "accepted_count": 9,
+          "accepted_rate_wilson_lower": 0.5958,
+          "evidence_age_days": 11.8,
+          "insufficiency_reasons": [],
+          "is_eligible": true,
+          "median_latency_seconds": 38.11,
+          "newest_evidence_timestamp": "2026-09-05T14:17:48.128676Z",
+          "oldest_evidence_timestamp": "2026-08-05T18:50:51.197540Z",
+          "profile": "antigravity-native-executor-read-only",
+          "rank": 1,
+          "sample_size": 10
+        },
+        {
+          "accepted_count": 24,
+          "accepted_rate_wilson_lower": 0.5383,
+          "evidence_age_days": 11.8,
+          "insufficiency_reasons": [],
+          "is_eligible": true,
+          "median_latency_seconds": 153.95,
+          "newest_evidence_timestamp": "2026-09-05T15:05:38.461409Z",
+          "oldest_evidence_timestamp": "2026-08-01T22:58:59.627686Z",
+          "profile": "codex-native-executor-read-only",
+          "rank": 2,
+          "sample_size": 34
+        }
+      ],
+      "recommended_profile": "antigravity-native-executor-read-only",
+      "task_class": "feature"
+    },
+    {
+      "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
+      "mutation_mode": "mutation",
+      "rankings": [
+        {
+          "accepted_count": 0,
+          "accepted_rate_wilson_lower": 0.0,
+          "evidence_age_days": null,
+          "insufficiency_reasons": [
+            "insufficient_sample_size: 0 tasks (minimum 10)"
+          ],
+          "is_eligible": false,
+          "median_latency_seconds": null,
+          "newest_evidence_timestamp": null,
+          "oldest_evidence_timestamp": null,
+          "profile": "antigravity-native-executor",
+          "rank": null,
+          "sample_size": 0
+        },
+        {
+          "accepted_count": 3,
+          "accepted_rate_wilson_lower": 0.3006,
+          "evidence_age_days": 11.9,
+          "insufficiency_reasons": [
+            "insufficient_sample_size: 4 tasks (minimum 10)"
+          ],
+          "is_eligible": false,
+          "median_latency_seconds": 340.8,
+          "newest_evidence_timestamp": "2026-09-05T13:34:37.313288Z",
+          "oldest_evidence_timestamp": "2026-09-05T12:13:02.386308Z",
+          "profile": "codex-native-executor",
+          "rank": null,
+          "sample_size": 4
+        }
+      ],
+      "recommended_profile": null,
+      "task_class": "investigation"
+    },
+    {
+      "fallback_reason": "insufficient_eligible_candidates: only 1 eligible candidate ('codex-native-executor-read-only') available; at least 2 required",
+      "mutation_mode": "read_only",
+      "rankings": [
+        {
+          "accepted_count": 15,
+          "accepted_rate_wilson_lower": 0.7961,
+          "evidence_age_days": 11.8,
+          "insufficiency_reasons": [],
+          "is_eligible": true,
+          "median_latency_seconds": 136.86,
+          "newest_evidence_timestamp": "2026-09-05T15:32:54.671949Z",
+          "oldest_evidence_timestamp": "2026-08-13T19:22:11.807940Z",
+          "profile": "codex-native-executor-read-only",
+          "rank": 1,
+          "sample_size": 15
+        },
+        {
+          "accepted_count": 8,
+          "accepted_rate_wilson_lower": 0.6756,
+          "evidence_age_days": 33.1,
+          "insufficiency_reasons": [
+            "insufficient_sample_size: 8 tasks (minimum 10)"
+          ],
+          "is_eligible": false,
+          "median_latency_seconds": 78.75,
+          "newest_evidence_timestamp": "2026-08-15T07:18:00.616107Z",
+          "oldest_evidence_timestamp": "2026-08-14T21:51:38.160034Z",
+          "profile": "antigravity-native-executor-read-only",
+          "rank": null,
+          "sample_size": 8
+        }
+      ],
+      "recommended_profile": null,
+      "task_class": "investigation"
+    },
+    {
+      "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
+      "mutation_mode": "mutation",
+      "rankings": [
+        {
+          "accepted_count": 5,
+          "accepted_rate_wilson_lower": 0.5655,
+          "evidence_age_days": 42.6,
+          "insufficiency_reasons": [
+            "insufficient_sample_size: 5 tasks (minimum 10)"
+          ],
+          "is_eligible": false,
+          "median_latency_seconds": 73.46,
+          "newest_evidence_timestamp": "2026-08-05T20:45:44.794328Z",
+          "oldest_evidence_timestamp": "2026-08-05T20:27:49.997709Z",
+          "profile": "antigravity-native-executor",
+          "rank": null,
+          "sample_size": 5
+        },
+        {
+          "accepted_count": 0,
+          "accepted_rate_wilson_lower": 0.0,
+          "evidence_age_days": null,
+          "insufficiency_reasons": [
+            "insufficient_sample_size: 0 tasks (minimum 10)"
+          ],
+          "is_eligible": false,
+          "median_latency_seconds": null,
+          "newest_evidence_timestamp": null,
+          "oldest_evidence_timestamp": null,
+          "profile": "codex-native-executor",
+          "rank": null,
+          "sample_size": 0
+        }
+      ],
+      "recommended_profile": null,
+      "task_class": "maintenance"
+    },
+    {
+      "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
+      "mutation_mode": "mutation",
+      "rankings": [
+        {
+          "accepted_count": 0,
+          "accepted_rate_wilson_lower": 0.0,
+          "evidence_age_days": null,
+          "insufficiency_reasons": [
+            "insufficient_sample_size: 0 tasks (minimum 10)"
+          ],
+          "is_eligible": false,
+          "median_latency_seconds": null,
+          "newest_evidence_timestamp": null,
+          "oldest_evidence_timestamp": null,
+          "profile": "antigravity-native-executor",
+          "rank": null,
+          "sample_size": 0
+        },
+        {
+          "accepted_count": 0,
+          "accepted_rate_wilson_lower": 0.0,
+          "evidence_age_days": 11.8,
+          "insufficiency_reasons": [
+            "insufficient_sample_size: 1 tasks (minimum 10)"
+          ],
+          "is_eligible": false,
+          "median_latency_seconds": 847.0,
+          "newest_evidence_timestamp": "2026-09-05T15:58:32.123268Z",
+          "oldest_evidence_timestamp": "2026-09-05T15:58:32.123268Z",
+          "profile": "codex-native-executor",
+          "rank": null,
+          "sample_size": 1
+        }
+      ],
+      "recommended_profile": null,
+      "task_class": "refactor"
+    },
+    {
+      "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
+      "mutation_mode": "read_only",
+      "rankings": [
+        {
+          "accepted_count": 0,
+          "accepted_rate_wilson_lower": 0.0,
+          "evidence_age_days": null,
+          "insufficiency_reasons": [
+            "insufficient_sample_size: 0 tasks (minimum 10)"
+          ],
+          "is_eligible": false,
+          "median_latency_seconds": null,
+          "newest_evidence_timestamp": null,
+          "oldest_evidence_timestamp": null,
+          "profile": "antigravity-native-executor-read-only",
+          "rank": null,
+          "sample_size": 0
+        },
+        {
+          "accepted_count": 0,
+          "accepted_rate_wilson_lower": 0.0,
+          "evidence_age_days": null,
+          "insufficiency_reasons": [
+            "insufficient_sample_size: 0 tasks (minimum 10)"
+          ],
+          "is_eligible": false,
+          "median_latency_seconds": null,
+          "newest_evidence_timestamp": null,
+          "oldest_evidence_timestamp": null,
+          "profile": "codex-native-executor-read-only",
+          "rank": null,
+          "sample_size": 0
+        }
+      ],
+      "recommended_profile": null,
+      "task_class": "scout"
+    }
+  ],
+  "schema_version": 1,
+  "status": "partial"
+}
