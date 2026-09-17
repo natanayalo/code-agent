@@ -179,3 +179,78 @@ class ProviderReliabilityReport(StrictModel):
     exclusions: TaskExclusionSummary
     evidence_cells: list[ProviderReliabilityEvidenceCell]
     recommendations: list[TaskClassRecommendation]
+
+
+class ProviderReliabilityRobustnessPolicy(StrictModel):
+    """Configuration and parameters for offline provider reliability robustness evaluation."""
+
+    schema_version: Literal[1] = 1
+    lookback_days: Literal[90] = 90
+    min_samples: int = Field(default=10, ge=1)
+    confidence_level: float = Field(default=0.95, gt=0.0, lt=1.0)
+    as_of: datetime
+    window_start_at: datetime
+    window_end_at: datetime
+    windows_days: tuple[int, ...] = (30, 60, 90)
+    temporal_split_days: int = Field(default=45, ge=1)
+    bootstrap_iterations: int = Field(default=10000, ge=1)
+    bootstrap_seed: int = Field(default=29)
+    enabled_profiles: list[str] = Field(default_factory=lambda: list(DEFAULT_ENABLED_PROFILES))
+    expected_groups: list[tuple[str, MutationMode]] = Field(
+        default_factory=lambda: list(DEFAULT_EXPECTED_GROUPS)
+    )
+
+
+class WindowRecommendationResult(StrictModel):
+    """Recommendation decision outcomes across a specific lookback window."""
+
+    window_days: int = Field(ge=1)
+    window_start_at: datetime
+    window_end_at: datetime
+    included_tasks_count: int = Field(ge=0)
+    recommendations: list[TaskClassRecommendation] = Field(default_factory=list)
+
+
+class TemporalCohortResult(StrictModel):
+    """Recommendation decision outcomes across a temporal half-split cohort."""
+
+    cohort_name: Literal["historical", "recent"]
+    window_start_at: datetime
+    window_end_at: datetime
+    included_tasks_count: int = Field(ge=0)
+    recommendations: list[TaskClassRecommendation] = Field(default_factory=list)
+
+
+class BootstrapCandidateResult(StrictModel):
+    """Candidate rank distribution and win metrics from bootstrap resampling."""
+
+    profile: str = Field(min_length=1)
+    sample_size: int = Field(ge=0)
+    win_count: int = Field(ge=0)
+    win_probability: float = Field(ge=0.0, le=1.0)
+    rank_counts: dict[str, int] = Field(default_factory=dict)
+    rank_probabilities: dict[str, float] = Field(default_factory=dict)
+
+
+class BootstrapGroupResult(StrictModel):
+    """Bootstrap resampling outcome for one (task_class, mutation_mode) group."""
+
+    task_class: str = Field(min_length=1)
+    mutation_mode: MutationMode
+    status: Literal["complete", "insufficient_data"]
+    eligible_profiles: list[str] = Field(default_factory=list)
+    candidates: list[BootstrapCandidateResult] = Field(default_factory=list)
+    fallback_reason: str | None = None
+
+
+class ProviderReliabilityRobustnessReport(StrictModel):
+    """Versioned provider reliability robustness advisory report (schema v1)."""
+
+    schema_version: Literal[1] = 1
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    status: ReportStatus
+    policy: ProviderReliabilityRobustnessPolicy
+    exclusions: TaskExclusionSummary
+    windows: list[WindowRecommendationResult]
+    temporal_cohorts: list[TemporalCohortResult]
+    bootstrap_results: list[BootstrapGroupResult]
