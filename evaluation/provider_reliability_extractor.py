@@ -26,6 +26,7 @@ from evaluation.provider_reliability_models import (
     ProfileCoverageSummary,
     ProviderReliabilityEvidenceCell,
     ProviderReliabilityReport,
+    ProviderReliabilityRobustnessPolicy,
     ReliabilityReportPolicy,
     RepairMetrics,
     StageOutcomeRates,
@@ -117,7 +118,7 @@ def _calculate_latencies(values: list[float]) -> LatencyMetrics:
 
 
 def _validate_task_candidate(
-    task: Task, policy: ReliabilityReportPolicy
+    task: Task, policy: ReliabilityReportPolicy | ProviderReliabilityRobustnessPolicy
 ) -> tuple[str | None, MutationMode | None, datetime | None, str | None]:
     """Check task eligibility criteria and return exclusion reason if invalid."""
     if task.status == TaskStatus.CANCELLED:
@@ -163,7 +164,7 @@ def _validate_task_candidate(
 
 
 def _extract_single_task(
-    task: Task, policy: ReliabilityReportPolicy
+    task: Task, policy: ReliabilityReportPolicy | ProviderReliabilityRobustnessPolicy
 ) -> tuple[ExtractedTaskEvidence | None, str | None]:
     """Extract and validate one task, returning evidence or an exclusion reason."""
     reason, mode, terminal_ts, profile = _validate_task_candidate(task, policy)
@@ -313,7 +314,7 @@ def _build_tasks_query(window_start_at: datetime, window_end_at: datetime):
 
 
 def load_and_classify_tasks(
-    session: Session, policy: ReliabilityReportPolicy
+    session: Session, policy: ReliabilityReportPolicy | ProviderReliabilityRobustnessPolicy
 ) -> tuple[list[ExtractedTaskEvidence], TaskExclusionSummary]:
     """Query tasks within bounded window and classify into evidence or exclusions."""
     older_count, newer_count = _query_boundary_counts(
@@ -417,7 +418,7 @@ def _compute_cell_repairs_and_interventions(
 def _aggregate_cell(
     key: tuple[str, str, MutationMode],
     tasks: list[ExtractedTaskEvidence],
-    policy: ReliabilityReportPolicy,
+    policy: ReliabilityReportPolicy | ProviderReliabilityRobustnessPolicy,
 ) -> ProviderReliabilityEvidenceCell:
     """Aggregate task observations for one (task_class, profile, mutation_mode) cell."""
     task_class, profile, mode = key
@@ -467,19 +468,26 @@ def _aggregate_cell(
     )
 
 
-def extract_provider_reliability_report(
-    database_url: str, policy: ReliabilityReportPolicy
-) -> ProviderReliabilityReport:
-    """Execute read-only extraction and assemble the versioned report."""
+def load_task_evidence_snapshot(
+    database_url: str,
+    policy: ReliabilityReportPolicy | ProviderReliabilityRobustnessPolicy,
+) -> tuple[list[ExtractedTaskEvidence], TaskExclusionSummary]:
+    """Execute read-only extraction of task observations and exclusion accounting."""
     engine = create_engine_from_url(database_url)
     try:
         with Session(engine) as session:
             if engine.dialect.name == "postgresql":
                 session.execute(text("SET TRANSACTION READ ONLY"))
-            tasks, exclusions = load_and_classify_tasks(session, policy)
+            return load_and_classify_tasks(session, policy)
     finally:
         engine.dispose()
 
+
+def build_evidence_cells(
+    tasks: list[ExtractedTaskEvidence],
+    policy: ReliabilityReportPolicy | ProviderReliabilityRobustnessPolicy,
+) -> list[ProviderReliabilityEvidenceCell]:
+    """Aggregate raw task observations into empirical evidence cells."""
     grouped: dict[tuple[str, str, MutationMode], list[ExtractedTaskEvidence]] = {}
     observed_groups: set[tuple[str, MutationMode]] = set()
     for task in tasks:
@@ -495,9 +503,14 @@ def extract_provider_reliability_report(
             if (t_class, p, m_typed) not in grouped:
                 grouped[(t_class, p, m_typed)] = []
 
-    cells = [_aggregate_cell(key, task_list, policy) for key, task_list in sorted(grouped.items())]
-    recommendations = generate_recommendations(cells, as_of=policy.as_of)
+    return [_aggregate_cell(key, task_list, policy) for key, task_list in sorted(grouped.items())]
 
+
+def build_profile_coverage(
+    cells: list[ProviderReliabilityEvidenceCell],
+    policy: ReliabilityReportPolicy | ProviderReliabilityRobustnessPolicy,
+) -> list[ProfileCoverageSummary]:
+    """Build coverage summary across enabled catalog profiles."""
     profile_coverage: list[ProfileCoverageSummary] = []
     for p in policy.enabled_profiles:
         p_mode: MutationMode = "read_only" if p.endswith("-read-only") else "mutation"
@@ -513,6 +526,18 @@ def extract_provider_reliability_report(
                 is_eligible=is_elig,
             )
         )
+    return profile_coverage
+
+
+def build_provider_reliability_report(
+    tasks: list[ExtractedTaskEvidence],
+    exclusions: TaskExclusionSummary,
+    policy: ReliabilityReportPolicy,
+) -> ProviderReliabilityReport:
+    """Assemble the versioned aggregate provider reliability advisory report."""
+    cells = build_evidence_cells(tasks, policy)
+    recommendations = generate_recommendations(cells, as_of=policy.as_of)
+    profile_coverage = build_profile_coverage(cells, policy)
 
     return ProviderReliabilityReport(
         schema_version=1,
@@ -526,8 +551,19 @@ def extract_provider_reliability_report(
     )
 
 
+def extract_provider_reliability_report(
+    database_url: str, policy: ReliabilityReportPolicy
+) -> ProviderReliabilityReport:
+    """Execute read-only extraction and assemble the versioned report."""
+    tasks, exclusions = load_task_evidence_snapshot(database_url, policy)
+    return build_provider_reliability_report(tasks, exclusions, policy)
+
+
 __all__ = [
     "ExtractedTaskEvidence",
+    "build_evidence_cells",
+    "build_profile_coverage",
+    "build_provider_reliability_report",
     "check_delivery_stage",
     "check_review_stage",
     "check_task_stages",
@@ -539,6 +575,7 @@ __all__ = [
     "generate_recommendations",
     "is_profile_compatible_with_mode",
     "load_and_classify_tasks",
+    "load_task_evidence_snapshot",
     "resolve_failure_kind",
     "verify_timeline_consistency",
 ]

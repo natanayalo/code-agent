@@ -45,6 +45,10 @@ allowlist redaction).
   contract aggregating real-task outcomes by task class, profile, and mutation
   mode with 95% Wilson confidence intervals, fallback recommendations, and
   public allowlist redaction
+- an offline read-only M29 provider reliability robustness analysis CLI and
+  versioned contract evaluating 30/60/90-day window variation, non-overlapping
+  historical/recent temporal cohorts, and deterministic bootstrap resampling with
+  public allowlist redaction
 
 Completed work remains in [`CHANGELOG.md`](../CHANGELOG.md). The historical
 Temporal migration and rollback record is in the
@@ -146,9 +150,8 @@ Temporal migration and rollback record is in the
 1. Advance M29 — Provider Reliability and Evidence-Driven Routing: collect
    targeted real-task evidence (2 `investigation` read-only Antigravity tasks for
    floor 10 eligibility; 10 `feature` read-only and 8 `docs` read-only tasks for
-   floor 20) and evaluate ranking robustness through evidence-perturbation checks
-   (30/60/90-day window variation, temporal splits, and bootstrap resampling) for
-   evidence-backed routing.
+   floor 20) and execute a live robustness run against the real-task evidence
+   snapshot for evidence-backed routing.
 2. Use the M28 report as a scoped safety/effectiveness signal only; do not
    change routing or add semantic retrieval without further evidence.
 

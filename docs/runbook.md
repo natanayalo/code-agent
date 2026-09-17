@@ -633,6 +633,45 @@ export DATABASE_URL="postgresql+psycopg://..."
   validator that forbids task IDs, task text, repository URLs, branch names, summaries,
   logs, artifact URIs, and secrets.
 
+### M29 provider reliability robustness analysis
+
+The M29 provider reliability robustness analysis evaluates the stability and sensitivity of candidate rankings under observation perturbations without changing live routing or introducing automated pass/fail policy thresholds. It analyzes one bounded 90-day PostgreSQL observation snapshot across window variations, temporal half-splits, and deterministic bootstrap resampling.
+
+Generate the robustness report using the operator CLI:
+
+```bash
+export DATABASE_URL="postgresql+psycopg://..."
+
+.venv/bin/python scripts/e2e/run_provider_reliability_robustness.py \
+  --database-url-env DATABASE_URL \
+  --min-samples 10 \
+  --bootstrap-iterations 10000 \
+  --bootstrap-seed 29 \
+  --json-output artifacts/evaluations/m29-provider-reliability-robustness.json \
+  --markdown-output artifacts/evaluations/m29-provider-reliability-robustness.md
+```
+
+#### CLI options and parameters
+
+- `--database-url-env`: Name of the environment variable storing the database connection URL. In PostgreSQL environments, the transaction is executed with `SET TRANSACTION READ ONLY`.
+- `--as-of`: Optional ISO 8601 reference timestamp (defaults to current UTC).
+- `--lookback-days`: Observation snapshot lookback window in days (fixed at 90).
+- `--min-samples`: Minimum completed/failed task count required per candidate profile cell (default: 10).
+- `--bootstrap-iterations`: Number of bootstrap resampling iterations (default: 10,000).
+- `--bootstrap-seed`: Deterministic base random seed for bootstrap resampling (default: 29).
+- `--json-output` / `--markdown-output`: Optional file paths to write deterministic sanitized outputs. If neither is specified, the Markdown report is printed to stdout.
+
+#### Data handling and interpretation
+
+- **Window variation**: Evaluates candidate recommendations across 30, 60, and 90-day lookback windows (`[as_of-30d, as_of]`, `[as_of-60d, as_of]`, `[as_of-90d, as_of]`) to detect sample-sparsity fallbacks and ranking changes over time.
+- **Temporal split-half cohorts**: Partitions tasks into non-overlapping historical `[as_of-90d, as_of-45d)` and recent `[as_of-45d, as_of]` cohorts to test for temporal drift in provider capability with zero overlap at the 45-day boundary.
+- **Deterministic bootstrap resampling**: Runs 10,000 bootstrap iterations with seed 29. Whole task observations are resampled independently within each eligible candidate profile cell, preserving sample sizes and the empirical correlation between acceptance and latency.
+- **Stable per-group seeding**: The base seed is combined with `(task_class, mutation_mode)` via SHA-256 digest to ensure deterministic reproducibility per candidate pool regardless of execution order.
+- **Ranking parity**: Candidate ranking strictly matches production: Wilson 95% confidence interval lower bound (descending), median latency in seconds (ascending, missing latency treated as infinite), and profile name (ascending).
+- **Eligibility gating & descriptive reporting**: Bootstrap is executed only when at least two profiles meet the sample floor; otherwise an explicit `insufficient_data` result with fallback reason is emitted. Winner counts, probabilities, and rank distributions are reported descriptively without automated "safe to route" thresholds.
+- **Exclusion accounting**: Root exclusions describe the full 90-day observation snapshot scanned from the database.
+- **Public data boundary**: Generated JSON and Markdown artifacts are validated by `assert_sanitized_robustness_report()` to ensure zero leak of task IDs, user prompt text, repositories, branch names, logs, artifacts, or secrets.
+
 
 ## 10) Antigravity Migration Guide
 
