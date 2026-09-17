@@ -30,17 +30,26 @@ def _write_atomic(path: Path, content: str) -> None:
     pending.replace(path)
 
 
-def _parse_as_of(val: str | None) -> datetime:
-    """Parse as-of timestamp into UTC datetime."""
+def _parse_as_of(val: str | None, max_future_skew_seconds: int = 60) -> datetime:
+    """Parse as-of timestamp into UTC datetime, rejecting materially future timestamps."""
+    now_utc = datetime.now(UTC)
     if not val:
-        return datetime.now(UTC)
+        return now_utc
     try:
         dt = datetime.fromisoformat(val)
         if dt.tzinfo is None:
-            return dt.replace(tzinfo=UTC)
-        return dt.astimezone(UTC)
+            parsed = dt.replace(tzinfo=UTC)
+        else:
+            parsed = dt.astimezone(UTC)
     except ValueError as exc:
         raise ValueError(f"Invalid ISO timestamp for --as-of: {val}") from exc
+
+    if parsed > now_utc + timedelta(seconds=max_future_skew_seconds):
+        raise ValueError(
+            f"--as-of timestamp cannot be materially in the future (got {parsed.isoformat()} > "
+            f"current {now_utc.isoformat()} + {max_future_skew_seconds}s tolerance)"
+        )
+    return parsed
 
 
 def build_parser() -> argparse.ArgumentParser:

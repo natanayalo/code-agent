@@ -712,3 +712,37 @@ def test_valid_failure_kinds_covers_canonical_and_renders_compile() -> None:
     rendered_json = render_json_report(report)
     assert '"compile": 2' in rendered_json
     assert_sanitized_report(rendered_json)
+
+
+def test_parse_as_of_valid_and_future_guard() -> None:
+    """Validate CLI as-of parsing handles defaults, zones, invalid formats, and future guards."""
+    from scripts.e2e.run_provider_reliability_report import _parse_as_of
+
+    # Default None returns near current UTC
+    now_res = _parse_as_of(None)
+    assert now_res.tzinfo == UTC
+    assert abs((datetime.now(UTC) - now_res).total_seconds()) < 2.0
+
+    # Valid past ISO string
+    past_iso = "2026-09-01T12:00:00Z"
+    parsed_past = _parse_as_of(past_iso)
+    assert parsed_past == datetime(2026, 9, 1, 12, 0, 0, tzinfo=UTC)
+
+    # Naive ISO string gets UTC tzinfo
+    naive_iso = "2026-09-01T12:00:00"
+    parsed_naive = _parse_as_of(naive_iso)
+    assert parsed_naive.tzinfo == UTC
+    assert parsed_naive == datetime(2026, 9, 1, 12, 0, 0, tzinfo=UTC)
+
+    # Invalid ISO string raises ValueError
+    with pytest.raises(ValueError, match="Invalid ISO timestamp for --as-of"):
+        _parse_as_of("not-a-timestamp")
+
+    # Future timestamp within tolerance succeeds
+    near_future = (datetime.now(UTC) + timedelta(seconds=30)).isoformat()
+    assert _parse_as_of(near_future) is not None
+
+    # Materially future timestamp (> 60s) raises ValueError
+    far_future = (datetime.now(UTC) + timedelta(minutes=10)).isoformat()
+    with pytest.raises(ValueError, match="--as-of timestamp cannot be materially in the future"):
+        _parse_as_of(far_future)

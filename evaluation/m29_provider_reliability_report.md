@@ -1,8 +1,8 @@
 # M29 Provider Reliability Advisory Report
 
 - **Status**: `partial`
-- **Generated At**: `2026-09-17T10:06:32.954342+00:00`
-- **Evidence Window**: `2026-06-19T10:10:00+00:00` to `2026-09-17T10:10:00+00:00` (90 days)
+- **Generated At**: `2026-09-17T11:52:56.244530+00:00`
+- **Evidence Window**: `2026-06-19T10:00:00+00:00` to `2026-09-17T10:00:00+00:00` (90 days)
 - **Minimum Samples Per Cell**: `10`
 - **Confidence Level**: `95%` (Wilson score interval)
 

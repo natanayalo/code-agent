@@ -1107,9 +1107,9 @@
     "included_tasks_count": 212,
     "total_tasks_scanned": 314
   },
-  "generated_at": "2026-09-17T10:06:32.954342Z",
+  "generated_at": "2026-09-17T11:52:56.244530Z",
   "policy": {
-    "as_of": "2026-09-17T10:10:00Z",
+    "as_of": "2026-09-17T10:00:00Z",
     "confidence_level": 0.95,
     "enabled_profiles": [
       "codex-native-executor",
@@ -1130,8 +1130,8 @@
     "lookback_days": 90,
     "min_samples": 10,
     "schema_version": 1,
-    "window_end_at": "2026-09-17T10:10:00Z",
-    "window_start_at": "2026-06-19T10:10:00Z"
+    "window_end_at": "2026-09-17T10:00:00Z",
+    "window_start_at": "2026-06-19T10:00:00Z"
   },
   "profile_coverage": [
     {
