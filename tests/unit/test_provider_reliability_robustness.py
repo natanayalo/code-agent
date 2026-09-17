@@ -414,30 +414,15 @@ def test_policy_invariant_enforcement() -> None:
             windows_days=(30, 60),
         )
 
-    # temporal_split_days <= 0 or >= 90
-    with pytest.raises(
-        ValidationError, match=r"greater than or equal to 1|temporal_split_days .* must be between"
-    ):
-        ProviderReliabilityRobustnessPolicy(
-            as_of=AS_OF,
-            window_start_at=AS_OF - timedelta(days=90),
-            window_end_at=AS_OF,
-            temporal_split_days=0,
-        )
-    with pytest.raises(ValidationError, match="temporal_split_days .* must be between"):
-        ProviderReliabilityRobustnessPolicy(
-            as_of=AS_OF,
-            window_start_at=AS_OF - timedelta(days=90),
-            window_end_at=AS_OF,
-            temporal_split_days=90,
-        )
-    with pytest.raises(ValidationError, match="temporal_split_days .* must be between"):
-        ProviderReliabilityRobustnessPolicy(
-            as_of=AS_OF,
-            window_start_at=AS_OF - timedelta(days=90),
-            window_end_at=AS_OF,
-            temporal_split_days=120,
-        )
+    # temporal_split_days must be exactly 45
+    for invalid_split in (0, 30, 60, 90, 120):
+        with pytest.raises(ValidationError, match="temporal_split_days must be exactly 45"):
+            ProviderReliabilityRobustnessPolicy(
+                as_of=AS_OF,
+                window_start_at=AS_OF - timedelta(days=90),
+                window_end_at=AS_OF,
+                temporal_split_days=invalid_split,
+            )
 
 
 def test_bootstrap_candidate_rank_validation() -> None:

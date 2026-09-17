@@ -195,7 +195,7 @@ class ProviderReliabilityRobustnessPolicy(StrictModel):
     window_start_at: datetime
     window_end_at: datetime
     windows_days: tuple[int, ...] = (30, 60, 90)
-    temporal_split_days: int = Field(default=45, ge=1)
+    temporal_split_days: int = Field(default=45)
     bootstrap_iterations: int = Field(default=10000, ge=1)
     bootstrap_seed: int = Field(default=29)
     enabled_profiles: list[str] = Field(default_factory=lambda: list(DEFAULT_ENABLED_PROFILES))
@@ -217,11 +217,8 @@ class ProviderReliabilityRobustnessPolicy(StrictModel):
             )
         if tuple(self.windows_days) != (30, 60, 90):
             raise ValueError(f"windows_days must be exactly (30, 60, 90), got {self.windows_days}")
-        if not (0 < self.temporal_split_days < self.lookback_days):
-            raise ValueError(
-                f"temporal_split_days ({self.temporal_split_days}) must be "
-                f"between 1 and {self.lookback_days - 1}"
-            )
+        if self.temporal_split_days != 45:
+            raise ValueError("temporal_split_days must be exactly 45")
         return self
 
 
