@@ -132,3 +132,16 @@ def test_terminal_delivery_failed_overrides_verifier_outcome_and_ignores_stale_a
     assert (
         resolve_failure_kind(task_current, accepted=True, runs=[run_with_compile_failure]) is None
     )
+
+
+def test_unvalidated_worker_run_failure_kind_falls_back_to_task_error_or_unknown() -> None:
+    """Proves unvalidated worker run failure kinds do not bypass VALID_FAILURE_KINDS."""
+    task_no_err = Task(status=TaskStatus.FAILED, last_error=None)
+    run_novel = WorkerRun(
+        status=WorkerRunStatus.FAILURE,
+        verifier_outcome={"status": "failed", "failure_kind": "novel_unvalidated_string"},
+    )
+    assert resolve_failure_kind(task_no_err, accepted=False, runs=[run_novel]) == "unknown"
+
+    task_with_err = Task(status=TaskStatus.FAILED, last_error="some error")
+    assert resolve_failure_kind(task_with_err, accepted=False, runs=[run_novel]) == "task_error"

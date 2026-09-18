@@ -236,7 +236,7 @@ def resolve_failure_kind(task: Task, accepted: bool, runs: list[WorkerRun]) -> s
     for r in reversed(runs):
         outcome = r.verifier_outcome if isinstance(r.verifier_outcome, dict) else {}
         fk = outcome.get("failure_kind")
-        if fk:
+        if fk and str(fk) in VALID_FAILURE_KINDS:
             return str(fk)
 
     if task.last_error:
