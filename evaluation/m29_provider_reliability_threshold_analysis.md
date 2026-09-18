@@ -149,3 +149,40 @@ In the operational diagnostic view (aggregating across all model vintages over t
    - Wave 2 qualifies `docs/read_only` at the canonical sample floor ($N=10$), while robustness status is explicitly reported as `partial` to acknowledge that temporal consistency cannot be claimed from a single timestamp cluster.
 2. **Production Routing Integrity**:
    - **Production routing remains strictly unchanged.** Production routing continues to use the existing static/checked-in metrics. Any runtime routing update is reserved for future explicit policy slices with full change controls.
+
+---
+
+## 7. Post-Wave Decision Record
+
+Following review of the Wave 2 evidence, the following definitive post-wave decisions are formally recorded:
+
+1. **Advisory Recommendation for `docs/read_only`**:
+   - Wave 2 satisfies the canonical dual-candidate sample floor ($N=10$ vs $10$) under verified current execution cohorts (`codex:gpt-5.6-luna/high` vs `antigravity:gemini-3.8-flash/medium`).
+   - The canonical advisory report (`evaluation/m29_provider_reliability_report.json`) recommends `codex-native-executor-read-only` based on $10/10$ accepted tasks ($100\%$ acceptance rate, Wilson 95% CI $[0.7225, 1.0]$, median latency $194.64\text{s}$, $2$ verifier repairs) over `antigravity-native-executor-read-only` ($9/10$ accepted tasks, Wilson 95% CI $[0.5958, 0.9821]$, median latency $150.67\text{s}$, $1$ typed failure: `infra_verifier_unavailable`).
+   - In 10,000 bootstrap iterations (seed 29), Codex achieved a $66.06\%$ win probability ($6,606$ wins) versus Antigravity's $33.94\%$ ($3,394$ wins).
+   - This recommendation is strictly advisory.
+
+2. **No Production Routing Policy Changes**:
+   - **Production routing policy remains strictly unchanged.** Production routing continues to use static heuristic / checked-in configuration (`evaluation/routing_metrics.json` is untouched).
+   - Neither automatic nor manual runtime routing changes will be made from this single evidence wave.
+   - Any future live routing update requires multi-cohort stability, broad task class representation, and a dedicated, reversible policy PR with explicit change controls.
+
+3. **No M27 Resumption**:
+   - Milestone M27 (reliability-based autonomy) remains deferred.
+   - A $66.06\%$ bootstrap win probability from a single clustered 20-task execution wave and the complete lack of historical current-cohort evidence ($0$ tasks in the historical 45-day split; robustness status `partial`) are insufficient to satisfy M27 entry conditions.
+   - Promoting actions from blocking approval to `proceed_with_flag` or `notify_only` requires longitudinal, multi-cohort proof of stability that a single 20-task cluster cannot provide.
+
+4. **Target Cells Lacking Evidence Remain Insufficient-Data**:
+   - The other three canonical target cells have zero samples under verified current-cohort identities:
+     - `feature` (`mutation`): $N=0$ (`insufficient_sample_size: 0 tasks (minimum 10)`)
+     - `feature` (`read_only`): $N=0$ (`insufficient_sample_size: 0 tasks (minimum 10)`)
+     - `investigation` (`read_only`): $N=0$ (`insufficient_sample_size: 0 tasks (minimum 10)`)
+   - Each cell reports fallback reason `no_eligible_candidates: all candidates lack sufficient samples`, with candidate rankings and recommended profiles suppressed (`null`). They remain explicitly labeled `insufficient-data`.
+
+5. **Milestone M29 Status & Ordered Next Slices**:
+   - Milestone M29 remains active; completing the post-wave review does not declare M29 complete.
+   - The remaining M29 work is ordered as follows:
+     1. Remove legacy raw-secret ingress and enforce opaque registered references (`RegisteredSecretDefinition` fail-closed gating).
+     2. Add provider-specific pre-dispatch diagnostics (validating credentials, CLI binaries, and container runtime readiness prior to dispatch).
+     3. Gather longitudinal and missing-cell current-cohort evidence (expanding coverage to `feature` and `investigation` cells across separated temporal cohorts).
+     4. Evaluate hierarchical budget controls separately (per-task, per-node, repair loops, wall time, and concurrency limits).
