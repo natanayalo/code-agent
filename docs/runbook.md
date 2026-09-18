@@ -587,12 +587,23 @@ Generate the report using the operator CLI:
 ```bash
 export DATABASE_URL="postgresql+psycopg://..."
 
+# Canonical Current-Cohort Advisory Report (default: current_execution_cohort)
 .venv/bin/python scripts/e2e/run_provider_reliability_report.py \
   --database-url-env DATABASE_URL \
+  --evidence-scope current_execution_cohort \
   --lookback-days 90 \
   --min-samples 10 \
-  --json-output artifacts/evaluations/m29-provider-reliability-report.json \
-  --markdown-output artifacts/evaluations/m29-provider-reliability-report.md
+  --json-output evaluation/m29_provider_reliability_report.json \
+  --markdown-output evaluation/m29_provider_reliability_report.md
+
+# Operational Diagnostic Report (all historical tasks & model vintages)
+.venv/bin/python scripts/e2e/run_provider_reliability_report.py \
+  --database-url-env DATABASE_URL \
+  --evidence-scope operational \
+  --lookback-days 90 \
+  --min-samples 10 \
+  --json-output evaluation/m29_provider_reliability_operational_report.json \
+  --markdown-output evaluation/m29_provider_reliability_operational_report.md
 ```
 
 #### CLI options and policy parameters
@@ -600,6 +611,13 @@ export DATABASE_URL="postgresql+psycopg://..."
 - `--database-url-env`: Name of the environment variable storing the database
   connection URL. In PostgreSQL environments, the transaction is executed with
   `SET TRANSACTION READ ONLY`.
+- `--evidence-scope`: Evidence filtering scope:
+  - `current_execution_cohort` (default): Strictly filters tasks to those whose worker runs
+    persisted authoritative `model_execution` budget metadata matching the current expected
+    cohorts (`codex: gpt-5.6-luna/high`, `antigravity: gemini-3.8-flash/medium`). Zero heuristic
+    inference.
+  - `operational`: Admits all terminal tasks regardless of model vintage for complete 90-day
+    system accounting, diagnostic failure decomposition, and historical tracking.
 - `--as-of`: Optional ISO 8601 reference timestamp (defaults to current UTC).
 - `--lookback-days`: Evidence observation window in days (default: 90). Tasks with
   terminal timestamps outside `[as_of - lookback_days, as_of]` are reported under
@@ -616,7 +634,7 @@ export DATABASE_URL="postgresql+psycopg://..."
   retry attempts or number of worker runs, preventing retry loops from inflating sample sizes.
 - **Inclusion criteria**: Requires terminal (`completed` or `failed`) Temporal tasks
   running in `native_agent` mode with a valid `TaskSpec`, pinned profile, and
-  consistent terminal timeline events. Cancelled, in-progress, malformed, or
+  consistent terminal timeline events. Cancelled, in-progress, malformed, smoke, or
   inconsistent tasks are categorized under exclusions.
 - **Stage applicability**: Unconfigured verification, independent review, and
   delivery stages are treated as not applicable (`None`) rather than failures.
@@ -648,8 +666,8 @@ export DATABASE_URL="postgresql+psycopg://..."
   --min-samples 10 \
   --bootstrap-iterations 10000 \
   --bootstrap-seed 29 \
-  --json-output artifacts/evaluations/m29-provider-reliability-robustness.json \
-  --markdown-output artifacts/evaluations/m29-provider-reliability-robustness.md
+  --json-output evaluation/m29_provider_reliability_robustness_report.json \
+  --markdown-output evaluation/m29_provider_reliability_robustness_report.md
 ```
 
 #### CLI options and parameters
@@ -665,13 +683,55 @@ export DATABASE_URL="postgresql+psycopg://..."
 #### Data handling and interpretation
 
 - **Window variation**: Evaluates candidate recommendations across 30, 60, and 90-day lookback windows (`[as_of-30d, as_of]`, `[as_of-60d, as_of]`, `[as_of-90d, as_of]`) to detect sample-sparsity fallbacks and ranking changes over time.
-- **Temporal split-half cohorts**: Partitions tasks into non-overlapping historical `[as_of-90d, as_of-45d)` and recent `[as_of-45d, as_of]` cohorts to test for temporal drift in provider capability with zero overlap at the 45-day boundary.
+- **Temporal split-half cohorts**: Partitions tasks into non-overlapping historical `[as_of-90d, as_of-45d)` and recent `[as_of-45d, as_of]` cohorts to test for temporal drift in provider capability with zero overlap at the 45-day boundary. If the historical cohort has zero tasks, the report status is marked `partial`.
 - **Deterministic bootstrap resampling**: Runs 10,000 bootstrap iterations with seed 29. Whole task observations are resampled independently within each eligible candidate profile cell, preserving sample sizes and the empirical correlation between acceptance and latency.
 - **Stable per-group seeding**: The base seed is combined with `(task_class, mutation_mode)` via SHA-256 digest to ensure deterministic reproducibility per candidate pool regardless of execution order.
 - **Ranking parity**: Candidate ranking strictly matches production: Wilson 95% confidence interval lower bound (descending), median latency in seconds (ascending, missing latency treated as infinite), and profile name (ascending).
 - **Eligibility gating & descriptive reporting**: Bootstrap is executed only when at least two profiles meet the sample floor; otherwise an explicit `insufficient_data` result with fallback reason is emitted. Winner counts, probabilities, and rank distributions are reported descriptively without automated "safe to route" thresholds.
 - **Exclusion accounting**: Root exclusions describe the full 90-day observation snapshot scanned from the database.
 - **Public data boundary**: Generated JSON and Markdown artifacts are validated by `assert_sanitized_robustness_report()` to ensure zero leak of task IDs, user prompt text, repositories, branch names, logs, artifacts, or secrets.
+
+### M29 live evidence wave harness
+
+The M29 live evidence wave harness (`scripts/e2e/run_m29_evidence_wave.py`) manages reproducible, resumable execution of frozen evidence suites against real provider runtimes:
+
+```bash
+# 0. Preflight smoke check (validates live container model resolution without evaluation contamination)
+.venv/bin/python scripts/e2e/run_m29_evidence_wave.py smoke
+
+# 1. Initialize a new evidence bundle (Wave 2: 20 docs cases, 10 pairs)
+.venv/bin/python scripts/e2e/run_m29_evidence_wave.py init \
+  --bundle-dir artifacts/m29_evidence_bundle_wave2 \
+  --suite-path evaluation/m29_live_provider_suite_wave2.json \
+  --build-sha "$(git rev-parse HEAD)" \
+  --target-repository-revision "$(git rev-parse origin/master)" \
+  --ack-live-read-only-evidence
+
+# 2. Check execution status and cell progress
+.venv/bin/python scripts/e2e/run_m29_evidence_wave.py status \
+  --bundle-dir artifacts/m29_evidence_bundle_wave2 \
+  --suite-path evaluation/m29_live_provider_suite_wave2.json
+
+# 3. Execute the suite sequentially (with optional --preflight-smoke)
+.venv/bin/python scripts/e2e/run_m29_evidence_wave.py run-batch \
+  --bundle-dir artifacts/m29_evidence_bundle_wave2 \
+  --suite-path evaluation/m29_live_provider_suite_wave2.json \
+  --repo-key code-agent \
+  --branch master \
+  --timeout-seconds 900 \
+  --preflight-smoke
+```
+
+#### Bundles and Diagnostic Baselines
+- **Wave 1 Diagnostic Baseline**: `evaluation/m29_live_provider_suite.json` (28 tasks across investigation, feature, and docs), preserved immutably at `artifacts/m29_evidence_bundle_wave1_diagnostic/bundle.json`. Captures the historical `gpt-5.4-mini` retirement event.
+- **Wave 2 Live Evidence**: `evaluation/m29_live_provider_suite_wave2.json` (20 docs tasks across 10 balanced pairs), tracked at `artifacts/m29_evidence_bundle_wave2/bundle.json`. Powered to meet the canonical sample floor ($N=10$ vs $10$).
+
+#### Invariants & failure semantics
+- **Strict Read-Only Delivery**: All evidence cases enforce `delivery_mode=summary`, low risk, read-only mode, and zero changed files.
+- **Early Smoke Exclusion**: Smoke tasks specify `exclude_from_provider_reliability: True` in task constraints and are rejected early by the extractor as `evaluation_smoke`.
+- **Fail-Closed Gate Checks**: Any cancellation, pending interaction, or malformed timeline is flagged immediately as a gate failure.
+- **Resumable Execution**: In-flight task IDs are tracked in `bundle.json`. If interrupted, re-running `run-batch` resumes polling the active task without creating duplicates.
+- **Terminal Truth**: Once a case reaches a terminal status (`completed` or `failed`), it is recorded permanently in `bundle.json` and is never rerun or replaced.
 
 
 ## 10) Antigravity Migration Guide

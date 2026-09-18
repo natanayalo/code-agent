@@ -138,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
 
     window_start = as_of_dt - timedelta(days=args.lookback_days)
     policy = ProviderReliabilityRobustnessPolicy(
-        schema_version=1,
+        schema_version=2,
         lookback_days=90,
         min_samples=args.min_samples,
         confidence_level=0.95,
@@ -149,6 +149,7 @@ def main(argv: list[str] | None = None) -> int:
         temporal_split_days=45,
         bootstrap_iterations=args.bootstrap_iterations,
         bootstrap_seed=args.bootstrap_seed,
+        evidence_scope="current_execution_cohort",
     )
 
     LOGGER.info(

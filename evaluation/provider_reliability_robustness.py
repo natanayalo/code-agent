@@ -186,7 +186,7 @@ def _evaluate_window(
     """Evaluate candidate recommendations for one bounded lookback window."""
     w_tasks = partition_window_tasks(tasks, as_of, w_days)
     w_policy = ReliabilityReportPolicy(
-        schema_version=1,
+        schema_version=2,
         lookback_days=w_days,
         min_samples=policy.min_samples,
         confidence_level=policy.confidence_level,
@@ -195,6 +195,8 @@ def _evaluate_window(
         window_end_at=as_of,
         enabled_profiles=list(policy.enabled_profiles),
         expected_groups=list(policy.expected_groups),
+        evidence_scope=policy.evidence_scope,
+        expected_execution_identities=dict(policy.expected_execution_identities),
     )
     cells = build_evidence_cells(w_tasks, w_policy)
     recs = generate_recommendations(cells, as_of=as_of)
@@ -217,7 +219,7 @@ def _evaluate_cohort(
 ) -> TemporalCohortResult:
     """Evaluate candidate recommendations for one temporal half-split cohort."""
     c_policy = ReliabilityReportPolicy(
-        schema_version=1,
+        schema_version=2,
         lookback_days=policy.temporal_split_days,
         min_samples=policy.min_samples,
         confidence_level=policy.confidence_level,
@@ -226,6 +228,8 @@ def _evaluate_cohort(
         window_end_at=end_ts,
         enabled_profiles=list(policy.enabled_profiles),
         expected_groups=list(policy.expected_groups),
+        evidence_scope=policy.evidence_scope,
+        expected_execution_identities=dict(policy.expected_execution_identities),
     )
     cells = build_evidence_cells(c_tasks, c_policy)
     recs = generate_recommendations(cells, as_of=as_of)
@@ -238,22 +242,16 @@ def _evaluate_cohort(
     )
 
 
-def evaluate_robustness_snapshot(
+def _evaluate_temporal_cohorts(
     tasks: list[ExtractedTaskEvidence],
-    exclusions: TaskExclusionSummary,
     policy: ProviderReliabilityRobustnessPolicy,
-) -> ProviderReliabilityRobustnessReport:
-    """Conduct full robustness analysis across windows, cohorts, and deterministic bootstrap."""
+) -> list[TemporalCohortResult]:
+    """Partition tasks and evaluate recommendations for historical and recent cohorts."""
     as_of = policy.as_of
-
-    windows: list[WindowRecommendationResult] = [
-        _evaluate_window(tasks, as_of, w_days, policy) for w_days in policy.windows_days
-    ]
-
     hist_tasks, rec_tasks = partition_temporal_cohort_tasks(
         tasks, as_of, split_days=policy.temporal_split_days, lookback_days=policy.lookback_days
     )
-    temporal_cohorts: list[TemporalCohortResult] = [
+    return [
         _evaluate_cohort(
             "historical",
             hist_tasks,
@@ -272,6 +270,12 @@ def evaluate_robustness_snapshot(
         ),
     ]
 
+
+def _run_bootstrap_groups(
+    tasks: list[ExtractedTaskEvidence],
+    policy: ProviderReliabilityRobustnessPolicy,
+) -> list[BootstrapGroupResult]:
+    """Group eligible tasks by target/observed group and compute bootstrap results."""
     grouped_tasks: dict[tuple[str, MutationMode], dict[str, list[ExtractedTaskEvidence]]] = {}
     observed_groups: set[tuple[str, MutationMode]] = set()
     for t in tasks:
@@ -298,16 +302,36 @@ def evaluate_robustness_snapshot(
             confidence_level=policy.confidence_level,
         )
         bootstrap_results.append(b_res)
+    return bootstrap_results
+
+
+def evaluate_robustness_snapshot(
+    tasks: list[ExtractedTaskEvidence],
+    exclusions: TaskExclusionSummary,
+    policy: ProviderReliabilityRobustnessPolicy,
+) -> ProviderReliabilityRobustnessReport:
+    """Conduct full robustness analysis across windows, cohorts, and deterministic bootstrap."""
+    as_of = policy.as_of
+    windows = [_evaluate_window(tasks, as_of, w_days, policy) for w_days in policy.windows_days]
+    temporal_cohorts = _evaluate_temporal_cohorts(tasks, policy)
+    bootstrap_results = _run_bootstrap_groups(tasks, policy)
 
     baseline_90d_recs: list[TaskClassRecommendation] = []
     for w in windows:
         if w.window_days == 90:
             baseline_90d_recs = w.recommendations
             break
-    report_status: ReportStatus = determine_report_status(baseline_90d_recs)
+    report_status: ReportStatus = determine_report_status(
+        baseline_90d_recs,
+        expected_groups=policy.expected_groups,
+        evidence_scope=policy.evidence_scope,
+    )
+    has_empty_temporal = any(c.included_tasks_count == 0 for c in temporal_cohorts)
+    if has_empty_temporal and report_status == "complete":
+        report_status = "partial"
 
     return ProviderReliabilityRobustnessReport(
-        schema_version=1,
+        schema_version=2,
         generated_at=datetime.now(UTC),
         status=report_status,
         policy=policy,

@@ -144,7 +144,7 @@ def test_robustness_extractor_synthetic_integration(tmp_path: Path) -> None:
     """Validate full robustness analysis across 30/60/90 windows, cohorts, and bootstrap."""
     db_url = _seed_robustness_tasks(tmp_path)
     policy = ProviderReliabilityRobustnessPolicy(
-        schema_version=1,
+        schema_version=2,
         lookback_days=90,
         min_samples=10,
         confidence_level=0.95,
@@ -254,7 +254,7 @@ def test_robustness_cli_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     json_content = json_path.read_text(encoding="utf-8")
     assert_sanitized_robustness_report(json_content)
     parsed = json.loads(json_content)
-    assert parsed["schema_version"] == 1
+    assert parsed["schema_version"] == 2
     assert parsed["policy"]["lookback_days"] == 90
     assert parsed["policy"]["bootstrap_iterations"] == 100
 

@@ -149,7 +149,7 @@ def test_temporal_cohort_split_non_overlapping() -> None:
 def test_recommendation_ranking_parity() -> None:
     """Verify ranking logic in robustness preserves exact production recommendation parity."""
     policy = ReliabilityReportPolicy(
-        schema_version=1,
+        schema_version=2,
         lookback_days=90,
         min_samples=10,
         confidence_level=0.95,
@@ -188,7 +188,7 @@ def test_recommendation_ranking_parity() -> None:
 def test_recommendation_missing_median_latency_tie_break() -> None:
     """Validate that missing median latency is treated as float('inf') matching production."""
     policy = ReliabilityReportPolicy(
-        schema_version=1,
+        schema_version=2,
         lookback_days=90,
         min_samples=10,
         confidence_level=0.95,
@@ -486,11 +486,11 @@ def test_bootstrap_candidate_rank_validation() -> None:
 def _build_sanitizer_base_payload() -> dict:
     """Construct minimal valid report payload for sanitizer testing."""
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "generated_at": AS_OF.isoformat(),
         "status": "complete",
         "policy": {
-            "schema_version": 1,
+            "schema_version": 2,
             "lookback_days": 90,
             "min_samples": 10,
             "confidence_level": 0.95,
@@ -597,11 +597,11 @@ def test_sanitization_bootstrap_candidates_adversarial_validation() -> None:
 def test_sanitization_public_allowlist_validator() -> None:
     """Test allowlist validator rejects forbidden keys and unsafe substrings."""
     valid_payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "generated_at": AS_OF.isoformat(),
         "status": "complete",
         "policy": {
-            "schema_version": 1,
+            "schema_version": 2,
             "lookback_days": 90,
             "min_samples": 10,
             "confidence_level": 0.95,
@@ -690,7 +690,7 @@ def test_full_report_evaluation_and_rendering() -> None:
     assert len(report.bootstrap_results) >= 1
 
     json_str = render_json_robustness_report(report)
-    assert '"schema_version": 1' in json_str
+    assert '"schema_version": 2' in json_str
 
     md_str = render_markdown_robustness_report(report)
     assert "# M29 Provider Reliability Robustness Report" in md_str
@@ -699,3 +699,16 @@ def test_full_report_evaluation_and_rendering() -> None:
     assert "## 3. Temporal Split-Half Cohorts" in md_str
     assert "## 4. Bootstrap Resampling Sensitivity" in md_str
     assert "## 5. Evidence Accounting & 90-Day Snapshot Exclusions" in md_str
+
+
+def test_operational_robustness_policy_rejected() -> None:
+    """Proves robustness evaluation policy strictly prohibits operational evidence scope."""
+    from pydantic import ValidationError
+
+    from evaluation.provider_reliability_models import ProviderReliabilityRobustnessPolicy
+
+    with pytest.raises(ValidationError):
+        ProviderReliabilityRobustnessPolicy(
+            as_of=AS_OF,
+            evidence_scope="operational",  # type: ignore[arg-type]
+        )

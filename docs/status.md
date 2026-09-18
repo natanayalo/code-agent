@@ -110,15 +110,20 @@ Temporal migration and rollback record is in the
   Temporal/native-agent evidence from PostgreSQL, enforces a 90-day window and
   10-task minimum per cell, computes 95% Wilson score confidence intervals,
   requires >= 2 eligible compatible candidates for recommendations, and validates
-  public-field sanitization without modifying live routing. The reviewed baseline
-  snapshot (2026-09-17, 212 included, 102 excluded, 314 scanned, 100% reconciled)
-  and threshold analysis across floors 5, 10, and 20 shows the `feature` (mutation)
-  recommendation remains available under the stricter floor 20, establishes
-  provisional floor 10 recommendations for `docs` (read_only) and `feature`
-  (read_only), and retains floor 10 with no recommendation for `investigation`
-  (read_only). Manual overrides remain visible across 90%-100% of eligible cells,
-  confirming worker execution reliability under assigned tasks without modifying
-  live routing.
+  public-field sanitization without modifying live routing. Following the discovery of
+  OpenAI's `gpt-5.4-mini` retirement, the evaluation architecture was reshaped to
+  enforce authoritative, model-aware execution cohorts (`provider`, `model`,
+  `reasoning_effort`) before aggregation. Wave 1 is retained immutably as a diagnostic
+  baseline (`artifacts/m29_evidence_bundle_wave1_diagnostic/`), and Wave 2
+  (`artifacts/m29_evidence_bundle_wave2/`, 20 paired docs tasks) establishes dual-candidate
+  sample floor qualification ($N=10$ vs $10$) in `docs` (`read_only`) under verified current
+  cohorts (`codex: gpt-5.6-luna/high`, `antigravity: gemini-3.8-flash/medium`), recommending
+  `codex-native-executor-read-only` (10/10 accepted, Wilson lower bound 0.7225, 66.1% bootstrap
+  win probability). Two distinct views are published: canonical current-cohort report
+  (`evaluation/m29_provider_reliability_report.{json,md}`) and operational diagnostic report
+  (`evaluation/m29_provider_reliability_operational_report.{json,md}`). Robustness status is
+  reported as `partial` to truthfully reflect that temporal consistency requires longitudinal data.
+  Live routing remains unchanged.
 
 ## Known limitations
 
@@ -147,11 +152,9 @@ Temporal migration and rollback record is in the
 
 ## Next slices only
 
-1. Advance M29 — Provider Reliability and Evidence-Driven Routing: collect
-   targeted real-task evidence (2 `investigation` read-only Antigravity tasks for
-   floor 10 eligibility; 10 `feature` read-only and 8 `docs` read-only tasks for
-   floor 20) and execute a live robustness run against the real-task evidence
-   snapshot for evidence-backed routing.
+1. Complete M29 review and post-wave findings: review the live robustness
+   baseline and evidence-backed recommendations, maintain offline advisory
+   status, and prepare any future routing policy PRs with explicit change controls.
 2. Use the M28 report as a scoped safety/effectiveness signal only; do not
    change routing or add semantic retrieval without further evidence.
 

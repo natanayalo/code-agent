@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 SAFE_RANK_KEY_PATTERN = re.compile(r"^[1-9][0-9]*$")
 
-ReportStatus = Literal["complete", "partial", "insufficient_data"]
+ReportStatus = Literal["complete", "partial", "insufficient_data", "diagnostic_only"]
 MutationMode = Literal["read_only", "mutation"]
 
 DEFAULT_ENABLED_PROFILES: tuple[str, ...] = (
@@ -21,7 +21,46 @@ DEFAULT_ENABLED_PROFILES: tuple[str, ...] = (
 )
 DEFAULT_EXPECTED_GROUPS: tuple[tuple[str, MutationMode], ...] = (
     ("feature", "mutation"),
-    ("scout", "read_only"),
+    ("feature", "read_only"),
+    ("docs", "read_only"),
+    ("investigation", "read_only"),
+)
+
+EvidenceScope = Literal["operational", "current_execution_cohort"]
+ExecutionIdentityStatus = Literal["verified", "unknown_legacy", "mixed_execution_identity"]
+
+VALID_FAILURE_KINDS: frozenset[str] = frozenset(
+    {
+        # Canonical worker failure kinds (workers.base.FailureKind)
+        "compile",
+        "test",
+        "tool_runtime",
+        "sandbox_infra",
+        "timeout",
+        "budget_exceeded",
+        "permission_denied",
+        "context_window",
+        "provider_error",
+        "provider_auth",
+        "incomplete_delivery",
+        "test_regression",
+        "scope_mismatch",
+        "infra_verifier_unavailable",
+        "risky_command",
+        "worker_failure",
+        "interaction",
+        "read_only_violation",
+        # Verification failure kinds and legacy taxonomy markers
+        "compile_error",
+        "test_failure",
+        "syntax_error",
+        "syntax",
+        "lint",
+        "type_check",
+        # Extractor synthesized failure kinds
+        "task_error",
+        "unknown",
+    }
 )
 
 
@@ -29,6 +68,30 @@ class StrictModel(BaseModel):
     """Reject unknown fields in provider reliability contracts."""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+
+class ExecutionIdentity(StrictModel):
+    """Authoritative execution identity describing provider, model, and reasoning effort."""
+
+    provider: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    reasoning_effort: str | None = None
+
+
+DEFAULT_EXPECTED_EXECUTION_IDENTITIES: dict[str, ExecutionIdentity] = {
+    "codex-native-executor": ExecutionIdentity(
+        provider="codex", model="gpt-5.6-luna", reasoning_effort="high"
+    ),
+    "codex-native-executor-read-only": ExecutionIdentity(
+        provider="codex", model="gpt-5.6-luna", reasoning_effort="high"
+    ),
+    "antigravity-native-executor": ExecutionIdentity(
+        provider="antigravity", model="gemini-3.8-flash", reasoning_effort="medium"
+    ),
+    "antigravity-native-executor-read-only": ExecutionIdentity(
+        provider="antigravity", model="gemini-3.8-flash", reasoning_effort="medium"
+    ),
+}
 
 
 class WilsonConfidenceInterval(StrictModel):
@@ -158,7 +221,7 @@ class ProfileCoverageSummary(StrictModel):
 class ReliabilityReportPolicy(StrictModel):
     """Sampling and statistical policy used to generate the report."""
 
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     lookback_days: int = Field(default=90, ge=1)
     min_samples: int = Field(default=10, ge=1)
     confidence_level: float = Field(default=0.95, gt=0.0, lt=1.0)
@@ -169,12 +232,16 @@ class ReliabilityReportPolicy(StrictModel):
     expected_groups: list[tuple[str, MutationMode]] = Field(
         default_factory=lambda: list(DEFAULT_EXPECTED_GROUPS)
     )
+    evidence_scope: EvidenceScope = "current_execution_cohort"
+    expected_execution_identities: dict[str, ExecutionIdentity] = Field(
+        default_factory=lambda: dict(DEFAULT_EXPECTED_EXECUTION_IDENTITIES)
+    )
 
 
 class ProviderReliabilityReport(StrictModel):
-    """Versioned aggregate provider reliability advisory report (schema v1)."""
+    """Versioned aggregate provider reliability advisory report (schema v2)."""
 
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     status: ReportStatus
     policy: ReliabilityReportPolicy
@@ -187,7 +254,7 @@ class ProviderReliabilityReport(StrictModel):
 class ProviderReliabilityRobustnessPolicy(StrictModel):
     """Configuration and parameters for offline provider reliability robustness evaluation."""
 
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     lookback_days: Literal[90] = 90
     min_samples: int = Field(default=10, ge=1)
     confidence_level: float = Field(default=0.95, gt=0.0, lt=1.0)
@@ -201,6 +268,10 @@ class ProviderReliabilityRobustnessPolicy(StrictModel):
     enabled_profiles: list[str] = Field(default_factory=lambda: list(DEFAULT_ENABLED_PROFILES))
     expected_groups: list[tuple[str, MutationMode]] = Field(
         default_factory=lambda: list(DEFAULT_EXPECTED_GROUPS)
+    )
+    evidence_scope: Literal["current_execution_cohort"] = "current_execution_cohort"
+    expected_execution_identities: dict[str, ExecutionIdentity] = Field(
+        default_factory=lambda: dict(DEFAULT_EXPECTED_EXECUTION_IDENTITIES)
     )
 
     @model_validator(mode="after")
@@ -281,9 +352,9 @@ class BootstrapGroupResult(StrictModel):
 
 
 class ProviderReliabilityRobustnessReport(StrictModel):
-    """Versioned provider reliability robustness advisory report (schema v1)."""
+    """Versioned provider reliability robustness advisory report (schema v2)."""
 
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     status: ReportStatus
     policy: ProviderReliabilityRobustnessPolicy

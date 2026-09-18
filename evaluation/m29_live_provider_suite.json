@@ -1,0 +1,262 @@
+{
+  "suite_name": "m29-live-provider-evidence",
+  "schema_version": 1,
+  "cases": [
+    {
+      "case_id": "m29-inv-01-extractor-timeline",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "extractor-timeline-invariants",
+      "prompt": "Investigate the provider reliability extractor deduplication logic and timeline invariants across tasks. Trace how duplicate tasks are ignored and how timeline ordering is validated, and summarize findings without modifying files."
+    },
+    {
+      "case_id": "m29-inv-02-robustness-boundaries",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "robustness-provenance-boundaries",
+      "prompt": "Investigate the provider reliability robustness analysis provenance tracking and publication boundaries. Trace how observation window timestamps and redaction boundaries are enforced, and summarize findings without modifying files."
+    },
+    {
+      "case_id": "m29-feat-01-preflight",
+      "task_class": "feature",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "provider-preflight",
+      "prompt": "Draft an implementation proposal for provider preflight validation before task dispatch, outlining checks for credential existence, container readiness, and health status without modifying files."
+    },
+    {
+      "case_id": "m29-feat-02-profile-comparison",
+      "task_class": "feature",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "profile-comparison",
+      "prompt": "Draft an implementation proposal for side-by-side profile matching and differential views, outlining metrics contrast and visual ranking indicators without modifying files."
+    },
+    {
+      "case_id": "m29-feat-03-evidence-drilldown",
+      "task_class": "feature",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "evidence-drill-down",
+      "prompt": "Draft an implementation proposal for task evidence drill-down views, outlining navigation from cell aggregations to specific task metadata without modifying files."
+    },
+    {
+      "case_id": "m29-feat-04-provenance-export",
+      "task_class": "feature",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "provenance-export",
+      "prompt": "Draft an implementation proposal for provider reliability provenance data export, outlining structured export formats and validation reporting without modifying files."
+    },
+    {
+      "case_id": "m29-feat-05-budget-visibility",
+      "task_class": "feature",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "budget-visibility",
+      "prompt": "Draft an implementation proposal for worker budget visibility, outlining timeout tracking and resource usage displays without modifying files."
+    },
+    {
+      "case_id": "m29-feat-06-sample-gap-visibility",
+      "task_class": "feature",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "sample-gap-visibility",
+      "prompt": "Draft an implementation proposal for sample-gap visibility displays, outlining indicators for cells needing more observations to meet sample floors without modifying files."
+    },
+    {
+      "case_id": "m29-feat-07-bundle-resume-ux",
+      "task_class": "feature",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "bundle-resume-ux",
+      "prompt": "Draft an implementation proposal for evidence bundle resume user experience, outlining operator prompts and progress recovery summaries without modifying files."
+    },
+    {
+      "case_id": "m29-feat-08-override-auditing",
+      "task_class": "feature",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "override-auditing",
+      "prompt": "Draft an implementation proposal for manual worker override accounting, outlining reporting on operator overrides versus automated routing without modifying files."
+    },
+    {
+      "case_id": "m29-feat-09-latency-trends",
+      "task_class": "feature",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "latency-trends",
+      "prompt": "Draft an implementation proposal for provider latency trend visualization, outlining moving median displays and percentile breakdowns without modifying files."
+    },
+    {
+      "case_id": "m29-feat-10-recommendation-diffs",
+      "task_class": "feature",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "recommendation-diffs",
+      "prompt": "Draft an implementation proposal for provider recommendation diff reporting, outlining change tracking between consecutive advisory evaluation runs without modifying files."
+    },
+    {
+      "case_id": "m29-docs-01-readme-antigravity",
+      "task_class": "docs",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "readme-capability-accuracy",
+      "pair_group": "docs-readme",
+      "pair_order": 1,
+      "prompt": "Update the repository README documentation to accurately describe current system capabilities and non-goals, providing concise read-only documentation guidance without modifying files."
+    },
+    {
+      "case_id": "m29-docs-01-readme-codex",
+      "task_class": "docs",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "readme-capability-accuracy",
+      "pair_group": "docs-readme",
+      "pair_order": 2,
+      "prompt": "Update the repository README documentation to accurately describe current system capabilities and non-goals, providing concise read-only documentation guidance without modifying files."
+    },
+    {
+      "case_id": "m29-docs-02-advisory-runbook-codex",
+      "task_class": "docs",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "m29-advisory-runbook",
+      "pair_group": "docs-advisory-runbook",
+      "pair_order": 1,
+      "prompt": "Document the M29 provider reliability advisory report workflow in the runbook documentation, explaining offline extraction and CLI invocation without modifying files."
+    },
+    {
+      "case_id": "m29-docs-02-advisory-runbook-antigravity",
+      "task_class": "docs",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "m29-advisory-runbook",
+      "pair_group": "docs-advisory-runbook",
+      "pair_order": 2,
+      "prompt": "Document the M29 provider reliability advisory report workflow in the runbook documentation, explaining offline extraction and CLI invocation without modifying files."
+    },
+    {
+      "case_id": "m29-docs-03-robustness-runbook-antigravity",
+      "task_class": "docs",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "m29-robustness-runbook",
+      "pair_group": "docs-robustness-runbook",
+      "pair_order": 1,
+      "prompt": "Document the M29 provider reliability robustness analysis workflow in the runbook documentation, explaining bootstrap parameters and window evaluations without modifying files."
+    },
+    {
+      "case_id": "m29-docs-03-robustness-runbook-codex",
+      "task_class": "docs",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "m29-robustness-runbook",
+      "pair_group": "docs-robustness-runbook",
+      "pair_order": 2,
+      "prompt": "Document the M29 provider reliability robustness analysis workflow in the runbook documentation, explaining bootstrap parameters and window evaluations without modifying files."
+    },
+    {
+      "case_id": "m29-docs-04-roadmap-boundaries-codex",
+      "task_class": "docs",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "roadmap-boundaries",
+      "pair_group": "docs-roadmap-boundaries",
+      "pair_order": 1,
+      "prompt": "Clarify roadmap milestone boundaries in the project documentation, detailing active focus versus deferred items without modifying files."
+    },
+    {
+      "case_id": "m29-docs-04-roadmap-boundaries-antigravity",
+      "task_class": "docs",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "roadmap-boundaries",
+      "pair_group": "docs-roadmap-boundaries",
+      "pair_order": 2,
+      "prompt": "Clarify roadmap milestone boundaries in the project documentation, detailing active focus versus deferred items without modifying files."
+    },
+    {
+      "case_id": "m29-docs-05-sample-targets-antigravity",
+      "task_class": "docs",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "sample-target-wording",
+      "pair_group": "docs-sample-targets",
+      "pair_order": 1,
+      "prompt": "Refine sample-target wording in the project evaluation documentation, describing minimum observation floors and candidate eligibility rules without modifying files."
+    },
+    {
+      "case_id": "m29-docs-05-sample-targets-codex",
+      "task_class": "docs",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "sample-target-wording",
+      "pair_group": "docs-sample-targets",
+      "pair_order": 2,
+      "prompt": "Refine sample-target wording in the project evaluation documentation, describing minimum observation floors and candidate eligibility rules without modifying files."
+    },
+    {
+      "case_id": "m29-docs-06-stack-recovery-codex",
+      "task_class": "docs",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "local-stack-recovery",
+      "pair_group": "docs-stack-recovery",
+      "pair_order": 1,
+      "prompt": "Document the local-stack recovery procedures in the operational runbook, detailing container startup sequence and health validation without modifying files."
+    },
+    {
+      "case_id": "m29-docs-06-stack-recovery-antigravity",
+      "task_class": "docs",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "local-stack-recovery",
+      "pair_group": "docs-stack-recovery",
+      "pair_order": 2,
+      "prompt": "Document the local-stack recovery procedures in the operational runbook, detailing container startup sequence and health validation without modifying files."
+    },
+    {
+      "case_id": "m29-docs-07-context-envelope-antigravity",
+      "task_class": "docs",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "context-envelope-guidance",
+      "pair_group": "docs-context-envelope",
+      "pair_order": 1,
+      "prompt": "Document ContextEnvelope context assembly guidance in the architectural documentation, explaining versioned artifact persistence and worker inputs without modifying files."
+    },
+    {
+      "case_id": "m29-docs-07-context-envelope-codex",
+      "task_class": "docs",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "context-envelope-guidance",
+      "pair_group": "docs-context-envelope",
+      "pair_order": 2,
+      "prompt": "Document ContextEnvelope context assembly guidance in the architectural documentation, explaining versioned artifact persistence and worker inputs without modifying files."
+    },
+    {
+      "case_id": "m29-docs-08-evidence-interpretation-codex",
+      "task_class": "docs",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "evidence-interpretation",
+      "pair_group": "docs-evidence-interpretation",
+      "pair_order": 1,
+      "prompt": "Document M28 and M29 evidence interpretation guidelines in the evaluation documentation, contrasting memory effectiveness with provider reliability without modifying files."
+    },
+    {
+      "case_id": "m29-docs-08-evidence-interpretation-antigravity",
+      "task_class": "docs",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "evidence-interpretation",
+      "pair_group": "docs-evidence-interpretation",
+      "pair_order": 2,
+      "prompt": "Document M28 and M29 evidence interpretation guidelines in the evaluation documentation, contrasting memory effectiveness with provider reliability without modifying files."
+    }
+  ]
+}

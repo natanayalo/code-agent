@@ -49,13 +49,14 @@ def test_extractor_synthetic_database(tmp_path: Path) -> None:
     """Test full database extraction, stage rates, exclusions, and recommendation."""
     db_url = _seed_test_database(tmp_path)
     policy = ReliabilityReportPolicy(
-        schema_version=1,
+        schema_version=2,
         lookback_days=90,
         min_samples=10,
         confidence_level=0.95,
         as_of=NOW,
         window_start_at=NOW - timedelta(days=90),
         window_end_at=NOW,
+        expected_groups=(("feature", "mutation"), ("scout", "read_only")),
     )
 
     report = extract_provider_reliability_report(db_url, policy)
@@ -152,7 +153,7 @@ def test_cli_execution_and_clean_outputs(tmp_path: Path, monkeypatch: pytest.Mon
     json_text = json_out.read_text(encoding="utf-8")
     assert_sanitized_report(json_text)
     data = json.loads(json_text)
-    assert data["schema_version"] == 1
+    assert data["schema_version"] == 2
     assert data["status"] == "partial"
     assert len(data["profile_coverage"]) == 4
 
@@ -524,11 +525,18 @@ def test_unordered_multiple_worker_runs_deterministic_failure(tmp_path: Path) ->
             finished_at=task.created_at + timedelta(minutes=min_offset + 2),
             status=WorkerRunStatus.FAILURE,
             verifier_outcome={"status": "failed", "failure_kind": kind},
+            budget_usage={
+                "native_agent": {
+                    "model_execution": {
+                        "provider": "codex",
+                        "model": "gpt-5.6-luna",
+                        "reasoning_effort": "high",
+                    }
+                }
+            },
         )
 
-    task.worker_runs.extend(
-        [_make_run("run-b", 5, "latest_failure"), _make_run("run-a", 1, "earlier_failure")]
-    )
+    task.worker_runs.extend([_make_run("run-b", 5, "compile"), _make_run("run-a", 1, "test")])
     with Session(engine) as session:
         session.add(task)
         session.commit()
@@ -541,8 +549,8 @@ def test_unordered_multiple_worker_runs_deterministic_failure(tmp_path: Path) ->
     )
     report = extract_provider_reliability_report(db_url, policy)
     cell = [c for c in report.evidence_cells if c.profile == "codex-native-executor"][0]
-    assert "latest_failure" in cell.typed_failures
-    assert "earlier_failure" not in cell.typed_failures
+    assert "compile" in cell.typed_failures
+    assert "test" not in cell.typed_failures
 
 
 def test_failed_task_with_cancelled_event_rejected(tmp_path: Path) -> None:
@@ -613,6 +621,7 @@ def test_extractor_all_profiles_complete(tmp_path: Path) -> None:
         window_start_at=NOW - timedelta(days=30),
         window_end_at=NOW + timedelta(days=1),
         min_samples=10,
+        expected_groups=(("feature", "mutation"), ("scout", "read_only")),
     )
     report = extract_provider_reliability_report(db_url, policy)
     assert report.status == "complete"
