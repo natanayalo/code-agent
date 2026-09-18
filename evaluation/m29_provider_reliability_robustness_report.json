@@ -1,0 +1,1881 @@
+{
+  "bootstrap_results": [
+    {
+      "candidates": [],
+      "eligible_profiles": [],
+      "fallback_reason": "insufficient_eligible_candidates: 0 eligible profile(s) meet the sample floor (10); at least 2 required",
+      "mutation_mode": "mutation",
+      "status": "insufficient_data",
+      "task_class": "bugfix"
+    },
+    {
+      "candidates": [],
+      "eligible_profiles": [],
+      "fallback_reason": "insufficient_eligible_candidates: 0 eligible profile(s) meet the sample floor (10); at least 2 required",
+      "mutation_mode": "mutation",
+      "status": "insufficient_data",
+      "task_class": "docs"
+    },
+    {
+      "candidates": [
+        {
+          "profile": "antigravity-native-executor-read-only",
+          "rank_counts": {
+            "1": 9600,
+            "2": 400
+          },
+          "rank_probabilities": {
+            "1": 0.96,
+            "2": 0.04
+          },
+          "sample_size": 28,
+          "win_count": 9600,
+          "win_probability": 0.96
+        },
+        {
+          "profile": "codex-native-executor-read-only",
+          "rank_counts": {
+            "1": 400,
+            "2": 9600
+          },
+          "rank_probabilities": {
+            "1": 0.04,
+            "2": 0.96
+          },
+          "sample_size": 28,
+          "win_count": 400,
+          "win_probability": 0.04
+        }
+      ],
+      "eligible_profiles": [
+        "antigravity-native-executor-read-only",
+        "codex-native-executor-read-only"
+      ],
+      "fallback_reason": null,
+      "mutation_mode": "read_only",
+      "status": "complete",
+      "task_class": "docs"
+    },
+    {
+      "candidates": [
+        {
+          "profile": "antigravity-native-executor",
+          "rank_counts": {
+            "1": 9798,
+            "2": 202
+          },
+          "rank_probabilities": {
+            "1": 0.9798,
+            "2": 0.0202
+          },
+          "sample_size": 74,
+          "win_count": 9798,
+          "win_probability": 0.9798
+        },
+        {
+          "profile": "codex-native-executor",
+          "rank_counts": {
+            "1": 202,
+            "2": 9798
+          },
+          "rank_probabilities": {
+            "1": 0.0202,
+            "2": 0.9798
+          },
+          "sample_size": 25,
+          "win_count": 202,
+          "win_probability": 0.0202
+        }
+      ],
+      "eligible_profiles": [
+        "antigravity-native-executor",
+        "codex-native-executor"
+      ],
+      "fallback_reason": null,
+      "mutation_mode": "mutation",
+      "status": "complete",
+      "task_class": "feature"
+    },
+    {
+      "candidates": [
+        {
+          "profile": "codex-native-executor-read-only",
+          "rank_counts": {
+            "1": 7489,
+            "2": 2511
+          },
+          "rank_probabilities": {
+            "1": 0.7489,
+            "2": 0.2511
+          },
+          "sample_size": 34,
+          "win_count": 7489,
+          "win_probability": 0.7489
+        },
+        {
+          "profile": "antigravity-native-executor-read-only",
+          "rank_counts": {
+            "1": 2511,
+            "2": 7489
+          },
+          "rank_probabilities": {
+            "1": 0.2511,
+            "2": 0.7489
+          },
+          "sample_size": 30,
+          "win_count": 2511,
+          "win_probability": 0.2511
+        }
+      ],
+      "eligible_profiles": [
+        "antigravity-native-executor-read-only",
+        "codex-native-executor-read-only"
+      ],
+      "fallback_reason": null,
+      "mutation_mode": "read_only",
+      "status": "complete",
+      "task_class": "feature"
+    },
+    {
+      "candidates": [],
+      "eligible_profiles": [],
+      "fallback_reason": "insufficient_eligible_candidates: 0 eligible profile(s) meet the sample floor (10); at least 2 required",
+      "mutation_mode": "mutation",
+      "status": "insufficient_data",
+      "task_class": "investigation"
+    },
+    {
+      "candidates": [
+        {
+          "profile": "codex-native-executor-read-only",
+          "rank_counts": {
+            "1": 10000,
+            "2": 0
+          },
+          "rank_probabilities": {
+            "1": 1.0,
+            "2": 0.0
+          },
+          "sample_size": 15,
+          "win_count": 10000,
+          "win_probability": 1.0
+        },
+        {
+          "profile": "antigravity-native-executor-read-only",
+          "rank_counts": {
+            "1": 0,
+            "2": 10000
+          },
+          "rank_probabilities": {
+            "1": 0.0,
+            "2": 1.0
+          },
+          "sample_size": 12,
+          "win_count": 0,
+          "win_probability": 0.0
+        }
+      ],
+      "eligible_profiles": [
+        "antigravity-native-executor-read-only",
+        "codex-native-executor-read-only"
+      ],
+      "fallback_reason": null,
+      "mutation_mode": "read_only",
+      "status": "complete",
+      "task_class": "investigation"
+    },
+    {
+      "candidates": [],
+      "eligible_profiles": [],
+      "fallback_reason": "insufficient_eligible_candidates: 0 eligible profile(s) meet the sample floor (10); at least 2 required",
+      "mutation_mode": "mutation",
+      "status": "insufficient_data",
+      "task_class": "maintenance"
+    },
+    {
+      "candidates": [],
+      "eligible_profiles": [],
+      "fallback_reason": "insufficient_eligible_candidates: 0 eligible profile(s) meet the sample floor (10); at least 2 required",
+      "mutation_mode": "mutation",
+      "status": "insufficient_data",
+      "task_class": "refactor"
+    },
+    {
+      "candidates": [],
+      "eligible_profiles": [],
+      "fallback_reason": "insufficient_eligible_candidates: 0 eligible profile(s) meet the sample floor (10); at least 2 required",
+      "mutation_mode": "read_only",
+      "status": "insufficient_data",
+      "task_class": "scout"
+    }
+  ],
+  "exclusions": {
+    "by_reason": {
+      "cancelled": 9,
+      "malformed_inconsistent_timeline": 10,
+      "non_native_agent_mode": 2,
+      "non_temporal_runtime": 81
+    },
+    "excluded_tasks_count": 102,
+    "included_tasks_count": 268,
+    "total_tasks_scanned": 370
+  },
+  "generated_at": "2026-09-17T20:44:56.615867Z",
+  "policy": {
+    "as_of": "2026-09-17T20:43:50Z",
+    "bootstrap_iterations": 10000,
+    "bootstrap_seed": 29,
+    "confidence_level": 0.95,
+    "enabled_profiles": [
+      "codex-native-executor",
+      "codex-native-executor-read-only",
+      "antigravity-native-executor",
+      "antigravity-native-executor-read-only"
+    ],
+    "expected_groups": [
+      [
+        "feature",
+        "mutation"
+      ],
+      [
+        "scout",
+        "read_only"
+      ]
+    ],
+    "lookback_days": 90,
+    "min_samples": 10,
+    "schema_version": 1,
+    "temporal_split_days": 45,
+    "window_end_at": "2026-09-17T20:43:50Z",
+    "window_start_at": "2026-06-19T20:43:50Z",
+    "windows_days": [
+      30,
+      60,
+      90
+    ]
+  },
+  "schema_version": 1,
+  "status": "partial",
+  "temporal_cohorts": [
+    {
+      "cohort_name": "historical",
+      "included_tasks_count": 34,
+      "recommendations": [
+        {
+          "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
+          "mutation_mode": "mutation",
+          "rankings": [
+            {
+              "accepted_count": 1,
+              "accepted_rate_wilson_lower": 0.2065,
+              "evidence_age_days": 53.0,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 1 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": 62.16,
+              "newest_evidence_timestamp": "2026-07-26T21:39:42.548252Z",
+              "oldest_evidence_timestamp": "2026-07-26T21:39:42.548252Z",
+              "profile": "antigravity-native-executor",
+              "rank": null,
+              "sample_size": 1
+            },
+            {
+              "accepted_count": 0,
+              "accepted_rate_wilson_lower": 0.0,
+              "evidence_age_days": null,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 0 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": null,
+              "newest_evidence_timestamp": null,
+              "oldest_evidence_timestamp": null,
+              "profile": "codex-native-executor",
+              "rank": null,
+              "sample_size": 0
+            }
+          ],
+          "recommended_profile": null,
+          "task_class": "docs"
+        },
+        {
+          "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
+          "mutation_mode": "read_only",
+          "rankings": [
+            {
+              "accepted_count": 5,
+              "accepted_rate_wilson_lower": 0.4365,
+              "evidence_age_days": 46.9,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 6 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": 44.95,
+              "newest_evidence_timestamp": "2026-08-01T23:03:10.140298Z",
+              "oldest_evidence_timestamp": "2026-07-21T19:49:54.708077Z",
+              "profile": "antigravity-native-executor-read-only",
+              "rank": null,
+              "sample_size": 6
+            },
+            {
+              "accepted_count": 7,
+              "accepted_rate_wilson_lower": 0.5291,
+              "evidence_age_days": 46.9,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 8 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": 210.85,
+              "newest_evidence_timestamp": "2026-08-01T23:06:24.570664Z",
+              "oldest_evidence_timestamp": "2026-07-21T22:12:59.347804Z",
+              "profile": "codex-native-executor-read-only",
+              "rank": null,
+              "sample_size": 8
+            }
+          ],
+          "recommended_profile": null,
+          "task_class": "docs"
+        },
+        {
+          "fallback_reason": "insufficient_eligible_candidates: only 1 eligible candidate ('antigravity-native-executor') available; at least 2 required",
+          "mutation_mode": "mutation",
+          "rankings": [
+            {
+              "accepted_count": 16,
+              "accepted_rate_wilson_lower": 0.7302,
+              "evidence_age_days": 46.9,
+              "insufficiency_reasons": [],
+              "is_eligible": true,
+              "median_latency_seconds": 41.03,
+              "newest_evidence_timestamp": "2026-08-01T22:06:05.041960Z",
+              "oldest_evidence_timestamp": "2026-07-13T17:49:32.338269Z",
+              "profile": "antigravity-native-executor",
+              "rank": 1,
+              "sample_size": 17
+            },
+            {
+              "accepted_count": 1,
+              "accepted_rate_wilson_lower": 0.2065,
+              "evidence_age_days": 66.1,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 1 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": 226.46,
+              "newest_evidence_timestamp": "2026-07-13T18:34:11.422912Z",
+              "oldest_evidence_timestamp": "2026-07-13T18:34:11.422912Z",
+              "profile": "codex-native-executor",
+              "rank": null,
+              "sample_size": 1
+            }
+          ],
+          "recommended_profile": null,
+          "task_class": "feature"
+        },
+        {
+          "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
+          "mutation_mode": "read_only",
+          "rankings": [
+            {
+              "accepted_count": 0,
+              "accepted_rate_wilson_lower": 0.0,
+              "evidence_age_days": null,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 0 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": null,
+              "newest_evidence_timestamp": null,
+              "oldest_evidence_timestamp": null,
+              "profile": "antigravity-native-executor-read-only",
+              "rank": null,
+              "sample_size": 0
+            },
+            {
+              "accepted_count": 1,
+              "accepted_rate_wilson_lower": 0.2065,
+              "evidence_age_days": 46.9,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 1 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": 109.23,
+              "newest_evidence_timestamp": "2026-08-01T22:58:59.627686Z",
+              "oldest_evidence_timestamp": "2026-08-01T22:58:59.627686Z",
+              "profile": "codex-native-executor-read-only",
+              "rank": null,
+              "sample_size": 1
+            }
+          ],
+          "recommended_profile": null,
+          "task_class": "feature"
+        },
+        {
+          "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
+          "mutation_mode": "read_only",
+          "rankings": [
+            {
+              "accepted_count": 0,
+              "accepted_rate_wilson_lower": 0.0,
+              "evidence_age_days": null,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 0 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": null,
+              "newest_evidence_timestamp": null,
+              "oldest_evidence_timestamp": null,
+              "profile": "antigravity-native-executor-read-only",
+              "rank": null,
+              "sample_size": 0
+            },
+            {
+              "accepted_count": 0,
+              "accepted_rate_wilson_lower": 0.0,
+              "evidence_age_days": null,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 0 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": null,
+              "newest_evidence_timestamp": null,
+              "oldest_evidence_timestamp": null,
+              "profile": "codex-native-executor-read-only",
+              "rank": null,
+              "sample_size": 0
+            }
+          ],
+          "recommended_profile": null,
+          "task_class": "scout"
+        }
+      ],
+      "window_end_at": "2026-08-03T20:43:50Z",
+      "window_start_at": "2026-06-19T20:43:50Z"
+    },
+    {
+      "cohort_name": "recent",
+      "included_tasks_count": 234,
+      "recommendations": [
+        {
+          "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
+          "mutation_mode": "mutation",
+          "rankings": [
+            {
+              "accepted_count": 1,
+              "accepted_rate_wilson_lower": 0.0945,
+              "evidence_age_days": 12.1,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 2 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": 46.15,
+              "newest_evidence_timestamp": "2026-09-05T17:20:50.948284Z",
+              "oldest_evidence_timestamp": "2026-08-05T21:42:12.242704Z",
+              "profile": "antigravity-native-executor",
+              "rank": null,
+              "sample_size": 2
+            },
+            {
+              "accepted_count": 4,
+              "accepted_rate_wilson_lower": 0.3755,
+              "evidence_age_days": 12.1,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 5 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": 395.4,
+              "newest_evidence_timestamp": "2026-09-05T17:22:53.673990Z",
+              "oldest_evidence_timestamp": "2026-09-05T13:10:07.423833Z",
+              "profile": "codex-native-executor",
+              "rank": null,
+              "sample_size": 5
+            }
+          ],
+          "recommended_profile": null,
+          "task_class": "bugfix"
+        },
+        {
+          "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
+          "mutation_mode": "mutation",
+          "rankings": [
+            {
+              "accepted_count": 1,
+              "accepted_rate_wilson_lower": 0.2065,
+              "evidence_age_days": 43.1,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 1 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": 78.58,
+              "newest_evidence_timestamp": "2026-08-05T19:20:01.378955Z",
+              "oldest_evidence_timestamp": "2026-08-05T19:20:01.378955Z",
+              "profile": "antigravity-native-executor",
+              "rank": null,
+              "sample_size": 1
+            },
+            {
+              "accepted_count": 3,
+              "accepted_rate_wilson_lower": 0.4385,
+              "evidence_age_days": 43.1,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 3 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": 266.27,
+              "newest_evidence_timestamp": "2026-08-05T19:18:03.625235Z",
+              "oldest_evidence_timestamp": "2026-08-05T18:59:06.942689Z",
+              "profile": "codex-native-executor",
+              "rank": null,
+              "sample_size": 3
+            }
+          ],
+          "recommended_profile": null,
+          "task_class": "docs"
+        },
+        {
+          "fallback_reason": null,
+          "mutation_mode": "read_only",
+          "rankings": [
+            {
+              "accepted_count": 9,
+              "accepted_rate_wilson_lower": 0.2326,
+              "evidence_age_days": 0.0,
+              "insufficiency_reasons": [],
+              "is_eligible": true,
+              "median_latency_seconds": 41.55,
+              "newest_evidence_timestamp": "2026-09-17T20:43:46.028499Z",
+              "oldest_evidence_timestamp": "2026-08-05T18:49:08.063207Z",
+              "profile": "antigravity-native-executor-read-only",
+              "rank": 1,
+              "sample_size": 22
+            },
+            {
+              "accepted_count": 1,
+              "accepted_rate_wilson_lower": 0.0089,
+              "evidence_age_days": 0.0,
+              "insufficiency_reasons": [],
+              "is_eligible": true,
+              "median_latency_seconds": 20.58,
+              "newest_evidence_timestamp": "2026-09-17T20:41:07.212913Z",
+              "oldest_evidence_timestamp": "2026-08-05T19:30:49.125327Z",
+              "profile": "codex-native-executor-read-only",
+              "rank": 2,
+              "sample_size": 20
+            }
+          ],
+          "recommended_profile": "antigravity-native-executor-read-only",
+          "task_class": "docs"
+        },
+        {
+          "fallback_reason": null,
+          "mutation_mode": "mutation",
+          "rankings": [
+            {
+              "accepted_count": 42,
+              "accepted_rate_wilson_lower": 0.6102,
+              "evidence_age_days": 2.0,
+              "insufficiency_reasons": [],
+              "is_eligible": true,
+              "median_latency_seconds": 52.72,
+              "newest_evidence_timestamp": "2026-09-15T21:26:09.900723Z",
+              "oldest_evidence_timestamp": "2026-08-05T18:53:49.454910Z",
+              "profile": "antigravity-native-executor",
+              "rank": 1,
+              "sample_size": 57
+            },
+            {
+              "accepted_count": 15,
+              "accepted_rate_wilson_lower": 0.4271,
+              "evidence_age_days": 2.2,
+              "insufficiency_reasons": [],
+              "is_eligible": true,
+              "median_latency_seconds": 102.73,
+              "newest_evidence_timestamp": "2026-09-15T16:17:57.302357Z",
+              "oldest_evidence_timestamp": "2026-08-05T18:52:47.691555Z",
+              "profile": "codex-native-executor",
+              "rank": 2,
+              "sample_size": 24
+            }
+          ],
+          "recommended_profile": "antigravity-native-executor",
+          "task_class": "feature"
+        },
+        {
+          "fallback_reason": null,
+          "mutation_mode": "read_only",
+          "rankings": [
+            {
+              "accepted_count": 23,
+              "accepted_rate_wilson_lower": 0.5266,
+              "evidence_age_days": 12.2,
+              "insufficiency_reasons": [],
+              "is_eligible": true,
+              "median_latency_seconds": 154.1,
+              "newest_evidence_timestamp": "2026-09-05T15:05:38.461409Z",
+              "oldest_evidence_timestamp": "2026-08-13T19:47:46.995357Z",
+              "profile": "codex-native-executor-read-only",
+              "rank": 1,
+              "sample_size": 33
+            },
+            {
+              "accepted_count": 19,
+              "accepted_rate_wilson_lower": 0.4551,
+              "evidence_age_days": 0.0,
+              "insufficiency_reasons": [],
+              "is_eligible": true,
+              "median_latency_seconds": 38.11,
+              "newest_evidence_timestamp": "2026-09-17T20:01:06.852894Z",
+              "oldest_evidence_timestamp": "2026-08-05T18:50:51.197540Z",
+              "profile": "antigravity-native-executor-read-only",
+              "rank": 2,
+              "sample_size": 30
+            }
+          ],
+          "recommended_profile": "codex-native-executor-read-only",
+          "task_class": "feature"
+        },
+        {
+          "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
+          "mutation_mode": "mutation",
+          "rankings": [
+            {
+              "accepted_count": 0,
+              "accepted_rate_wilson_lower": 0.0,
+              "evidence_age_days": null,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 0 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": null,
+              "newest_evidence_timestamp": null,
+              "oldest_evidence_timestamp": null,
+              "profile": "antigravity-native-executor",
+              "rank": null,
+              "sample_size": 0
+            },
+            {
+              "accepted_count": 3,
+              "accepted_rate_wilson_lower": 0.3006,
+              "evidence_age_days": 12.3,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 4 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": 340.8,
+              "newest_evidence_timestamp": "2026-09-05T13:34:37.313288Z",
+              "oldest_evidence_timestamp": "2026-09-05T12:13:02.386308Z",
+              "profile": "codex-native-executor",
+              "rank": null,
+              "sample_size": 4
+            }
+          ],
+          "recommended_profile": null,
+          "task_class": "investigation"
+        },
+        {
+          "fallback_reason": null,
+          "mutation_mode": "read_only",
+          "rankings": [
+            {
+              "accepted_count": 15,
+              "accepted_rate_wilson_lower": 0.7961,
+              "evidence_age_days": 12.2,
+              "insufficiency_reasons": [],
+              "is_eligible": true,
+              "median_latency_seconds": 136.86,
+              "newest_evidence_timestamp": "2026-09-05T15:32:54.671949Z",
+              "oldest_evidence_timestamp": "2026-08-13T19:22:11.807940Z",
+              "profile": "codex-native-executor-read-only",
+              "rank": 1,
+              "sample_size": 15
+            },
+            {
+              "accepted_count": 9,
+              "accepted_rate_wilson_lower": 0.4677,
+              "evidence_age_days": 0.1,
+              "insufficiency_reasons": [],
+              "is_eligible": true,
+              "median_latency_seconds": 78.75,
+              "newest_evidence_timestamp": "2026-09-17T19:29:10.942689Z",
+              "oldest_evidence_timestamp": "2026-08-14T21:51:38.160034Z",
+              "profile": "antigravity-native-executor-read-only",
+              "rank": 2,
+              "sample_size": 12
+            }
+          ],
+          "recommended_profile": "codex-native-executor-read-only",
+          "task_class": "investigation"
+        },
+        {
+          "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
+          "mutation_mode": "mutation",
+          "rankings": [
+            {
+              "accepted_count": 5,
+              "accepted_rate_wilson_lower": 0.5655,
+              "evidence_age_days": 43.0,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 5 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": 73.46,
+              "newest_evidence_timestamp": "2026-08-05T20:45:44.794328Z",
+              "oldest_evidence_timestamp": "2026-08-05T20:27:49.997709Z",
+              "profile": "antigravity-native-executor",
+              "rank": null,
+              "sample_size": 5
+            },
+            {
+              "accepted_count": 0,
+              "accepted_rate_wilson_lower": 0.0,
+              "evidence_age_days": null,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 0 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": null,
+              "newest_evidence_timestamp": null,
+              "oldest_evidence_timestamp": null,
+              "profile": "codex-native-executor",
+              "rank": null,
+              "sample_size": 0
+            }
+          ],
+          "recommended_profile": null,
+          "task_class": "maintenance"
+        },
+        {
+          "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
+          "mutation_mode": "mutation",
+          "rankings": [
+            {
+              "accepted_count": 0,
+              "accepted_rate_wilson_lower": 0.0,
+              "evidence_age_days": null,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 0 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": null,
+              "newest_evidence_timestamp": null,
+              "oldest_evidence_timestamp": null,
+              "profile": "antigravity-native-executor",
+              "rank": null,
+              "sample_size": 0
+            },
+            {
+              "accepted_count": 0,
+              "accepted_rate_wilson_lower": 0.0,
+              "evidence_age_days": 12.2,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 1 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": 847.0,
+              "newest_evidence_timestamp": "2026-09-05T15:58:32.123268Z",
+              "oldest_evidence_timestamp": "2026-09-05T15:58:32.123268Z",
+              "profile": "codex-native-executor",
+              "rank": null,
+              "sample_size": 1
+            }
+          ],
+          "recommended_profile": null,
+          "task_class": "refactor"
+        },
+        {
+          "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
+          "mutation_mode": "read_only",
+          "rankings": [
+            {
+              "accepted_count": 0,
+              "accepted_rate_wilson_lower": 0.0,
+              "evidence_age_days": null,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 0 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": null,
+              "newest_evidence_timestamp": null,
+              "oldest_evidence_timestamp": null,
+              "profile": "antigravity-native-executor-read-only",
+              "rank": null,
+              "sample_size": 0
+            },
+            {
+              "accepted_count": 0,
+              "accepted_rate_wilson_lower": 0.0,
+              "evidence_age_days": null,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 0 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": null,
+              "newest_evidence_timestamp": null,
+              "oldest_evidence_timestamp": null,
+              "profile": "codex-native-executor-read-only",
+              "rank": null,
+              "sample_size": 0
+            }
+          ],
+          "recommended_profile": null,
+          "task_class": "scout"
+        }
+      ],
+      "window_end_at": "2026-09-17T20:43:50Z",
+      "window_start_at": "2026-08-03T20:43:50Z"
+    }
+  ],
+  "windows": [
+    {
+      "included_tasks_count": 93,
+      "recommendations": [
+        {
+          "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
+          "mutation_mode": "mutation",
+          "rankings": [
+            {
+              "accepted_count": 0,
+              "accepted_rate_wilson_lower": 0.0,
+              "evidence_age_days": 12.1,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 1 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": 5.03,
+              "newest_evidence_timestamp": "2026-09-05T17:20:50.948284Z",
+              "oldest_evidence_timestamp": "2026-09-05T17:20:50.948284Z",
+              "profile": "antigravity-native-executor",
+              "rank": null,
+              "sample_size": 1
+            },
+            {
+              "accepted_count": 4,
+              "accepted_rate_wilson_lower": 0.3755,
+              "evidence_age_days": 12.1,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 5 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": 395.4,
+              "newest_evidence_timestamp": "2026-09-05T17:22:53.673990Z",
+              "oldest_evidence_timestamp": "2026-09-05T13:10:07.423833Z",
+              "profile": "codex-native-executor",
+              "rank": null,
+              "sample_size": 5
+            }
+          ],
+          "recommended_profile": null,
+          "task_class": "bugfix"
+        },
+        {
+          "fallback_reason": null,
+          "mutation_mode": "read_only",
+          "rankings": [
+            {
+              "accepted_count": 7,
+              "accepted_rate_wilson_lower": 0.1812,
+              "evidence_age_days": 0.0,
+              "insufficiency_reasons": [],
+              "is_eligible": true,
+              "median_latency_seconds": 32.31,
+              "newest_evidence_timestamp": "2026-09-17T20:43:46.028499Z",
+              "oldest_evidence_timestamp": "2026-09-07T06:42:02.396800Z",
+              "profile": "antigravity-native-executor-read-only",
+              "rank": 1,
+              "sample_size": 20
+            },
+            {
+              "accepted_count": 0,
+              "accepted_rate_wilson_lower": 0.0,
+              "evidence_age_days": 0.0,
+              "insufficiency_reasons": [],
+              "is_eligible": true,
+              "median_latency_seconds": 20.25,
+              "newest_evidence_timestamp": "2026-09-17T20:41:07.212913Z",
+              "oldest_evidence_timestamp": "2026-09-05T22:33:28.370636Z",
+              "profile": "codex-native-executor-read-only",
+              "rank": 2,
+              "sample_size": 18
+            }
+          ],
+          "recommended_profile": "antigravity-native-executor-read-only",
+          "task_class": "docs"
+        },
+        {
+          "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
+          "mutation_mode": "mutation",
+          "rankings": [
+            {
+              "accepted_count": 7,
+              "accepted_rate_wilson_lower": 0.4526,
+              "evidence_age_days": 2.0,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 9 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": 107.84,
+              "newest_evidence_timestamp": "2026-09-15T21:26:09.900723Z",
+              "oldest_evidence_timestamp": "2026-08-21T21:21:12.491245Z",
+              "profile": "antigravity-native-executor",
+              "rank": null,
+              "sample_size": 9
+            },
+            {
+              "accepted_count": 2,
+              "accepted_rate_wilson_lower": 0.1176,
+              "evidence_age_days": 2.2,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 5 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": 49.67,
+              "newest_evidence_timestamp": "2026-09-15T16:17:57.302357Z",
+              "oldest_evidence_timestamp": "2026-08-21T21:50:06.343798Z",
+              "profile": "codex-native-executor",
+              "rank": null,
+              "sample_size": 5
+            }
+          ],
+          "recommended_profile": null,
+          "task_class": "feature"
+        },
+        {
+          "fallback_reason": "insufficient_eligible_candidates: only 1 eligible candidate ('antigravity-native-executor-read-only') available; at least 2 required",
+          "mutation_mode": "read_only",
+          "rankings": [
+            {
+              "accepted_count": 10,
+              "accepted_rate_wilson_lower": 0.2834,
+              "evidence_age_days": 0.0,
+              "insufficiency_reasons": [],
+              "is_eligible": true,
+              "median_latency_seconds": 5.1,
+              "newest_evidence_timestamp": "2026-09-17T20:01:06.852894Z",
+              "oldest_evidence_timestamp": "2026-09-05T14:17:48.128676Z",
+              "profile": "antigravity-native-executor-read-only",
+              "rank": 1,
+              "sample_size": 21
+            },
+            {
+              "accepted_count": 2,
+              "accepted_rate_wilson_lower": 0.15,
+              "evidence_age_days": 12.2,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 4 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": 196.11,
+              "newest_evidence_timestamp": "2026-09-05T15:05:38.461409Z",
+              "oldest_evidence_timestamp": "2026-09-05T14:22:27.489316Z",
+              "profile": "codex-native-executor-read-only",
+              "rank": null,
+              "sample_size": 4
+            }
+          ],
+          "recommended_profile": null,
+          "task_class": "feature"
+        },
+        {
+          "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
+          "mutation_mode": "mutation",
+          "rankings": [
+            {
+              "accepted_count": 0,
+              "accepted_rate_wilson_lower": 0.0,
+              "evidence_age_days": null,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 0 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": null,
+              "newest_evidence_timestamp": null,
+              "oldest_evidence_timestamp": null,
+              "profile": "antigravity-native-executor",
+              "rank": null,
+              "sample_size": 0
+            },
+            {
+              "accepted_count": 3,
+              "accepted_rate_wilson_lower": 0.3006,
+              "evidence_age_days": 12.3,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 4 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": 340.8,
+              "newest_evidence_timestamp": "2026-09-05T13:34:37.313288Z",
+              "oldest_evidence_timestamp": "2026-09-05T12:13:02.386308Z",
+              "profile": "codex-native-executor",
+              "rank": null,
+              "sample_size": 4
+            }
+          ],
+          "recommended_profile": null,
+          "task_class": "investigation"
+        },
+        {
+          "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
+          "mutation_mode": "read_only",
+          "rankings": [
+            {
+              "accepted_count": 1,
+              "accepted_rate_wilson_lower": 0.0456,
+              "evidence_age_days": 0.1,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 4 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": 125.38,
+              "newest_evidence_timestamp": "2026-09-17T19:29:10.942689Z",
+              "oldest_evidence_timestamp": "2026-09-17T18:39:40.350200Z",
+              "profile": "antigravity-native-executor-read-only",
+              "rank": null,
+              "sample_size": 4
+            },
+            {
+              "accepted_count": 1,
+              "accepted_rate_wilson_lower": 0.2065,
+              "evidence_age_days": 12.2,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 1 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": 582.81,
+              "newest_evidence_timestamp": "2026-09-05T15:32:54.671949Z",
+              "oldest_evidence_timestamp": "2026-09-05T15:32:54.671949Z",
+              "profile": "codex-native-executor-read-only",
+              "rank": null,
+              "sample_size": 1
+            }
+          ],
+          "recommended_profile": null,
+          "task_class": "investigation"
+        },
+        {
+          "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
+          "mutation_mode": "mutation",
+          "rankings": [
+            {
+              "accepted_count": 0,
+              "accepted_rate_wilson_lower": 0.0,
+              "evidence_age_days": null,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 0 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": null,
+              "newest_evidence_timestamp": null,
+              "oldest_evidence_timestamp": null,
+              "profile": "antigravity-native-executor",
+              "rank": null,
+              "sample_size": 0
+            },
+            {
+              "accepted_count": 0,
+              "accepted_rate_wilson_lower": 0.0,
+              "evidence_age_days": 12.2,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 1 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": 847.0,
+              "newest_evidence_timestamp": "2026-09-05T15:58:32.123268Z",
+              "oldest_evidence_timestamp": "2026-09-05T15:58:32.123268Z",
+              "profile": "codex-native-executor",
+              "rank": null,
+              "sample_size": 1
+            }
+          ],
+          "recommended_profile": null,
+          "task_class": "refactor"
+        },
+        {
+          "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
+          "mutation_mode": "read_only",
+          "rankings": [
+            {
+              "accepted_count": 0,
+              "accepted_rate_wilson_lower": 0.0,
+              "evidence_age_days": null,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 0 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": null,
+              "newest_evidence_timestamp": null,
+              "oldest_evidence_timestamp": null,
+              "profile": "antigravity-native-executor-read-only",
+              "rank": null,
+              "sample_size": 0
+            },
+            {
+              "accepted_count": 0,
+              "accepted_rate_wilson_lower": 0.0,
+              "evidence_age_days": null,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 0 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": null,
+              "newest_evidence_timestamp": null,
+              "oldest_evidence_timestamp": null,
+              "profile": "codex-native-executor-read-only",
+              "rank": null,
+              "sample_size": 0
+            }
+          ],
+          "recommended_profile": null,
+          "task_class": "scout"
+        }
+      ],
+      "window_days": 30,
+      "window_end_at": "2026-09-17T20:43:50Z",
+      "window_start_at": "2026-08-18T20:43:50Z"
+    },
+    {
+      "included_tasks_count": 263,
+      "recommendations": [
+        {
+          "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
+          "mutation_mode": "mutation",
+          "rankings": [
+            {
+              "accepted_count": 1,
+              "accepted_rate_wilson_lower": 0.0945,
+              "evidence_age_days": 12.1,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 2 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": 46.15,
+              "newest_evidence_timestamp": "2026-09-05T17:20:50.948284Z",
+              "oldest_evidence_timestamp": "2026-08-05T21:42:12.242704Z",
+              "profile": "antigravity-native-executor",
+              "rank": null,
+              "sample_size": 2
+            },
+            {
+              "accepted_count": 4,
+              "accepted_rate_wilson_lower": 0.3755,
+              "evidence_age_days": 12.1,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 5 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": 395.4,
+              "newest_evidence_timestamp": "2026-09-05T17:22:53.673990Z",
+              "oldest_evidence_timestamp": "2026-09-05T13:10:07.423833Z",
+              "profile": "codex-native-executor",
+              "rank": null,
+              "sample_size": 5
+            }
+          ],
+          "recommended_profile": null,
+          "task_class": "bugfix"
+        },
+        {
+          "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
+          "mutation_mode": "mutation",
+          "rankings": [
+            {
+              "accepted_count": 2,
+              "accepted_rate_wilson_lower": 0.3424,
+              "evidence_age_days": 43.1,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 2 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": 70.37,
+              "newest_evidence_timestamp": "2026-08-05T19:20:01.378955Z",
+              "oldest_evidence_timestamp": "2026-07-26T21:39:42.548252Z",
+              "profile": "antigravity-native-executor",
+              "rank": null,
+              "sample_size": 2
+            },
+            {
+              "accepted_count": 3,
+              "accepted_rate_wilson_lower": 0.4385,
+              "evidence_age_days": 43.1,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 3 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": 266.27,
+              "newest_evidence_timestamp": "2026-08-05T19:18:03.625235Z",
+              "oldest_evidence_timestamp": "2026-08-05T18:59:06.942689Z",
+              "profile": "codex-native-executor",
+              "rank": null,
+              "sample_size": 3
+            }
+          ],
+          "recommended_profile": null,
+          "task_class": "docs"
+        },
+        {
+          "fallback_reason": null,
+          "mutation_mode": "read_only",
+          "rankings": [
+            {
+              "accepted_count": 14,
+              "accepted_rate_wilson_lower": 0.3263,
+              "evidence_age_days": 0.0,
+              "insufficiency_reasons": [],
+              "is_eligible": true,
+              "median_latency_seconds": 44.95,
+              "newest_evidence_timestamp": "2026-09-17T20:43:46.028499Z",
+              "oldest_evidence_timestamp": "2026-07-21T19:49:54.708077Z",
+              "profile": "antigravity-native-executor-read-only",
+              "rank": 1,
+              "sample_size": 28
+            },
+            {
+              "accepted_count": 8,
+              "accepted_rate_wilson_lower": 0.1525,
+              "evidence_age_days": 0.0,
+              "insufficiency_reasons": [],
+              "is_eligible": true,
+              "median_latency_seconds": 21.71,
+              "newest_evidence_timestamp": "2026-09-17T20:41:07.212913Z",
+              "oldest_evidence_timestamp": "2026-07-21T22:12:59.347804Z",
+              "profile": "codex-native-executor-read-only",
+              "rank": 2,
+              "sample_size": 28
+            }
+          ],
+          "recommended_profile": "antigravity-native-executor-read-only",
+          "task_class": "docs"
+        },
+        {
+          "fallback_reason": null,
+          "mutation_mode": "mutation",
+          "rankings": [
+            {
+              "accepted_count": 55,
+              "accepted_rate_wilson_lower": 0.6761,
+              "evidence_age_days": 2.0,
+              "insufficiency_reasons": [],
+              "is_eligible": true,
+              "median_latency_seconds": 43.88,
+              "newest_evidence_timestamp": "2026-09-15T21:26:09.900723Z",
+              "oldest_evidence_timestamp": "2026-07-21T19:14:25.274355Z",
+              "profile": "antigravity-native-executor",
+              "rank": 1,
+              "sample_size": 70
+            },
+            {
+              "accepted_count": 15,
+              "accepted_rate_wilson_lower": 0.4271,
+              "evidence_age_days": 2.2,
+              "insufficiency_reasons": [],
+              "is_eligible": true,
+              "median_latency_seconds": 102.73,
+              "newest_evidence_timestamp": "2026-09-15T16:17:57.302357Z",
+              "oldest_evidence_timestamp": "2026-08-05T18:52:47.691555Z",
+              "profile": "codex-native-executor",
+              "rank": 2,
+              "sample_size": 24
+            }
+          ],
+          "recommended_profile": "antigravity-native-executor",
+          "task_class": "feature"
+        },
+        {
+          "fallback_reason": null,
+          "mutation_mode": "read_only",
+          "rankings": [
+            {
+              "accepted_count": 24,
+              "accepted_rate_wilson_lower": 0.5383,
+              "evidence_age_days": 12.2,
+              "insufficiency_reasons": [],
+              "is_eligible": true,
+              "median_latency_seconds": 153.95,
+              "newest_evidence_timestamp": "2026-09-05T15:05:38.461409Z",
+              "oldest_evidence_timestamp": "2026-08-01T22:58:59.627686Z",
+              "profile": "codex-native-executor-read-only",
+              "rank": 1,
+              "sample_size": 34
+            },
+            {
+              "accepted_count": 19,
+              "accepted_rate_wilson_lower": 0.4551,
+              "evidence_age_days": 0.0,
+              "insufficiency_reasons": [],
+              "is_eligible": true,
+              "median_latency_seconds": 38.11,
+              "newest_evidence_timestamp": "2026-09-17T20:01:06.852894Z",
+              "oldest_evidence_timestamp": "2026-08-05T18:50:51.197540Z",
+              "profile": "antigravity-native-executor-read-only",
+              "rank": 2,
+              "sample_size": 30
+            }
+          ],
+          "recommended_profile": "codex-native-executor-read-only",
+          "task_class": "feature"
+        },
+        {
+          "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
+          "mutation_mode": "mutation",
+          "rankings": [
+            {
+              "accepted_count": 0,
+              "accepted_rate_wilson_lower": 0.0,
+              "evidence_age_days": null,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 0 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": null,
+              "newest_evidence_timestamp": null,
+              "oldest_evidence_timestamp": null,
+              "profile": "antigravity-native-executor",
+              "rank": null,
+              "sample_size": 0
+            },
+            {
+              "accepted_count": 3,
+              "accepted_rate_wilson_lower": 0.3006,
+              "evidence_age_days": 12.3,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 4 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": 340.8,
+              "newest_evidence_timestamp": "2026-09-05T13:34:37.313288Z",
+              "oldest_evidence_timestamp": "2026-09-05T12:13:02.386308Z",
+              "profile": "codex-native-executor",
+              "rank": null,
+              "sample_size": 4
+            }
+          ],
+          "recommended_profile": null,
+          "task_class": "investigation"
+        },
+        {
+          "fallback_reason": null,
+          "mutation_mode": "read_only",
+          "rankings": [
+            {
+              "accepted_count": 15,
+              "accepted_rate_wilson_lower": 0.7961,
+              "evidence_age_days": 12.2,
+              "insufficiency_reasons": [],
+              "is_eligible": true,
+              "median_latency_seconds": 136.86,
+              "newest_evidence_timestamp": "2026-09-05T15:32:54.671949Z",
+              "oldest_evidence_timestamp": "2026-08-13T19:22:11.807940Z",
+              "profile": "codex-native-executor-read-only",
+              "rank": 1,
+              "sample_size": 15
+            },
+            {
+              "accepted_count": 9,
+              "accepted_rate_wilson_lower": 0.4677,
+              "evidence_age_days": 0.1,
+              "insufficiency_reasons": [],
+              "is_eligible": true,
+              "median_latency_seconds": 78.75,
+              "newest_evidence_timestamp": "2026-09-17T19:29:10.942689Z",
+              "oldest_evidence_timestamp": "2026-08-14T21:51:38.160034Z",
+              "profile": "antigravity-native-executor-read-only",
+              "rank": 2,
+              "sample_size": 12
+            }
+          ],
+          "recommended_profile": "codex-native-executor-read-only",
+          "task_class": "investigation"
+        },
+        {
+          "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
+          "mutation_mode": "mutation",
+          "rankings": [
+            {
+              "accepted_count": 5,
+              "accepted_rate_wilson_lower": 0.5655,
+              "evidence_age_days": 43.0,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 5 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": 73.46,
+              "newest_evidence_timestamp": "2026-08-05T20:45:44.794328Z",
+              "oldest_evidence_timestamp": "2026-08-05T20:27:49.997709Z",
+              "profile": "antigravity-native-executor",
+              "rank": null,
+              "sample_size": 5
+            },
+            {
+              "accepted_count": 0,
+              "accepted_rate_wilson_lower": 0.0,
+              "evidence_age_days": null,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 0 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": null,
+              "newest_evidence_timestamp": null,
+              "oldest_evidence_timestamp": null,
+              "profile": "codex-native-executor",
+              "rank": null,
+              "sample_size": 0
+            }
+          ],
+          "recommended_profile": null,
+          "task_class": "maintenance"
+        },
+        {
+          "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
+          "mutation_mode": "mutation",
+          "rankings": [
+            {
+              "accepted_count": 0,
+              "accepted_rate_wilson_lower": 0.0,
+              "evidence_age_days": null,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 0 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": null,
+              "newest_evidence_timestamp": null,
+              "oldest_evidence_timestamp": null,
+              "profile": "antigravity-native-executor",
+              "rank": null,
+              "sample_size": 0
+            },
+            {
+              "accepted_count": 0,
+              "accepted_rate_wilson_lower": 0.0,
+              "evidence_age_days": 12.2,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 1 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": 847.0,
+              "newest_evidence_timestamp": "2026-09-05T15:58:32.123268Z",
+              "oldest_evidence_timestamp": "2026-09-05T15:58:32.123268Z",
+              "profile": "codex-native-executor",
+              "rank": null,
+              "sample_size": 1
+            }
+          ],
+          "recommended_profile": null,
+          "task_class": "refactor"
+        },
+        {
+          "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
+          "mutation_mode": "read_only",
+          "rankings": [
+            {
+              "accepted_count": 0,
+              "accepted_rate_wilson_lower": 0.0,
+              "evidence_age_days": null,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 0 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": null,
+              "newest_evidence_timestamp": null,
+              "oldest_evidence_timestamp": null,
+              "profile": "antigravity-native-executor-read-only",
+              "rank": null,
+              "sample_size": 0
+            },
+            {
+              "accepted_count": 0,
+              "accepted_rate_wilson_lower": 0.0,
+              "evidence_age_days": null,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 0 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": null,
+              "newest_evidence_timestamp": null,
+              "oldest_evidence_timestamp": null,
+              "profile": "codex-native-executor-read-only",
+              "rank": null,
+              "sample_size": 0
+            }
+          ],
+          "recommended_profile": null,
+          "task_class": "scout"
+        }
+      ],
+      "window_days": 60,
+      "window_end_at": "2026-09-17T20:43:50Z",
+      "window_start_at": "2026-07-19T20:43:50Z"
+    },
+    {
+      "included_tasks_count": 268,
+      "recommendations": [
+        {
+          "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
+          "mutation_mode": "mutation",
+          "rankings": [
+            {
+              "accepted_count": 1,
+              "accepted_rate_wilson_lower": 0.0945,
+              "evidence_age_days": 12.1,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 2 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": 46.15,
+              "newest_evidence_timestamp": "2026-09-05T17:20:50.948284Z",
+              "oldest_evidence_timestamp": "2026-08-05T21:42:12.242704Z",
+              "profile": "antigravity-native-executor",
+              "rank": null,
+              "sample_size": 2
+            },
+            {
+              "accepted_count": 4,
+              "accepted_rate_wilson_lower": 0.3755,
+              "evidence_age_days": 12.1,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 5 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": 395.4,
+              "newest_evidence_timestamp": "2026-09-05T17:22:53.673990Z",
+              "oldest_evidence_timestamp": "2026-09-05T13:10:07.423833Z",
+              "profile": "codex-native-executor",
+              "rank": null,
+              "sample_size": 5
+            }
+          ],
+          "recommended_profile": null,
+          "task_class": "bugfix"
+        },
+        {
+          "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
+          "mutation_mode": "mutation",
+          "rankings": [
+            {
+              "accepted_count": 2,
+              "accepted_rate_wilson_lower": 0.3424,
+              "evidence_age_days": 43.1,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 2 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": 70.37,
+              "newest_evidence_timestamp": "2026-08-05T19:20:01.378955Z",
+              "oldest_evidence_timestamp": "2026-07-26T21:39:42.548252Z",
+              "profile": "antigravity-native-executor",
+              "rank": null,
+              "sample_size": 2
+            },
+            {
+              "accepted_count": 3,
+              "accepted_rate_wilson_lower": 0.4385,
+              "evidence_age_days": 43.1,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 3 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": 266.27,
+              "newest_evidence_timestamp": "2026-08-05T19:18:03.625235Z",
+              "oldest_evidence_timestamp": "2026-08-05T18:59:06.942689Z",
+              "profile": "codex-native-executor",
+              "rank": null,
+              "sample_size": 3
+            }
+          ],
+          "recommended_profile": null,
+          "task_class": "docs"
+        },
+        {
+          "fallback_reason": null,
+          "mutation_mode": "read_only",
+          "rankings": [
+            {
+              "accepted_count": 14,
+              "accepted_rate_wilson_lower": 0.3263,
+              "evidence_age_days": 0.0,
+              "insufficiency_reasons": [],
+              "is_eligible": true,
+              "median_latency_seconds": 44.95,
+              "newest_evidence_timestamp": "2026-09-17T20:43:46.028499Z",
+              "oldest_evidence_timestamp": "2026-07-21T19:49:54.708077Z",
+              "profile": "antigravity-native-executor-read-only",
+              "rank": 1,
+              "sample_size": 28
+            },
+            {
+              "accepted_count": 8,
+              "accepted_rate_wilson_lower": 0.1525,
+              "evidence_age_days": 0.0,
+              "insufficiency_reasons": [],
+              "is_eligible": true,
+              "median_latency_seconds": 21.71,
+              "newest_evidence_timestamp": "2026-09-17T20:41:07.212913Z",
+              "oldest_evidence_timestamp": "2026-07-21T22:12:59.347804Z",
+              "profile": "codex-native-executor-read-only",
+              "rank": 2,
+              "sample_size": 28
+            }
+          ],
+          "recommended_profile": "antigravity-native-executor-read-only",
+          "task_class": "docs"
+        },
+        {
+          "fallback_reason": null,
+          "mutation_mode": "mutation",
+          "rankings": [
+            {
+              "accepted_count": 58,
+              "accepted_rate_wilson_lower": 0.6773,
+              "evidence_age_days": 2.0,
+              "insufficiency_reasons": [],
+              "is_eligible": true,
+              "median_latency_seconds": 43.88,
+              "newest_evidence_timestamp": "2026-09-15T21:26:09.900723Z",
+              "oldest_evidence_timestamp": "2026-07-13T17:49:32.338269Z",
+              "profile": "antigravity-native-executor",
+              "rank": 1,
+              "sample_size": 74
+            },
+            {
+              "accepted_count": 16,
+              "accepted_rate_wilson_lower": 0.4452,
+              "evidence_age_days": 2.2,
+              "insufficiency_reasons": [],
+              "is_eligible": true,
+              "median_latency_seconds": 102.76,
+              "newest_evidence_timestamp": "2026-09-15T16:17:57.302357Z",
+              "oldest_evidence_timestamp": "2026-07-13T18:34:11.422912Z",
+              "profile": "codex-native-executor",
+              "rank": 2,
+              "sample_size": 25
+            }
+          ],
+          "recommended_profile": "antigravity-native-executor",
+          "task_class": "feature"
+        },
+        {
+          "fallback_reason": null,
+          "mutation_mode": "read_only",
+          "rankings": [
+            {
+              "accepted_count": 24,
+              "accepted_rate_wilson_lower": 0.5383,
+              "evidence_age_days": 12.2,
+              "insufficiency_reasons": [],
+              "is_eligible": true,
+              "median_latency_seconds": 153.95,
+              "newest_evidence_timestamp": "2026-09-05T15:05:38.461409Z",
+              "oldest_evidence_timestamp": "2026-08-01T22:58:59.627686Z",
+              "profile": "codex-native-executor-read-only",
+              "rank": 1,
+              "sample_size": 34
+            },
+            {
+              "accepted_count": 19,
+              "accepted_rate_wilson_lower": 0.4551,
+              "evidence_age_days": 0.0,
+              "insufficiency_reasons": [],
+              "is_eligible": true,
+              "median_latency_seconds": 38.11,
+              "newest_evidence_timestamp": "2026-09-17T20:01:06.852894Z",
+              "oldest_evidence_timestamp": "2026-08-05T18:50:51.197540Z",
+              "profile": "antigravity-native-executor-read-only",
+              "rank": 2,
+              "sample_size": 30
+            }
+          ],
+          "recommended_profile": "codex-native-executor-read-only",
+          "task_class": "feature"
+        },
+        {
+          "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
+          "mutation_mode": "mutation",
+          "rankings": [
+            {
+              "accepted_count": 0,
+              "accepted_rate_wilson_lower": 0.0,
+              "evidence_age_days": null,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 0 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": null,
+              "newest_evidence_timestamp": null,
+              "oldest_evidence_timestamp": null,
+              "profile": "antigravity-native-executor",
+              "rank": null,
+              "sample_size": 0
+            },
+            {
+              "accepted_count": 3,
+              "accepted_rate_wilson_lower": 0.3006,
+              "evidence_age_days": 12.3,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 4 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": 340.8,
+              "newest_evidence_timestamp": "2026-09-05T13:34:37.313288Z",
+              "oldest_evidence_timestamp": "2026-09-05T12:13:02.386308Z",
+              "profile": "codex-native-executor",
+              "rank": null,
+              "sample_size": 4
+            }
+          ],
+          "recommended_profile": null,
+          "task_class": "investigation"
+        },
+        {
+          "fallback_reason": null,
+          "mutation_mode": "read_only",
+          "rankings": [
+            {
+              "accepted_count": 15,
+              "accepted_rate_wilson_lower": 0.7961,
+              "evidence_age_days": 12.2,
+              "insufficiency_reasons": [],
+              "is_eligible": true,
+              "median_latency_seconds": 136.86,
+              "newest_evidence_timestamp": "2026-09-05T15:32:54.671949Z",
+              "oldest_evidence_timestamp": "2026-08-13T19:22:11.807940Z",
+              "profile": "codex-native-executor-read-only",
+              "rank": 1,
+              "sample_size": 15
+            },
+            {
+              "accepted_count": 9,
+              "accepted_rate_wilson_lower": 0.4677,
+              "evidence_age_days": 0.1,
+              "insufficiency_reasons": [],
+              "is_eligible": true,
+              "median_latency_seconds": 78.75,
+              "newest_evidence_timestamp": "2026-09-17T19:29:10.942689Z",
+              "oldest_evidence_timestamp": "2026-08-14T21:51:38.160034Z",
+              "profile": "antigravity-native-executor-read-only",
+              "rank": 2,
+              "sample_size": 12
+            }
+          ],
+          "recommended_profile": "codex-native-executor-read-only",
+          "task_class": "investigation"
+        },
+        {
+          "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
+          "mutation_mode": "mutation",
+          "rankings": [
+            {
+              "accepted_count": 5,
+              "accepted_rate_wilson_lower": 0.5655,
+              "evidence_age_days": 43.0,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 5 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": 73.46,
+              "newest_evidence_timestamp": "2026-08-05T20:45:44.794328Z",
+              "oldest_evidence_timestamp": "2026-08-05T20:27:49.997709Z",
+              "profile": "antigravity-native-executor",
+              "rank": null,
+              "sample_size": 5
+            },
+            {
+              "accepted_count": 0,
+              "accepted_rate_wilson_lower": 0.0,
+              "evidence_age_days": null,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 0 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": null,
+              "newest_evidence_timestamp": null,
+              "oldest_evidence_timestamp": null,
+              "profile": "codex-native-executor",
+              "rank": null,
+              "sample_size": 0
+            }
+          ],
+          "recommended_profile": null,
+          "task_class": "maintenance"
+        },
+        {
+          "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
+          "mutation_mode": "mutation",
+          "rankings": [
+            {
+              "accepted_count": 0,
+              "accepted_rate_wilson_lower": 0.0,
+              "evidence_age_days": null,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 0 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": null,
+              "newest_evidence_timestamp": null,
+              "oldest_evidence_timestamp": null,
+              "profile": "antigravity-native-executor",
+              "rank": null,
+              "sample_size": 0
+            },
+            {
+              "accepted_count": 0,
+              "accepted_rate_wilson_lower": 0.0,
+              "evidence_age_days": 12.2,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 1 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": 847.0,
+              "newest_evidence_timestamp": "2026-09-05T15:58:32.123268Z",
+              "oldest_evidence_timestamp": "2026-09-05T15:58:32.123268Z",
+              "profile": "codex-native-executor",
+              "rank": null,
+              "sample_size": 1
+            }
+          ],
+          "recommended_profile": null,
+          "task_class": "refactor"
+        },
+        {
+          "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
+          "mutation_mode": "read_only",
+          "rankings": [
+            {
+              "accepted_count": 0,
+              "accepted_rate_wilson_lower": 0.0,
+              "evidence_age_days": null,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 0 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": null,
+              "newest_evidence_timestamp": null,
+              "oldest_evidence_timestamp": null,
+              "profile": "antigravity-native-executor-read-only",
+              "rank": null,
+              "sample_size": 0
+            },
+            {
+              "accepted_count": 0,
+              "accepted_rate_wilson_lower": 0.0,
+              "evidence_age_days": null,
+              "insufficiency_reasons": [
+                "insufficient_sample_size: 0 tasks (minimum 10)"
+              ],
+              "is_eligible": false,
+              "median_latency_seconds": null,
+              "newest_evidence_timestamp": null,
+              "oldest_evidence_timestamp": null,
+              "profile": "codex-native-executor-read-only",
+              "rank": null,
+              "sample_size": 0
+            }
+          ],
+          "recommended_profile": null,
+          "task_class": "scout"
+        }
+      ],
+      "window_days": 90,
+      "window_end_at": "2026-09-17T20:43:50Z",
+      "window_start_at": "2026-06-19T20:43:50Z"
+    }
+  ]
+}

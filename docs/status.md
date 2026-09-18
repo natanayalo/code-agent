@@ -110,15 +110,15 @@ Temporal migration and rollback record is in the
   Temporal/native-agent evidence from PostgreSQL, enforces a 90-day window and
   10-task minimum per cell, computes 95% Wilson score confidence intervals,
   requires >= 2 eligible compatible candidates for recommendations, and validates
-  public-field sanitization without modifying live routing. The reviewed baseline
-  snapshot (2026-09-17, 212 included, 102 excluded, 314 scanned, 100% reconciled)
-  and threshold analysis across floors 5, 10, and 20 shows the `feature` (mutation)
-  recommendation remains available under the stricter floor 20, establishes
-  provisional floor 10 recommendations for `docs` (read_only) and `feature`
-  (read_only), and retains floor 10 with no recommendation for `investigation`
-  (read_only). Manual overrides remain visible across 90%-100% of eligible cells,
-  confirming worker execution reliability under assigned tasks without modifying
-  live routing.
+  public-field sanitization without modifying live routing. Following the reviewed
+  28-task live evidence wave (2026-09-17, 268 included, 102 excluded, 370 scanned,
+  100% reconciled, zero exclusions introduced), dual-candidate recommendations are
+  established across all 4 operational cells at floor 10 (`feature` mutation,
+  `feature` read_only, `docs` read_only, `investigation` read_only) and 3 cells at
+  floor 20 (`feature` mutation, `feature` read_only, `docs` read_only). The 10,000-iteration
+  bootstrap robustness baseline confirms strong stability (96%-100% win probability for
+  `docs` read-only, `feature` mutation, and `investigation` read-only; 75% for `feature`
+  read-only). Live routing remains unchanged.
 
 ## Known limitations
 
@@ -147,11 +147,9 @@ Temporal migration and rollback record is in the
 
 ## Next slices only
 
-1. Advance M29 — Provider Reliability and Evidence-Driven Routing: collect
-   targeted real-task evidence (2 `investigation` read-only Antigravity tasks for
-   floor 10 eligibility; 10 `feature` read-only and 8 `docs` read-only tasks for
-   floor 20) and execute a live robustness run against the real-task evidence
-   snapshot for evidence-backed routing.
+1. Complete M29 review and post-wave findings: review the live robustness
+   baseline and evidence-backed recommendations, maintain offline advisory
+   status, and prepare any future routing policy PRs with explicit change controls.
 2. Use the M28 report as a scoped safety/effectiveness signal only; do not
    change routing or add semantic retrieval without further evidence.
 

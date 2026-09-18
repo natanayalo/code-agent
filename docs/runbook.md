@@ -673,6 +673,36 @@ export DATABASE_URL="postgresql+psycopg://..."
 - **Exclusion accounting**: Root exclusions describe the full 90-day observation snapshot scanned from the database.
 - **Public data boundary**: Generated JSON and Markdown artifacts are validated by `assert_sanitized_robustness_report()` to ensure zero leak of task IDs, user prompt text, repositories, branch names, logs, artifacts, or secrets.
 
+### M29 live evidence wave harness
+
+The M29 live evidence wave harness (`scripts/e2e/run_m29_evidence_wave.py`) manages reproducible, resumable execution of the frozen 28-task live evaluation suite against real provider runtimes:
+
+```bash
+# 1. Initialize a new evidence bundle
+.venv/bin/python scripts/e2e/run_m29_evidence_wave.py init \
+  --bundle-dir artifacts/m29_evidence_bundle \
+  --build-sha "$(git rev-parse HEAD)" \
+  --target-repository-revision "$(git rev-parse origin/master)" \
+  --ack-live-read-only-evidence
+
+# 2. Check execution status and cell progress
+.venv/bin/python scripts/e2e/run_m29_evidence_wave.py status \
+  --bundle-dir artifacts/m29_evidence_bundle
+
+# 3. Execute the 28-task suite sequentially
+.venv/bin/python scripts/e2e/run_m29_evidence_wave.py run-batch \
+  --bundle-dir artifacts/m29_evidence_bundle \
+  --repo-key code-agent \
+  --branch master \
+  --timeout-seconds 900
+```
+
+#### Invariants & failure semantics
+- **Strict Read-Only Delivery**: All 28 cases enforce `delivery_mode=summary`, low risk, read-only mode, and zero changed files.
+- **Fail-Closed Gate Checks**: Any cancellation, pending interaction, or malformed timeline is flagged immediately as a gate failure.
+- **Resumable Execution**: In-flight task IDs are tracked in `bundle.json`. If the CLI process is interrupted, re-running `run-batch` resumes polling the active task without creating duplicates.
+- **Terminal Truth**: Once a case reaches a terminal status (`completed` or `failed`), it is recorded permanently in `bundle.json` and is never rerun or replaced.
+
 
 ## 10) Antigravity Migration Guide
 

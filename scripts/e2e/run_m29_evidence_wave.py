@@ -16,6 +16,13 @@ from typing import Any
 
 import httpx
 
+try:
+    import dotenv
+
+    dotenv.load_dotenv()
+except ImportError:
+    pass
+
 from evaluation.m29_evidence_models import (
     TOTAL_CASES,
     M29BundleIdentity,
