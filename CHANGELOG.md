@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: add model and reasoning effort resolution with typed execution provenance ([#403](https://github.com/natanayalo/code-agent/pull/403))
+
 - Feat: add M29 provider reliability robustness analysis ([#401](https://github.com/natanayalo/code-agent/pull/401))
 
 - Feat: add M29 provider reliability advisory report ([#399](https://github.com/natanayalo/code-agent/pull/399))
