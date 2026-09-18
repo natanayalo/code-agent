@@ -416,7 +416,7 @@ def test_routing_policy_rejects_candidates_with_mismatched_model(tmp_path: Path)
         "version": "1.0",
         "profiles": {
             "codex-native-executor": {
-                "model": "gpt-5-codex",
+                "model": "unknown_legacy",
                 "reasoning_effort": "high",
                 "task_classes": {
                     "bugfix": {
@@ -438,6 +438,39 @@ def test_routing_policy_rejects_candidates_with_mismatched_model(tmp_path: Path)
         runtime_mode="native_agent",
     )
     decision = policy.choose_profile("bugfix", {"codex-native-executor": codex_profile})
+    assert decision is None
+
+
+def test_routing_policy_detects_mismatch_from_environment(tmp_path: Path) -> None:
+    path = tmp_path / "env_mismatch_metrics.json"
+    metrics = {
+        "version": "1.0",
+        "profiles": {
+            "codex-native-executor": {
+                "model": "gpt-5.6-luna",
+                "reasoning_effort": "high",
+                "task_classes": {
+                    "bugfix": {
+                        "success_rate": 0.98,
+                        "mean_latency_seconds": 50.0,
+                    }
+                },
+            }
+        },
+    }
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(metrics, f)
+
+    # Environment sets Terra instead of Luna
+    env = {"CODE_AGENT_CODEX_MODEL": "gpt-5.6-terra"}
+    policy = PerformanceRoutingPolicy(path, env=env)
+    codex_profile = WorkerProfile(
+        name="codex-native-executor",
+        worker_type="codex",
+        runtime_mode="native_agent",
+    )
+    decision = policy.choose_profile("bugfix", {"codex-native-executor": codex_profile})
+    # Mismatch between metrics (Luna) and environment (Terra) -> rejected!
     assert decision is None
 
 

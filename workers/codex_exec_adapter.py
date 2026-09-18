@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import subprocess
@@ -29,6 +30,7 @@ from workers.llm_tracing import set_llm_span_output, with_llm_span
 from workers.model_config import (
     CODEX_MODEL_ENV_VAR,
     CODEX_REASONING_EFFORT_ENV_VAR,
+    ResolvedModelConfig,
     build_codex_model_cli_args,
     resolve_codex_model_config,
 )
@@ -105,6 +107,7 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
         working_directory: str | Path | None = None,
         config_overrides: Sequence[str] = (),
         env: Mapping[str, str] | None = None,
+        model_config: ResolvedModelConfig | None = None,
     ) -> None:
         resolved_env = os.environ if env is None else env
         self.executable = executable
@@ -126,6 +129,13 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
             if isinstance(override, str) and override.strip()
         )
         self.env = build_codex_subprocess_env(resolved_env)
+        self.model_config = model_config
+
+    def with_model_config(self, model_config: ResolvedModelConfig) -> CodexExecCliRuntimeAdapter:
+        """Return a copy of this adapter bound to a pre-resolved model configuration."""
+        bound = copy.copy(self)
+        bound.model_config = model_config
+        return bound
 
     @classmethod
     def from_env(
@@ -171,7 +181,7 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
         ]
         if output_schema_path is not None:
             command.extend(["--output-schema", str(output_schema_path)])
-        model_config = resolve_codex_model_config(
+        model_config = self.model_config or resolve_codex_model_config(
             adapter_model=self.model,
             adapter_reasoning_effort=self.reasoning_effort,
             env=self.env,

@@ -53,6 +53,8 @@ class _RuntimeSetup:
     expects_changed_files: bool
     fallback_command_template: str | None
     system_prompt: str
+    adapter: CliRuntimeAdapter
+    model_execution: ModelExecutionMetadata | None = None
 
 
 @dataclass
@@ -131,10 +133,11 @@ def _worker_result_from_execution(
     )
 
 
-def _resolve_runtime_model_execution(
+def _resolve_runtime_model_context(
     request: WorkerRequest,
     adapter: CliRuntimeAdapter,
-) -> ModelExecutionMetadata | None:
+) -> tuple[CliRuntimeAdapter, ModelExecutionMetadata | None]:
+    """Resolve model configuration once for the request and bind it to the adapter."""
     from workers.antigravity_cli_adapter import AntigravityCliRuntimeAdapter
     from workers.codex_exec_adapter import CodexExecCliRuntimeAdapter
     from workers.model_config import (
@@ -144,22 +147,33 @@ def _resolve_runtime_model_execution(
 
     manifest_worker = (request.runtime_manifest or {}).get("worker")
     if isinstance(adapter, CodexExecCliRuntimeAdapter):
-        return resolve_codex_model_config(
+        resolved_config = resolve_codex_model_config(
             task_constraints=request.constraints,
             manifest_worker=manifest_worker,
             adapter_model=adapter.model,
             adapter_reasoning_effort=adapter.reasoning_effort,
             env=adapter.env,
-        ).to_metadata()
+        )
+        bound_adapter = adapter.with_model_config(resolved_config)
+        return bound_adapter, resolved_config.to_metadata()
     if isinstance(adapter, AntigravityCliRuntimeAdapter):
-        return resolve_antigravity_model_config(
+        resolved_config = resolve_antigravity_model_config(
             task_constraints=request.constraints,
             manifest_worker=manifest_worker,
             adapter_model=adapter.model,
             adapter_reasoning_effort=adapter.reasoning_effort,
             env=adapter.env,
-        ).to_metadata()
-    return None
+        )
+        return adapter, resolved_config.to_metadata()
+    return adapter, None
+
+
+def _resolve_runtime_model_execution(
+    request: WorkerRequest,
+    adapter: CliRuntimeAdapter,
+) -> ModelExecutionMetadata | None:
+    _, metadata = _resolve_runtime_model_context(request, adapter)
+    return metadata
 
 
 class RuntimeExecutor:
@@ -209,6 +223,9 @@ class RuntimeExecutor:
             tool_registry=self.tool_registry,
         )
 
+        bound_adapter, model_execution = _resolve_runtime_model_context(
+            request, self.runtime_adapter
+        )
         return _RuntimeSetup(
             container=container,
             session=session,
@@ -219,6 +236,8 @@ class RuntimeExecutor:
             ),
             fallback_command_template=fallback_command_template,
             system_prompt=system_prompt,
+            adapter=bound_adapter,
+            model_execution=model_execution,
         )
 
     def _execute_loop(
@@ -230,7 +249,7 @@ class RuntimeExecutor:
     ) -> CliRuntimeExecutionResult:
         redactor = SecretRedactor(list((request.secrets or {}).values()))
         return run_cli_runtime_loop(
-            self.runtime_adapter,
+            runtime_setup.adapter,
             runtime_setup.session,
             system_prompt=runtime_setup.system_prompt,
             settings=runtime_setup.runtime_settings,
@@ -240,7 +259,7 @@ class RuntimeExecutor:
             cancel_token=cancel_token,
             task_id=request.task_id,
             session_id=request.session_id,
-            model_name=getattr(self.runtime_adapter, "model", None),
+            model_name=getattr(runtime_setup.adapter, "model", None),
             redactor=redactor,
             response_format=request.response_format,
             response_schema=request.response_schema,
@@ -278,7 +297,7 @@ class RuntimeExecutor:
             execution=execution,
             task_text=request.task_text,
             constraints=constraints,
-            runtime_adapter=self.runtime_adapter,
+            runtime_adapter=runtime_setup.adapter,
             runtime_settings=runtime_setup.runtime_settings,
             system_prompt=runtime_setup.system_prompt,
             repo_path=workspace.repo_path,
@@ -305,7 +324,7 @@ class RuntimeExecutor:
             cancel_token=cancel_token,
             task_id=request.task_id,
             session_id=request.session_id,
-            model_name=getattr(self.runtime_adapter, "model", None),
+            model_name=getattr(runtime_setup.adapter, "model", None),
             adapter_failure_log_message=(
                 "CLI worker self-review adapter failed; recording explicit no-findings fallback."
             ),
@@ -405,7 +424,7 @@ class RuntimeExecutor:
         cancel_token: Callable[[], bool] | None,
         request: WorkerRequest,
     ) -> WorkerResult:
-        model_execution = _resolve_runtime_model_execution(request, self.runtime_adapter)
+        model_execution = runtime_setup.model_execution
         result = _worker_result_from_execution(
             workspace,
             runtime_phase.execution,

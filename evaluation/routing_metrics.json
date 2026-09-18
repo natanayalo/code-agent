@@ -3,7 +3,7 @@
     "source": "evaluation/routing_metrics.json",
     "profiles": {
         "codex-native-executor": {
-            "model": "gpt-5-codex",
+            "model": "unknown_legacy",
             "reasoning_effort": null,
             "task_classes": {
                 "bugfix": {
@@ -37,7 +37,7 @@
             }
         },
         "antigravity-native-executor": {
-            "model": "gemini-3.7-flash",
+            "model": "unknown_legacy",
             "reasoning_effort": null,
             "task_classes": {
                 "bugfix": {

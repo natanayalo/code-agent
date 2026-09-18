@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -11,10 +12,8 @@ from typing import Any
 from orchestrator.state import RouteDecision
 from workers.base import WorkerProfile
 from workers.model_config import (
-    DEFAULT_ANTIGRAVITY_MODEL,
-    DEFAULT_ANTIGRAVITY_REASONING_EFFORT,
-    DEFAULT_CODEX_MODEL,
-    DEFAULT_CODEX_REASONING_EFFORT,
+    resolve_antigravity_model_config,
+    resolve_codex_model_config,
 )
 
 logger = logging.getLogger(__name__)
@@ -24,24 +23,41 @@ DEFAULT_METRICS_PATH = Path(__file__).resolve().parents[1] / "evaluation" / "rou
 _METRICS_CACHE: dict[Path, dict[str, Any]] = {}
 
 
-def _expected_profile_model_config(profile: WorkerProfile) -> tuple[str | None, str | None]:
+def _expected_profile_model_config(
+    profile: WorkerProfile,
+    env: Mapping[str, str] | None = None,
+) -> tuple[str | None, str | None]:
     """Return the expected (model, reasoning_effort) for a worker profile."""
-    model = profile.model
-    effort = profile.reasoning_effort
+    resolved_env = os.environ if env is None else env
+    manifest_worker = {
+        "model": profile.model,
+        "reasoning_effort": profile.reasoning_effort,
+    }
     if profile.worker_type == "codex":
-        model = model or DEFAULT_CODEX_MODEL
-        effort = effort or DEFAULT_CODEX_REASONING_EFFORT
+        resolved = resolve_codex_model_config(
+            manifest_worker=manifest_worker,
+            env=resolved_env,
+        )
+        return resolved.model, resolved.reasoning_effort
     elif profile.worker_type == "antigravity":
-        model = model or DEFAULT_ANTIGRAVITY_MODEL
-        effort = effort or DEFAULT_ANTIGRAVITY_REASONING_EFFORT
-    return model, effort
+        resolved = resolve_antigravity_model_config(
+            manifest_worker=manifest_worker,
+            env=resolved_env,
+        )
+        return resolved.model, resolved.reasoning_effort
+    return profile.model, profile.reasoning_effort
 
 
 class PerformanceRoutingPolicy:
     """Policy helper to dynamically choose worker profiles based on success rates and latencies."""
 
-    def __init__(self, metrics_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        metrics_path: Path | None = None,
+        env: Mapping[str, str] | None = None,
+    ) -> None:
         self.metrics_path = (metrics_path or DEFAULT_METRICS_PATH).resolve()
+        self.env: Mapping[str, str] = os.environ if env is None else env
         self.metrics_data: dict[str, Any] = {}
         self._load_metrics()
 
@@ -151,7 +167,7 @@ class PerformanceRoutingPolicy:
                 candidate_metrics_meta[profile_name] = "no_metrics"
                 continue
 
-            expected_model, expected_effort = _expected_profile_model_config(profile)
+            expected_model, expected_effort = _expected_profile_model_config(profile, env=self.env)
             metric_model = profile_metric.get("model")
             metric_effort = profile_metric.get("reasoning_effort")
             if metric_model != expected_model or metric_effort != expected_effort:
