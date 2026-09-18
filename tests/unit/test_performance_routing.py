@@ -18,6 +18,8 @@ def temp_metrics_path(tmp_path: Path) -> Path:
         "source": "tests/temp_metrics.json",
         "profiles": {
             "codex-native-executor": {
+                "model": "gpt-5.6-luna",
+                "reasoning_effort": "high",
                 "task_classes": {
                     "bugfix": {
                         "success_rate": 0.80,
@@ -27,9 +29,11 @@ def temp_metrics_path(tmp_path: Path) -> Path:
                         "success_rate": 0.90,
                         "mean_latency_seconds": 50.0,
                     },
-                }
+                },
             },
             "antigravity-native-executor": {
+                "model": "gemini-3.8-flash",
+                "reasoning_effort": "medium",
                 "task_classes": {
                     "bugfix": {
                         "success_rate": 0.90,
@@ -39,7 +43,7 @@ def temp_metrics_path(tmp_path: Path) -> Path:
                         "success_rate": 0.90,
                         "mean_latency_seconds": 40.0,
                     },
-                }
+                },
             },
         },
     }
@@ -323,12 +327,14 @@ def test_routing_policy_loads_via_symlink(tmp_path: Path) -> None:
         "version": "1.0",
         "profiles": {
             "codex-native-executor": {
+                "model": "gpt-5.6-luna",
+                "reasoning_effort": "high",
                 "task_classes": {
                     "bugfix": {
                         "success_rate": 0.95,
                         "mean_latency_seconds": 100.0,
                     }
-                }
+                },
             }
         },
     }
@@ -377,12 +383,14 @@ def test_routing_policy_handles_native_to_read_only_executor_mapping(tmp_path: P
         "version": "1.0",
         "profiles": {
             "codex-native-executor": {
+                "model": "gpt-5.6-luna",
+                "reasoning_effort": "high",
                 "task_classes": {
                     "bugfix": {
                         "success_rate": 0.98,
                         "mean_latency_seconds": 50.0,
                     }
-                }
+                },
             }
         },
     }
@@ -400,3 +408,57 @@ def test_routing_policy_handles_native_to_read_only_executor_mapping(tmp_path: P
     )
     assert decision is not None
     assert decision.chosen_profile == "codex-read-only-executor"
+
+
+def test_routing_policy_rejects_candidates_with_mismatched_model(tmp_path: Path) -> None:
+    path = tmp_path / "mismatched_metrics.json"
+    metrics = {
+        "version": "1.0",
+        "profiles": {
+            "codex-native-executor": {
+                "model": "gpt-5-codex",
+                "reasoning_effort": "high",
+                "task_classes": {
+                    "bugfix": {
+                        "success_rate": 0.98,
+                        "mean_latency_seconds": 50.0,
+                    }
+                },
+            }
+        },
+    }
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(metrics, f)
+
+    policy = PerformanceRoutingPolicy(path)
+    # Profile expects default gpt-5.6-luna / high
+    codex_profile = WorkerProfile(
+        name="codex-native-executor",
+        worker_type="codex",
+        runtime_mode="native_agent",
+    )
+    decision = policy.choose_profile("bugfix", {"codex-native-executor": codex_profile})
+    assert decision is None
+
+
+def test_routing_policy_rejects_stale_repo_metrics_for_new_default_models() -> None:
+    from orchestrator.performance_routing import _METRICS_CACHE, DEFAULT_METRICS_PATH
+
+    _METRICS_CACHE.pop(DEFAULT_METRICS_PATH, None)
+    policy = PerformanceRoutingPolicy(DEFAULT_METRICS_PATH)
+    codex_profile = WorkerProfile(
+        name="codex-native-executor",
+        worker_type="codex",
+        runtime_mode="native_agent",
+    )
+    antigravity_profile = WorkerProfile(
+        name="antigravity-native-executor",
+        worker_type="antigravity",
+        runtime_mode="native_agent",
+    )
+    routable = {
+        "codex-native-executor": codex_profile,
+        "antigravity-native-executor": antigravity_profile,
+    }
+    decision = policy.choose_profile("bugfix", routable)
+    assert decision is None

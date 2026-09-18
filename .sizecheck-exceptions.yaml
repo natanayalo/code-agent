@@ -1,4 +1,5 @@
 file_exceptions:
+  apps/api/task_service_factory.py: Centralized task service bootstrap factory; wires repositories, sandbox, and provider worker instances in one cohesive dependency injection layer.
   workers/codex_cli_worker_native.py: Native provider adapter keeps request preparation and result mapping compatible with the shared worker contract.
   repositories/sqlalchemy_task.py: Highly stateful database repository layer; tightly coupled and slightly exceeds limit due to robust concurrency safeguards.
   db/models.py: Central ORM definitions; tightly coupled models.

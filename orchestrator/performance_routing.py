@@ -10,12 +10,31 @@ from typing import Any
 
 from orchestrator.state import RouteDecision
 from workers.base import WorkerProfile
+from workers.model_config import (
+    DEFAULT_ANTIGRAVITY_MODEL,
+    DEFAULT_ANTIGRAVITY_REASONING_EFFORT,
+    DEFAULT_CODEX_MODEL,
+    DEFAULT_CODEX_REASONING_EFFORT,
+)
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_METRICS_PATH = Path(__file__).resolve().parents[1] / "evaluation" / "routing_metrics.json"
 
 _METRICS_CACHE: dict[Path, dict[str, Any]] = {}
+
+
+def _expected_profile_model_config(profile: WorkerProfile) -> tuple[str | None, str | None]:
+    """Return the expected (model, reasoning_effort) for a worker profile."""
+    model = profile.model
+    effort = profile.reasoning_effort
+    if profile.worker_type == "codex":
+        model = model or DEFAULT_CODEX_MODEL
+        effort = effort or DEFAULT_CODEX_REASONING_EFFORT
+    elif profile.worker_type == "antigravity":
+        model = model or DEFAULT_ANTIGRAVITY_MODEL
+        effort = effort or DEFAULT_ANTIGRAVITY_REASONING_EFFORT
+    return model, effort
 
 
 class PerformanceRoutingPolicy:
@@ -130,6 +149,13 @@ class PerformanceRoutingPolicy:
             profile_metric = profiles_metrics.get(profile_name)
             if not isinstance(profile_metric, dict):
                 candidate_metrics_meta[profile_name] = "no_metrics"
+                continue
+
+            expected_model, expected_effort = _expected_profile_model_config(profile)
+            metric_model = profile_metric.get("model")
+            metric_effort = profile_metric.get("reasoning_effort")
+            if metric_model != expected_model or metric_effort != expected_effort:
+                candidate_metrics_meta[profile_name] = "model_mismatch"
                 continue
 
             task_classes = profile_metric.get("task_classes")

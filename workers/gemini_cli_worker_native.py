@@ -31,6 +31,7 @@ from workers.antigravity_event_normalizer import AntigravityStreamNormalizer
 from workers.base import (
     ArtifactReference,
     FailureKind,
+    ModelExecutionMetadata,
     WorkerCommand,
     WorkerRequest,
     WorkerResult,
@@ -42,7 +43,6 @@ from workers.cli_runtime import (
     ShellSessionProtocol,
 )
 from workers.failure_taxonomy import classify_failure_kind
-from workers.model_config import resolve_antigravity_model_config
 from workers.native_agent_models import NativeAgentRunResult
 from workers.native_agent_runner import (
     NativeAgentRunRequest,
@@ -549,20 +549,26 @@ class GeminiCliWorkerNativeMixin:
                 request=request,
                 runtime_mode=runtime_mode,
             )
+            # Legacy Gemini runs do not participate in Antigravity model resolution.
+            # Record truthful metadata only if explicit model is on adapter;
+            # otherwise leave model_execution empty for unconfigured legacy runs.
             adapter = getattr(self, "runtime_adapter", None)
-            model_config = resolve_antigravity_model_config(
-                task_constraints=request.constraints,
-                manifest_worker=(request.runtime_manifest or {}).get("worker"),
-                adapter_model=getattr(adapter, "model", None),
-                adapter_reasoning_effort=getattr(adapter, "reasoning_effort", None),
-                env=getattr(adapter, "env", None),
-            )
-            model_exec = model_config.to_metadata()
-            provider_metadata["model"] = model_exec.model
-            provider_metadata["reasoning_effort"] = model_exec.reasoning_effort
-            provider_metadata["model_source"] = model_exec.model_source
-            provider_metadata["reasoning_effort_source"] = model_exec.reasoning_effort_source
-            provider_metadata["model_execution"] = model_exec.model_dump(mode="json")
+            legacy_model = getattr(adapter, "model", None)
+            if legacy_model:
+                model_exec = ModelExecutionMetadata(
+                    provider="gemini",
+                    model=str(legacy_model),
+                    reasoning_effort=None,
+                    requested_model=None,
+                    requested_reasoning_effort=None,
+                    model_source="environment",
+                    reasoning_effort_source=None,
+                )
+                provider_metadata["model"] = model_exec.model
+                provider_metadata["reasoning_effort"] = None
+                provider_metadata["model_source"] = model_exec.model_source
+                provider_metadata["reasoning_effort_source"] = None
+                provider_metadata["model_execution"] = model_exec.model_dump(mode="json")
         task_id = request.task_id or request.session_id or "local"
         if hasattr(self, "ephemeral_store") and self.ephemeral_store is not None:
             self.ephemeral_store.refresh_task_ttl(task_id)

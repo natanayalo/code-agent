@@ -337,3 +337,18 @@ def test_runtime_adapters_explicit_env_provenance() -> None:
     assert anti_cfg.reasoning_effort == "medium"
     assert anti_cfg.model_source == "environment"
     assert anti_cfg.reasoning_effort_source == "environment"
+
+
+def test_resolve_antigravity_rejects_invalid_effort() -> None:
+    with pytest.raises(ValueError, match="Invalid Antigravity reasoning effort 'xhigh'"):
+        resolve_antigravity_model_config(task_constraints={"antigravity_reasoning_effort": "xhigh"})
+
+    with pytest.raises(ValueError, match="Invalid Antigravity reasoning effort 'ultra'"):
+        resolve_antigravity_model_config(env={"CODE_AGENT_ANTIGRAVITY_REASONING_EFFORT": "ultra"})
+
+
+def test_parse_antigravity_slug_unsupported_suffix() -> None:
+    # 'xhigh' or 'max' are not recognized as Antigravity effort suffixes
+    base, effort = parse_antigravity_model_slug("gemini-3.8-flash-xhigh")
+    assert base == "gemini-3.8-flash-xhigh"
+    assert effort is None

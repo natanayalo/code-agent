@@ -97,3 +97,28 @@ def test_build_task_service_from_env_treats_legacy_gemini_bin_agy_as_antigravity
         assert service.worker.get_worker("antigravity").native_sandbox_enabled is True
     finally:
         _close_outbound_http_clients(outbound_http_clients)
+
+
+def test_build_task_service_builds_antigravity_when_only_effort_configured(
+    tmp_path: Path,
+) -> None:
+    """Configuring only CODE_AGENT_ANTIGRAVITY_REASONING_EFFORT enables Antigravity worker."""
+    database_path = tmp_path / "code-agent.db"
+    outbound_http_clients = create_outbound_http_clients()
+    service = build_task_service_from_env(
+        {
+            "CODE_AGENT_ENABLE_TASK_SERVICE": "true",
+            "DATABASE_URL": f"sqlite+pysqlite:///{database_path}",
+            "CODE_AGENT_ANTIGRAVITY_REASONING_EFFORT": "high",
+        },
+        outbound_http_clients=outbound_http_clients,
+    )
+
+    try:
+        assert service is not None
+        assert isinstance(service.worker.get_worker("antigravity"), GeminiCliWorker)
+        adapter = service.worker.get_worker("antigravity").runtime_adapter
+        assert isinstance(adapter, AntigravityCliRuntimeAdapter)
+        assert adapter.reasoning_effort == "high"
+    finally:
+        _close_outbound_http_clients(outbound_http_clients)

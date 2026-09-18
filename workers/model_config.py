@@ -21,8 +21,10 @@ CODEX_REASONING_EFFORT_ENV_VAR: Final[str] = "CODE_AGENT_CODEX_REASONING_EFFORT"
 ANTIGRAVITY_MODEL_ENV_VAR: Final[str] = "CODE_AGENT_ANTIGRAVITY_MODEL"
 ANTIGRAVITY_REASONING_EFFORT_ENV_VAR: Final[str] = "CODE_AGENT_ANTIGRAVITY_REASONING_EFFORT"
 
+ANTIGRAVITY_REASONING_EFFORTS: Final[frozenset[str]] = frozenset({"low", "medium", "high"})
+
 _EFFORT_SLUG_SUFFIX_PATTERN: Final[re.Pattern[str]] = re.compile(
-    r"^(?P<base>.+)-(?P<effort>low|medium|high|xhigh|max)$", re.IGNORECASE
+    r"^(?P<base>.+)-(?P<effort>low|medium|high)$", re.IGNORECASE
 )
 
 
@@ -262,6 +264,11 @@ def _resolve_raw_antigravity_effort(
         adapter_effort=adapter_effort,
         resolved_env=resolved_env,
     )
+    if ind_effort is not None and ind_effort not in ANTIGRAVITY_REASONING_EFFORTS:
+        allowed = ", ".join(sorted(ANTIGRAVITY_REASONING_EFFORTS))
+        raise ValueError(
+            f"Invalid Antigravity reasoning effort '{ind_effort}'. Allowed efforts: {allowed}."
+        )
 
     if ind_effort is not None and embedded_effort is not None:
         assert ind_source is not None
