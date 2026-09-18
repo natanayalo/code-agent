@@ -195,10 +195,23 @@ def test_build_antigravity_model_cli_args() -> None:
         DEFAULT_ANTIGRAVITY_REASONING_EFFORT,
     ]
 
-    auto_config = resolve_antigravity_model_config(
-        task_constraints={"antigravity_model": "auto-gemini-2.5"}
-    )
-    assert build_antigravity_model_cli_args(auto_config) == []
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"task_constraints": {"antigravity_model": "auto-gemini-2.5"}},
+        {"task_constraints": {"model": "auto-gemini-2.5", "worker_type": "antigravity"}},
+        {"manifest_worker": {"model": "auto-gemini-2.5"}},
+        {"env": {"CODE_AGENT_ANTIGRAVITY_MODEL": "auto-gemini-2.5"}},
+        {"adapter_model": "auto-gemini-2.5"},
+    ],
+)
+def test_resolve_antigravity_rejects_auto_routing_aliases(kwargs: dict) -> None:
+    with pytest.raises(
+        ValueError,
+        match=r"Antigravity auto-\* routing aliases cannot be used as execution models",
+    ):
+        resolve_antigravity_model_config(**kwargs)
 
 
 def test_config_to_metadata_export() -> None:

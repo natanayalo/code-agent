@@ -334,6 +334,11 @@ def resolve_antigravity_model_config(
         default_model=default_model,
     )
     base_family, embedded_effort = parse_antigravity_model_slug(raw_model)
+    if base_family.lower().startswith("auto-"):
+        raise ValueError(
+            "Antigravity auto-* routing aliases cannot be used as execution models; "
+            "specify an explicit model returned by `agy models`."
+        )
 
     effective_effort, effort_source = _resolve_raw_antigravity_effort(
         requested_effort=requested_effort,
@@ -361,7 +366,7 @@ def resolve_antigravity_model_config(
 def build_antigravity_model_cli_args(config: ResolvedModelConfig) -> list[str]:
     """Emit the single canonical argv slice for Antigravity model and effort."""
     args: list[str] = []
-    if config.model and not config.model.lower().startswith("auto-"):
+    if config.model:
         args.extend(["--model", config.model])
         if config.reasoning_effort:
             args.extend(["--effort", config.reasoning_effort])

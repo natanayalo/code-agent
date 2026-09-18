@@ -168,14 +168,6 @@ def _resolve_runtime_model_context(
     return adapter, None
 
 
-def _resolve_runtime_model_execution(
-    request: WorkerRequest,
-    adapter: CliRuntimeAdapter,
-) -> ModelExecutionMetadata | None:
-    _, metadata = _resolve_runtime_model_context(request, adapter)
-    return metadata
-
-
 class RuntimeExecutor:
     """Unified runtime executor driving the tool loop execution."""
 

@@ -83,17 +83,17 @@ def test_antigravity_adapter_from_env_builds_prompt_command_and_scoped_env(tmp_p
     assert adapter.env == {"XDG_RUNTIME_DIR": "/tmp/runtime"}
 
 
-def test_antigravity_adapter_omits_auto_model_to_use_provider_default(tmp_path: Path) -> None:
+def test_antigravity_adapter_rejects_auto_model_routing_alias(tmp_path: Path) -> None:
     adapter = AntigravityCliRuntimeAdapter(
         executable="/opt/bin/agy",
         model="auto-gemini-2.5",
     )
 
-    assert adapter.build_native_command(prompt="do the work", cwd=tmp_path) == [
-        "/opt/bin/agy",
-        "-p",
-        "do the work",
-    ]
+    with pytest.raises(
+        ValueError,
+        match=r"Antigravity auto-\* routing aliases cannot be used as execution models",
+    ):
+        adapter.build_native_command(prompt="do the work", cwd=tmp_path)
 
 
 def test_antigravity_adapter_uses_lowest_cost_default_model(tmp_path: Path) -> None:
