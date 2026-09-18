@@ -12,14 +12,19 @@ from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, load_only, selectinload
 
 from db.enums import (
-    HumanInteractionType,
     OrchestrationRuntime,
     TaskStatus,
     WorkerRuntimeMode,
 )
 from db.models import HumanInteraction, Task, TaskTimelineEvent, WorkerRun
+from evaluation.provider_reliability_identity import (
+    check_cohort_membership,
+    resolve_task_execution_identity,
+)
 from evaluation.provider_reliability_models import (
     BudgetCoverageMetrics,
+    ExecutionIdentity,
+    ExecutionIdentityStatus,
     InterventionMetrics,
     LatencyMetrics,
     MutationMode,
@@ -43,6 +48,7 @@ from evaluation.provider_reliability_stages import (
     check_task_stages,
     check_verification_stage,
     determine_task_mutation_mode,
+    extract_task_interaction_metrics,
     is_profile_compatible_with_mode,
     resolve_failure_kind,
     verify_timeline_consistency,
@@ -78,6 +84,8 @@ class ExtractedTaskEvidence:
     review_passed: bool
     delivery_applicable: bool
     delivery_passed: bool
+    execution_identity: ExecutionIdentity | None = None
+    execution_identity_status: ExecutionIdentityStatus = "unknown_legacy"
 
 
 def compute_wilson_interval(
@@ -121,6 +129,8 @@ def _validate_task_candidate(
     task: Task, policy: ReliabilityReportPolicy | ProviderReliabilityRobustnessPolicy
 ) -> tuple[str | None, MutationMode | None, datetime | None, str | None]:
     """Check task eligibility criteria and return exclusion reason if invalid."""
+    if task.constraints and task.constraints.get("exclude_from_provider_reliability") is True:
+        return "evaluation_smoke", None, None, None
     if task.status == TaskStatus.CANCELLED:
         return "cancelled", None, None, None
     if task.status in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS):
@@ -180,34 +190,22 @@ def _extract_single_task(
     accepted = task.status == TaskStatus.COMPLETED
     c = task.constraints or {}
 
-    interactions = task.human_interactions or []
-    clarifications = sum(
-        1 for i in interactions if i.interaction_type == HumanInteractionType.CLARIFICATION
+    clarifications, approvals, has_override, duration = extract_task_interaction_metrics(
+        task, c, terminal_ts
     )
-    approvals = sum(
-        1
-        for i in interactions
-        if i.interaction_type
-        in (
-            HumanInteractionType.PERMISSION,
-            HumanInteractionType.REVIEW,
-            HumanInteractionType.MERGE,
-        )
-    )
-
-    has_override = bool(
-        task.worker_override is not None
-        or c.get("worker_override") is not None
-        or c.get("worker_profile_override") is not None
-        or task.route_reason in ("manual_override", "manual_profile_override")
-    )
-
-    start_ts = task.created_at
-    if start_ts and start_ts.tzinfo is None:
-        start_ts = start_ts.replace(tzinfo=UTC)
-    duration = max(0.0, (terminal_ts - start_ts).total_seconds()) if start_ts else None
 
     stages = check_task_stages(task, runs)
+    identity, identity_status = resolve_task_execution_identity(task, runs)
+
+    exclusion = check_cohort_membership(
+        policy.evidence_scope,
+        profile,
+        identity,
+        identity_status,
+        policy.expected_execution_identities,
+    )
+    if exclusion:
+        return None, exclusion
 
     return (
         ExtractedTaskEvidence(
@@ -222,7 +220,7 @@ def _extract_single_task(
             review_repaired=c.get("independent_review_repair_passes_used", 0) > 0,
             clarification_count=clarifications,
             approval_count=approvals,
-            has_intervention=bool(interactions),
+            has_intervention=bool(task.human_interactions),
             has_override=has_override,
             has_budget=any(bool(r.budget_usage) for r in runs),
             dispatched=stages[0],
@@ -233,6 +231,8 @@ def _extract_single_task(
             review_passed=stages[5],
             delivery_applicable=stages[6],
             delivery_passed=stages[7],
+            execution_identity=identity,
+            execution_identity_status=identity_status,
         ),
         None,
     )
@@ -540,7 +540,7 @@ def build_provider_reliability_report(
     profile_coverage = build_profile_coverage(cells, policy)
 
     return ProviderReliabilityReport(
-        schema_version=1,
+        schema_version=2,
         generated_at=datetime.now(UTC),
         status=determine_report_status(recommendations),
         policy=policy,

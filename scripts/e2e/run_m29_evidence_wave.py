@@ -24,7 +24,6 @@ except ImportError:
     pass
 
 from evaluation.m29_evidence_models import (
-    TOTAL_CASES,
     M29BundleIdentity,
     M29CaseOutcome,
     M29EvidenceBundle,
@@ -79,17 +78,11 @@ def _client(base_url: str, api_token_env: str) -> httpx.Client:
 
 def _check_stack_health(client: httpx.Client) -> None:
     """Verify API health and execution readiness before dispatching tasks."""
-    try:
-        health = client.get("/health", timeout=5.0)
-        health.raise_for_status()
-    except Exception as exc:
-        raise RuntimeError(f"preflight /health check failed: {exc}") from exc
-
-    try:
-        ready = client.get("/ready", timeout=5.0)
-        ready.raise_for_status()
-    except Exception as exc:
-        raise RuntimeError(f"preflight /ready check failed: {exc}") from exc
+    for endpoint in ("/health", "/ready"):
+        try:
+            client.get(endpoint, timeout=5.0).raise_for_status()
+        except Exception as exc:
+            raise RuntimeError(f"preflight {endpoint} check failed: {exc}") from exc
 
 
 def _resolve_task_failure_kind(task_data: dict[str, Any]) -> str | None:
@@ -123,10 +116,7 @@ def _get_changed_files_count(task_data: dict[str, Any]) -> int:
     if files_changed:
         return len(files_changed)
     plan = task_data.get("execution_plan") or {}
-    count = 0
-    for node in plan.get("nodes") or []:
-        count += len(node.get("changed_files") or [])
-    return count
+    return sum(len(n.get("changed_files") or []) for n in plan.get("nodes") or [])
 
 
 def _submit_case(
@@ -194,33 +184,26 @@ def _validate_and_record_outcome(
     if status not in TERMINAL_STATUSES:
         raise ValueError(f"expected terminal status, got {status}")
 
-    # Orchestration and runtime assertions
+    task_id = str(task_data.get("task_id"))
     orch = str(task_data.get("orchestration_runtime") or "")
     if orch != "temporal":
-        raise ValueError(f"task {task_data.get('task_id')} runtime '{orch}' != 'temporal'")
+        raise ValueError(f"task {task_id} runtime '{orch}' != 'temporal'")
 
     mode = str(task_data.get("runtime_mode") or "")
     if mode != "native_agent":
-        raise ValueError(f"task {task_data.get('task_id')} mode '{mode}' != 'native_agent'")
+        raise ValueError(f"task {task_id} mode '{mode}' != 'native_agent'")
 
-    spec = task_data.get("task_spec") or {}
-    task_type = spec.get("task_type")
+    task_type = (task_data.get("task_spec") or {}).get("task_type")
     if task_type != case.task_class:
-        raise ValueError(
-            f"task {task_data.get('task_id')} class '{task_type}' != '{case.task_class}'"
-        )
+        raise ValueError(f"task {task_id} class '{task_type}' != '{case.task_class}'")
 
     profile = task_data.get("chosen_profile")
     if profile != case.worker_profile:
-        raise ValueError(
-            f"task {task_data.get('task_id')} profile '{profile}' != '{case.worker_profile}'"
-        )
+        raise ValueError(f"task {task_id} profile '{profile}' != '{case.worker_profile}'")
 
     changed_files = _get_changed_files_count(task_data)
     if changed_files > 0:
-        raise ValueError(
-            f"task {task_data.get('task_id')} modified {changed_files} files (must be 0)"
-        )
+        raise ValueError(f"task {task_id} modified {changed_files} files (must be 0)")
 
     created = task_data.get("created_at") or datetime.now(UTC).isoformat()
     updated = task_data.get("updated_at") or created
@@ -287,21 +270,110 @@ def init_cmd(args: argparse.Namespace) -> int:
     return 0
 
 
+def _submit_smoke_case(
+    client: httpx.Client,
+    profile: str,
+    worker_override: str,
+    args: argparse.Namespace,
+) -> str:
+    """Submit a preflight smoke task excluded from provider reliability evaluation."""
+    timestamp = int(time.time())
+    thread_id = f"m29-smoke-{worker_override}-{timestamp}"
+    delivery_id = hashlib.sha256(thread_id.encode()).hexdigest()
+    payload = {
+        "task_text": "Smoke test: summarize README.md in one paragraph.",
+        "repo_key": args.repo_key,
+        "branch": args.branch,
+        "source": "m29-live-provider-evidence",
+        "external_user_id": "m29-smoke-operator",
+        "external_thread_id": thread_id,
+        "delivery_id": delivery_id,
+        "worker_override": worker_override,
+        "worker_profile_override": profile,
+        "constraints": {
+            "read_only": True,
+            "delivery_mode": "summary",
+            "exclude_from_provider_reliability": True,
+        },
+        "budget": {"worker_timeout_seconds": 300},
+    }
+    resp = client.post("/webhook", json=payload, timeout=10.0)
+    resp.raise_for_status()
+    task_id = str(resp.json().get("task_id") or "")
+    if not task_id:
+        raise RuntimeError(f"preflight smoke response missing task_id for {profile}")
+    return task_id
+
+
+def _verify_smoke_task_model_execution(
+    task_data: dict[str, Any], exp_prov: str, exp_mod: str, exp_eff: str | None
+) -> None:
+    """Verify smoke task persisted model_execution metadata in budget_usage."""
+    status = task_data.get("status")
+    if status != "completed":
+        kind = _resolve_task_failure_kind(task_data)
+        raise RuntimeError(
+            f"preflight smoke task failed with status '{status}', failure_kind: {kind}"
+        )
+    budget = (task_data.get("latest_run") or {}).get("budget_usage") or {}
+    model_exec = (budget.get("native_agent") or {}).get("model_execution") or {}
+    actual = (
+        model_exec.get("provider"),
+        model_exec.get("model"),
+        model_exec.get("reasoning_effort"),
+    )
+    if actual != (exp_prov, exp_mod, exp_eff):
+        raise RuntimeError(
+            f"preflight smoke model_execution mismatch: "
+            f"expected ({exp_prov}, {exp_mod}, {exp_eff}), got {actual}"
+        )
+
+
+def run_preflight_smoke(client: httpx.Client, args: argparse.Namespace) -> None:
+    """Run preflight smoke verification for Codex and Antigravity."""
+    print("Running preflight smoke validation...")
+    checks = [
+        (
+            "codex-native-executor-read-only",
+            "codex",
+            "codex",
+            "gpt-5.6-luna",
+            "high",
+        ),
+        (
+            "antigravity-native-executor-read-only",
+            "antigravity",
+            "antigravity",
+            "gemini-3.8-flash",
+            "medium",
+        ),
+    ]
+    for profile, override, exp_prov, exp_mod, exp_eff in checks:
+        print(f"  Submitting smoke task for {profile}...")
+        task_id = _submit_smoke_case(client, profile, override, args)
+        print(f"  Polling smoke task {task_id} (timeout=300s)...")
+        task_data = _poll_task(client, task_id, 300)
+        _verify_smoke_task_model_execution(task_data, exp_prov, exp_mod, exp_eff)
+        print(f"  ✓ Smoke task for {profile} passed with model {exp_mod} ({exp_eff}).")
+    print("Preflight smoke validation succeeded for all providers.")
+
+
 def status_cmd(args: argparse.Namespace) -> int:
     """Print current progress and status of evidence collection."""
     bundle = _load_bundle(args.bundle_dir)
     suite = _load_suite(args.suite_path)
+    total_cases = len(suite.cases)
 
     completed = len(bundle.cases)
     in_flight = len(bundle.in_flight)
-    remaining = TOTAL_CASES - completed
+    remaining = total_cases - completed
 
     print(f"M29 Evidence Bundle Status: {args.bundle_dir}")
     print(f"  Build SHA: {bundle.identity.build_sha}")
     print(f"  Target repo revision: {bundle.identity.target_repository_revision}")
     print(f"  Created at: {bundle.identity.created_at.isoformat()}")
     print(
-        f"  Progress: {completed}/{TOTAL_CASES} completed, "
+        f"  Progress: {completed}/{total_cases} completed, "
         f"{in_flight} in-flight, {remaining} pending"
     )
 
@@ -332,10 +404,21 @@ def status_cmd(args: argparse.Namespace) -> int:
     return 0
 
 
+def smoke_cmd(args: argparse.Namespace) -> int:
+    """Run standalone preflight smoke check."""
+    with _client(args.base_url, args.api_token_env) as client:
+        print(f"Performing preflight checks at {args.base_url}...")
+        _check_stack_health(client)
+        print("Stack is healthy and execution-ready.")
+        run_preflight_smoke(client, args)
+    return 0
+
+
 def run_batch_cmd(args: argparse.Namespace) -> int:
     """Execute all remaining cases sequentially with automatic resumption."""
     bundle = _load_bundle(args.bundle_dir)
     suite = _load_suite(args.suite_path)
+    total_cases = len(suite.cases)
 
     actual_sha = _calculate_sha256(args.suite_path)
     if bundle.suite_sha256 != actual_sha:
@@ -351,10 +434,13 @@ def run_batch_cmd(args: argparse.Namespace) -> int:
         _check_stack_health(client)
         print("Stack is healthy and execution-ready.")
 
+        if getattr(args, "preflight_smoke", False):
+            run_preflight_smoke(client, args)
+
         for i, case in enumerate(suite.cases, 1):
             if case.case_id in bundle.cases:
                 LOGGER.info(
-                    "[%d/%d] Skipping already completed case %s", i, TOTAL_CASES, case.case_id
+                    "[%d/%d] Skipping already completed case %s", i, total_cases, case.case_id
                 )
                 continue
 
@@ -362,12 +448,12 @@ def run_batch_cmd(args: argparse.Namespace) -> int:
             task_id = bundle.in_flight.get(case.case_id)
             if task_id:
                 print(
-                    f"[{i}/{TOTAL_CASES}] Resuming in-flight task {task_id} "
+                    f"[{i}/{total_cases}] Resuming in-flight task {task_id} "
                     f"for case {case.case_id}..."
                 )
             else:
                 print(
-                    f"[{i}/{TOTAL_CASES}] Submitting case {case.case_id} "
+                    f"[{i}/{total_cases}] Submitting case {case.case_id} "
                     f"({case.task_class}, {case.worker_profile})..."
                 )
                 task_id = _submit_case(client, case, bundle_id, args)
@@ -390,7 +476,12 @@ def run_batch_cmd(args: argparse.Namespace) -> int:
             )
             print(f"  -> Case {case.case_id} finished: {status_str} in {duration_str}")
 
-    print(f"\nAll {TOTAL_CASES} cases in evidence wave completed successfully!")
+    completed_count = sum(1 for o in bundle.cases.values() if o.terminal_status == "completed")
+    failed_count = sum(1 for o in bundle.cases.values() if o.terminal_status == "failed")
+    print(
+        f"\nAll {total_cases} cases reached terminal state: {completed_count} completed, "
+        f"{failed_count} failed."
+    )
     return 0
 
 
@@ -433,6 +524,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to frozen suite JSON",
     )
 
+    # smoke
+    smoke = subparsers.add_parser(
+        "smoke", help="Run preflight smoke validation for Codex and Antigravity"
+    )
+    smoke.add_argument("--base-url", default="http://127.0.0.1:8000", help="API base URL")
+    smoke.add_argument(
+        "--api-token-env", default="CODE_AGENT_API_SHARED_SECRET", help="API secret env var"
+    )
+    smoke.add_argument("--repo-key", default="code-agent", help="Allowed repository key")
+    smoke.add_argument("--branch", default="master", help="Target branch name")
+
     # run-batch
     batch = subparsers.add_parser("run-batch", help="Run or resume remaining cases in batch")
     batch.add_argument("--bundle-dir", type=Path, required=True, help="Path to bundle directory")
@@ -451,6 +553,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path("evaluation/m29_live_provider_suite.json"),
         help="Path to frozen suite JSON",
     )
+    batch.add_argument(
+        "--preflight-smoke",
+        action="store_true",
+        help="Run preflight smoke validation for Codex and Antigravity before batch execution",
+    )
 
     return parser
 
@@ -464,6 +571,8 @@ def main(argv: list[str] | None = None) -> int:
         return init_cmd(args)
     if args.command == "status":
         return status_cmd(args)
+    if args.command == "smoke":
+        return smoke_cmd(args)
     if args.command == "run-batch":
         return run_batch_cmd(args)
     return 1

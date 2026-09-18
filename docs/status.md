@@ -110,15 +110,20 @@ Temporal migration and rollback record is in the
   Temporal/native-agent evidence from PostgreSQL, enforces a 90-day window and
   10-task minimum per cell, computes 95% Wilson score confidence intervals,
   requires >= 2 eligible compatible candidates for recommendations, and validates
-  public-field sanitization without modifying live routing. Following the reviewed
-  28-task live evidence wave (2026-09-17, 268 included, 102 excluded, 370 scanned,
-  100% reconciled, zero exclusions introduced), dual-candidate recommendations are
-  established across all 4 operational cells at floor 10 (`feature` mutation,
-  `feature` read_only, `docs` read_only, `investigation` read_only) and 3 cells at
-  floor 20 (`feature` mutation, `feature` read_only, `docs` read_only). The 10,000-iteration
-  bootstrap robustness baseline confirms strong stability (96%-100% win probability for
-  `docs` read-only, `feature` mutation, and `investigation` read-only; 75% for `feature`
-  read-only). Live routing remains unchanged.
+  public-field sanitization without modifying live routing. Following the discovery of
+  OpenAI's `gpt-5.4-mini` retirement, the evaluation architecture was reshaped to
+  enforce authoritative, model-aware execution cohorts (`provider`, `model`,
+  `reasoning_effort`) before aggregation. Wave 1 is retained immutably as a diagnostic
+  baseline (`artifacts/m29_evidence_bundle_wave1_diagnostic/`), and Wave 2
+  (`artifacts/m29_evidence_bundle_wave2/`, 20 paired docs tasks) establishes dual-candidate
+  sample floor qualification ($N=10$ vs $10$) in `docs` (`read_only`) under verified current
+  cohorts (`codex: gpt-5.6-luna/high`, `antigravity: gemini-3.8-flash/medium`), recommending
+  `codex-native-executor-read-only` (10/10 accepted, Wilson lower bound 0.7225, 66.1% bootstrap
+  win probability). Two distinct views are published: canonical current-cohort report
+  (`evaluation/m29_provider_reliability_report.{json,md}`) and operational diagnostic report
+  (`evaluation/m29_provider_reliability_operational_report.{json,md}`). Robustness status is
+  reported as `partial` to truthfully reflect that temporal consistency requires longitudinal data.
+  Live routing remains unchanged.
 
 ## Known limitations
 

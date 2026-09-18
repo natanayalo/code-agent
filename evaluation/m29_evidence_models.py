@@ -39,78 +39,94 @@ class M29EvidenceCase(StrictModel):
     pair_order: int | None = Field(default=None, ge=1, le=2)
 
 
-class M29EvidenceSuite(StrictModel):
-    """The frozen 28-case M29 live provider evidence suite."""
+def _validate_paired_groups(docs_cases: list[M29EvidenceCase], expected_pairs: int) -> None:
+    """Validate paired docs groups contain alternating providers."""
+    paired_groups: dict[str, list[M29EvidenceCase]] = {}
+    for c in docs_cases:
+        if not c.pair_group:
+            raise ValueError(f"docs case {c.case_id} is missing pair_group")
+        paired_groups.setdefault(c.pair_group, []).append(c)
 
-    suite_name: Literal["m29-live-provider-evidence"]
+    if len(paired_groups) != expected_pairs:
+        raise ValueError(f"expected {expected_pairs} docs pair groups, got {len(paired_groups)}")
+
+    last_first_provider: str | None = None
+    for group_name, group_cases in paired_groups.items():
+        if len(group_cases) != 2:
+            raise ValueError(
+                f"pair group '{group_name}' must contain exactly 2 cases, got {len(group_cases)}"
+            )
+        profiles = {gc.worker_profile for gc in group_cases}
+        if profiles != {
+            "antigravity-native-executor-read-only",
+            "codex-native-executor-read-only",
+        }:
+            raise ValueError(
+                f"pair group '{group_name}' must have one antigravity and one codex case"
+            )
+        sorted_cases = sorted(group_cases, key=lambda c: c.pair_order or 0)
+        first_provider = sorted_cases[0].worker_profile
+        if last_first_provider is not None and first_provider == last_first_provider:
+            raise ValueError(
+                f"pair group '{group_name}' does not alternate provider order "
+                "to counterbalance ordering bias"
+            )
+        last_first_provider = first_provider
+
+
+class M29EvidenceSuite(StrictModel):
+    """The frozen M29 live provider evidence suite (Wave 1: 28 cases; Wave 2: 20 cases)."""
+
+    suite_name: Literal["m29-live-provider-evidence", "m29-live-provider-evidence-wave2"]
     schema_version: Literal[1] = 1
     cases: list[M29EvidenceCase]
 
     @model_validator(mode="after")
     def validate_suite_structure(self) -> M29EvidenceSuite:
-        if len(self.cases) != TOTAL_CASES:
-            raise ValueError(
-                f"suite must contain exactly {TOTAL_CASES} cases, got {len(self.cases)}"
-            )
-
         case_ids = [c.case_id for c in self.cases]
         if len(set(case_ids)) != len(case_ids):
             raise ValueError("duplicate case IDs found in suite")
 
-        inv_cases = [c for c in self.cases if c.task_class == "investigation"]
-        feat_cases = [c for c in self.cases if c.task_class == "feature"]
-        docs_cases = [c for c in self.cases if c.task_class == "docs"]
-
-        if len(inv_cases) != INVESTIGATION_CASES:
-            raise ValueError(
-                f"expected {INVESTIGATION_CASES} investigation cases, got {len(inv_cases)}"
-            )
-        if any(c.worker_profile != "antigravity-native-executor-read-only" for c in inv_cases):
-            raise ValueError("investigation cases must use antigravity-native-executor-read-only")
-
-        if len(feat_cases) != FEATURE_CASES:
-            raise ValueError(f"expected {FEATURE_CASES} feature cases, got {len(feat_cases)}")
-        if any(c.worker_profile != "antigravity-native-executor-read-only" for c in feat_cases):
-            raise ValueError("feature cases must use antigravity-native-executor-read-only")
-
-        if len(docs_cases) != DOCS_CASES:
-            raise ValueError(f"expected {DOCS_CASES} docs cases, got {len(docs_cases)}")
-
-        paired_groups: dict[str, list[M29EvidenceCase]] = {}
-        for c in docs_cases:
-            if not c.pair_group:
-                raise ValueError(f"docs case {c.case_id} is missing pair_group")
-            paired_groups.setdefault(c.pair_group, []).append(c)
-
-        if len(paired_groups) != DOCS_PAIRED_TOPICS:
-            raise ValueError(
-                f"expected {DOCS_PAIRED_TOPICS} docs pair groups, got {len(paired_groups)}"
-            )
-
-        # Verify each pair has exactly 1 Antigravity and 1 Codex case and order alternates
-        last_first_provider: str | None = None
-        for group_name, group_cases in paired_groups.items():
-            if len(group_cases) != 2:
+        if self.suite_name == "m29-live-provider-evidence":
+            if len(self.cases) != TOTAL_CASES:
                 raise ValueError(
-                    f"pair group '{group_name}' must contain exactly 2 cases, "
-                    f"got {len(group_cases)}"
+                    f"suite must contain exactly {TOTAL_CASES} cases, got {len(self.cases)}"
                 )
-            profiles = {gc.worker_profile for gc in group_cases}
-            if profiles != {
-                "antigravity-native-executor-read-only",
-                "codex-native-executor-read-only",
-            }:
+
+            inv_cases = [c for c in self.cases if c.task_class == "investigation"]
+            feat_cases = [c for c in self.cases if c.task_class == "feature"]
+            docs_cases = [c for c in self.cases if c.task_class == "docs"]
+
+            if len(inv_cases) != INVESTIGATION_CASES:
                 raise ValueError(
-                    f"pair group '{group_name}' must have one antigravity and one codex case"
+                    f"expected {INVESTIGATION_CASES} investigation cases, got {len(inv_cases)}"
                 )
-            sorted_cases = sorted(group_cases, key=lambda c: c.pair_order or 0)
-            first_provider = sorted_cases[0].worker_profile
-            if last_first_provider is not None and first_provider == last_first_provider:
+            if any(c.worker_profile != "antigravity-native-executor-read-only" for c in inv_cases):
                 raise ValueError(
-                    f"pair group '{group_name}' does not alternate provider order "
-                    f"to counterbalance ordering bias"
+                    "investigation cases must use antigravity-native-executor-read-only"
                 )
-            last_first_provider = first_provider
+
+            if len(feat_cases) != FEATURE_CASES:
+                raise ValueError(f"expected {FEATURE_CASES} feature cases, got {len(feat_cases)}")
+            if any(c.worker_profile != "antigravity-native-executor-read-only" for c in feat_cases):
+                raise ValueError("feature cases must use antigravity-native-executor-read-only")
+
+            if len(docs_cases) != DOCS_CASES:
+                raise ValueError(f"expected {DOCS_CASES} docs cases, got {len(docs_cases)}")
+
+            _validate_paired_groups(docs_cases, DOCS_PAIRED_TOPICS)
+
+        elif self.suite_name == "m29-live-provider-evidence-wave2":
+            if len(self.cases) != 20:
+                raise ValueError(
+                    f"Wave 2 suite must contain exactly 20 cases, got {len(self.cases)}"
+                )
+            docs_cases = [c for c in self.cases if c.task_class == "docs"]
+            if len(docs_cases) != 20:
+                raise ValueError(
+                    f"Wave 2 suite must contain only docs cases, got {len(docs_cases)}"
+                )
+            _validate_paired_groups(docs_cases, 10)
 
         return self
 

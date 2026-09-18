@@ -38,6 +38,15 @@ ALLOWED_KEYS_BY_LEVEL: dict[str, frozenset[str]] = {
             "window_end_at",
             "enabled_profiles",
             "expected_groups",
+            "evidence_scope",
+            "expected_execution_identities",
+        }
+    ),
+    "execution_identity": frozenset(
+        {
+            "provider",
+            "model",
+            "reasoning_effort",
         }
     ),
     "profile_coverage": frozenset(
@@ -195,6 +204,10 @@ VALID_EXCLUSION_REASONS: frozenset[str] = frozenset(
         "mixed_profile_execution",
         "incompatible_profile_mode",
         "malformed_missing_mode",
+        "unknown_execution_identity",
+        "mixed_execution_identity",
+        "execution_identity_mismatch",
+        "evaluation_smoke",
     }
 )
 
@@ -207,6 +220,12 @@ def _validate_domain_value(key: str, val: Any) -> None:
                 raise ValueError(f"Unsafe substring '{sub}' detected in field {key}: {val}")
         if key == "profile" and not SAFE_IDENTIFIER_PATTERN.match(val):
             raise ValueError(f"Invalid profile identifier format: {val}")
+        if key in ("provider", "model") and not SAFE_IDENTIFIER_PATTERN.match(val):
+            raise ValueError(f"Invalid {key} identifier format: {val}")
+        if key == "reasoning_effort" and val not in ("low", "medium", "high"):
+            raise ValueError(f"Invalid reasoning_effort value: {val}")
+        if key == "evidence_scope" and val not in ("operational", "current_execution_cohort"):
+            raise ValueError(f"Invalid evidence_scope domain value: {val}")
         if key == "task_class":
             if not SAFE_CLASS_PATTERN.match(val) or val not in VALID_TASK_CLASSES:
                 raise ValueError(f"Invalid task_class domain value: {val}")
@@ -268,6 +287,15 @@ def assert_sanitized_report(payload: dict[str, Any] | str) -> None:
     _validate_dict_keys(data, ALLOWED_KEYS_BY_LEVEL["root"], "root")
     if "policy" in data:
         _validate_dict_keys(data["policy"], ALLOWED_KEYS_BY_LEVEL["policy"], "policy")
+        for prof, ident in data["policy"].get("expected_execution_identities", {}).items():
+            if not SAFE_IDENTIFIER_PATTERN.match(prof):
+                raise ValueError(f"Invalid profile in expected_execution_identities: {prof}")
+            if isinstance(ident, dict):
+                _validate_dict_keys(
+                    ident,
+                    ALLOWED_KEYS_BY_LEVEL["execution_identity"],
+                    f"policy.expected_execution_identities[{prof}]",
+                )
     if "exclusions" in data:
         _validate_dict_keys(data["exclusions"], ALLOWED_KEYS_BY_LEVEL["exclusions"], "exclusions")
         for rk in data["exclusions"].get("by_reason", {}):
@@ -324,6 +352,7 @@ def _render_header(report: ProviderReliabilityReport) -> list[str]:
         "# M29 Provider Reliability Advisory Report",
         "",
         f"- **Status**: `{report.status}`",
+        f"- **Evidence Scope**: `{p.evidence_scope}`",
         f"- **Generated At**: `{report.generated_at.isoformat()}`",
         f"- **Evidence Window**: `{p.window_start_at.isoformat()}` to "
         f"`{p.window_end_at.isoformat()}` ({p.lookback_days} days)",

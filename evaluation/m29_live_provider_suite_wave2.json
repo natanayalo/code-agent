@@ -1,0 +1,206 @@
+{
+  "suite_name": "m29-live-provider-evidence-wave2",
+  "schema_version": 1,
+  "cases": [
+    {
+      "case_id": "m29-w2-docs-01-readme-antigravity",
+      "task_class": "docs",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "readme-architecture",
+      "pair_group": "docs-readme-architecture",
+      "pair_order": 1,
+      "prompt": "Improve architectural clarity in README documentation, detailing system components and design invariants without modifying files."
+    },
+    {
+      "case_id": "m29-w2-docs-01-readme-codex",
+      "task_class": "docs",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "readme-architecture",
+      "pair_group": "docs-readme-architecture",
+      "pair_order": 2,
+      "prompt": "Improve architectural clarity in README documentation, detailing system components and design invariants without modifying files."
+    },
+    {
+      "case_id": "m29-w2-docs-02-advisory-runbook-codex",
+      "task_class": "docs",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "m29-advisory-runbook",
+      "pair_group": "docs-advisory-runbook",
+      "pair_order": 1,
+      "prompt": "Document the M29 provider reliability advisory report workflow in the runbook documentation, explaining offline extraction and CLI invocation without modifying files."
+    },
+    {
+      "case_id": "m29-w2-docs-02-advisory-runbook-antigravity",
+      "task_class": "docs",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "m29-advisory-runbook",
+      "pair_group": "docs-advisory-runbook",
+      "pair_order": 2,
+      "prompt": "Document the M29 provider reliability advisory report workflow in the runbook documentation, explaining offline extraction and CLI invocation without modifying files."
+    },
+    {
+      "case_id": "m29-w2-docs-03-robustness-runbook-antigravity",
+      "task_class": "docs",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "m29-robustness-runbook",
+      "pair_group": "docs-robustness-runbook",
+      "pair_order": 1,
+      "prompt": "Document the M29 provider reliability robustness analysis workflow in the runbook documentation, explaining bootstrap parameters and window evaluations without modifying files."
+    },
+    {
+      "case_id": "m29-w2-docs-03-robustness-runbook-codex",
+      "task_class": "docs",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "m29-robustness-runbook",
+      "pair_group": "docs-robustness-runbook",
+      "pair_order": 2,
+      "prompt": "Document the M29 provider reliability robustness analysis workflow in the runbook documentation, explaining bootstrap parameters and window evaluations without modifying files."
+    },
+    {
+      "case_id": "m29-w2-docs-04-roadmap-boundaries-codex",
+      "task_class": "docs",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "roadmap-boundaries",
+      "pair_group": "docs-roadmap-boundaries",
+      "pair_order": 1,
+      "prompt": "Clarify roadmap milestone boundaries in the project documentation, detailing active focus versus deferred items without modifying files."
+    },
+    {
+      "case_id": "m29-w2-docs-04-roadmap-boundaries-antigravity",
+      "task_class": "docs",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "roadmap-boundaries",
+      "pair_group": "docs-roadmap-boundaries",
+      "pair_order": 2,
+      "prompt": "Clarify roadmap milestone boundaries in the project documentation, detailing active focus versus deferred items without modifying files."
+    },
+    {
+      "case_id": "m29-w2-docs-05-sample-targets-antigravity",
+      "task_class": "docs",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "sample-target-wording",
+      "pair_group": "docs-sample-targets",
+      "pair_order": 1,
+      "prompt": "Refine sample-target wording in the project evaluation documentation, describing minimum observation floors and candidate eligibility rules without modifying files."
+    },
+    {
+      "case_id": "m29-w2-docs-05-sample-targets-codex",
+      "task_class": "docs",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "sample-target-wording",
+      "pair_group": "docs-sample-targets",
+      "pair_order": 2,
+      "prompt": "Refine sample-target wording in the project evaluation documentation, describing minimum observation floors and candidate eligibility rules without modifying files."
+    },
+    {
+      "case_id": "m29-w2-docs-06-stack-recovery-codex",
+      "task_class": "docs",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "local-stack-recovery",
+      "pair_group": "docs-stack-recovery",
+      "pair_order": 1,
+      "prompt": "Document the local-stack recovery procedures in the operational runbook, detailing container startup sequence and health validation without modifying files."
+    },
+    {
+      "case_id": "m29-w2-docs-06-stack-recovery-antigravity",
+      "task_class": "docs",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "local-stack-recovery",
+      "pair_group": "docs-stack-recovery",
+      "pair_order": 2,
+      "prompt": "Document the local-stack recovery procedures in the operational runbook, detailing container startup sequence and health validation without modifying files."
+    },
+    {
+      "case_id": "m29-w2-docs-07-context-envelope-antigravity",
+      "task_class": "docs",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "context-envelope-guidance",
+      "pair_group": "docs-context-envelope",
+      "pair_order": 1,
+      "prompt": "Document ContextEnvelope context assembly guidance in the architectural documentation, explaining versioned artifact persistence and worker inputs without modifying files."
+    },
+    {
+      "case_id": "m29-w2-docs-07-context-envelope-codex",
+      "task_class": "docs",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "context-envelope-guidance",
+      "pair_group": "docs-context-envelope",
+      "pair_order": 2,
+      "prompt": "Document ContextEnvelope context assembly guidance in the architectural documentation, explaining versioned artifact persistence and worker inputs without modifying files."
+    },
+    {
+      "case_id": "m29-w2-docs-08-evidence-interpretation-codex",
+      "task_class": "docs",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "evidence-interpretation",
+      "pair_group": "docs-evidence-interpretation",
+      "pair_order": 1,
+      "prompt": "Document M28 and M29 evidence interpretation guidelines in the evaluation documentation, contrasting memory effectiveness with provider reliability without modifying files."
+    },
+    {
+      "case_id": "m29-w2-docs-08-evidence-interpretation-antigravity",
+      "task_class": "docs",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "evidence-interpretation",
+      "pair_group": "docs-evidence-interpretation",
+      "pair_order": 2,
+      "prompt": "Document M28 and M29 evidence interpretation guidelines in the evaluation documentation, contrasting memory effectiveness with provider reliability without modifying files."
+    },
+    {
+      "case_id": "m29-w2-docs-09-identity-provenance-antigravity",
+      "task_class": "docs",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "execution-identity-provenance",
+      "pair_group": "docs-identity-provenance",
+      "pair_order": 1,
+      "prompt": "Document the authoritative execution identity and provenance model in the provider architecture documentation, detailing model_execution fields and cohort verification without modifying files."
+    },
+    {
+      "case_id": "m29-w2-docs-09-identity-provenance-codex",
+      "task_class": "docs",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "execution-identity-provenance",
+      "pair_group": "docs-identity-provenance",
+      "pair_order": 2,
+      "prompt": "Document the authoritative execution identity and provenance model in the provider architecture documentation, detailing model_execution fields and cohort verification without modifying files."
+    },
+    {
+      "case_id": "m29-w2-docs-10-model-precedence-codex",
+      "task_class": "docs",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "model-precedence-hierarchy",
+      "pair_group": "docs-model-precedence",
+      "pair_order": 1,
+      "prompt": "Document the model and reasoning effort resolution precedence hierarchy in the worker runtime documentation, explaining configuration layers from task constraints to provider defaults without modifying files."
+    },
+    {
+      "case_id": "m29-w2-docs-10-model-precedence-antigravity",
+      "task_class": "docs",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "model-precedence-hierarchy",
+      "pair_group": "docs-model-precedence",
+      "pair_order": 2,
+      "prompt": "Document the model and reasoning effort resolution precedence hierarchy in the worker runtime documentation, explaining configuration layers from task constraints to provider defaults without modifying files."
+    }
+  ]
+}

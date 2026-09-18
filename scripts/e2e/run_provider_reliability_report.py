@@ -91,6 +91,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Optional path to write deterministic sanitized Markdown report.",
     )
+    parser.add_argument(
+        "--evidence-scope",
+        default="current_execution_cohort",
+        choices=["current_execution_cohort", "operational"],
+        help="Evidence filtering scope (default: current_execution_cohort).",
+    )
     return parser
 
 
@@ -122,13 +128,14 @@ def main(argv: list[str] | None = None) -> int:
 
     window_start = as_of_dt - timedelta(days=args.lookback_days)
     policy = ReliabilityReportPolicy(
-        schema_version=1,
+        schema_version=2,
         lookback_days=args.lookback_days,
         min_samples=args.min_samples,
         confidence_level=0.95,
         as_of=as_of_dt,
         window_start_at=window_start,
         window_end_at=as_of_dt,
+        evidence_scope=args.evidence_scope,
     )
 
     LOGGER.info(

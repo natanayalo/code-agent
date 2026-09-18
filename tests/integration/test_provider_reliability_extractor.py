@@ -49,7 +49,7 @@ def test_extractor_synthetic_database(tmp_path: Path) -> None:
     """Test full database extraction, stage rates, exclusions, and recommendation."""
     db_url = _seed_test_database(tmp_path)
     policy = ReliabilityReportPolicy(
-        schema_version=1,
+        schema_version=2,
         lookback_days=90,
         min_samples=10,
         confidence_level=0.95,
@@ -152,7 +152,7 @@ def test_cli_execution_and_clean_outputs(tmp_path: Path, monkeypatch: pytest.Mon
     json_text = json_out.read_text(encoding="utf-8")
     assert_sanitized_report(json_text)
     data = json.loads(json_text)
-    assert data["schema_version"] == 1
+    assert data["schema_version"] == 2
     assert data["status"] == "partial"
     assert len(data["profile_coverage"]) == 4
 
@@ -524,6 +524,15 @@ def test_unordered_multiple_worker_runs_deterministic_failure(tmp_path: Path) ->
             finished_at=task.created_at + timedelta(minutes=min_offset + 2),
             status=WorkerRunStatus.FAILURE,
             verifier_outcome={"status": "failed", "failure_kind": kind},
+            budget_usage={
+                "native_agent": {
+                    "model_execution": {
+                        "provider": "codex",
+                        "model": "gpt-5.6-luna",
+                        "reasoning_effort": "high",
+                    }
+                }
+            },
         )
 
     task.worker_runs.extend(

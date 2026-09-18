@@ -47,6 +47,15 @@ ROBUSTNESS_ALLOWED_KEYS_BY_LEVEL: dict[str, frozenset[str]] = {
             "bootstrap_seed",
             "enabled_profiles",
             "expected_groups",
+            "evidence_scope",
+            "expected_execution_identities",
+        }
+    ),
+    "execution_identity": frozenset(
+        {
+            "provider",
+            "model",
+            "reasoning_effort",
         }
     ),
     "exclusions": frozenset(
@@ -134,6 +143,12 @@ def _validate_domain_value(key: str, val: Any) -> None:
             "eligible_profiles",
         ) and not SAFE_IDENTIFIER_PATTERN.match(val):
             raise ValueError(f"Invalid profile identifier format: {val}")
+        if key in ("provider", "model") and not SAFE_IDENTIFIER_PATTERN.match(val):
+            raise ValueError(f"Invalid {key} identifier format: {val}")
+        if key == "reasoning_effort" and val not in ("low", "medium", "high"):
+            raise ValueError(f"Invalid reasoning_effort value: {val}")
+        if key == "evidence_scope" and val not in ("operational", "current_execution_cohort"):
+            raise ValueError(f"Invalid evidence_scope domain value: {val}")
         if key == "task_class":
             if not SAFE_CLASS_PATTERN.match(val) or val not in VALID_TASK_CLASSES:
                 raise ValueError(f"Invalid task_class domain value: {val}")
@@ -158,6 +173,15 @@ def _validate_policy_structure(policy_data: dict[str, Any]) -> None:
     for p in policy_data.get("enabled_profiles", []):
         if not isinstance(p, str) or not SAFE_IDENTIFIER_PATTERN.match(p):
             raise ValueError(f"Invalid enabled_profiles identifier format: {p}")
+    for prof, ident in policy_data.get("expected_execution_identities", {}).items():
+        if not SAFE_IDENTIFIER_PATTERN.match(prof):
+            raise ValueError(f"Invalid profile in expected_execution_identities: {prof}")
+        if isinstance(ident, dict):
+            _validate_dict_keys(
+                ident,
+                ROBUSTNESS_ALLOWED_KEYS_BY_LEVEL["execution_identity"],
+                f"policy.expected_execution_identities[{prof}]",
+            )
     for grp in policy_data.get("expected_groups", []):
         if (
             not isinstance(grp, list | tuple)
@@ -467,6 +491,7 @@ def render_markdown_robustness_report(report: ProviderReliabilityRobustnessRepor
         "# M29 Provider Reliability Robustness Report",
         "",
         f"- **Status**: `{report.status}`",
+        f"- **Evidence Scope**: `{p.evidence_scope}`",
         f"- **Generated At**: `{report.generated_at.isoformat()}`",
         f"- **Observation Reference (`as_of`)**: `{p.as_of.isoformat()}`",
         f"- **Lookback Window**: {p.lookback_days} days ({win_str})",

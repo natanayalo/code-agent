@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from db.enums import (
     ArtifactType,
+    HumanInteractionType,
     TaskStatus,
     TimelineEventType,
     WorkerRunStatus,
@@ -218,3 +219,30 @@ def resolve_failure_kind(task: Task, accepted: bool, runs: list[WorkerRun]) -> s
     if task.last_error:
         return "task_error"
     return "unknown"
+
+
+def extract_task_interaction_metrics(
+    task: Task, c: dict[str, Any], terminal_ts: datetime
+) -> tuple[int, int, bool, float | None]:
+    """Extract clarifications, approvals, override flags, and duration."""
+    interactions = task.human_interactions or []
+    clarifications = sum(
+        1 for i in interactions if i.interaction_type == HumanInteractionType.CLARIFICATION
+    )
+    appr_types = (
+        HumanInteractionType.PERMISSION,
+        HumanInteractionType.REVIEW,
+        HumanInteractionType.MERGE,
+    )
+    approvals = sum(1 for i in interactions if i.interaction_type in appr_types)
+    has_override = bool(
+        task.worker_override
+        or c.get("worker_override")
+        or c.get("worker_profile_override")
+        or task.route_reason in ("manual_override", "manual_profile_override")
+    )
+    start_ts = task.created_at
+    if start_ts and start_ts.tzinfo is None:
+        start_ts = start_ts.replace(tzinfo=UTC)
+    duration = max(0.0, (terminal_ts - start_ts).total_seconds()) if start_ts else None
+    return clarifications, approvals, has_override, duration

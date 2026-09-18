@@ -52,7 +52,7 @@ def test_wilson_interval_bounds_and_zero_samples() -> None:
 def test_sample_gating_nine_versus_ten() -> None:
     """Validate 9-versus-10 task sample eligibility gating."""
     policy = ReliabilityReportPolicy(
-        schema_version=1,
+        schema_version=2,
         lookback_days=90,
         min_samples=10,
         confidence_level=0.95,
@@ -263,7 +263,7 @@ def test_report_rendering_json_and_markdown() -> None:
     """Test deterministic JSON and Markdown output generation."""
     now = datetime(2026, 9, 16, 12, 0, tzinfo=UTC)
     policy = ReliabilityReportPolicy(
-        schema_version=1,
+        schema_version=2,
         lookback_days=90,
         min_samples=10,
         confidence_level=0.95,
@@ -275,7 +275,7 @@ def test_report_rendering_json_and_markdown() -> None:
     rec = generate_recommendations([cell])[0]
 
     report = ProviderReliabilityReport(
-        schema_version=1,
+        schema_version=2,
         generated_at=now,
         status="insufficient_data",
         policy=policy,
@@ -291,7 +291,7 @@ def test_report_rendering_json_and_markdown() -> None:
 
     json_str = render_json_report(report)
     loaded = json.loads(json_str)
-    assert loaded["schema_version"] == 1
+    assert loaded["schema_version"] == 2
     assert loaded["status"] == "insufficient_data"
     assert loaded["exclusions"]["total_tasks_scanned"] == 20
 
@@ -316,7 +316,7 @@ def test_render_markdown_empty_tables() -> None:
     """Test markdown rendering when recommendations and evidence cells are empty."""
     now = datetime(2026, 9, 16, 12, 0, tzinfo=UTC)
     policy = ReliabilityReportPolicy(
-        schema_version=1,
+        schema_version=2,
         lookback_days=90,
         min_samples=10,
         confidence_level=0.95,
@@ -325,7 +325,7 @@ def test_render_markdown_empty_tables() -> None:
         window_end_at=now,
     )
     report = ProviderReliabilityReport(
-        schema_version=1,
+        schema_version=2,
         generated_at=now,
         status="insufficient_data",
         policy=policy,
@@ -696,7 +696,7 @@ def test_valid_failure_kinds_covers_canonical_and_renders_compile() -> None:
         }
     )
     report = ProviderReliabilityReport(
-        schema_version=1,
+        schema_version=2,
         generated_at=datetime.now(UTC),
         status="complete",
         policy=policy,

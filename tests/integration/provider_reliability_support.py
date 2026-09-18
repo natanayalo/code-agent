@@ -47,6 +47,29 @@ def _add_worker_run(
         verifier_outcome = {"status": "passed"}
     else:
         verifier_outcome = {"status": "failed", "failure_kind": failure_kind or "test_failure"}
+    if budget is not None:
+        usage = dict(budget)
+    else:
+        usage = {"tokens": 100}
+
+    if "native_agent" not in usage and profile:
+        if "codex" in profile:
+            usage["native_agent"] = {
+                "model_execution": {
+                    "provider": "codex",
+                    "model": "gpt-5.6-luna",
+                    "reasoning_effort": "high",
+                }
+            }
+        elif "antigravity" in profile:
+            usage["native_agent"] = {
+                "model_execution": {
+                    "provider": "antigravity",
+                    "model": "gemini-3.8-flash",
+                    "reasoning_effort": "medium",
+                }
+            }
+
     task.worker_runs.append(
         WorkerRun(
             worker_type=WorkerType.CODEX,
@@ -57,7 +80,7 @@ def _add_worker_run(
             finished_at=updated_at,
             status=run_status,
             verifier_outcome=verifier_outcome,
-            budget_usage=budget or {"tokens": 100},
+            budget_usage=usage,
         )
     )
 
