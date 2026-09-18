@@ -118,12 +118,14 @@ Temporal migration and rollback record is in the
   (`artifacts/m29_evidence_bundle_wave2/`, 20 paired docs tasks) establishes dual-candidate
   sample floor qualification ($N=10$ vs $10$) in `docs` (`read_only`) under verified current
   cohorts (`codex: gpt-5.6-luna/high`, `antigravity: gemini-3.8-flash/medium`), recommending
-  `codex-native-executor-read-only` (10/10 accepted, Wilson lower bound 0.7225, 66.1% bootstrap
+  `codex-native-executor-read-only` (10/10 accepted, Wilson lower bound 0.7225, 66.06% bootstrap
   win probability). Two distinct views are published: canonical current-cohort report
   (`evaluation/m29_provider_reliability_report.{json,md}`) and operational diagnostic report
   (`evaluation/m29_provider_reliability_operational_report.{json,md}`). Robustness status is
   reported as `partial` to truthfully reflect that temporal consistency requires longitudinal data.
-  Live routing remains unchanged.
+  The post-wave review confirmed that production routing remains static and unchanged, target
+  cells `feature/mutation`, `feature/read_only`, and `investigation/read_only` remain
+  insufficient-data ($N=0$), and M27 resumption remains deferred.
 
 ## Known limitations
 
@@ -152,9 +154,13 @@ Temporal migration and rollback record is in the
 
 ## Next slices only
 
-1. Complete M29 review and post-wave findings: review the live robustness
-   baseline and evidence-backed recommendations, maintain offline advisory
-   status, and prepare any future routing policy PRs with explicit change controls.
+1. Execute remaining M29 work following the reviewed post-wave conclusion (advisory
+   Codex recommendation for `docs/read_only` only, partial robustness, and static
+   production routing unchanged):
+   a. remove legacy raw-secret ingress and enforce opaque registered references;
+   b. add provider-specific pre-dispatch diagnostics;
+   c. gather longitudinal and missing-cell current-cohort evidence;
+   d. evaluate hierarchical budget controls separately.
 2. Use the M28 report as a scoped safety/effectiveness signal only; do not
    change routing or add semantic retrieval without further evidence.
 
@@ -162,7 +168,8 @@ Temporal migration and rollback record is in the
 
 - M27 reliability-based autonomy remains reserved until real-task metrics can
   support reversible policy thresholds, and additionally requires M29's
-  expanded evidence.
+  expanded evidence (Wave 2's 66.06% bootstrap win probability and lack of a
+  historical cohort are insufficient).
 - durable child workflows, broad mutable fan-out, isolated worktree/patch
   reconciliation, an operator-visible agent tree, and evidence-backed
   procedural skills remain future/conditional ideas rather than current work.
