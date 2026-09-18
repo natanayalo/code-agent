@@ -65,6 +65,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Changed
 
+- Docs: record M29 post-wave reliability decision ([#404](https://github.com/natanayalo/code-agent/pull/404))
+
 - Build(deps-dev): bump undici from 7.28.0 to 7.29.1 in /dashboard ([#389](https://github.com/natanayalo/code-agent/pull/389))
 
 - Build(deps-dev): bump js-yaml from 4.3.0 to 4.3.2 in /dashboard ([#388](https://github.com/natanayalo/code-agent/pull/388))
