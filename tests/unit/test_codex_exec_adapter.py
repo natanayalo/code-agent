@@ -103,7 +103,15 @@ def test_codex_exec_adapter_invokes_codex_exec_and_parses_a_tool_call(
     assert "--output-last-message" in command
     assert "--ephemeral" in command
     assert command[command.index("-C") + 1] == str(tmp_path)
-    assert command[-5:] == ["--model", "gpt-5.4", "--profile", "ci", "-"]
+    assert command[-7:] == [
+        "--model",
+        "gpt-5.4",
+        "-c",
+        'model_reasoning_effort="high"',
+        "--profile",
+        "ci",
+        "-",
+    ]
     assert "## Runtime Transcript" in str(recorded["input"])
     assert "Tool result: execute_bash" in str(recorded["input"])
 

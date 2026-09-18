@@ -57,6 +57,8 @@ class RuntimeWorkerManifest(RuntimeManifestModel):
     worker_profile: str | None = None
     runtime_mode: str | None = None
     workspace_id: str | None = None
+    model: str | None = None
+    reasoning_effort: str | None = None
 
 
 class RuntimeTaskPolicyManifest(RuntimeManifestModel):
@@ -178,6 +180,8 @@ def build_runtime_manifest(
     worker_profile: str | None = None,
     runtime_mode: Any | None = None,
     workspace_id: str | None = None,
+    model: str | None = None,
+    reasoning_effort: str | None = None,
     task_spec: Mapping[str, Any] | object | None = None,
     read_only: bool = False,
     network_enabled: bool = False,
@@ -208,6 +212,8 @@ def build_runtime_manifest(
             worker_profile=worker_profile,
             runtime_mode=_enum_value(runtime_mode),
             workspace_id=workspace_id,
+            model=model,
+            reasoning_effort=reasoning_effort,
         ),
         task=RuntimeTaskPolicyManifest(
             read_only=read_only,

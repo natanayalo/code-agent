@@ -11,10 +11,18 @@ from typing import Any, Final, Literal, cast, get_args
 from workers.adapter_utils import coerce_positive_int
 from workers.cli_runtime import CliRuntimeAdapter, CliRuntimeMessage, CliRuntimeStep
 from workers.constants import DEFAULT_GEMINI_REQUEST_TIMEOUT_SECONDS
+from workers.model_config import (
+    ANTIGRAVITY_MODEL_ENV_VAR,
+    ANTIGRAVITY_REASONING_EFFORT_ENV_VAR,
+    DEFAULT_ANTIGRAVITY_MODEL,
+    DEFAULT_ANTIGRAVITY_REASONING_EFFORT,
+    ResolvedModelConfig,
+    build_antigravity_model_cli_args,
+    resolve_antigravity_model_config,
+)
 from workers.subprocess_env import build_antigravity_subprocess_env
 
 ANTIGRAVITY_EXECUTABLE_ENV_VAR: Final[str] = "CODE_AGENT_ANTIGRAVITY_CLI_BIN"
-ANTIGRAVITY_MODEL_ENV_VAR: Final[str] = "CODE_AGENT_ANTIGRAVITY_MODEL"
 ANTIGRAVITY_TIMEOUT_ENV_VAR: Final[str] = "CODE_AGENT_ANTIGRAVITY_TIMEOUT_SECONDS"
 ANTIGRAVITY_AUTH_DIR_ENV_VAR: Final[str] = "CODE_AGENT_ANTIGRAVITY_AUTH_DIR"
 ANTIGRAVITY_NATIVE_SANDBOX_ENABLED_ENV_VAR: Final[str] = (
@@ -38,7 +46,6 @@ AntigravityArtifactReviewPolicy = Literal[
 ]
 
 DEFAULT_ANTIGRAVITY_EXECUTABLE: Final[str] = "agy"
-DEFAULT_ANTIGRAVITY_MODEL: Final[str] = "gemini-3.5-flash-low"
 DEFAULT_ANTIGRAVITY_TOOL_PERMISSION: Final[AntigravityToolPermission] = "proceed-in-sandbox"
 DEFAULT_ANTIGRAVITY_ARTIFACT_REVIEW_POLICY: Final[AntigravityArtifactReviewPolicy] = "agent-decides"
 
@@ -144,6 +151,7 @@ class AntigravityCliRuntimeAdapter(CliRuntimeAdapter):
         *,
         executable: str = DEFAULT_ANTIGRAVITY_EXECUTABLE,
         model: str | None = DEFAULT_ANTIGRAVITY_MODEL,
+        reasoning_effort: str | None = DEFAULT_ANTIGRAVITY_REASONING_EFFORT,
         request_timeout_seconds: int = DEFAULT_GEMINI_REQUEST_TIMEOUT_SECONDS,
         tool_permission: str = DEFAULT_ANTIGRAVITY_TOOL_PERMISSION,
         artifact_review_policy: str = DEFAULT_ANTIGRAVITY_ARTIFACT_REVIEW_POLICY,
@@ -152,6 +160,9 @@ class AntigravityCliRuntimeAdapter(CliRuntimeAdapter):
         resolved_env = os.environ if env is None else env
         self.executable = executable
         self.model = _normalize_optional_text(model)
+        self.reasoning_effort = _normalize_optional_text(reasoning_effort)
+        if self.reasoning_effort is not None:
+            self.reasoning_effort = self.reasoning_effort.lower()
         self.request_timeout_seconds = coerce_positive_int(
             request_timeout_seconds,
             default=DEFAULT_GEMINI_REQUEST_TIMEOUT_SECONDS,
@@ -175,6 +186,9 @@ class AntigravityCliRuntimeAdapter(CliRuntimeAdapter):
             model=resolved_env.get(ANTIGRAVITY_MODEL_ENV_VAR)
             or resolved_env.get("CODE_AGENT_GEMINI_MODEL")
             or DEFAULT_ANTIGRAVITY_MODEL,
+            reasoning_effort=resolved_env.get(ANTIGRAVITY_REASONING_EFFORT_ENV_VAR)
+            or resolved_env.get("CODE_AGENT_GEMINI_REASONING_EFFORT")
+            or DEFAULT_ANTIGRAVITY_REASONING_EFFORT,
             request_timeout_seconds=coerce_positive_int(
                 resolved_env.get(ANTIGRAVITY_TIMEOUT_ENV_VAR)
                 or resolved_env.get("CODE_AGENT_GEMINI_TIMEOUT_SECONDS"),
@@ -196,11 +210,16 @@ class AntigravityCliRuntimeAdapter(CliRuntimeAdapter):
         *,
         prompt: str,
         cwd: Path | None = None,
+        model_config: ResolvedModelConfig | None = None,
     ) -> list[str]:
         """Build the documented one-shot Antigravity CLI command."""
         command = [self.executable, "-p", prompt]
-        if self.model is not None and not _uses_provider_default_model(self.model):
-            command.extend(["--model", self.model])
+        resolved = model_config or resolve_antigravity_model_config(
+            adapter_model=self.model,
+            adapter_reasoning_effort=self.reasoning_effort,
+            env=self.env,
+        )
+        command.extend(build_antigravity_model_cli_args(resolved))
         return command
 
     def next_step(

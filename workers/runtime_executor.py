@@ -18,7 +18,12 @@ from tools import (
     ToolRegistry,
     granted_permission_from_constraints,
 )
-from workers.base import ArtifactReference, WorkerRequest, WorkerResult
+from workers.base import (
+    ArtifactReference,
+    ModelExecutionMetadata,
+    WorkerRequest,
+    WorkerResult,
+)
 from workers.cli_adapter_utils import build_worker_result
 from workers.cli_runtime import (
     CliRuntimeAdapter,
@@ -101,6 +106,7 @@ def _worker_result_from_execution(
     review_result: ReviewResult | None = None,
     diff_text: str | None = None,
     artifacts: list[ArtifactReference] | None = None,
+    model_execution: ModelExecutionMetadata | None = None,
 ) -> WorkerResult:
     """Map the shared CLI runtime output into the worker contract."""
     requested_permission = (
@@ -121,7 +127,39 @@ def _worker_result_from_execution(
         artifacts=[*_workspace_artifacts(workspace), *(artifacts or [])],
         next_action_hint=_next_action_hint(execution),
         workspace_id=workspace.workspace_id,
+        model_execution=model_execution,
     )
+
+
+def _resolve_runtime_model_execution(
+    request: WorkerRequest,
+    adapter: CliRuntimeAdapter,
+) -> ModelExecutionMetadata | None:
+    from workers.antigravity_cli_adapter import AntigravityCliRuntimeAdapter
+    from workers.codex_exec_adapter import CodexExecCliRuntimeAdapter
+    from workers.model_config import (
+        resolve_antigravity_model_config,
+        resolve_codex_model_config,
+    )
+
+    manifest_worker = (request.runtime_manifest or {}).get("worker")
+    if isinstance(adapter, CodexExecCliRuntimeAdapter):
+        return resolve_codex_model_config(
+            task_constraints=request.constraints,
+            manifest_worker=manifest_worker,
+            adapter_model=adapter.model,
+            adapter_reasoning_effort=adapter.reasoning_effort,
+            env=adapter.env,
+        ).to_metadata()
+    if isinstance(adapter, AntigravityCliRuntimeAdapter):
+        return resolve_antigravity_model_config(
+            task_constraints=request.constraints,
+            manifest_worker=manifest_worker,
+            adapter_model=adapter.model,
+            adapter_reasoning_effort=adapter.reasoning_effort,
+            env=adapter.env,
+        ).to_metadata()
+    return None
 
 
 class RuntimeExecutor:
@@ -355,7 +393,9 @@ class RuntimeExecutor:
                 review_result=review_result,
             )
 
-            return self._finalize_result(workspace, runtime_setup, runtime_phase, cancel_token)
+            return self._finalize_result(
+                workspace, runtime_setup, runtime_phase, cancel_token, request=request
+            )
 
     def _finalize_result(
         self,
@@ -363,7 +403,9 @@ class RuntimeExecutor:
         runtime_setup: _RuntimeSetup,
         runtime_phase: _RuntimeExecutionPhase,
         cancel_token: Callable[[], bool] | None,
+        request: WorkerRequest,
     ) -> WorkerResult:
+        model_execution = _resolve_runtime_model_execution(request, self.runtime_adapter)
         result = _worker_result_from_execution(
             workspace,
             runtime_phase.execution,
@@ -377,6 +419,7 @@ class RuntimeExecutor:
             if runtime_phase.execution.status == "success" and not (cancel_token and cancel_token())
             else None,
             artifacts=runtime_phase.lint_format_artifacts,
+            model_execution=model_execution,
         )
         if cancel_token and cancel_token():
             result.status = "error"

@@ -251,9 +251,59 @@ def test_gemini_cli_worker_native_mode_honors_read_only_constraint(tmp_path: Pat
         )
 
     assert result.status == "success"
+    assert result.model_execution is not None
+    assert result.model_execution.provider == "antigravity"
+    assert result.model_execution.model == "gemini-3.8-flash"
+    assert result.model_execution.reasoning_effort == "medium"
+    assert result.model_execution.model_source == "provider_default"
+    assert result.model_execution.reasoning_effort_source == "provider_default"
     command = run_native.call_args.args[0].command
     assert "--approval-mode" in command
     assert command[command.index("--approval-mode") + 1] == "plan"
+
+
+def test_gemini_cli_worker_native_mode_resolves_task_model_override(tmp_path: Path) -> None:
+    workspace = _make_workspace(tmp_path)
+    workspace_manager = _FakeWorkspaceManager(workspace)
+    container_manager = _FakeContainerManager(_make_container(workspace))
+    worker = GeminiCliWorker(
+        runtime_adapter=_ScriptedAdapter([]),
+        workspace_manager=workspace_manager,
+        container_manager=container_manager,
+    )
+    native_result = NativeAgentRunResult(
+        status="success",
+        summary="Done with Antigravity override.",
+        command="agy -p 'do it' --model gemini-3.8-flash --effort high",
+        duration_seconds=1.0,
+        exit_code=0,
+        timed_out=False,
+    )
+    with patch(
+        "workers.gemini_cli_worker_native.run_native_agent",
+        return_value=native_result,
+    ):
+        result = asyncio.run(
+            worker.run(
+                WorkerRequest(
+                    session_id="session-antigravity-override",
+                    repo_url="https://example.com/repo.git",
+                    branch="main",
+                    task_text="Run with override",
+                    constraints={"antigravity_reasoning_effort": "high"},
+                    runtime_manifest={"worker": {"model": "gemini-3.8-flash"}},
+                    runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+                )
+            )
+        )
+    assert result.status == "success"
+    assert result.model_execution is not None
+    assert result.model_execution.model == "gemini-3.8-flash"
+    assert result.model_execution.model_source == "worker_profile"
+    assert result.model_execution.reasoning_effort == "high"
+    assert result.model_execution.reasoning_effort_source == "task_override"
+    assert result.model_execution.requested_reasoning_effort == "high"
+    assert result.model_execution.requested_model is None
 
 
 def test_gemini_native_runtime_keeps_memory_with_system_prompt_override(tmp_path: Path) -> None:

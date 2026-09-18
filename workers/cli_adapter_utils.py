@@ -10,7 +10,7 @@ from workers.base import FailureKind, WorkerRequest, WorkerResult
 from workers.failure_taxonomy import build_failure_summary, classify_failure_kind
 
 if TYPE_CHECKING:
-    from workers.base import ArtifactReference
+    from workers.base import ArtifactReference, ModelExecutionMetadata
     from workers.cli_runtime import CliRuntimeExecutionResult
     from workers.review import ReviewResult
 
@@ -58,6 +58,7 @@ def build_worker_result(
     artifacts: list[ArtifactReference] | None = None,
     next_action_hint: str | None = None,
     workspace_id: str | None = None,
+    model_execution: ModelExecutionMetadata | None = None,
 ) -> WorkerResult:
     """Construct a standardized WorkerResult from CLI runtime execution outputs."""
     final_message = (
@@ -96,4 +97,5 @@ def build_worker_result(
         diff_text=diff_text,
         next_action_hint=next_action_hint,
         workspace_id=workspace_id,
+        model_execution=model_execution,
     )

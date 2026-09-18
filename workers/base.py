@@ -163,6 +163,8 @@ class WorkerProfile(WorkerModel):
     self_review_policy: WorkerSelfReviewPolicy = "on_failure"
     supported_delivery_modes: list[WorkerDeliveryMode] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    model: str | None = None
+    reasoning_effort: str | None = None
 
     @field_validator("worker_type", mode="before")
     @classmethod
@@ -245,6 +247,26 @@ class WorkerMemoryEntry(WorkerModel):
     requires_verification: bool = True
 
 
+ConfigSource = Literal[
+    "task_override",
+    "worker_profile",
+    "environment",
+    "provider_default",
+]
+
+
+class ModelExecutionMetadata(WorkerModel):
+    """Authoritative execution identity describing what model/effort produced this result."""
+
+    provider: str
+    model: str
+    reasoning_effort: str | None = None
+    requested_model: str | None = None
+    requested_reasoning_effort: str | None = None
+    model_source: ConfigSource
+    reasoning_effort_source: ConfigSource | None = None
+
+
 class WorkerResult(WorkerModel):
     """Structured result returned from a coding worker."""
 
@@ -254,6 +276,7 @@ class WorkerResult(WorkerModel):
     workspace_id: str | None = None
     requested_permission: str | None = None
     budget_usage: dict[str, Any] | None = None
+    model_execution: ModelExecutionMetadata | None = None
     commands_run: list[WorkerCommand] = Field(default_factory=list)
     files_changed: list[str] = Field(default_factory=list)
     test_results: list[WorkerTestResult] = Field(default_factory=list)

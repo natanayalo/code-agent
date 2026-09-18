@@ -42,6 +42,7 @@ from workers.cli_runtime import (
     ShellSessionProtocol,
 )
 from workers.failure_taxonomy import classify_failure_kind
+from workers.model_config import resolve_antigravity_model_config
 from workers.native_agent_models import NativeAgentRunResult
 from workers.native_agent_runner import (
     NativeAgentRunRequest,
@@ -548,6 +549,16 @@ class GeminiCliWorkerNativeMixin:
                 request=request,
                 runtime_mode=runtime_mode,
             )
+            adapter = getattr(self, "runtime_adapter", None)
+            model_config = resolve_antigravity_model_config(
+                task_constraints=request.constraints,
+                manifest_worker=(request.runtime_manifest or {}).get("worker"),
+                adapter_model=getattr(adapter, "model", None),
+                adapter_reasoning_effort=getattr(adapter, "reasoning_effort", None),
+                env=getattr(adapter, "env", None),
+            )
+            provider_metadata["model_config"] = model_config
+            provider_metadata["model_execution"] = model_config.to_metadata()
         task_id = request.task_id or request.session_id or "local"
         if hasattr(self, "ephemeral_store") and self.ephemeral_store is not None:
             self.ephemeral_store.refresh_task_ttl(task_id)
@@ -732,6 +743,7 @@ class GeminiCliWorkerNativeMixin:
                 },
                 artifacts=_workspace_artifacts(workspace),
                 next_action_hint="inspect_worker_configuration",
+                model_execution=provider_metadata.get("model_execution"),
             )
         run_request = replace(run_request, cancel_requested=cancel_token)
         native_result = run_native_agent(run_request)
@@ -783,6 +795,7 @@ class GeminiCliWorkerNativeMixin:
             next_action_hint=self._native_next_action_hint(native_result),
             stdout=native_result.stdout,
             stderr=native_result.stderr,
+            model_execution=(provider_metadata or {}).get("model_execution"),
         )
         if cancel_token and cancel_token():
             result.status = "error"
