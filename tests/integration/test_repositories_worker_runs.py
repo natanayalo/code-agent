@@ -262,3 +262,64 @@ def test_worker_run_repositories_support_expiry_artifact_cleanup_and_metrics(
         assert empty_metrics["legacy_tool_loop_usage"] == {}
         assert empty_metrics["avg_duration_seconds"] == 0.0
         assert empty_metrics["success_rate"] == 0
+
+
+def test_worker_run_repository_persists_native_worker_budget_usage_with_model_execution(
+    session_factory,
+) -> None:
+    """Worker runs persist native-agent budget_usage containing model_execution and scalars."""
+    with session_scope(session_factory) as session:
+        user_repo = UserRepository(session)
+        session_repo = SessionRepository(session)
+        task_repo = TaskRepository(session)
+        worker_run_repo = WorkerRunRepository(session)
+
+        user = user_repo.create(external_user_id="telegram:native", display_name="NativeRunner")
+        conv_session = session_repo.create(
+            user_id=user.id,
+            channel="telegram",
+            external_thread_id="thread-native",
+        )
+        task = task_repo.create(session_id=conv_session.id, task_text="Run native task")
+
+        budget_usage = {
+            "runtime_mode": "native_agent",
+            "native_agent": {
+                "duration_seconds": 12.5,
+                "exit_code": 0,
+                "timed_out": False,
+                "sandbox_mode": "workspace-write",
+                "model": "gpt-5.6-luna",
+                "reasoning_effort": "high",
+                "model_source": "environment",
+                "reasoning_effort_source": "environment",
+                "model_execution": {
+                    "provider": "codex",
+                    "model": "gpt-5.6-luna",
+                    "reasoning_effort": "high",
+                    "requested_model": None,
+                    "requested_reasoning_effort": None,
+                    "model_source": "environment",
+                    "reasoning_effort_source": "environment",
+                },
+            },
+        }
+
+        worker_run = worker_run_repo.create_for_task(
+            task=task,
+            worker_type="codex",
+            started_at=datetime.now(UTC),
+            finished_at=datetime.now(UTC),
+            status=WorkerRunStatus.SUCCESS,
+            summary="Native run succeeded with Luna",
+            budget_usage=budget_usage,
+        )
+
+        persisted = worker_run_repo.get(worker_run.id)
+        assert persisted is not None
+        assert persisted.budget_usage == budget_usage
+        native_meta = persisted.budget_usage["native_agent"]
+        assert native_meta["model"] == "gpt-5.6-luna"
+        assert native_meta["reasoning_effort"] == "high"
+        assert native_meta["model_source"] == "environment"
+        assert native_meta["model_execution"]["provider"] == "codex"

@@ -14,8 +14,6 @@ from workers.constants import DEFAULT_GEMINI_REQUEST_TIMEOUT_SECONDS
 from workers.model_config import (
     ANTIGRAVITY_MODEL_ENV_VAR,
     ANTIGRAVITY_REASONING_EFFORT_ENV_VAR,
-    DEFAULT_ANTIGRAVITY_MODEL,
-    DEFAULT_ANTIGRAVITY_REASONING_EFFORT,
     ResolvedModelConfig,
     build_antigravity_model_cli_args,
     resolve_antigravity_model_config,
@@ -150,8 +148,8 @@ class AntigravityCliRuntimeAdapter(CliRuntimeAdapter):
         self,
         *,
         executable: str = DEFAULT_ANTIGRAVITY_EXECUTABLE,
-        model: str | None = DEFAULT_ANTIGRAVITY_MODEL,
-        reasoning_effort: str | None = DEFAULT_ANTIGRAVITY_REASONING_EFFORT,
+        model: str | None = None,
+        reasoning_effort: str | None = None,
         request_timeout_seconds: int = DEFAULT_GEMINI_REQUEST_TIMEOUT_SECONDS,
         tool_permission: str = DEFAULT_ANTIGRAVITY_TOOL_PERMISSION,
         artifact_review_policy: str = DEFAULT_ANTIGRAVITY_ARTIFACT_REVIEW_POLICY,
@@ -185,10 +183,10 @@ class AntigravityCliRuntimeAdapter(CliRuntimeAdapter):
             ),
             model=resolved_env.get(ANTIGRAVITY_MODEL_ENV_VAR)
             or resolved_env.get("CODE_AGENT_GEMINI_MODEL")
-            or DEFAULT_ANTIGRAVITY_MODEL,
+            or None,
             reasoning_effort=resolved_env.get(ANTIGRAVITY_REASONING_EFFORT_ENV_VAR)
             or resolved_env.get("CODE_AGENT_GEMINI_REASONING_EFFORT")
-            or DEFAULT_ANTIGRAVITY_REASONING_EFFORT,
+            or None,
             request_timeout_seconds=coerce_positive_int(
                 resolved_env.get(ANTIGRAVITY_TIMEOUT_ENV_VAR)
                 or resolved_env.get("CODE_AGENT_GEMINI_TIMEOUT_SECONDS"),

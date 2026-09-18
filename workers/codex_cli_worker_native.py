@@ -311,13 +311,17 @@ class CodexCliWorkerNativeMixin:
             env=adapter_env,
         )
 
+        model_exec = model_config.to_metadata()
         sandbox_metadata = {
             "sandbox_mode": sandbox_mode,
             "in_container": in_container,
             "repo_approved": repo_approved,
             "read_only_requested": read_only_requested,
-            "model_config": model_config,
-            "model_execution": model_config.to_metadata(),
+            "model": model_exec.model,
+            "reasoning_effort": model_exec.reasoning_effort,
+            "model_source": model_exec.model_source,
+            "reasoning_effort_source": model_exec.reasoning_effort_source,
+            "model_execution": model_exec.model_dump(mode="json"),
         }
 
         command = [

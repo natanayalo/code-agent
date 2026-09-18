@@ -112,6 +112,8 @@ class PerformanceRoutingPolicy:
             route_reason="dynamic_performance_routing",
             override_applied=False,
             route_metadata=route_metadata,
+            model=best_profile.model,
+            reasoning_effort=best_profile.reasoning_effort,
         )
 
     def _build_routing_candidates(

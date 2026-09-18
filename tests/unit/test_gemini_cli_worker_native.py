@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from typing import Any, Literal
 from unittest.mock import patch
@@ -251,6 +252,16 @@ def test_gemini_cli_worker_native_mode_honors_read_only_constraint(tmp_path: Pat
         )
 
     assert result.status == "success"
+    assert result.budget_usage is not None
+    assert result.budget_usage["runtime_mode"] == "native_agent"
+    serialized_budget = json.dumps(result.budget_usage)
+    assert "gemini-3.8-flash" in serialized_budget
+    native_meta = result.budget_usage["native_agent"]
+    assert not any(hasattr(v, "__dataclass_fields__") for v in native_meta.values())
+    assert not any(hasattr(v, "model_dump") for v in native_meta.values())
+    assert isinstance(native_meta["model_execution"], dict)
+    assert native_meta["model"] == "gemini-3.8-flash"
+    assert native_meta["model_source"] == "provider_default"
     assert result.model_execution is not None
     assert result.model_execution.provider == "antigravity"
     assert result.model_execution.model == "gemini-3.8-flash"

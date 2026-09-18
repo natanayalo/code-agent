@@ -165,10 +165,24 @@ def _review_result_json(
     return json.dumps(payload.model_dump(mode="json"))
 
 
+def _assert_native_agent_budget_json_safe(
+    budget_usage: dict[str, Any],
+    expected_model: str,
+    expected_source: str,
+) -> None:
+    serialized = json.dumps(budget_usage)
+    assert expected_model in serialized
+    meta = budget_usage["native_agent"]
+    assert not any(hasattr(v, "__dataclass_fields__") for v in meta.values())
+    assert not any(hasattr(v, "model_dump") for v in meta.values())
+    assert isinstance(meta["model_execution"], dict)
+    assert meta["model"] == expected_model
+    assert meta["model_source"] == expected_source
+
+
 def test_codex_cli_worker_runs_native_agent_mode_when_requested(tmp_path: Path) -> None:
     """Codex native mode should invoke one-shot runner and skip tool-loop container setup."""
     adapter = _ScriptedAdapter([])
-    # Regression guard: adapter defaults must not force native mode into read-only.
     adapter.sandbox_mode = "read-only"
     workspace = _workspace_handle(tmp_path)
     container = DockerSandboxContainer(
@@ -236,6 +250,7 @@ def test_codex_cli_worker_runs_native_agent_mode_when_requested(tmp_path: Path) 
     assert result.diff_text == "diff --git a/note.txt b/note.txt"
     assert result.budget_usage is not None
     assert result.budget_usage["runtime_mode"] == "native_agent"
+    _assert_native_agent_budget_json_safe(result.budget_usage, "gpt-5.6-luna", "provider_default")
     assert result.commands_run[0].command.startswith("codex exec")
     assert container_manager.start_requests == []
     assert container_manager.stop_requests == []

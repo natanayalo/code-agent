@@ -372,6 +372,7 @@ def build_antigravity_native_command(
     # remain the enforcement point for writable versus read-only requests.
     command.append("--dangerously-skip-permissions")
     command.extend(["--log-file", str(log_file)])
+    model_exec = model_config.to_metadata()
     metadata = {
         "provider": "antigravity",
         "tool_permission": tool_permission,
@@ -382,8 +383,11 @@ def build_antigravity_native_command(
         "migration_actions": migration_actions,
         "settings_path": str(settings_path),
         "log_file": str(log_file),
-        "model_config": model_config,
-        "model_execution": model_config.to_metadata(),
+        "model": model_exec.model,
+        "reasoning_effort": model_exec.reasoning_effort,
+        "model_source": model_exec.model_source,
+        "reasoning_effort_source": model_exec.reasoning_effort_source,
+        "model_execution": model_exec.model_dump(mode="json"),
     }
     return command, log_file, metadata
 

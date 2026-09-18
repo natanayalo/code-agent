@@ -557,8 +557,12 @@ class GeminiCliWorkerNativeMixin:
                 adapter_reasoning_effort=getattr(adapter, "reasoning_effort", None),
                 env=getattr(adapter, "env", None),
             )
-            provider_metadata["model_config"] = model_config
-            provider_metadata["model_execution"] = model_config.to_metadata()
+            model_exec = model_config.to_metadata()
+            provider_metadata["model"] = model_exec.model
+            provider_metadata["reasoning_effort"] = model_exec.reasoning_effort
+            provider_metadata["model_source"] = model_exec.model_source
+            provider_metadata["reasoning_effort_source"] = model_exec.reasoning_effort_source
+            provider_metadata["model_execution"] = model_exec.model_dump(mode="json")
         task_id = request.task_id or request.session_id or "local"
         if hasattr(self, "ephemeral_store") and self.ephemeral_store is not None:
             self.ephemeral_store.refresh_task_ttl(task_id)

@@ -211,17 +211,22 @@ def _resolve_raw_antigravity_model(
     return default_model, "provider_default"
 
 
-def _resolve_raw_antigravity_effort(
+_SOURCE_PRECEDENCE: Final[dict[ConfigSource, int]] = {
+    "task_override": 4,
+    "worker_profile": 3,
+    "environment": 2,
+    "provider_default": 1,
+}
+
+
+def _resolve_independent_antigravity_effort(
     *,
     requested_effort: str | None,
     manifest: Mapping[str, Any],
     adapter_effort: str | None,
     resolved_env: Mapping[str, str],
-    embedded_effort: str | None,
-    model_source: ConfigSource,
-    default_effort: str,
 ) -> tuple[str | None, ConfigSource | None]:
-    """Resolve raw Antigravity effort and provenance."""
+    """Find the highest-precedence independently configured effort, if any."""
     if requested_effort is not None:
         return requested_effort, "task_override"
     if (manifest_effort := _clean_effort(manifest.get("reasoning_effort"))) is not None:
@@ -235,6 +240,48 @@ def _resolve_raw_antigravity_effort(
         )
     ) is not None:
         return env_effort, "environment"
+    return None, None
+
+
+def _resolve_raw_antigravity_effort(
+    *,
+    requested_effort: str | None,
+    manifest: Mapping[str, Any],
+    adapter_effort: str | None,
+    resolved_env: Mapping[str, str],
+    embedded_effort: str | None,
+    model_source: ConfigSource,
+    default_effort: str,
+    raw_model: str,
+    base_family: str,
+) -> tuple[str | None, ConfigSource | None]:
+    """Resolve raw Antigravity effort using layered source precedence."""
+    ind_effort, ind_source = _resolve_independent_antigravity_effort(
+        requested_effort=requested_effort,
+        manifest=manifest,
+        adapter_effort=adapter_effort,
+        resolved_env=resolved_env,
+    )
+
+    if ind_effort is not None and embedded_effort is not None:
+        assert ind_source is not None
+        ind_prec = _SOURCE_PRECEDENCE[ind_source]
+        model_prec = _SOURCE_PRECEDENCE[model_source]
+        if ind_prec > model_prec:
+            return ind_effort, ind_source
+        if model_prec > ind_prec:
+            return embedded_effort, model_source
+        if ind_effort != embedded_effort:
+            raise ValueError(
+                f"Conflicting Antigravity model '{raw_model}' "
+                f"(specifies effort '{embedded_effort}') "
+                f"and {ind_source} reasoning effort '{ind_effort}'. "
+                f"Specify base model family '{base_family}' or matching effort."
+            )
+        return ind_effort, ind_source
+
+    if ind_effort is not None:
+        return ind_effort, ind_source
     if embedded_effort is not None:
         return embedded_effort, model_source
     return default_effort, "provider_default"
@@ -254,7 +301,7 @@ def resolve_antigravity_model_config(
 
     task constraint > manifest profile > adapter/env > provider default.
     Normalizes compound slugs (e.g. `gemini-3.8-flash-medium` -> `gemini-3.8-flash` + `medium`)
-    and rejects contradictory configurations.
+    and enforces precedence-aware conflict resolution.
     """
     constraints = dict(task_constraints or {})
     manifest = dict(manifest_worker or {})
@@ -289,14 +336,9 @@ def resolve_antigravity_model_config(
         embedded_effort=embedded_effort,
         model_source=model_source,
         default_effort=default_reasoning_effort,
+        raw_model=raw_model,
+        base_family=base_family,
     )
-
-    if embedded_effort is not None and effective_effort != embedded_effort:
-        raise ValueError(
-            f"Conflicting Antigravity model '{raw_model}' (specifies effort '{embedded_effort}') "
-            f"and resolved reasoning effort '{effective_effort}'. "
-            f"Specify base model family '{base_family}' or matching effort."
-        )
 
     return ResolvedModelConfig(
         provider="antigravity",

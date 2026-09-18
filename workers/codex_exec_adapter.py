@@ -29,8 +29,6 @@ from workers.llm_tracing import set_llm_span_output, with_llm_span
 from workers.model_config import (
     CODEX_MODEL_ENV_VAR,
     CODEX_REASONING_EFFORT_ENV_VAR,
-    DEFAULT_CODEX_MODEL,
-    DEFAULT_CODEX_REASONING_EFFORT,
     build_codex_model_cli_args,
     resolve_codex_model_config,
 )
@@ -138,10 +136,8 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
         resolved_env = os.environ if environ is None else environ
         return cls(
             executable=resolved_env.get(CODEX_EXECUTABLE_ENV_VAR, DEFAULT_CODEX_EXECUTABLE),
-            model=resolved_env.get(CODEX_MODEL_ENV_VAR, DEFAULT_CODEX_MODEL),
-            reasoning_effort=resolved_env.get(
-                CODEX_REASONING_EFFORT_ENV_VAR, DEFAULT_CODEX_REASONING_EFFORT
-            ),
+            model=resolved_env.get(CODEX_MODEL_ENV_VAR),
+            reasoning_effort=resolved_env.get(CODEX_REASONING_EFFORT_ENV_VAR),
             profile=resolved_env.get(CODEX_PROFILE_ENV_VAR),
             sandbox_mode=resolved_env.get(CODEX_SANDBOX_ENV_VAR, DEFAULT_CODEX_SANDBOX_MODE),
             request_timeout_seconds=coerce_positive_int(
