@@ -20,6 +20,7 @@ from workers.antigravity_cli_adapter import (
 )
 from workers.base import WorkerRequest, WorkerResult
 from workers.cli_runtime import CliRuntimeSettings
+from workers.model_config import resolve_antigravity_model_config
 from workers.native_agent_artifacts import DEFAULT_NATIVE_AGENT_ARTIFACTS_DIR
 
 ANTIGRAVITY_READ_ONLY_TOOL_PERMISSION = "strict"
@@ -354,15 +355,24 @@ def build_antigravity_native_command(
         else workspace.workspace_path / DEFAULT_NATIVE_AGENT_ARTIFACTS_DIR
     ) / f"run-{uuid4().hex}"
     log_file = artifact_root / "provider.log"
+    model_config = resolve_antigravity_model_config(
+        task_constraints=request.constraints,
+        manifest_worker=(request.runtime_manifest or {}).get("worker"),
+        adapter_model=adapter.model,
+        adapter_reasoning_effort=getattr(adapter, "reasoning_effort", None),
+        env=adapter.env,
+    )
     command = adapter.build_native_command(
         prompt=prompt,
         cwd=workspace.repo_path,
+        model_config=model_config,
     )
     # Antigravity print mode otherwise soft-denies every tool confirmation,
     # including repository reads. Docker mount mode and post-run validation
     # remain the enforcement point for writable versus read-only requests.
     command.append("--dangerously-skip-permissions")
     command.extend(["--log-file", str(log_file)])
+    model_exec = model_config.to_metadata()
     metadata = {
         "provider": "antigravity",
         "tool_permission": tool_permission,
@@ -373,6 +383,11 @@ def build_antigravity_native_command(
         "migration_actions": migration_actions,
         "settings_path": str(settings_path),
         "log_file": str(log_file),
+        "model": model_exec.model,
+        "reasoning_effort": model_exec.reasoning_effort,
+        "model_source": model_exec.model_source,
+        "reasoning_effort_source": model_exec.reasoning_effort_source,
+        "model_execution": model_exec.model_dump(mode="json"),
     }
     return command, log_file, metadata
 

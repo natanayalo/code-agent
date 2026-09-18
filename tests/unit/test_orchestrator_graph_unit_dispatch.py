@@ -113,3 +113,42 @@ def test_dispatch_job_raises_value_error_if_no_worker() -> None:
     )
     with pytest.raises(ValueError, match="choose_worker must set route.chosen_worker"):
         dispatch_job(state)
+
+
+def test_worker_profile_model_and_effort_projected_to_worker_request() -> None:
+    """WorkerProfile model and reasoning_effort route through dispatch into WorkerRequest."""
+    profile = WorkerProfile(
+        name="codex-luna-high",
+        worker_type="codex",
+        runtime_mode="native_agent",
+        model="gpt-5.6-luna",
+        reasoning_effort="high",
+    )
+    state = OrchestratorState.model_validate(
+        {
+            "task": {
+                "task_id": "task-test-1",
+                "task_text": "Implement feature with Luna",
+                "worker_profile_override": "codex-luna-high",
+            },
+        }
+    )
+    route_decision = _compute_route_decision(
+        state,
+        available_workers=frozenset({"codex"}),
+        available_profiles={"codex-luna-high": profile},
+    )
+    assert route_decision.chosen_profile == "codex-luna-high"
+    assert route_decision.model == "gpt-5.6-luna"
+    assert route_decision.reasoning_effort == "high"
+
+    routed_state = state.model_copy(update={"route": route_decision})
+    dispatch_output = dispatch_job(routed_state)
+    dispatched_state = routed_state.model_copy(update={"dispatch": dispatch_output["dispatch"]})
+
+    request = _build_worker_request(dispatched_state)
+    assert request.runtime_manifest is not None
+    worker_manifest = request.runtime_manifest.get("worker", {})
+    assert worker_manifest.get("model") == "gpt-5.6-luna"
+    assert worker_manifest.get("reasoning_effort") == "high"
+    assert worker_manifest.get("worker_profile") == "codex-luna-high"

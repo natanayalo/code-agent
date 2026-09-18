@@ -272,6 +272,8 @@ async def test_singleton_merge_projects_runtime_manifest_into_parent_state(
             "worker_profile": "readonly-profile",
             "runtime_mode": "native_agent",
             "workspace_id": None,
+            "model": None,
+            "reasoning_effort": None,
         }
 
 

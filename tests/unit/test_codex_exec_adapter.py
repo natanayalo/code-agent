@@ -103,7 +103,15 @@ def test_codex_exec_adapter_invokes_codex_exec_and_parses_a_tool_call(
     assert "--output-last-message" in command
     assert "--ephemeral" in command
     assert command[command.index("-C") + 1] == str(tmp_path)
-    assert command[-5:] == ["--model", "gpt-5.4", "--profile", "ci", "-"]
+    assert command[-7:] == [
+        "--model",
+        "gpt-5.4",
+        "-c",
+        'model_reasoning_effort="high"',
+        "--profile",
+        "ci",
+        "-",
+    ]
     assert "## Runtime Transcript" in str(recorded["input"])
     assert "Tool result: execute_bash" in str(recorded["input"])
 
@@ -230,3 +238,33 @@ def test_codex_exec_adapter_prompt_override_bypasses_schema_wrapping(
     assert "--output-last-message" in command
     assert "--output-schema" not in command
     assert recorded["input"] == "Review this diff and return ReviewResult JSON."
+
+
+def test_codex_exec_adapter_with_model_config_binds_pre_resolved_config(tmp_path: Path) -> None:
+    from workers.model_config import ResolvedModelConfig
+
+    adapter = CodexExecCliRuntimeAdapter(working_directory=tmp_path)
+    assert adapter.model_config is None
+
+    resolved = ResolvedModelConfig(
+        provider="codex",
+        model="gpt-5.6-terra",
+        reasoning_effort="xhigh",
+        model_source="task_override",
+        reasoning_effort_source="task_override",
+        requested_model="gpt-5.6-terra",
+        requested_reasoning_effort="xhigh",
+    )
+    bound = adapter.with_model_config(resolved)
+    assert bound.model_config == resolved
+    assert adapter.model_config is None  # Original adapter remains untouched
+
+    cmd = bound._build_command(
+        output_schema_path=None,
+        output_message_path=tmp_path / "msg.json",
+        working_directory=tmp_path,
+    )
+    assert "--model" in cmd
+    assert cmd[cmd.index("--model") + 1] == "gpt-5.6-terra"
+    assert "-c" in cmd
+    assert 'model_reasoning_effort="xhigh"' in cmd

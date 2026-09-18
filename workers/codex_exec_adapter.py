@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import subprocess
@@ -26,6 +27,13 @@ from workers.adapter_utils import (
 from workers.cli_runtime import CliRuntimeAdapter, CliRuntimeMessage, CliRuntimeStep
 from workers.constants import DEFAULT_CODEX_REQUEST_TIMEOUT_SECONDS
 from workers.llm_tracing import set_llm_span_output, with_llm_span
+from workers.model_config import (
+    CODEX_MODEL_ENV_VAR,
+    CODEX_REASONING_EFFORT_ENV_VAR,
+    ResolvedModelConfig,
+    build_codex_model_cli_args,
+    resolve_codex_model_config,
+)
 from workers.prompt_tools import build_runtime_adapter_tool_guidance_lines
 from workers.subprocess_env import build_codex_subprocess_env
 
@@ -35,7 +43,6 @@ DEFAULT_CODEX_SANDBOX_MODE: Final[str] = "read-only"
 _DETAIL_PREVIEW_CHARACTERS: Final[int] = 1200
 
 CODEX_EXECUTABLE_ENV_VAR: Final[str] = "CODE_AGENT_CODEX_CLI_BIN"
-CODEX_MODEL_ENV_VAR: Final[str] = "CODE_AGENT_CODEX_MODEL"
 CODEX_PROFILE_ENV_VAR: Final[str] = "CODE_AGENT_CODEX_PROFILE"
 CODEX_TIMEOUT_ENV_VAR: Final[str] = "CODE_AGENT_CODEX_TIMEOUT_SECONDS"
 CODEX_SANDBOX_ENV_VAR: Final[str] = "CODE_AGENT_CODEX_SANDBOX"
@@ -93,16 +100,23 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
         *,
         executable: str = DEFAULT_CODEX_EXECUTABLE,
         model: str | None = None,
+        reasoning_effort: str | None = None,
         profile: str | None = None,
         sandbox_mode: str = DEFAULT_CODEX_SANDBOX_MODE,
         request_timeout_seconds: int = DEFAULT_CODEX_REQUEST_TIMEOUT_SECONDS,
         working_directory: str | Path | None = None,
         config_overrides: Sequence[str] = (),
         env: Mapping[str, str] | None = None,
+        model_config: ResolvedModelConfig | None = None,
     ) -> None:
         resolved_env = os.environ if env is None else env
         self.executable = executable
         self.model = model.strip() if model is not None and model.strip() else None
+        self.reasoning_effort = (
+            reasoning_effort.strip().lower()
+            if isinstance(reasoning_effort, str) and reasoning_effort.strip()
+            else None
+        )
         self.profile = profile.strip() if profile is not None and profile.strip() else None
         self.sandbox_mode = sandbox_mode.strip() or DEFAULT_CODEX_SANDBOX_MODE
         self.request_timeout_seconds = coerce_positive_int(
@@ -115,6 +129,13 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
             if isinstance(override, str) and override.strip()
         )
         self.env = build_codex_subprocess_env(resolved_env)
+        self.model_config = model_config
+
+    def with_model_config(self, model_config: ResolvedModelConfig) -> CodexExecCliRuntimeAdapter:
+        """Return a copy of this adapter bound to a pre-resolved model configuration."""
+        bound = copy.copy(self)
+        bound.model_config = model_config
+        return bound
 
     @classmethod
     def from_env(
@@ -126,6 +147,7 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
         return cls(
             executable=resolved_env.get(CODEX_EXECUTABLE_ENV_VAR, DEFAULT_CODEX_EXECUTABLE),
             model=resolved_env.get(CODEX_MODEL_ENV_VAR),
+            reasoning_effort=resolved_env.get(CODEX_REASONING_EFFORT_ENV_VAR),
             profile=resolved_env.get(CODEX_PROFILE_ENV_VAR),
             sandbox_mode=resolved_env.get(CODEX_SANDBOX_ENV_VAR, DEFAULT_CODEX_SANDBOX_MODE),
             request_timeout_seconds=coerce_positive_int(
@@ -159,8 +181,12 @@ class CodexExecCliRuntimeAdapter(CliRuntimeAdapter):
         ]
         if output_schema_path is not None:
             command.extend(["--output-schema", str(output_schema_path)])
-        if self.model is not None:
-            command.extend(["--model", self.model])
+        model_config = self.model_config or resolve_codex_model_config(
+            adapter_model=self.model,
+            adapter_reasoning_effort=self.reasoning_effort,
+            env=self.env,
+        )
+        command.extend(build_codex_model_cli_args(model_config))
         if self.profile is not None:
             command.extend(["--profile", self.profile])
         for override in self.config_overrides:

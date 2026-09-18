@@ -75,23 +75,25 @@ def test_antigravity_adapter_from_env_builds_prompt_command_and_scoped_env(tmp_p
         "do the work",
         "--model",
         "gemini-3-pro",
+        "--effort",
+        "medium",
     ]
     assert adapter.tool_permission == "strict"
     assert adapter.artifact_review_policy == "asks-for-review"
     assert adapter.env == {"XDG_RUNTIME_DIR": "/tmp/runtime"}
 
 
-def test_antigravity_adapter_omits_auto_model_to_use_provider_default(tmp_path: Path) -> None:
+def test_antigravity_adapter_rejects_auto_model_routing_alias(tmp_path: Path) -> None:
     adapter = AntigravityCliRuntimeAdapter(
         executable="/opt/bin/agy",
         model="auto-gemini-2.5",
     )
 
-    assert adapter.build_native_command(prompt="do the work", cwd=tmp_path) == [
-        "/opt/bin/agy",
-        "-p",
-        "do the work",
-    ]
+    with pytest.raises(
+        ValueError,
+        match=r"Antigravity auto-\* routing aliases cannot be used as execution models",
+    ):
+        adapter.build_native_command(prompt="do the work", cwd=tmp_path)
 
 
 def test_antigravity_adapter_uses_lowest_cost_default_model(tmp_path: Path) -> None:
@@ -102,16 +104,20 @@ def test_antigravity_adapter_uses_lowest_cost_default_model(tmp_path: Path) -> N
         "-p",
         "do the work",
         "--model",
-        "gemini-3.5-flash-low",
+        "gemini-3.8-flash",
+        "--effort",
+        "medium",
     ]
 
 
 def test_antigravity_adapter_from_env_uses_lowest_cost_default_model(tmp_path: Path) -> None:
     adapter = AntigravityCliRuntimeAdapter.from_env({})
 
-    assert adapter.build_native_command(prompt="do the work", cwd=tmp_path)[-2:] == [
+    assert adapter.build_native_command(prompt="do the work", cwd=tmp_path)[-4:] == [
         "--model",
-        "gemini-3.5-flash-low",
+        "gemini-3.8-flash",
+        "--effort",
+        "medium",
     ]
 
 
@@ -235,6 +241,7 @@ from pathlib import Path
 parser = argparse.ArgumentParser()
 parser.add_argument("-p", dest="prompt", required=True)
 parser.add_argument("--model")
+parser.add_argument("--effort")
 args = parser.parse_args()
 
 if sys.stdin.read():
@@ -293,6 +300,7 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("-p", required=True)
 parser.add_argument("--model")
+parser.add_argument("--effort")
 parser.parse_args()
 print("No changes needed.")
 """,

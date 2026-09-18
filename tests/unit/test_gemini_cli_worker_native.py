@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from typing import Any, Literal
 from unittest.mock import patch
@@ -17,6 +18,7 @@ from sandbox import (
 )
 from tools import DEFAULT_TOOL_REGISTRY
 from workers import GeminiCliWorker, WorkerRequest, WorkerResult
+from workers.antigravity_cli_adapter import AntigravityCliRuntimeAdapter
 from workers.base import ArtifactReference
 from workers.cli_runtime import CliRuntimeMessage, CliRuntimeSettings, CliRuntimeStep
 from workers.gemini_cli_worker import _prepare_workspace_gemini_home
@@ -251,9 +253,66 @@ def test_gemini_cli_worker_native_mode_honors_read_only_constraint(tmp_path: Pat
         )
 
     assert result.status == "success"
+    assert result.budget_usage is not None
+    assert result.budget_usage["runtime_mode"] == "native_agent"
+    serialized_budget = json.dumps(result.budget_usage)
+    assert serialized_budget is not None
+    assert result.model_execution is None
+    assert "model_execution" not in result.budget_usage["native_agent"]
     command = run_native.call_args.args[0].command
     assert "--approval-mode" in command
     assert command[command.index("--approval-mode") + 1] == "plan"
+
+
+def test_gemini_cli_worker_native_mode_resolves_task_model_override(tmp_path: Path) -> None:
+    workspace = _make_workspace(tmp_path)
+    workspace_manager = _FakeWorkspaceManager(workspace)
+    container_manager = _FakeContainerManager(_make_container(workspace))
+    provider_home = tmp_path / "provider-home"
+    token_path = provider_home / "antigravity-cli" / "antigravity-oauth-token"
+    token_path.parent.mkdir(parents=True)
+    token_path.write_text('{"token":{"access_token":"test-access","refresh_token":"test-refresh"}}')
+    worker = GeminiCliWorker(
+        runtime_adapter=AntigravityCliRuntimeAdapter(
+            executable="agy",
+            env={"GEMINI_HOME": str(provider_home)},
+        ),
+        workspace_manager=workspace_manager,
+        container_manager=container_manager,
+    )
+    native_result = NativeAgentRunResult(
+        status="success",
+        summary="Done with Antigravity override.",
+        command="agy -p 'do it' --model gemini-3.8-flash --effort high",
+        duration_seconds=1.0,
+        exit_code=0,
+        timed_out=False,
+    )
+    with patch(
+        "workers.gemini_cli_worker_native.run_native_agent",
+        return_value=native_result,
+    ):
+        result = asyncio.run(
+            worker.run(
+                WorkerRequest(
+                    session_id="session-antigravity-override",
+                    repo_url="https://example.com/repo.git",
+                    branch="main",
+                    task_text="Run with override",
+                    constraints={"antigravity_reasoning_effort": "high"},
+                    runtime_manifest={"worker": {"model": "gemini-3.8-flash"}},
+                    runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+                )
+            )
+        )
+    assert result.status == "success"
+    assert result.model_execution is not None
+    assert result.model_execution.model == "gemini-3.8-flash"
+    assert result.model_execution.model_source == "worker_profile"
+    assert result.model_execution.reasoning_effort == "high"
+    assert result.model_execution.reasoning_effort_source == "task_override"
+    assert result.model_execution.requested_reasoning_effort == "high"
+    assert result.model_execution.requested_model is None
 
 
 def test_gemini_native_runtime_keeps_memory_with_system_prompt_override(tmp_path: Path) -> None:
@@ -511,3 +570,70 @@ def test_gemini_cli_worker_run_skips_workspace_home_for_scratch_node(
     assert result.status == "success"
     prepare_home.assert_not_called()
     execute_native.assert_called_once()
+
+
+def test_legacy_gemini_cli_runtime_adapter_truthful_metadata(tmp_path: Path) -> None:
+    from workers.gemini_cli_adapter import GeminiCliRuntimeAdapter
+
+    workspace = _make_workspace(tmp_path)
+    # Case 1: Explicit model on adapter
+    adapter_with_model = GeminiCliRuntimeAdapter(model="gemini-1.5-pro")
+    worker = GeminiCliWorker(
+        runtime_adapter=adapter_with_model,
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(_make_container(workspace)),
+    )
+    request = WorkerRequest(
+        task_text="Run legacy gemini with explicit model",
+        repo_url="https://example.com/repo.git",
+    )
+    fake_native_res = NativeAgentRunResult(
+        status="success",
+        summary="done",
+        command="gemini",
+        exit_code=0,
+        duration_seconds=1,
+        timed_out=False,
+    )
+    with patch("workers.gemini_cli_worker_native.run_native_agent") as run_native:
+        run_native.return_value = fake_native_res
+        result = worker._execute_native_runtime(
+            request,
+            workspace=workspace,
+            runtime_settings=CliRuntimeSettings(),
+            runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+            system_prompt_override=None,
+            cancel_token=None,
+        )
+        run_request = run_native.call_args.args[0]
+        assert "--model" in run_request.command
+        model_idx = run_request.command.index("--model")
+        assert run_request.command[model_idx + 1] == "gemini-1.5-pro"
+
+    assert result.model_execution is not None
+    assert result.model_execution.provider == "gemini"
+    assert result.model_execution.model == "gemini-1.5-pro"
+    assert result.model_execution.reasoning_effort is None
+
+    # Case 2: Unconfigured model on adapter
+    adapter_no_model = GeminiCliRuntimeAdapter(model=None)
+    worker2 = GeminiCliWorker(
+        runtime_adapter=adapter_no_model,
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(_make_container(workspace)),
+    )
+    with patch("workers.gemini_cli_worker_native.run_native_agent") as run_native:
+        run_native.return_value = fake_native_res
+        result2 = worker2._execute_native_runtime(
+            request,
+            workspace=workspace,
+            runtime_settings=CliRuntimeSettings(),
+            runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+            system_prompt_override=None,
+            cancel_token=None,
+        )
+        run_request2 = run_native.call_args.args[0]
+        assert "--model" not in run_request2.command
+
+    assert result2.model_execution is None
+    assert "model_execution" not in result2.budget_usage["native_agent"]

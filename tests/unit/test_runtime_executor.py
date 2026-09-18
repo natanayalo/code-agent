@@ -240,3 +240,111 @@ def test_runtime_executor_execution_cancellation() -> None:
         assert result.status == "error"
         assert result.failure_kind == "timeout"
         assert "cancelled" in (result.summary or "").lower()
+
+
+def _make_mock_executor_and_workspace(
+    adapter: CliRuntimeAdapter,
+    tmp_path: Path,
+) -> tuple[RuntimeExecutor, WorkspaceHandle]:
+    mock_sandbox_adapter = MagicMock(spec=SandboxSessionAdapter)
+    mock_container = MagicMock(spec=DockerSandboxContainer)
+    mock_container.working_dir = "/workspace"
+    mock_session = MagicMock()
+
+    class MockContextManager:
+        def __enter__(self):
+            return mock_container, mock_session
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            pass
+
+    mock_sandbox_adapter.session_context.return_value = MockContextManager()
+    executor = RuntimeExecutor(
+        runtime_adapter=adapter,
+        tool_registry=DEFAULT_TOOL_REGISTRY,
+        sandbox_adapter=mock_sandbox_adapter,
+        runtime_settings=CliRuntimeSettings(),
+    )
+    workspace = MagicMock(spec=WorkspaceHandle)
+    workspace.workspace_id = "ws_123"
+    workspace.workspace_path = MagicMock()
+    workspace.workspace_path.as_uri.return_value = "file:///tmp/repo"
+    workspace.repo_path = tmp_path
+    return executor, workspace
+
+
+def test_runtime_executor_codex_task_override_binds_adapter_argv_and_model_execution(
+    tmp_path: Path,
+) -> None:
+    """RuntimeExecutor resolves task constraints once, binds them to adapter,
+    and asserts argv & model_execution parity.
+    """
+    from workers.codex_exec_adapter import CodexExecCliRuntimeAdapter
+
+    real_adapter = CodexExecCliRuntimeAdapter(
+        executable="/opt/codex",
+        model="gpt-5.6-luna",
+        reasoning_effort="high",
+        working_directory=tmp_path,
+    )
+    executor, workspace = _make_mock_executor_and_workspace(real_adapter, tmp_path)
+
+    # Task constraint overrides Codex model and reasoning effort
+    request = WorkerRequest(
+        task_text="Refactor authentication",
+        repo_url="https://example.com/repo",
+        constraints={
+            "codex_model": "gpt-5.6-terra",
+            "codex_reasoning_effort": "xhigh",
+        },
+    )
+
+    captured_command: list[str] = []
+
+    def fake_run_cli_runtime_loop(adapter, *args, **kwargs):
+        cmd = adapter._build_command(
+            output_schema_path=None,
+            output_message_path=tmp_path / "msg.json",
+            working_directory=tmp_path,
+        )
+        captured_command.extend(cmd)
+        return CliRuntimeExecutionResult(
+            status="success",
+            summary="success",
+            stop_reason="final_answer",
+            budget_ledger=CliRuntimeBudgetLedger(max_iterations=1),
+        )
+
+    with (
+        patch(
+            "workers.runtime_executor.run_cli_runtime_loop",
+            side_effect=fake_run_cli_runtime_loop,
+        ),
+        patch(
+            "workers.runtime_executor.collect_changed_files_and_apply_post_run_lint_format",
+            return_value=([], None, []),
+        ),
+        patch(
+            "workers.runtime_executor.run_shared_self_review_fix_loop",
+            return_value=(None, [], {}, []),
+        ),
+        patch("workers.runtime_executor.collect_diff_for_review", return_value=""),
+    ):
+        result = executor.execute(request, workspace=workspace)
+
+        assert result.status == "success"
+        # Assert generated command argv has overridden model and effort
+        assert "--model" in captured_command
+        assert captured_command[captured_command.index("--model") + 1] == "gpt-5.6-terra"
+        assert "-c" in captured_command
+        assert 'model_reasoning_effort="xhigh"' in captured_command
+
+        # Assert result.model_execution matches the exact executed model and effort
+        assert result.model_execution is not None
+        assert result.model_execution.provider == "codex"
+        assert result.model_execution.model == "gpt-5.6-terra"
+        assert result.model_execution.reasoning_effort == "xhigh"
+        assert result.model_execution.model_source == "task_override"
+        assert result.model_execution.reasoning_effort_source == "task_override"
+        assert result.model_execution.requested_model == "gpt-5.6-terra"
+        assert result.model_execution.requested_reasoning_effort == "xhigh"

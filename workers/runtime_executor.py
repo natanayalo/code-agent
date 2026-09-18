@@ -18,7 +18,12 @@ from tools import (
     ToolRegistry,
     granted_permission_from_constraints,
 )
-from workers.base import ArtifactReference, WorkerRequest, WorkerResult
+from workers.base import (
+    ArtifactReference,
+    ModelExecutionMetadata,
+    WorkerRequest,
+    WorkerResult,
+)
 from workers.cli_adapter_utils import build_worker_result
 from workers.cli_runtime import (
     CliRuntimeAdapter,
@@ -48,6 +53,8 @@ class _RuntimeSetup:
     expects_changed_files: bool
     fallback_command_template: str | None
     system_prompt: str
+    adapter: CliRuntimeAdapter
+    model_execution: ModelExecutionMetadata | None = None
 
 
 @dataclass
@@ -101,6 +108,7 @@ def _worker_result_from_execution(
     review_result: ReviewResult | None = None,
     diff_text: str | None = None,
     artifacts: list[ArtifactReference] | None = None,
+    model_execution: ModelExecutionMetadata | None = None,
 ) -> WorkerResult:
     """Map the shared CLI runtime output into the worker contract."""
     requested_permission = (
@@ -121,7 +129,43 @@ def _worker_result_from_execution(
         artifacts=[*_workspace_artifacts(workspace), *(artifacts or [])],
         next_action_hint=_next_action_hint(execution),
         workspace_id=workspace.workspace_id,
+        model_execution=model_execution,
     )
+
+
+def _resolve_runtime_model_context(
+    request: WorkerRequest,
+    adapter: CliRuntimeAdapter,
+) -> tuple[CliRuntimeAdapter, ModelExecutionMetadata | None]:
+    """Resolve model configuration once for the request and bind it to the adapter."""
+    from workers.antigravity_cli_adapter import AntigravityCliRuntimeAdapter
+    from workers.codex_exec_adapter import CodexExecCliRuntimeAdapter
+    from workers.model_config import (
+        resolve_antigravity_model_config,
+        resolve_codex_model_config,
+    )
+
+    manifest_worker = (request.runtime_manifest or {}).get("worker")
+    if isinstance(adapter, CodexExecCliRuntimeAdapter):
+        resolved_config = resolve_codex_model_config(
+            task_constraints=request.constraints,
+            manifest_worker=manifest_worker,
+            adapter_model=adapter.model,
+            adapter_reasoning_effort=adapter.reasoning_effort,
+            env=adapter.env,
+        )
+        bound_adapter = adapter.with_model_config(resolved_config)
+        return bound_adapter, resolved_config.to_metadata()
+    if isinstance(adapter, AntigravityCliRuntimeAdapter):
+        resolved_config = resolve_antigravity_model_config(
+            task_constraints=request.constraints,
+            manifest_worker=manifest_worker,
+            adapter_model=adapter.model,
+            adapter_reasoning_effort=adapter.reasoning_effort,
+            env=adapter.env,
+        )
+        return adapter, resolved_config.to_metadata()
+    return adapter, None
 
 
 class RuntimeExecutor:
@@ -171,6 +215,9 @@ class RuntimeExecutor:
             tool_registry=self.tool_registry,
         )
 
+        bound_adapter, model_execution = _resolve_runtime_model_context(
+            request, self.runtime_adapter
+        )
         return _RuntimeSetup(
             container=container,
             session=session,
@@ -181,6 +228,8 @@ class RuntimeExecutor:
             ),
             fallback_command_template=fallback_command_template,
             system_prompt=system_prompt,
+            adapter=bound_adapter,
+            model_execution=model_execution,
         )
 
     def _execute_loop(
@@ -192,7 +241,7 @@ class RuntimeExecutor:
     ) -> CliRuntimeExecutionResult:
         redactor = SecretRedactor(list((request.secrets or {}).values()))
         return run_cli_runtime_loop(
-            self.runtime_adapter,
+            runtime_setup.adapter,
             runtime_setup.session,
             system_prompt=runtime_setup.system_prompt,
             settings=runtime_setup.runtime_settings,
@@ -202,7 +251,7 @@ class RuntimeExecutor:
             cancel_token=cancel_token,
             task_id=request.task_id,
             session_id=request.session_id,
-            model_name=getattr(self.runtime_adapter, "model", None),
+            model_name=getattr(runtime_setup.adapter, "model", None),
             redactor=redactor,
             response_format=request.response_format,
             response_schema=request.response_schema,
@@ -240,7 +289,7 @@ class RuntimeExecutor:
             execution=execution,
             task_text=request.task_text,
             constraints=constraints,
-            runtime_adapter=self.runtime_adapter,
+            runtime_adapter=runtime_setup.adapter,
             runtime_settings=runtime_setup.runtime_settings,
             system_prompt=runtime_setup.system_prompt,
             repo_path=workspace.repo_path,
@@ -267,7 +316,7 @@ class RuntimeExecutor:
             cancel_token=cancel_token,
             task_id=request.task_id,
             session_id=request.session_id,
-            model_name=getattr(self.runtime_adapter, "model", None),
+            model_name=getattr(runtime_setup.adapter, "model", None),
             adapter_failure_log_message=(
                 "CLI worker self-review adapter failed; recording explicit no-findings fallback."
             ),
@@ -355,7 +404,9 @@ class RuntimeExecutor:
                 review_result=review_result,
             )
 
-            return self._finalize_result(workspace, runtime_setup, runtime_phase, cancel_token)
+            return self._finalize_result(
+                workspace, runtime_setup, runtime_phase, cancel_token, request=request
+            )
 
     def _finalize_result(
         self,
@@ -363,7 +414,9 @@ class RuntimeExecutor:
         runtime_setup: _RuntimeSetup,
         runtime_phase: _RuntimeExecutionPhase,
         cancel_token: Callable[[], bool] | None,
+        request: WorkerRequest,
     ) -> WorkerResult:
+        model_execution = runtime_setup.model_execution
         result = _worker_result_from_execution(
             workspace,
             runtime_phase.execution,
@@ -377,6 +430,7 @@ class RuntimeExecutor:
             if runtime_phase.execution.status == "success" and not (cancel_token and cancel_token())
             else None,
             artifacts=runtime_phase.lint_format_artifacts,
+            model_execution=model_execution,
         )
         if cancel_token and cancel_token():
             result.status = "error"

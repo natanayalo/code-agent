@@ -31,6 +31,7 @@ from workers.antigravity_event_normalizer import AntigravityStreamNormalizer
 from workers.base import (
     ArtifactReference,
     FailureKind,
+    ModelExecutionMetadata,
     WorkerCommand,
     WorkerRequest,
     WorkerResult,
@@ -548,6 +549,26 @@ class GeminiCliWorkerNativeMixin:
                 request=request,
                 runtime_mode=runtime_mode,
             )
+            # Legacy Gemini runs do not participate in Antigravity model resolution.
+            # Record truthful metadata only if explicit model is on adapter;
+            # otherwise leave model_execution empty for unconfigured legacy runs.
+            adapter = getattr(self, "runtime_adapter", None)
+            legacy_model = getattr(adapter, "model", None)
+            if legacy_model:
+                model_exec = ModelExecutionMetadata(
+                    provider="gemini",
+                    model=str(legacy_model),
+                    reasoning_effort=None,
+                    requested_model=None,
+                    requested_reasoning_effort=None,
+                    model_source="environment",
+                    reasoning_effort_source=None,
+                )
+                provider_metadata["model"] = model_exec.model
+                provider_metadata["reasoning_effort"] = None
+                provider_metadata["model_source"] = model_exec.model_source
+                provider_metadata["reasoning_effort_source"] = None
+                provider_metadata["model_execution"] = model_exec.model_dump(mode="json")
         task_id = request.task_id or request.session_id or "local"
         if hasattr(self, "ephemeral_store") and self.ephemeral_store is not None:
             self.ephemeral_store.refresh_task_ttl(task_id)
@@ -732,6 +753,7 @@ class GeminiCliWorkerNativeMixin:
                 },
                 artifacts=_workspace_artifacts(workspace),
                 next_action_hint="inspect_worker_configuration",
+                model_execution=provider_metadata.get("model_execution"),
             )
         run_request = replace(run_request, cancel_requested=cancel_token)
         native_result = run_native_agent(run_request)
@@ -783,6 +805,7 @@ class GeminiCliWorkerNativeMixin:
             next_action_hint=self._native_next_action_hint(native_result),
             stdout=native_result.stdout,
             stderr=native_result.stderr,
+            model_execution=(provider_metadata or {}).get("model_execution"),
         )
         if cancel_token and cancel_token():
             result.status = "error"

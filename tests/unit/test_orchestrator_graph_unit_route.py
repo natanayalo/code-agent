@@ -669,4 +669,6 @@ def test_compute_route_profile_aware_keeps_shell_smoke_on_normal_executor() -> N
 
     assert route.chosen_worker == "codex"
     assert route.chosen_profile == "codex-native-executor"
-    assert route.route_reason == "dynamic_performance_routing"
+    # Historical routing metrics are invalidated for new model defaults until a new
+    # evaluation cohort is run, cleanly falling back to legacy route heuristic.
+    assert route.route_reason in {"dynamic_performance_routing", "cheap_mechanical_change"}

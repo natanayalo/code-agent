@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -44,6 +44,10 @@ from workers.cli_runtime import (
 )
 from workers.codex_event_normalizer import CodexStreamNormalizer
 from workers.failure_taxonomy import classify_failure_kind
+from workers.model_config import (
+    build_codex_model_cli_args,
+    resolve_codex_model_config,
+)
 from workers.native_agent_models import NativeAgentRunResult
 from workers.native_agent_runner import (
     NativeAgentRunRequest,
@@ -234,6 +238,24 @@ if TYPE_CHECKING:
     pass
 
 
+def _resolve_codex_sandbox_mode(
+    *,
+    request: WorkerRequest,
+    trusted_repo_patterns: Sequence[re.Pattern[str]],
+    default_sandbox_mode: str,
+) -> tuple[str, bool, bool, bool]:
+    in_container = is_in_container()
+    repo_approved = any(pattern.search(request.repo_url or "") for pattern in trusted_repo_patterns)
+    read_only_requested = request.read_only or bool(request.constraints.get("read_only"))
+    if read_only_requested:
+        sandbox_mode = "read-only"
+    elif in_container and repo_approved:
+        sandbox_mode = "danger-full-access"
+    else:
+        sandbox_mode = default_sandbox_mode
+    return sandbox_mode, in_container, repo_approved, read_only_requested
+
+
 class CodexCliWorkerNativeMixin:
     def _resolve_runtime_mode(self, request: WorkerRequest) -> WorkerRuntimeMode:
         """Resolve effective runtime mode from request override or worker defaults."""
@@ -256,25 +278,18 @@ class CodexCliWorkerNativeMixin:
     ) -> tuple[list[str], dict[str, Any]]:
         """Build a one-shot `codex exec` command for native-agent mode."""
         executable = getattr(self.runtime_adapter, "executable", "codex")  # type: ignore[attr-defined]
-        model = getattr(self.runtime_adapter, "model", None)  # type: ignore[attr-defined]
+        adapter_model = getattr(self.runtime_adapter, "model", None)  # type: ignore[attr-defined]
+        adapter_effort = getattr(self.runtime_adapter, "reasoning_effort", None)  # type: ignore[attr-defined]
+        adapter_env = getattr(self.runtime_adapter, "env", None)  # type: ignore[attr-defined]
         profile = getattr(self.runtime_adapter, "profile", None)  # type: ignore[attr-defined]
-        read_only_requested = request.read_only or bool(request.constraints.get("read_only"))
 
-        # Sandbox selection policy (T-172)
-        in_container = is_in_container()
-        repo_approved = False
-        repo_url = request.repo_url or ""
-        for pattern in self.trusted_repo_patterns:  # type: ignore[attr-defined]
-            if pattern.search(repo_url):
-                repo_approved = True
-                break
-
-        if read_only_requested:
-            sandbox_mode = "read-only"
-        elif in_container and repo_approved:
-            sandbox_mode = "danger-full-access"
-        else:
-            sandbox_mode = self.native_sandbox_mode or DEFAULT_CODEX_NATIVE_SANDBOX_MODE  # type: ignore[attr-defined]
+        sandbox_mode, in_container, repo_approved, read_only_requested = (
+            _resolve_codex_sandbox_mode(
+                request=request,
+                trusted_repo_patterns=self.trusted_repo_patterns,  # type: ignore[attr-defined]
+                default_sandbox_mode=self.native_sandbox_mode or DEFAULT_CODEX_NATIVE_SANDBOX_MODE,  # type: ignore[attr-defined]
+            )
+        )
 
         logger.info(
             "Selected Codex native sandbox mode: %s",
@@ -287,11 +302,26 @@ class CodexCliWorkerNativeMixin:
             },
         )
 
+        manifest_worker = (request.runtime_manifest or {}).get("worker")
+        model_config = resolve_codex_model_config(
+            task_constraints=request.constraints,
+            manifest_worker=manifest_worker,
+            adapter_model=adapter_model,
+            adapter_reasoning_effort=adapter_effort,
+            env=adapter_env,
+        )
+
+        model_exec = model_config.to_metadata()
         sandbox_metadata = {
             "sandbox_mode": sandbox_mode,
             "in_container": in_container,
             "repo_approved": repo_approved,
             "read_only_requested": read_only_requested,
+            "model": model_exec.model,
+            "reasoning_effort": model_exec.reasoning_effort,
+            "model_source": model_exec.model_source,
+            "reasoning_effort_source": model_exec.reasoning_effort_source,
+            "model_execution": model_exec.model_dump(mode="json"),
         }
 
         command = [
@@ -308,8 +338,7 @@ class CodexCliWorkerNativeMixin:
             "-C",
             str(workspace.repo_path),
         ]
-        if model:
-            command.extend(["--model", str(model)])
+        command.extend(build_codex_model_cli_args(model_config))
         if profile:
             command.extend(["--profile", str(profile)])
         if output_schema_path:
@@ -581,6 +610,7 @@ class CodexCliWorkerNativeMixin:
                 budget_usage={"runtime_mode": runtime_mode.value, "native_agent": sandbox_metadata},
                 artifacts=_workspace_artifacts(workspace),
                 next_action_hint="inspect_worker_configuration",
+                model_execution=sandbox_metadata.get("model_execution"),
             )
         run_request = replace(run_request, cancel_requested=cancel_token)
         native_result = run_native_agent(run_request)
@@ -618,6 +648,7 @@ class CodexCliWorkerNativeMixin:
             next_action_hint=self._native_next_action_hint(native_result),
             stdout=native_result.stdout,
             stderr=native_result.stderr,
+            model_execution=sandbox_metadata.get("model_execution"),
         )
         if cancel_token and cancel_token():
             result.status = "error"

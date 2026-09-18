@@ -496,13 +496,23 @@ def _build_worker_request_runtime_manifest(
 ) -> dict[str, Any]:
     """Build the frozen runtime manifest payload for a worker request."""
     route = state.route
-    dispatch = state.dispatch
+    dispatch = (
+        WorkerDispatch.model_validate(state.dispatch)
+        if isinstance(state.dispatch, dict)
+        else state.dispatch
+    )
+    model = (dispatch.model if dispatch else None) or (route.model if route else None)
+    reasoning_effort = (dispatch.reasoning_effort if dispatch else None) or (
+        route.reasoning_effort if route else None
+    )
     return build_runtime_manifest(
         worker_type=(dispatch.worker_type if dispatch else None)
         or (route.chosen_worker if route else None),
         worker_profile=worker_profile,
         runtime_mode=runtime_mode,
         workspace_id=dispatch.workspace_id if dispatch else None,
+        model=model,
+        reasoning_effort=reasoning_effort,
         task_spec=task_spec or state.task_spec,
         read_only=read_only,
         network_enabled=False,
@@ -558,7 +568,11 @@ def _build_worker_request(
     """Build the typed worker request from orchestrator state."""
     task_text = task_text_override or _build_worker_request_task_text(state)
     route = state.route
-    dispatch = state.dispatch
+    dispatch = (
+        WorkerDispatch.model_validate(state.dispatch)
+        if isinstance(state.dispatch, dict)
+        else state.dispatch
+    )
     worker_profile = (dispatch.worker_profile if dispatch else None) or (
         route.chosen_profile if route else None
     )
@@ -1212,6 +1226,8 @@ def _route_for_profile(
         runtime_mode=profile.runtime_mode,
         route_reason=reason,
         override_applied=override_applied,
+        model=profile.model,
+        reasoning_effort=profile.reasoning_effort,
     )
 
 
@@ -1235,6 +1251,8 @@ def _route_from_worker_choice(
         runtime_mode=profile.runtime_mode,
         route_reason=worker_route.route_reason,
         override_applied=worker_route.override_applied,
+        model=profile.model,
+        reasoning_effort=profile.reasoning_effort,
     )
 
 
@@ -3242,6 +3260,8 @@ def dispatch_job(state_input: OrchestratorState) -> dict[str, Any]:
             worker_profile=state.route.chosen_profile,
             runtime_mode=state.route.runtime_mode,
             workspace_id=state.dispatch.workspace_id,
+            model=state.route.model,
+            reasoning_effort=state.route.reasoning_effort,
         )
         set_span_input_output(input_data=state.task.task_text, output_data=state.route.model_dump())
         return {

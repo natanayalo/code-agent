@@ -329,12 +329,13 @@ Checks:
 ### Antigravity (`agy`) specific issues
 
 **Default model**
-Native Antigravity tasks default to `gemini-3.5-flash-low`, the lowest-cost
-model available to the enrolled account at this slice's verification time. To
-override it, first run `agy models` through the trusted enrollment container
-and set `CODE_AGENT_ANTIGRAVITY_MODEL` to one of the returned IDs. Do not use
+Native Antigravity tasks default to `gemini-3.8-flash` with medium effort. The
+currently available model slugs are documented in `.env.example`; model slugs
+with an effort suffix can also be passed directly. To override the default,
+first run `agy models` through the trusted enrollment container and set
+`CODE_AGENT_ANTIGRAVITY_MODEL` to one of the returned IDs. Do not use
 legacy `auto-*` values such as `auto-gemini-2.5`: they are routing aliases, not
-valid explicit `agy --model` IDs.
+valid explicit `agy --model` IDs, and are rejected during model resolution.
 
 **`agy: command not found`**
 Ensure that the Antigravity CLI is installed and its binary is available in the `PATH` environment variable of the context executing the command (host or Docker worker).

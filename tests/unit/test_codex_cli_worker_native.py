@@ -165,10 +165,24 @@ def _review_result_json(
     return json.dumps(payload.model_dump(mode="json"))
 
 
+def _assert_native_agent_budget_json_safe(
+    budget_usage: dict[str, Any],
+    expected_model: str,
+    expected_source: str,
+) -> None:
+    serialized = json.dumps(budget_usage)
+    assert expected_model in serialized
+    meta = budget_usage["native_agent"]
+    assert not any(hasattr(v, "__dataclass_fields__") for v in meta.values())
+    assert not any(hasattr(v, "model_dump") for v in meta.values())
+    assert isinstance(meta["model_execution"], dict)
+    assert meta["model"] == expected_model
+    assert meta["model_source"] == expected_source
+
+
 def test_codex_cli_worker_runs_native_agent_mode_when_requested(tmp_path: Path) -> None:
     """Codex native mode should invoke one-shot runner and skip tool-loop container setup."""
     adapter = _ScriptedAdapter([])
-    # Regression guard: adapter defaults must not force native mode into read-only.
     adapter.sandbox_mode = "read-only"
     workspace = _workspace_handle(tmp_path)
     container = DockerSandboxContainer(
@@ -225,11 +239,18 @@ def test_codex_cli_worker_runs_native_agent_mode_when_requested(tmp_path: Path) 
 
     assert result.status == "success"
     assert result.summary == "Native run complete."
+    assert result.model_execution is not None
+    assert result.model_execution.provider == "codex"
+    assert result.model_execution.model == "gpt-5.6-luna"
+    assert result.model_execution.reasoning_effort == "high"
+    assert result.model_execution.model_source == "provider_default"
+    assert result.model_execution.reasoning_effort_source == "provider_default"
     assert result.json_payload == {"status": "passed", "summary": "structured"}
     assert result.files_changed == ["note.txt"]
     assert result.diff_text == "diff --git a/note.txt b/note.txt"
     assert result.budget_usage is not None
     assert result.budget_usage["runtime_mode"] == "native_agent"
+    _assert_native_agent_budget_json_safe(result.budget_usage, "gpt-5.6-luna", "provider_default")
     assert result.commands_run[0].command.startswith("codex exec")
     assert container_manager.start_requests == []
     assert container_manager.stop_requests == []
@@ -239,6 +260,55 @@ def test_codex_cli_worker_runs_native_agent_mode_when_requested(tmp_path: Path) 
     assert command[command.index("--sandbox") + 1] == "workspace-write"
     assert "--json" in command
     assert result.artifacts[0].name == "workspace"
+
+
+def test_codex_cli_worker_native_mode_resolves_task_model_override(tmp_path: Path) -> None:
+    workspace = _workspace_handle(tmp_path)
+    workspace_manager = _FakeWorkspaceManager(workspace)
+    container_manager = _FakeContainerManager(None)  # type: ignore[arg-type]
+    worker = CodexCliWorker(
+        runtime_adapter=_ScriptedAdapter([]),
+        workspace_manager=workspace_manager,
+        container_manager=container_manager,
+    )
+    native_result = NativeAgentRunResult(
+        status="success",
+        summary="Done with override.",
+        command="codex exec --model gpt-5.6-profile",
+        duration_seconds=1.0,
+        exit_code=0,
+        timed_out=False,
+    )
+    with patch(
+        "workers.codex_cli_worker_native.run_native_agent",
+        return_value=native_result,
+    ) as run_native:
+        result = asyncio.run(
+            worker.run(
+                WorkerRequest(
+                    session_id="session-override",
+                    repo_url="https://example.com/repo.git",
+                    branch="main",
+                    task_text="Run with override",
+                    constraints={"codex_reasoning_effort": "low"},
+                    runtime_manifest={"worker": {"model": "gpt-5.6-profile"}},
+                    runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+                )
+            )
+        )
+    assert result.status == "success"
+    assert result.model_execution is not None
+    assert result.model_execution.model == "gpt-5.6-profile"
+    assert result.model_execution.model_source == "worker_profile"
+    assert result.model_execution.reasoning_effort == "low"
+    assert result.model_execution.reasoning_effort_source == "task_override"
+    assert result.model_execution.requested_reasoning_effort == "low"
+    assert result.model_execution.requested_model is None
+    command = run_native.call_args.args[0].command
+    assert "--model" in command
+    assert command[command.index("--model") + 1] == "gpt-5.6-profile"
+    assert "-c" in command
+    assert command[command.index("-c") + 1] == 'model_reasoning_effort="low"'
 
 
 def test_codex_cli_worker_native_mode_honors_read_only_constraint(tmp_path: Path) -> None:

@@ -203,6 +203,8 @@ class RouteDecision(OrchestratorModel):
     route_reason: str | None = None
     override_applied: bool = False
     route_metadata: dict[str, Any] | None = None
+    model: str | None = None
+    reasoning_effort: str | None = None
 
     @field_validator("chosen_worker", mode="before")
     @classmethod
@@ -369,6 +371,8 @@ class WorkerDispatch(OrchestratorModel):
     runtime_mode: WorkerRuntimeMode | None = None
     workspace_id: str | None = None
     runtime_manifest: dict[str, Any] | None = None
+    model: str | None = None
+    reasoning_effort: str | None = None
 
     @field_validator("worker_type", mode="before")
     @classmethod
