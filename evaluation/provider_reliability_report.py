@@ -7,6 +7,7 @@ import re
 from typing import Any
 
 from evaluation.provider_reliability_models import (
+    VALID_FAILURE_KINDS,
     ProviderReliabilityReport,
 )
 
@@ -158,39 +159,6 @@ VALID_TASK_CLASSES: frozenset[str] = frozenset(
     {"docs", "bugfix", "feature", "refactor", "investigation", "review_fix", "maintenance", "scout"}
 )
 VALID_MUTATION_MODES: frozenset[str] = frozenset({"mutation", "read_only"})
-VALID_FAILURE_KINDS: frozenset[str] = frozenset(
-    {
-        # Canonical worker failure kinds (workers.base.FailureKind)
-        "compile",
-        "test",
-        "tool_runtime",
-        "sandbox_infra",
-        "timeout",
-        "budget_exceeded",
-        "permission_denied",
-        "context_window",
-        "provider_error",
-        "provider_auth",
-        "incomplete_delivery",
-        "test_regression",
-        "scope_mismatch",
-        "infra_verifier_unavailable",
-        "risky_command",
-        "worker_failure",
-        "interaction",
-        "read_only_violation",
-        # Verification failure kinds and legacy taxonomy markers
-        "compile_error",
-        "test_failure",
-        "syntax_error",
-        "syntax",
-        "lint",
-        "type_check",
-        # Extractor synthesized failure kinds
-        "task_error",
-        "unknown",
-    }
-)
 VALID_EXCLUSION_REASONS: frozenset[str] = frozenset(
     {
         "cancelled",
@@ -226,6 +194,13 @@ def _validate_domain_value(key: str, val: Any) -> None:
             raise ValueError(f"Invalid reasoning_effort value: {val}")
         if key == "evidence_scope" and val not in ("operational", "current_execution_cohort"):
             raise ValueError(f"Invalid evidence_scope domain value: {val}")
+        if key == "status" and val not in (
+            "complete",
+            "partial",
+            "insufficient_data",
+            "diagnostic_only",
+        ):
+            raise ValueError(f"Invalid status domain value: {val}")
         if key == "task_class":
             if not SAFE_CLASS_PATTERN.match(val) or val not in VALID_TASK_CLASSES:
                 raise ValueError(f"Invalid task_class domain value: {val}")
@@ -388,10 +363,21 @@ def _render_exclusions(report: ProviderReliabilityReport) -> list[str]:
 
 def _render_recommendations(report: ProviderReliabilityReport) -> list[str]:
     """Render recommendation decisions and candidate rankings."""
-    lines = [
-        "## 2. Recommendations by Task Class and Mode",
-        "",
-    ]
+    if report.policy.evidence_scope == "operational":
+        lines = [
+            "## 2. Historical Aggregates by Task Class and Mode (Diagnostic-Only)",
+            "",
+            "> [!NOTE]",
+            "> Operational scope aggregates evidence across heterogeneous model vintages "
+            "(e.g. gpt-5.4-mini, gpt-5.6-luna, legacy and current Antigravity) for diagnostic "
+            "accounting. Recommendations and ranking eligibility are strictly suppressed.",
+            "",
+        ]
+    else:
+        lines = [
+            "## 2. Recommendations by Task Class and Mode",
+            "",
+        ]
     if not report.recommendations:
         lines.append("_No recommendations generated._\n")
         return lines

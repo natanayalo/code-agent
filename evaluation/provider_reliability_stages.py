@@ -13,7 +13,17 @@ from db.enums import (
     WorkerRunStatus,
 )
 from db.models import Task, WorkerRun
-from evaluation.provider_reliability_models import MutationMode
+from evaluation.provider_reliability_models import VALID_FAILURE_KINDS, MutationMode
+
+TERMINAL_FAILURE_EVENT_TYPES: frozenset[TimelineEventType] = frozenset(
+    {
+        TimelineEventType.DELIVERY_FAILED,
+        TimelineEventType.WORKER_FAILED,
+        TimelineEventType.WORKER_ERROR,
+        TimelineEventType.INFRA_FAILURE,
+        TimelineEventType.TASK_FAILED,
+    }
+)
 
 
 def is_profile_compatible_with_mode(profile: str, mode: MutationMode) -> bool:
@@ -209,13 +219,26 @@ def check_task_stages(
 
 
 def resolve_failure_kind(task: Task, accepted: bool, runs: list[WorkerRun]) -> str | None:
-    """Resolve typed failure cause deterministically from sorted worker runs."""
+    """Resolve typed failure cause deterministically from timeline events and worker runs."""
     if accepted:
         return None
+
+    target_attempt = task.attempt_count
+    for event in reversed(task.timeline_events or []):
+        if target_attempt is not None and event.attempt_number != target_attempt:
+            continue
+        if event.event_type in TERMINAL_FAILURE_EVENT_TYPES:
+            payload = event.payload if isinstance(event.payload, dict) else {}
+            fk = payload.get("failure_kind")
+            if fk and str(fk) in VALID_FAILURE_KINDS:
+                return str(fk)
+
     for r in reversed(runs):
-        outcome = r.verifier_outcome or {}
-        if outcome.get("failure_kind"):
-            return str(outcome["failure_kind"])
+        outcome = r.verifier_outcome if isinstance(r.verifier_outcome, dict) else {}
+        fk = outcome.get("failure_kind")
+        if fk:
+            return str(fk)
+
     if task.last_error:
         return "task_error"
     return "unknown"

@@ -663,7 +663,6 @@ export DATABASE_URL="postgresql+psycopg://..."
 
 .venv/bin/python scripts/e2e/run_provider_reliability_robustness.py \
   --database-url-env DATABASE_URL \
-  --evidence-scope current_execution_cohort \
   --min-samples 10 \
   --bootstrap-iterations 10000 \
   --bootstrap-seed 29 \
@@ -674,7 +673,6 @@ export DATABASE_URL="postgresql+psycopg://..."
 #### CLI options and parameters
 
 - `--database-url-env`: Name of the environment variable storing the database connection URL. In PostgreSQL environments, the transaction is executed with `SET TRANSACTION READ ONLY`.
-- `--evidence-scope`: Evidence filtering scope (`current_execution_cohort` default). Propagates `schema_version=2` and cohort policy to all child window and temporal split evaluations.
 - `--as-of`: Optional ISO 8601 reference timestamp (defaults to current UTC).
 - `--lookback-days`: Observation snapshot lookback window in days (fixed at 90).
 - `--min-samples`: Minimum completed/failed task count required per candidate profile cell (default: 10).

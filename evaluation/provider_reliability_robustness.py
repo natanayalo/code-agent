@@ -321,7 +321,11 @@ def evaluate_robustness_snapshot(
         if w.window_days == 90:
             baseline_90d_recs = w.recommendations
             break
-    report_status: ReportStatus = determine_report_status(baseline_90d_recs)
+    report_status: ReportStatus = determine_report_status(
+        baseline_90d_recs,
+        expected_groups=policy.expected_groups,
+        evidence_scope=policy.evidence_scope,
+    )
     has_empty_temporal = any(c.included_tasks_count == 0 for c in temporal_cohorts)
     if has_empty_temporal and report_status == "complete":
         report_status = "partial"

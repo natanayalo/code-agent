@@ -699,3 +699,16 @@ def test_full_report_evaluation_and_rendering() -> None:
     assert "## 3. Temporal Split-Half Cohorts" in md_str
     assert "## 4. Bootstrap Resampling Sensitivity" in md_str
     assert "## 5. Evidence Accounting & 90-Day Snapshot Exclusions" in md_str
+
+
+def test_operational_robustness_policy_rejected() -> None:
+    """Proves robustness evaluation policy strictly prohibits operational evidence scope."""
+    from pydantic import ValidationError
+
+    from evaluation.provider_reliability_models import ProviderReliabilityRobustnessPolicy
+
+    with pytest.raises(ValidationError):
+        ProviderReliabilityRobustnessPolicy(
+            as_of=AS_OF,
+            evidence_scope="operational",  # type: ignore[arg-type]
+        )

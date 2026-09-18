@@ -2,9 +2,9 @@
 
 - **Status**: `partial`
 - **Evidence Scope**: `current_execution_cohort`
-- **Generated At**: `2026-09-18T21:08:30.936912+00:00`
-- **Observation Reference (`as_of`)**: `2026-09-18T21:08:30.192795+00:00`
-- **Lookback Window**: 90 days (`2026-06-20T21:08:30.192795+00:00` to `2026-09-18T21:08:30.192795+00:00`)
+- **Generated At**: `2026-09-18T21:39:01.826911+00:00`
+- **Observation Reference (`as_of`)**: `2026-09-18T21:08:09+00:00`
+- **Lookback Window**: 90 days (`2026-06-20T21:08:09+00:00` to `2026-09-18T21:08:09+00:00`)
 - **Minimum Samples Per Cell**: 10
 - **Bootstrap Resampling**: 10,000 iterations, seed 29
 
@@ -14,56 +14,69 @@
 |---|---|---|---|---|---|---|---|---|
 | `docs` | `read_only` | `codex-native-executor-read-only` | `codex-native-executor-read-only` | `codex-native-executor-read-only` | `None` | `codex-native-executor-read-only` | `codex-native-executor-read-only` | 66% |
 | `feature` | `mutation` | `None` | `None` | `None` | `None` | `None` | `None` | N/A |
-| `scout` | `read_only` | `None` | `None` | `None` | `None` | `None` | `None` | N/A |
+| `feature` | `read_only` | `None` | `None` | `None` | `None` | `None` | `None` | N/A |
+| `investigation` | `read_only` | `None` | `None` | `None` | `None` | `None` | `None` | N/A |
 
 ## 2. Window Variation Analysis
 
-### 30-Day Lookback Window (`2026-08-19T21:08:30.192795+00:00` to `2026-09-18T21:08:30.192795+00:00`)
+### 30-Day Lookback Window (`2026-08-19T21:08:09+00:00` to `2026-09-18T21:08:09+00:00`)
 - **Included Tasks**: 20
 
 - **`docs` (read_only)**: Recommended: `codex-native-executor-read-only`
 - **`feature` (mutation)**: Recommended: _None_
   - Fallback: no_eligible_candidates: all candidates lack sufficient samples
-- **`scout` (read_only)**: Recommended: _None_
+- **`feature` (read_only)**: Recommended: _None_
+  - Fallback: no_eligible_candidates: all candidates lack sufficient samples
+- **`investigation` (read_only)**: Recommended: _None_
   - Fallback: no_eligible_candidates: all candidates lack sufficient samples
 
-### 60-Day Lookback Window (`2026-07-20T21:08:30.192795+00:00` to `2026-09-18T21:08:30.192795+00:00`)
+### 60-Day Lookback Window (`2026-07-20T21:08:09+00:00` to `2026-09-18T21:08:09+00:00`)
 - **Included Tasks**: 20
 
 - **`docs` (read_only)**: Recommended: `codex-native-executor-read-only`
 - **`feature` (mutation)**: Recommended: _None_
   - Fallback: no_eligible_candidates: all candidates lack sufficient samples
-- **`scout` (read_only)**: Recommended: _None_
+- **`feature` (read_only)**: Recommended: _None_
+  - Fallback: no_eligible_candidates: all candidates lack sufficient samples
+- **`investigation` (read_only)**: Recommended: _None_
   - Fallback: no_eligible_candidates: all candidates lack sufficient samples
 
-### 90-Day Lookback Window (`2026-06-20T21:08:30.192795+00:00` to `2026-09-18T21:08:30.192795+00:00`)
+### 90-Day Lookback Window (`2026-06-20T21:08:09+00:00` to `2026-09-18T21:08:09+00:00`)
 - **Included Tasks**: 20
 
 - **`docs` (read_only)**: Recommended: `codex-native-executor-read-only`
 - **`feature` (mutation)**: Recommended: _None_
   - Fallback: no_eligible_candidates: all candidates lack sufficient samples
-- **`scout` (read_only)**: Recommended: _None_
+- **`feature` (read_only)**: Recommended: _None_
+  - Fallback: no_eligible_candidates: all candidates lack sufficient samples
+- **`investigation` (read_only)**: Recommended: _None_
   - Fallback: no_eligible_candidates: all candidates lack sufficient samples
 
 ## 3. Temporal Split-Half Cohorts
 
 Evaluates temporal stability across non-overlapping partitions of the 90-day window: historical `[as_of-90d, as_of-45d)` and recent `[as_of-45d, as_of]`.
 
-### Cohort: `historical` (`2026-06-20T21:08:30.192795+00:00` to `2026-08-04T21:08:30.192795+00:00`)
+### Cohort: `historical` (`2026-06-20T21:08:09+00:00` to `2026-08-04T21:08:09+00:00`)
 - **Included Tasks**: 0
 
+- **`docs` (read_only)**: Recommended: _None_
+  - Fallback: no_eligible_candidates: all candidates lack sufficient samples
 - **`feature` (mutation)**: Recommended: _None_
   - Fallback: no_eligible_candidates: all candidates lack sufficient samples
-- **`scout` (read_only)**: Recommended: _None_
+- **`feature` (read_only)**: Recommended: _None_
+  - Fallback: no_eligible_candidates: all candidates lack sufficient samples
+- **`investigation` (read_only)**: Recommended: _None_
   - Fallback: no_eligible_candidates: all candidates lack sufficient samples
 
-### Cohort: `recent` (`2026-08-04T21:08:30.192795+00:00` to `2026-09-18T21:08:30.192795+00:00`)
+### Cohort: `recent` (`2026-08-04T21:08:09+00:00` to `2026-09-18T21:08:09+00:00`)
 - **Included Tasks**: 20
 
 - **`docs` (read_only)**: Recommended: `codex-native-executor-read-only`
 - **`feature` (mutation)**: Recommended: _None_
   - Fallback: no_eligible_candidates: all candidates lack sufficient samples
-- **`scout` (read_only)**: Recommended: _None_
+- **`feature` (read_only)**: Recommended: _None_
+  - Fallback: no_eligible_candidates: all candidates lack sufficient samples
+- **`investigation` (read_only)**: Recommended: _None_
   - Fallback: no_eligible_candidates: all candidates lack sufficient samples
 
 ## 4. Bootstrap Resampling Sensitivity
@@ -82,7 +95,11 @@ Evaluates 10,000 deterministic bootstrap iterations (seed 29) resampling whole t
 - **Status**: `insufficient_data`
 - **Fallback Reason**: insufficient_eligible_candidates: 0 eligible profile(s) meet the sample floor (10); at least 2 required
 
-### Group: `scout` (read_only)
+### Group: `feature` (read_only)
+- **Status**: `insufficient_data`
+- **Fallback Reason**: insufficient_eligible_candidates: 0 eligible profile(s) meet the sample floor (10); at least 2 required
+
+### Group: `investigation` (read_only)
 - **Status**: `insufficient_data`
 - **Fallback Reason**: insufficient_eligible_candidates: 0 eligible profile(s) meet the sample floor (10); at least 2 required
 

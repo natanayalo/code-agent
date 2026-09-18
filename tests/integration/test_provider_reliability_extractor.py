@@ -56,6 +56,7 @@ def test_extractor_synthetic_database(tmp_path: Path) -> None:
         as_of=NOW,
         window_start_at=NOW - timedelta(days=90),
         window_end_at=NOW,
+        expected_groups=(("feature", "mutation"), ("scout", "read_only")),
     )
 
     report = extract_provider_reliability_report(db_url, policy)
@@ -622,6 +623,7 @@ def test_extractor_all_profiles_complete(tmp_path: Path) -> None:
         window_start_at=NOW - timedelta(days=30),
         window_end_at=NOW + timedelta(days=1),
         min_samples=10,
+        expected_groups=(("feature", "mutation"), ("scout", "read_only")),
     )
     report = extract_provider_reliability_report(db_url, policy)
     assert report.status == "complete"

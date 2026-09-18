@@ -356,5 +356,25 @@ def test_resolve_identity_decomposed_nodes_disagreement() -> None:
     task = _make_task("codex-native-executor-read-only", [run])
 
     identity, status = resolve_task_execution_identity(task, [run])
-    assert status == "unknown_legacy"
+    assert status == "mixed_execution_identity"
+    assert identity is None
+
+
+def test_unprofiled_retry_causes_mixed_execution_identity() -> None:
+    """Proves task with verified run plus unprofiled retry fails closed as mixed."""
+    budget_verified = {
+        "native_agent": {
+            "model_execution": {
+                "provider": "codex",
+                "model": "gpt-5.6-luna",
+                "reasoning_effort": "high",
+            }
+        }
+    }
+    run_verified = _make_run("codex-native-executor-read-only", budget_verified)
+    run_unprofiled = _make_run(None, None)
+    task = _make_task("codex-native-executor-read-only", [run_verified, run_unprofiled])
+
+    identity, status = resolve_task_execution_identity(task, [run_verified, run_unprofiled])
+    assert status == "mixed_execution_identity"
     assert identity is None

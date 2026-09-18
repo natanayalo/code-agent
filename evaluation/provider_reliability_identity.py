@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from db.models import Task, WorkerRun
 from evaluation.provider_reliability_models import (
@@ -11,17 +11,23 @@ from evaluation.provider_reliability_models import (
 )
 
 
-def _extract_run_model_execution(run: WorkerRun) -> dict[str, Any] | None:
+def _extract_run_model_execution(
+    run: WorkerRun,
+) -> tuple[dict[str, Any] | None, Literal["verified", "absent", "mixed"]]:
     """Safely extract authoritative model_execution dictionary from worker run."""
     if not run.budget_usage or not isinstance(run.budget_usage, dict):
-        return None
+        return None, "absent"
 
     # Case 1: Standard single execution run
     native_meta = run.budget_usage.get("native_agent")
     if isinstance(native_meta, dict):
         model_exec = native_meta.get("model_execution")
         if isinstance(model_exec, dict):
-            return model_exec
+            provider = model_exec.get("provider")
+            model = model_exec.get("model")
+            if provider and isinstance(provider, str) and model and isinstance(model, str):
+                return model_exec, "verified"
+            return None, "absent"
 
     # Case 2: Decomposed execution with node dictionary
     nodes = run.budget_usage.get("nodes")
@@ -29,16 +35,16 @@ def _extract_run_model_execution(run: WorkerRun) -> dict[str, Any] | None:
         node_execs: list[dict[str, Any]] = []
         for node_payload in nodes.values():
             if not isinstance(node_payload, dict):
-                return None
+                return None, "absent"
             n_meta = node_payload.get("native_agent")
             if not isinstance(n_meta, dict):
-                return None
+                return None, "absent"
             n_exec = n_meta.get("model_execution")
             if not isinstance(n_exec, dict):
-                return None
+                return None, "absent"
             node_execs.append(n_exec)
         if not node_execs:
-            return None
+            return None, "absent"
         first = node_execs[0]
         for other in node_execs[1:]:
             if (
@@ -46,59 +52,57 @@ def _extract_run_model_execution(run: WorkerRun) -> dict[str, Any] | None:
                 or other.get("model") != first.get("model")
                 or other.get("reasoning_effort") != first.get("reasoning_effort")
             ):
-                return None
-        return first
+                return None, "mixed"
+        provider = first.get("provider")
+        model = first.get("model")
+        if provider and isinstance(provider, str) and model and isinstance(model, str):
+            return first, "verified"
+        return None, "absent"
 
-    return None
+    return None, "absent"
 
 
 def resolve_task_execution_identity(
     task: Task, runs: list[WorkerRun]
 ) -> tuple[ExecutionIdentity | None, ExecutionIdentityStatus]:
-    """Resolve authoritative execution identity across all relevant worker runs for a task.
+    """Resolve authoritative execution identity across all worker runs for a task.
 
     Rules:
     - Only budget_usage["native_agent"]["model_execution"] constitutes verified identity.
     - Zero heuristic inference from profile name, runtime manifest, or environment.
-    - If no relevant runs exist or none have model_execution: unknown_legacy.
+    - If no runs exist or all runs lack model_execution: unknown_legacy.
+    - If any run has conflicting decomposed node identities: mixed_execution_identity.
     - If some runs have model_execution and some lack it: mixed_execution_identity.
     - If multiple verified runs disagree on provider, model, or effort: mixed_execution_identity.
-    - If all relevant runs agree on identical metadata: verified.
+    - If all runs agree on identical metadata: verified.
     """
-    relevant_runs = runs
-    if task.chosen_profile:
-        matched = [r for r in runs if r.worker_profile == task.chosen_profile]
-        if matched:
-            relevant_runs = matched
-
-    if not relevant_runs:
+    if not runs:
         return None, "unknown_legacy"
 
-    exec_payloads: list[dict[str, Any]] = []
-    missing_count = 0
+    verified_payloads: list[dict[str, Any]] = []
+    has_absent = False
 
-    for r in relevant_runs:
-        payload = _extract_run_model_execution(r)
-        if payload is None:
-            missing_count += 1
-        else:
-            exec_payloads.append(payload)
+    for r in runs:
+        payload, run_status = _extract_run_model_execution(r)
+        if run_status == "mixed":
+            return None, "mixed_execution_identity"
+        if run_status == "absent":
+            has_absent = True
+        elif run_status == "verified" and payload is not None:
+            verified_payloads.append(payload)
 
-    if missing_count == len(relevant_runs):
-        return None, "unknown_legacy"
-
-    if missing_count > 0 and exec_payloads:
+    if has_absent and verified_payloads:
         return None, "mixed_execution_identity"
 
-    # All runs have model_execution payload; check agreement
+    if has_absent and not verified_payloads:
+        return None, "unknown_legacy"
+
     identities: set[tuple[str, str, str | None]] = set()
-    for p in exec_payloads:
-        provider = p.get("provider")
-        model = p.get("model")
-        effort = p.get("reasoning_effort")
-        if not provider or not isinstance(provider, str) or not model or not isinstance(model, str):
-            return None, "mixed_execution_identity"
-        identities.add((provider, model, str(effort) if effort is not None else None))
+    for p in verified_payloads:
+        provider = str(p["provider"])
+        model = str(p["model"])
+        effort = str(p["reasoning_effort"]) if p.get("reasoning_effort") is not None else None
+        identities.add((provider, model, effort))
 
     if len(identities) != 1:
         return None, "mixed_execution_identity"

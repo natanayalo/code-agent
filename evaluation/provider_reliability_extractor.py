@@ -435,10 +435,17 @@ def _aggregate_cell(
     budget_count = sum(1 for t in tasks if t.has_budget)
     durations = [t.duration_seconds for t in tasks if t.duration_seconds is not None]
 
-    is_eligible = n >= policy.min_samples
-    reasons = []
-    if not is_eligible:
-        reasons.append(f"insufficient_sample_size: {n} tasks (minimum {policy.min_samples})")
+    if policy.evidence_scope == "operational":
+        is_eligible = False
+        reasons = [
+            "diagnostic_scope_non_comparable: operational scope aggregates "
+            "heterogeneous model vintages; recommendations suppressed"
+        ]
+    else:
+        is_eligible = n >= policy.min_samples
+        reasons = []
+        if not is_eligible:
+            reasons.append(f"insufficient_sample_size: {n} tasks (minimum {policy.min_samples})")
 
     return ProviderReliabilityEvidenceCell(
         task_class=task_class,
@@ -536,13 +543,19 @@ def build_provider_reliability_report(
 ) -> ProviderReliabilityReport:
     """Assemble the versioned aggregate provider reliability advisory report."""
     cells = build_evidence_cells(tasks, policy)
-    recommendations = generate_recommendations(cells, as_of=policy.as_of)
+    recommendations = generate_recommendations(
+        cells, as_of=policy.as_of, evidence_scope=policy.evidence_scope
+    )
     profile_coverage = build_profile_coverage(cells, policy)
 
     return ProviderReliabilityReport(
         schema_version=2,
         generated_at=datetime.now(UTC),
-        status=determine_report_status(recommendations),
+        status=determine_report_status(
+            recommendations,
+            expected_groups=policy.expected_groups,
+            evidence_scope=policy.evidence_scope,
+        ),
         policy=policy,
         profile_coverage=profile_coverage,
         exclusions=exclusions,

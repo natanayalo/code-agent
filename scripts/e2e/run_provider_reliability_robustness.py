@@ -103,12 +103,6 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Optional path to write deterministic sanitized Markdown robustness report.",
     )
-    parser.add_argument(
-        "--evidence-scope",
-        default="current_execution_cohort",
-        choices=["current_execution_cohort", "operational"],
-        help="Evidence filtering scope (default: current_execution_cohort).",
-    )
     return parser
 
 
@@ -155,7 +149,7 @@ def main(argv: list[str] | None = None) -> int:
         temporal_split_days=45,
         bootstrap_iterations=args.bootstrap_iterations,
         bootstrap_seed=args.bootstrap_seed,
-        evidence_scope=args.evidence_scope,
+        evidence_scope="current_execution_cohort",
     )
 
     LOGGER.info(

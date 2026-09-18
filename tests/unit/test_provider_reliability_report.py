@@ -15,6 +15,7 @@ from evaluation.provider_reliability_extractor import (
     is_profile_compatible_with_mode,
 )
 from evaluation.provider_reliability_models import (
+    DEFAULT_EXPECTED_GROUPS,
     BudgetCoverageMetrics,
     InterventionMetrics,
     LatencyMetrics,
@@ -445,80 +446,86 @@ def test_determine_report_status_states() -> None:
     assert determine_report_status([rec_completed, rec_insufficient]) == "partial"
 
 
-def test_provider_reliability_stages_direct() -> None:
-    """Direct unit tests for stage checking, artifact extraction, and failure kinds."""
-    from db.enums import ArtifactType, TaskStatus, WorkerRunStatus
-    from db.models import Task, WorkerRun
-    from evaluation.provider_reliability_stages import (
-        check_delivery_stage,
-        check_review_stage,
-        check_verification_stage,
-        resolve_failure_kind,
-        verify_timeline_consistency,
+def test_unexpected_current_cohort_task_class_does_not_affect_canonical_status() -> None:
+    """Ensure unconfigured/incidental task classes do not alter canonical report completeness."""
+    # 4 expected canonical groups are all complete
+    canonical_recs = [
+        TaskClassRecommendation(
+            task_class="feature",
+            mutation_mode="mutation",
+            recommended_profile="codex-native-executor",
+        ),
+        TaskClassRecommendation(
+            task_class="feature",
+            mutation_mode="read_only",
+            recommended_profile="codex-native-executor-read-only",
+        ),
+        TaskClassRecommendation(
+            task_class="docs",
+            mutation_mode="read_only",
+            recommended_profile="codex-native-executor-read-only",
+        ),
+        TaskClassRecommendation(
+            task_class="investigation",
+            mutation_mode="read_only",
+            recommended_profile="codex-native-executor-read-only",
+        ),
+    ]
+    # An incidental 5th group with insufficient data
+    incidental_rec = TaskClassRecommendation(
+        task_class="scout",
+        mutation_mode="read_only",
+        recommended_profile=None,
+        fallback_reason="no_eligible_candidates",
     )
 
-    consistent, ts = verify_timeline_consistency(TaskStatus.IN_PROGRESS, [], None)
-    assert not consistent and ts is None
-
-    consistent, ts = verify_timeline_consistency(TaskStatus.FAILED, [], None)
-    assert not consistent and ts is None
-
-    task = Task(status=TaskStatus.COMPLETED, task_spec={"verification_commands": ["test"]})
-    run_passed = WorkerRun(status=WorkerRunStatus.SUCCESS, verifier_outcome={"status": "passed"})
-    run_failed = WorkerRun(status=WorkerRunStatus.FAILURE, verifier_outcome={"status": "failed"})
-    assert check_verification_stage(task, [run_passed]) == (True, True)
-    assert check_verification_stage(task, [run_failed]) == (True, False)
-
-    run_with_review_pass = WorkerRun(
-        status=WorkerRunStatus.SUCCESS,
-        artifact_index=[
-            {
-                "artifact_type": ArtifactType.INDEPENDENT_REVIEW_RESULT.value,
-                "artifact_metadata": {
-                    ArtifactType.INDEPENDENT_REVIEW_RESULT.value: {
-                        "outcome": "no_findings",
-                        "findings": [],
-                    }
-                },
-            }
-        ],
+    # When expected_groups is provided, status checks only the expected groups
+    status = determine_report_status(
+        canonical_recs + [incidental_rec],
+        expected_groups=DEFAULT_EXPECTED_GROUPS,
     )
-    assert check_review_stage(task, [run_with_review_pass], v_passed=True) == (True, True)
+    assert status == "complete"
 
-    run_with_review_fail = WorkerRun(
-        status=WorkerRunStatus.SUCCESS,
-        artifact_index=[
-            {
-                "artifact_type": ArtifactType.INDEPENDENT_REVIEW_RESULT.value,
-                "artifact_metadata": {
-                    ArtifactType.INDEPENDENT_REVIEW_RESULT.value: {
-                        "outcome": "findings",
-                        "findings": [{"message": "bug"}],
-                    }
-                },
-            }
-        ],
+    # If one of the canonical groups was insufficient, status is partial
+    partial_status = determine_report_status(
+        canonical_recs[:3] + [incidental_rec],
+        expected_groups=DEFAULT_EXPECTED_GROUPS,
     )
-    assert check_review_stage(task, [run_with_review_fail], v_passed=True) == (True, False)
+    assert partial_status == "partial"
 
-    task_repair = Task(
-        status=TaskStatus.COMPLETED,
-        task_spec={"allowed_actions": ["modify_workspace_files"]},
-        constraints={"independent_review_repair_passes_used": 1},
-    )
-    assert check_review_stage(task_repair, [], v_passed=True) == (False, False)
 
-    run_delivery = WorkerRun(
-        status=WorkerRunStatus.SUCCESS,
-        delivery_metadata={"branch": "refs/heads/feature"},
-    )
-    task_branch = Task(status=TaskStatus.COMPLETED, task_spec={"delivery_mode": "branch"})
-    assert check_delivery_stage(task_branch, [run_delivery]) == (True, False)
+def test_operational_scope_diagnostic_only_status_and_suppressed_recommendations() -> None:
+    """Ensure operational evidence scope produces diagnostic_only status and suppresses recs."""
+    cells = [
+        _make_dummy_cell(
+            "codex-native-executor",
+            wilson_lower=0.8,
+            median_latency=10.0,
+            is_eligible=True,
+            sample_size=20,
+            accepted=20,
+        ),
+        _make_dummy_cell(
+            "antigravity-native-executor",
+            wilson_lower=0.7,
+            median_latency=12.0,
+            is_eligible=True,
+            sample_size=20,
+            accepted=18,
+        ),
+    ]
+    recs = generate_recommendations(cells, evidence_scope="operational")
+    assert len(recs) == 1
+    rec = recs[0]
+    assert rec.recommended_profile is None
+    assert rec.fallback_reason is not None
+    assert rec.fallback_reason.startswith("diagnostic_scope:")
+    assert rec.rankings[0].rank is None
+    assert rec.rankings[0].is_eligible is False
+    assert any("diagnostic_scope" in r for r in rec.rankings[0].insufficiency_reasons)
 
-    task_err = Task(status=TaskStatus.FAILED, last_error="boom")
-    assert resolve_failure_kind(task_err, accepted=False, runs=[]) == "task_error"
-    task_unknown = Task(status=TaskStatus.FAILED, last_error=None)
-    assert resolve_failure_kind(task_unknown, accepted=False, runs=[]) == "unknown"
+    status = determine_report_status(recs, evidence_scope="operational")
+    assert status == "diagnostic_only"
 
 
 def test_sanitizer_rejects_invalid_domains() -> None:

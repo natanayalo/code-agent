@@ -51,7 +51,7 @@
         "p90_seconds": 326.24
       },
       "typed_failures": {
-        "unknown": 1
+        "infra_verifier_unavailable": 1
       }
     },
     {
@@ -186,10 +186,118 @@
       "is_eligible": false,
       "manual_override_rate": 0.0,
       "manual_overrides_count": 0,
+      "mutation_mode": "read_only",
+      "newest_evidence_timestamp": null,
+      "oldest_evidence_timestamp": null,
+      "profile": "antigravity-native-executor-read-only",
+      "repairs": {
+        "repair_rate": 0.0,
+        "review_repairs_count": 0,
+        "total_repaired_tasks": 0,
+        "verifier_repairs_count": 0
+      },
+      "sample_size": 0,
+      "stage_outcome_rates": {
+        "delivery_pass_rate": null,
+        "dispatch_rate": 0.0,
+        "execution_success_rate": 0.0,
+        "review_pass_rate": null,
+        "verification_pass_rate": null
+      },
+      "task_class": "feature",
+      "terminal_latency": {
+        "max_seconds": null,
+        "mean_seconds": null,
+        "median_seconds": null,
+        "min_seconds": null,
+        "p90_seconds": null
+      },
+      "typed_failures": {}
+    },
+    {
+      "accepted_count": 0,
+      "accepted_task_rate": 0.0,
+      "accepted_task_rate_ci": {
+        "center": 0.0,
+        "lower": 0.0,
+        "upper": 0.0
+      },
+      "budget_field_coverage": {
+        "budget_coverage_rate": 0.0,
+        "budget_reported_count": 0
+      },
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "insufficiency_reasons": [
+        "insufficient_sample_size: 0 tasks (minimum 10)"
+      ],
+      "interventions": {
+        "approvals_count": 0,
+        "clarification_questions_count": 0,
+        "human_interventions_count": 0,
+        "intervention_rate": 0.0
+      },
+      "is_eligible": false,
+      "manual_override_rate": 0.0,
+      "manual_overrides_count": 0,
       "mutation_mode": "mutation",
       "newest_evidence_timestamp": null,
       "oldest_evidence_timestamp": null,
       "profile": "codex-native-executor",
+      "repairs": {
+        "repair_rate": 0.0,
+        "review_repairs_count": 0,
+        "total_repaired_tasks": 0,
+        "verifier_repairs_count": 0
+      },
+      "sample_size": 0,
+      "stage_outcome_rates": {
+        "delivery_pass_rate": null,
+        "dispatch_rate": 0.0,
+        "execution_success_rate": 0.0,
+        "review_pass_rate": null,
+        "verification_pass_rate": null
+      },
+      "task_class": "feature",
+      "terminal_latency": {
+        "max_seconds": null,
+        "mean_seconds": null,
+        "median_seconds": null,
+        "min_seconds": null,
+        "p90_seconds": null
+      },
+      "typed_failures": {}
+    },
+    {
+      "accepted_count": 0,
+      "accepted_task_rate": 0.0,
+      "accepted_task_rate_ci": {
+        "center": 0.0,
+        "lower": 0.0,
+        "upper": 0.0
+      },
+      "budget_field_coverage": {
+        "budget_coverage_rate": 0.0,
+        "budget_reported_count": 0
+      },
+      "failure_count": 0,
+      "failure_rate": 0.0,
+      "insufficiency_reasons": [
+        "insufficient_sample_size: 0 tasks (minimum 10)"
+      ],
+      "interventions": {
+        "approvals_count": 0,
+        "clarification_questions_count": 0,
+        "human_interventions_count": 0,
+        "intervention_rate": 0.0
+      },
+      "is_eligible": false,
+      "manual_override_rate": 0.0,
+      "manual_overrides_count": 0,
+      "mutation_mode": "read_only",
+      "newest_evidence_timestamp": null,
+      "oldest_evidence_timestamp": null,
+      "profile": "codex-native-executor-read-only",
       "repairs": {
         "repair_rate": 0.0,
         "review_repairs_count": 0,
@@ -258,7 +366,7 @@
         "review_pass_rate": null,
         "verification_pass_rate": null
       },
-      "task_class": "scout",
+      "task_class": "investigation",
       "terminal_latency": {
         "max_seconds": null,
         "mean_seconds": null,
@@ -312,7 +420,7 @@
         "review_pass_rate": null,
         "verification_pass_rate": null
       },
-      "task_class": "scout",
+      "task_class": "investigation",
       "terminal_latency": {
         "max_seconds": null,
         "mean_seconds": null,
@@ -336,9 +444,9 @@
     "included_tasks_count": 20,
     "total_tasks_scanned": 392
   },
-  "generated_at": "2026-09-18T21:08:09.989928Z",
+  "generated_at": "2026-09-18T21:38:37.590936Z",
   "policy": {
-    "as_of": "2026-09-18T21:08:09.338278Z",
+    "as_of": "2026-09-18T21:08:09Z",
     "confidence_level": 0.95,
     "enabled_profiles": [
       "codex-native-executor",
@@ -375,15 +483,23 @@
         "mutation"
       ],
       [
-        "scout",
+        "feature",
+        "read_only"
+      ],
+      [
+        "docs",
+        "read_only"
+      ],
+      [
+        "investigation",
         "read_only"
       ]
     ],
     "lookback_days": 90,
     "min_samples": 10,
     "schema_version": 2,
-    "window_end_at": "2026-09-18T21:08:09.338278Z",
-    "window_start_at": "2026-06-20T21:08:09.338278Z"
+    "window_end_at": "2026-09-18T21:08:09Z",
+    "window_start_at": "2026-06-20T21:08:09Z"
   },
   "profile_coverage": [
     {
@@ -524,7 +640,45 @@
         }
       ],
       "recommended_profile": null,
-      "task_class": "scout"
+      "task_class": "feature"
+    },
+    {
+      "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
+      "mutation_mode": "read_only",
+      "rankings": [
+        {
+          "accepted_count": 0,
+          "accepted_rate_wilson_lower": 0.0,
+          "evidence_age_days": null,
+          "insufficiency_reasons": [
+            "insufficient_sample_size: 0 tasks (minimum 10)"
+          ],
+          "is_eligible": false,
+          "median_latency_seconds": null,
+          "newest_evidence_timestamp": null,
+          "oldest_evidence_timestamp": null,
+          "profile": "antigravity-native-executor-read-only",
+          "rank": null,
+          "sample_size": 0
+        },
+        {
+          "accepted_count": 0,
+          "accepted_rate_wilson_lower": 0.0,
+          "evidence_age_days": null,
+          "insufficiency_reasons": [
+            "insufficient_sample_size: 0 tasks (minimum 10)"
+          ],
+          "is_eligible": false,
+          "median_latency_seconds": null,
+          "newest_evidence_timestamp": null,
+          "oldest_evidence_timestamp": null,
+          "profile": "codex-native-executor-read-only",
+          "rank": null,
+          "sample_size": 0
+        }
+      ],
+      "recommended_profile": null,
+      "task_class": "investigation"
     }
   ],
   "schema_version": 2,

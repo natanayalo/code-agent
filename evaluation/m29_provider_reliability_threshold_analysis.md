@@ -21,11 +21,12 @@ Two distinct versioned report views (schema v2) are published:
      - **Rank 1**: `codex-native-executor-read-only` ($10/10 = 100\%$ accepted, Wilson 95% lower bound: $0.7225$, median latency: $194.6\text{s}$).
      - **Rank 2**: `antigravity-native-executor-read-only` ($9/10 = 90\%$ accepted, Wilson 95% lower bound: $0.5958$, median latency: $150.7\text{s}$).
      - **Advisory Recommendation**: `codex-native-executor-read-only`.
-   - Other cells (`feature` mutation, `feature` read_only, `scout` read_only, `investigation` read_only) have zero tasks in the current execution cohort and report `insufficient_sample_size: 0 tasks (minimum 10)` with clean fallback reasons.
+   - The other three canonical target cells (`feature/mutation`, `feature/read_only`, `investigation/read_only`) have zero tasks in the current execution cohort and report `insufficient_sample_size: 0 tasks (minimum 10)` with clean fallback reasons.
    - **Robustness Status**: Truthfully reported as `partial`. While the $N=10$ sample floor is met and 10,000 bootstrap iterations confirm a 66.1% win probability for Codex vs 33.9% for Antigravity, a single execution cluster cannot establish temporal split consistency or window sensitivity.
 2. **Operational Diagnostic Report** (`evaluation/m29_provider_reliability_operational_report.{json,md}`):
    - **Scope**: `operational`.
    - Admits all valid historical tasks regardless of model vintage to provide complete 90-day system accounting, diagnostic failure taxonomy, Wave 1 deprecation documentation, and verifier delegation breakdown.
+   - **Status**: Strictly `diagnostic_only`. Active provider recommendations and candidate rankings are suppressed (`recommended_profile: None`, `is_eligible: False`, `rank: None`) to prevent misleading head-to-head comparisons across heterogeneous model vintages.
 
 ---
 
@@ -106,17 +107,21 @@ All evaluations were extracted with strict read-only transactions (`SET TRANSACT
 
 ### 4.2. Other Task Classes in Canonical Cohort View
 
+The canonical M29 target groups encompass four specific cells:
+- `docs` (read_only): Qualified ($N=10$ vs $10$) $\rightarrow$ Recommended: `codex-native-executor-read-only`.
 - `feature` (mutation): $N=0$ in current cohort $\rightarrow$ fallback: `no_eligible_candidates`.
 - `feature` (read_only): $N=0$ in current cohort $\rightarrow$ fallback: `no_eligible_candidates`.
 - `investigation` (read_only): $N=0$ in current cohort $\rightarrow$ fallback: `no_eligible_candidates`.
-- `scout` (read_only): $N=0$ in current cohort $\rightarrow$ fallback: `no_eligible_candidates`.
 
 ### 4.3. Operational 90-Day Diagnostic Perspective
 
-From the operational diagnostic perspective (aggregating across all model vintages):
-- `feature` (mutation): Qualified at floor 20. Recommends `antigravity-native-executor` ($N=74$, Wilson Lower=0.6773 vs Codex $N=25$, Wilson Lower=0.4452).
-- `feature` (read_only): Qualified at floor 20. Recommends `codex-native-executor-read-only` ($N=34$, Wilson Lower=0.5383 vs Antigravity $N=30$, Wilson Lower=0.4551).
-- `investigation` (read_only): Qualified at floor 10. Recommends `codex-native-executor-read-only` ($N=15$, Wilson Lower=0.7961 vs Antigravity $N=12$, Wilson Lower=0.4677).
+In the operational diagnostic view (aggregating across all model vintages over the 90-day window):
+- **Report Status**: `diagnostic_only`.
+- Active recommendations are suppressed (`recommended_profile: None`, `rank: None`, `is_eligible: False`) with explicit fallback reason `diagnostic_scope: operational scope aggregates heterogeneous model vintages; recommendations are valid only in current_execution_cohort`.
+- Historical sample sizes and raw pass rates remain fully inspectable for systems diagnostics:
+  - `feature` (mutation): $N=74$ Antigravity ($67.7\%$ lower bound), $N=25$ Codex ($44.5\%$ lower bound).
+  - `feature` (read_only): $N=34$ Codex ($53.8\%$ lower bound), $N=30$ Antigravity ($45.5\%$ lower bound).
+  - `investigation` (read_only): $N=15$ Codex ($79.6\%$ lower bound), $N=12$ Antigravity ($46.8\%$ lower bound).
 
 ---
 
@@ -132,7 +137,7 @@ From the operational diagnostic perspective (aggregating across all model vintag
    - Updated Codex configuration to `gpt-5.6-luna` (high reasoning effort) and Antigravity to `gemini-3.8-flash` (medium reasoning effort).
    - Preflight smoke verification validated live container model resolution and proved early exclusion of smoke tasks as `evaluation_smoke`.
    - Codex read-only executed 10/10 tasks cleanly ($100\%$ acceptance, zero errors, median duration $194.6\text{s}$).
-   - Antigravity read-only executed 9/10 tasks cleanly ($90\%$ acceptance, 1 failure on `m29-w2-docs-05` with `infra_verifier_unavailable` during delegated verification).
+   - Antigravity read-only executed 9/10 tasks cleanly ($90\%$ acceptance, median duration $150.7\text{s}$). The single failure on `m29-w2-docs-05` cleanly resolved to `infra_verifier_unavailable` via timeline failure event precedence over worker run verifier outcome.
 
 ---
 
