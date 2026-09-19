@@ -599,7 +599,11 @@ class GeminiCliWorkerNativeMixin:
                 _is_gemini_api_key_secret(registry.get(ref.name, task_id=task_id))
                 for ref in request.secret_refs or ()
             )
-            bootstrap = ProviderBootstrapLoader.load(provider_dir, has_api_key=has_api_key)
+            bootstrap = ProviderBootstrapLoader.load(
+                provider_dir,
+                provider="gemini",
+                has_api_key=has_api_key,
+            )
         for d in bootstrap.definitions:
             if d.name not in registry:
                 registry.register(d)

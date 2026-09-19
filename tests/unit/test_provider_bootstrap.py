@@ -50,7 +50,23 @@ def test_codex_auth_resolution_uses_fallback_directory_consistently(tmp_path, mo
     resolved_dir = resolve_codex_provider_dir()
     assert resolved_dir == codex_home
     assert resolve_codex_auth_path() == codex_home / "auth.json"
-    assert ProviderBootstrapLoader.load(resolved_dir).ref_names == ("codex_auth_json",)
+    assert ProviderBootstrapLoader.load(resolved_dir, provider="codex").ref_names == (
+        "codex_auth_json",
+    )
+
+
+def test_codex_custom_directory_stages_auth_file_with_explicit_provider(
+    tmp_path,
+) -> None:
+    provider_dir = tmp_path / "codex-auth"
+    provider_dir.mkdir()
+    (provider_dir / "auth.json").write_text("{}", encoding="utf-8")
+
+    bootstrap = ProviderBootstrapLoader.load(provider_dir, provider="codex")
+
+    assert bootstrap.ref_names == ("codex_auth_json",)
+    assert bootstrap.destination_by_ref["codex_auth_json"] == ".codex/auth.json"
+    assert "codex_auth_json" in bootstrap.file_store
 
 
 def test_codex_api_key_resolution_keeps_first_configured_directory(tmp_path, monkeypatch) -> None:
@@ -107,7 +123,7 @@ def test_codex_api_key_mode_does_not_mount_oauth_auth_file(tmp_path) -> None:
     (provider_dir / "auth.json").write_text('{"oauth": "secret"}', encoding="utf-8")
     (provider_dir / "config.toml").write_text('model = "gpt-5"', encoding="utf-8")
 
-    bootstrap = ProviderBootstrapLoader.load(provider_dir, has_api_key=True)
+    bootstrap = ProviderBootstrapLoader.load(provider_dir, provider="codex", has_api_key=True)
 
     assert bootstrap.ref_names == ("codex_config_toml",)
     assert "codex_auth_json" not in bootstrap.file_store
@@ -119,7 +135,7 @@ def test_gemini_api_key_mode_does_not_mount_oauth_credentials(tmp_path) -> None:
     (provider_dir / "oauth_creds.json").write_text('{"oauth": "secret"}', encoding="utf-8")
     (provider_dir / "settings.json").write_text("{}", encoding="utf-8")
 
-    bootstrap = ProviderBootstrapLoader.load(provider_dir, has_api_key=True)
+    bootstrap = ProviderBootstrapLoader.load(provider_dir, provider="gemini", has_api_key=True)
 
     assert bootstrap.ref_names == ("gemini_settings",)
     assert "gemini_oauth_creds" not in bootstrap.file_store

@@ -309,6 +309,11 @@ class ProviderDiagnosticsService:
 
     def check_credentials(self, context: ProviderExecutionContext) -> DiagnosticCheckResult:
         worker = self._worker_for_provider(context.provider)
+        adapter_env = None
+        if worker is not None:
+            candidate_adapter_env = getattr(getattr(worker, "runtime_adapter", None), "env", None)
+            if isinstance(candidate_adapter_env, Mapping):
+                adapter_env = dict(candidate_adapter_env)
         worker_secret_env = getattr(worker, "secret_env", None) if worker is not None else None
         secret_env = self.secret_env if worker_secret_env is None else dict(worker_secret_env)
         secret_store = self.secret_store
@@ -323,6 +328,7 @@ class ProviderDiagnosticsService:
         return check_provider_credentials(
             context,
             self.secret_registry,
+            adapter_env=adapter_env,
             secret_env=secret_env,
             effective_api_key_configured=effective_api_key_configured,
             secret_store=secret_store,

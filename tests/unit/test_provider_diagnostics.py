@@ -1191,6 +1191,23 @@ def test_codex_oauth_preflight_uses_fallback_directory(tmp_path: Path, monkeypat
     assert result.status == "ready"
 
 
+def test_codex_preflight_uses_adapter_only_auth_home(tmp_path: Path, monkeypatch) -> None:
+    process_home = tmp_path / "process" / ".codex"
+    adapter_home = tmp_path / "adapter" / ".codex"
+    process_home.mkdir(parents=True)
+    adapter_home.mkdir(parents=True)
+    (adapter_home / "auth.json").write_text("{}", encoding="utf-8")
+    monkeypatch.delenv("CODE_AGENT_CODEX_AUTH_DIR", raising=False)
+    monkeypatch.setenv("CODEX_HOME", str(process_home))
+    worker = SimpleNamespace(runtime_adapter=SimpleNamespace(env={"CODEX_HOME": str(adapter_home)}))
+
+    result = ProviderDiagnosticsService(workers={"codex": worker}).check_credentials(
+        _make_context(auth_mechanism="chatgpt_oauth")
+    )
+
+    assert result.status == "ready"
+
+
 def test_antigravity_token_missing_no_oauth_creds(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1217,6 +1234,26 @@ def test_antigravity_preflight_uses_fallback_directory(tmp_path: Path, monkeypat
     monkeypatch.setenv("CODE_AGENT_GEMINI_AUTH_DIR", str(fallback))
 
     result = ProviderDiagnosticsService().check_credentials(
+        _make_context(provider="antigravity", auth_mechanism="antigravity_oauth")
+    )
+
+    assert result.status == "ready"
+
+
+def test_antigravity_preflight_uses_adapter_only_auth_home(tmp_path: Path, monkeypatch) -> None:
+    process_home = tmp_path / "process" / ".gemini"
+    adapter_home = tmp_path / "adapter" / ".gemini"
+    process_home.mkdir(parents=True)
+    token_path = adapter_home / "antigravity-cli/antigravity-oauth-token"
+    token_path.parent.mkdir(parents=True)
+    token_path.write_text("token", encoding="utf-8")
+    monkeypatch.delenv("CODE_AGENT_ANTIGRAVITY_AUTH_DIR", raising=False)
+    monkeypatch.setenv("GEMINI_HOME", str(process_home))
+    worker = SimpleNamespace(
+        runtime_adapter=SimpleNamespace(env={"GEMINI_HOME": str(adapter_home)})
+    )
+
+    result = ProviderDiagnosticsService(workers={"antigravity": worker}).check_credentials(
         _make_context(provider="antigravity", auth_mechanism="antigravity_oauth")
     )
 

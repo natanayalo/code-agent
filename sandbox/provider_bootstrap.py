@@ -6,6 +6,7 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 from sandbox.provider_hosts import (
     ANTIGRAVITY_OAUTH_HOSTS,
@@ -106,19 +107,24 @@ class ProviderBootstrap:
 class ProviderBootstrapLoader:
     """Loads a provider directory and prepares registered secrets."""
 
-    # Map of known files to (is_required, ref_name, logical_mount_path, provider_hosts)
-    # Using 'codex' and 'gemini' as top-level dir inference.
+    # Map of known files to (is_required, ref_name, logical_mount_path, provider_hosts).
 
     @classmethod
-    def load(cls, provider_dir: Path, has_api_key: bool = False) -> ProviderBootstrap:
-        """Load bootstrap definitions from a provider config directory."""
+    def load(
+        cls,
+        provider_dir: Path,
+        *,
+        provider: Literal["codex", "gemini"],
+        has_api_key: bool = False,
+    ) -> ProviderBootstrap:
+        """Load bootstrap definitions using the explicit provider identity."""
         definitions: list[RegisteredSecretDefinition] = []
         file_store: dict[str, str] = {}
         destination_by_ref: dict[str, str] = {}
         ref_names: list[str] = []
 
-        is_gemini = provider_dir.name == ".gemini"
-        is_codex = provider_dir.name == ".codex"
+        is_gemini = provider == "gemini"
+        is_codex = provider == "codex"
 
         found_required = False
 

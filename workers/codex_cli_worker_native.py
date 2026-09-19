@@ -504,7 +504,11 @@ class CodexCliWorkerNativeMixin:
             adapter_env=getattr(getattr(self, "runtime_adapter", None), "env", None),
             required_file=None if has_api_key else "auth.json",
         )
-        bootstrap = ProviderBootstrapLoader.load(provider_dir, has_api_key=has_api_key)
+        bootstrap = ProviderBootstrapLoader.load(
+            provider_dir,
+            provider="codex",
+            has_api_key=has_api_key,
+        )
         for d in bootstrap.definitions:
             if d.name not in registry:
                 registry.register(d)

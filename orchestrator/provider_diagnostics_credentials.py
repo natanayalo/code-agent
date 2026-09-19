@@ -289,20 +289,25 @@ def _effective_api_key_check(
     )
 
 
-def resolve_codex_auth_path() -> Path:
+def resolve_codex_auth_path(*, adapter_env: Mapping[str, str] | None = None) -> Path:
     """Return effective Codex auth.json path based on environment precedence."""
-    return resolve_codex_provider_dir() / "auth.json"
+    return resolve_codex_provider_dir(adapter_env=adapter_env) / "auth.json"
 
 
-def resolve_antigravity_token_path() -> Path:
+def resolve_antigravity_token_path(*, adapter_env: Mapping[str, str] | None = None) -> Path:
     """Return effective Antigravity OAuth token path based on environment precedence."""
-    return resolve_antigravity_provider_dir() / "antigravity-cli" / "antigravity-oauth-token"
+    return (
+        resolve_antigravity_provider_dir(adapter_env=adapter_env)
+        / "antigravity-cli"
+        / "antigravity-oauth-token"
+    )
 
 
 def check_codex_credentials(
     context: ProviderExecutionContext,
     secret_registry: SecretRegistry,
     *,
+    adapter_env: Mapping[str, str] | None = None,
     secret_env: Mapping[str, str] | None = None,
     effective_api_key_configured: bool | None = None,
     secret_store: Mapping[str, str] | None = None,
@@ -335,7 +340,7 @@ def check_codex_credentials(
             provider_label="OpenAI",
         )
 
-    auth_file = resolve_codex_auth_path()
+    auth_file = resolve_codex_auth_path(adapter_env=adapter_env)
     if not auth_file.is_file():
         return DiagnosticCheckResult(
             name="credentials",
@@ -379,9 +384,13 @@ def check_codex_credentials(
     )
 
 
-def check_antigravity_credentials(context: ProviderExecutionContext) -> DiagnosticCheckResult:
+def check_antigravity_credentials(
+    context: ProviderExecutionContext,
+    *,
+    adapter_env: Mapping[str, str] | None = None,
+) -> DiagnosticCheckResult:
     """Validate that native Antigravity has a valid antigravity-oauth-token file."""
-    token_path = resolve_antigravity_token_path()
+    token_path = resolve_antigravity_token_path(adapter_env=adapter_env)
     if not token_path.is_file():
         gemini_dir = token_path.parents[1]
         if (gemini_dir / "oauth_creds.json").is_file():
@@ -481,6 +490,7 @@ def check_provider_credentials(
     context: ProviderExecutionContext,
     secret_registry: SecretRegistry,
     *,
+    adapter_env: Mapping[str, str] | None = None,
     secret_env: Mapping[str, str] | None = None,
     effective_api_key_configured: bool | None = None,
     secret_store: Mapping[str, str] | None = None,
@@ -492,6 +502,7 @@ def check_provider_credentials(
         return check_codex_credentials(
             context,
             secret_registry,
+            adapter_env=adapter_env,
             secret_env=secret_env,
             effective_api_key_configured=effective_api_key_configured,
             secret_store=secret_store,
@@ -499,7 +510,7 @@ def check_provider_credentials(
             ephemeral_store=ephemeral_store,
         )
     if context.provider == "antigravity":
-        return check_antigravity_credentials(context)
+        return check_antigravity_credentials(context, adapter_env=adapter_env)
     if context.provider == "openrouter":
         return check_openrouter_credentials(
             context,
