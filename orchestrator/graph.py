@@ -25,6 +25,7 @@ from apps.observability import (
     set_span_status_from_outcome,
     start_optional_span,
 )
+from db.base import utc_now
 from db.enums import ArtifactType, TimelineEventType
 from db.models import Task
 from db.utils import compute_interaction_content_hash
@@ -76,6 +77,7 @@ from orchestrator.provider_diagnostics import (
 from orchestrator.provider_diagnostics_types import (
     ProviderExecutionContext,
     ProviderPreDispatchReport,
+    compute_report_id,
 )
 from orchestrator.review import REPAIR_REQUEST_CONSTRAINT, SEVERITY_RANK, review_result
 from orchestrator.runtime_manifest import build_runtime_manifest
@@ -115,7 +117,14 @@ from repositories.sqlalchemy import (
 from repositories.sqlalchemy_plan import ExecutionPlanRepository
 from sandbox.secrets import SecretRegistry
 from tools.numeric import coerce_positive_int_like
-from workers import ArtifactReference, Worker, WorkerProfile, WorkerRequest, WorkerResult
+from workers import (
+    ArtifactReference,
+    FailureKind,
+    Worker,
+    WorkerProfile,
+    WorkerRequest,
+    WorkerResult,
+)
 from workers.constants import (
     DEFAULT_ORCHESTRATOR_GRACE_SECONDS,
     DEFAULT_WORKER_TIMEOUT_SECONDS,
@@ -160,7 +169,6 @@ _WORKER_FAILURE_RETRY_SAME_WORKER_KINDS = frozenset(
         "permission_denied",
     }
 )
-_PREFLIGHT_REJECTION_REASON_CODE: Final[str] = "preflight_rejected"
 
 
 def _resolve_orchestrator_timeout_seconds(state: OrchestratorState) -> int:
@@ -400,22 +408,66 @@ async def _evaluate_preflight_with_timeout(
 
 
 def _preflight_timeout_result(
-    request: WorkerRequest, timeout_seconds: float
+    request: WorkerRequest,
+    context: ProviderExecutionContext,
+    timeout_seconds: float,
 ) -> tuple[WorkerResult, str]:
     """Build the terminal result when preflight does not finish in time."""
+    report = _terminal_preflight_report(
+        context,
+        decision="preflight_timeout",
+        failure_kind="timeout",
+        next_action_hint="inspect_worker_configuration",
+        reason_code="preflight_timeout",
+        summary=(
+            "Provider pre-dispatch diagnostics exceeded its timeout "
+            f"({timeout_seconds}s); worker launch was skipped."
+        ),
+    )
+    diagnostic_artifact = _preflight_diagnostic_artifact(report)
     return (
         WorkerResult(
             status="error",
-            summary=(
-                "Provider pre-dispatch diagnostics exceeded its timeout "
-                f"({timeout_seconds}s); worker launch was skipped."
-            ),
+            summary=report.summary,
             failure_kind="timeout",
             next_action_hint="inspect_worker_configuration",
             workspace_id=request.workspace_id,
+            artifacts=[diagnostic_artifact],
             preflight_rejected=True,
+            execution_not_started=True,
         ),
         "pre-dispatch diagnostics timed out before execution",
+    )
+
+
+def _terminal_preflight_report(
+    context: ProviderExecutionContext,
+    *,
+    decision: Literal["preflight_timeout", "preflight_budget_exhausted"],
+    failure_kind: FailureKind,
+    next_action_hint: str,
+    reason_code: str,
+    summary: str,
+) -> ProviderPreDispatchReport:
+    """Create audit evidence for a preflight terminal path without provider execution."""
+    checked_at = utc_now()
+    return ProviderPreDispatchReport(
+        report_id=compute_report_id(context.logical_execution_key or "unknown"),
+        checked_at=checked_at,
+        execution_environment_id=os.environ.get("HOSTNAME", "local"),
+        logical_execution_key=context.logical_execution_key or "unknown",
+        provider=context.provider,
+        worker_profile=context.worker_profile,
+        runtime_mode=context.runtime_mode,
+        model=context.model,
+        decision=decision,
+        ready=False,
+        execution_started=False,
+        checks=[],
+        failure_kind=failure_kind,
+        next_action_hint=next_action_hint,
+        reason_code=reason_code,
+        summary=summary,
     )
 
 
@@ -448,7 +500,8 @@ def _preflight_rejection_result(
             next_action_hint=report.next_action_hint or "fix_provider_prerequisites",
             workspace_id=request.workspace_id,
             artifacts=[diagnostic_artifact],
-            preflight_rejected=report.decision == _PREFLIGHT_REJECTION_REASON_CODE,
+            preflight_rejected=True,
+            execution_not_started=True,
         ),
         "pre-dispatch diagnostics rejected execution",
     )
@@ -491,7 +544,11 @@ async def execute_with_preflight(
             timeout_seconds=timeout_seconds,
         )
 
-    service = diagnostics_service or ProviderDiagnosticsService(secret_registry=secret_registry)
+    service = diagnostics_service or ProviderDiagnosticsService(
+        secret_registry=secret_registry,
+        secret_env=getattr(worker, "secret_env", None),
+        worker=worker,
+    )
     ctx = resolve_execution_context(
         worker,
         request,
@@ -500,6 +557,7 @@ async def execute_with_preflight(
         session_id=session_id,
         attempt_count=attempt_count,
         logical_execution_key=logical_execution_key,
+        secret_registry=service.secret_registry,
     )
     report, preflight_elapsed = await _evaluate_preflight_with_timeout(
         service,
@@ -509,7 +567,7 @@ async def execute_with_preflight(
         worker_type=worker_type,
     )
     if report is None:
-        return _preflight_timeout_result(request, service.preflight_timeout)
+        return _preflight_timeout_result(request, ctx, service.preflight_timeout)
 
     remaining = max(
         0.0,
@@ -529,8 +587,29 @@ async def execute_with_preflight(
         )
 
     if remaining <= 0:
+        report = _terminal_preflight_report(
+            ctx,
+            decision="preflight_budget_exhausted",
+            failure_kind="timeout",
+            next_action_hint="inspect_worker_configuration",
+            reason_code="preflight_budget_exhausted",
+            summary=(
+                "Provider pre-dispatch diagnostics consumed the execution timeout "
+                "envelope; worker launch was skipped."
+            ),
+        )
+        diagnostic_artifact = _preflight_diagnostic_artifact(report)
+        timeout_result = _timed_out_worker_result(timeout_seconds).model_copy(
+            update={
+                "summary": report.summary,
+                "workspace_id": request.workspace_id,
+                "artifacts": [diagnostic_artifact],
+                "preflight_rejected": True,
+                "execution_not_started": True,
+            }
+        )
         return (
-            _timed_out_worker_result(timeout_seconds),
+            timeout_result,
             "pre-dispatch diagnostics consumed the execution timeout envelope",
         )
 
@@ -851,6 +930,7 @@ def _skipped_node_result(node: DecomposedTaskNode, reason: str) -> WorkerResult:
         files_changed=[],
         test_results=[],
         artifacts=[],
+        execution_not_started=True,
     )
 
 
@@ -1066,6 +1146,12 @@ def _aggregate_decomposed_results(outcomes: list[NodeOutcome]) -> WorkerResult:
         outcome.result for outcome in outcomes if outcome.result.status == "success"
     ]
     failed_results = [outcome.result for outcome in outcomes if outcome.result.status != "success"]
+    execution_not_started = bool(outcomes) and all(
+        outcome.result.execution_not_started for outcome in outcomes
+    )
+    preflight_rejected = execution_not_started and any(
+        outcome.result.preflight_rejected for outcome in outcomes
+    )
     status: Literal["success", "failure"] = (
         "failure" if failed is not None or skipped else "success"
     )
@@ -1133,6 +1219,8 @@ def _aggregate_decomposed_results(outcomes: list[NodeOutcome]) -> WorkerResult:
             if status == "failure"
             else "persist_memory"
         ),
+        preflight_rejected=preflight_rejected,
+        execution_not_started=execution_not_started,
     )
 
 
@@ -2673,7 +2761,7 @@ def _compute_route_escalation(
 ) -> RouteDecision | None:
     if state.attempt_count == 0 or state.dispatch.worker_type is None:
         return None
-    if state.result is not None and getattr(state.result, "preflight_rejected", False):
+    if state.result is not None and getattr(state.result, "execution_not_started", False):
         return None
 
     prior_worker: WorkerType = state.dispatch.worker_type
@@ -3008,7 +3096,7 @@ def _resolve_brain_retry_context(state: OrchestratorState) -> tuple[WorkerType |
 
     if state.attempt_count <= 0 or prior_worker is None:
         return None, None
-    if state.result is not None and getattr(state.result, "preflight_rejected", False):
+    if state.result is not None and getattr(state.result, "execution_not_started", False):
         return prior_worker, None
     if state.verification is not None and state.verification.status == "failed":
         verification_failure_kind = state.verification.failure_kind or "unknown"

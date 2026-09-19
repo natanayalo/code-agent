@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import time
+from collections.abc import Mapping
 from datetime import timedelta
 from typing import Any
 
@@ -68,11 +69,41 @@ def _resolve_executable(worker: Any, worker_type: str) -> str | None:
     return executable
 
 
-def _resolve_auth_mechanism(worker: Any, worker_type: str, credential_refs: tuple[str, ...]) -> str:
+def _is_api_key_definition(definition: Any, provider: str) -> bool:
+    expected_env = "OPENAI_API_KEY" if provider == "codex" else "OPENROUTER_API_KEY"
+    return bool(
+        definition
+        and (
+            str(getattr(definition, "source_key", "")).upper() == expected_env
+            or str(getattr(definition, "destination_env_var", "")).upper() == expected_env
+        )
+    )
+
+
+def _resolve_auth_mechanism(
+    worker: Any,
+    worker_type: str,
+    credential_refs: tuple[str, ...],
+    secret_registry: SecretRegistry | None = None,
+) -> str:
     if worker_type == "codex":
         adapter = getattr(worker, "runtime_adapter", None)
-        if "openai_api_key" in [r.lower() for r in credential_refs] or (
-            getattr(adapter, "auth_mode", None) == "api_key"
+        legacy_api_key_ref = {"openai_api_key", "openai_key"}
+        if (
+            any(
+                (
+                    _is_api_key_definition(secret_registry.get(ref), worker_type)
+                    if secret_registry is not None
+                    else ref.lower() in legacy_api_key_ref
+                )
+                for ref in credential_refs
+            )
+            or getattr(adapter, "auth_mode", None) == "api_key"
+            or bool(
+                (getattr(adapter, "env", None) or getattr(worker, "secret_env", None) or {})
+                .get("OPENAI_API_KEY", "")
+                .strip()
+            )
         ):
             return "api_key"
         return "chatgpt_oauth"
@@ -83,22 +114,27 @@ def _resolve_auth_mechanism(worker: Any, worker_type: str, credential_refs: tupl
     return "none"
 
 
-def _worker_requires_sandbox_container(worker: Any, worker_type: str, runtime_mode: str) -> bool:
-    if hasattr(worker, "container_manager"):
-        return True
-    return runtime_mode in ("native_agent", "shell") and worker_type in (
-        "codex",
-        "antigravity",
-    )
+def _worker_api_key_configured(worker: Any, worker_type: str) -> bool:
+    adapter = getattr(worker, "runtime_adapter", None)
+    if worker_type == "openrouter":
+        return bool(str(getattr(adapter, "api_key", "")).strip())
+    if worker_type == "codex":
+        env = getattr(adapter, "env", None) or getattr(worker, "secret_env", None) or {}
+        return bool(str(env.get("OPENAI_API_KEY", "")).strip())
+    return False
 
 
 def _resolve_executor_image(
-    worker: Any, worker_type: str, runtime_mode: str, manifest_sandbox: dict[str, Any]
+    worker: Any,
+    worker_type: str,
+    runtime_mode: str,
+    manifest_sandbox: dict[str, Any],
+    request_image: str | None,
 ) -> str:
     manager = getattr(worker, "container_manager", None)
     worker_default = _optional_string(getattr(manager, "default_image", None))
     if worker_default and (worker_type == "openrouter" or runtime_mode in ("tool_loop", "shell")):
-        return worker_default
+        return request_image or worker_default
     return (
         _optional_string(manifest_sandbox.get("native_executor_image"))
         or os.environ.get("CODE_AGENT_NATIVE_AGENT_EXECUTOR_IMAGE")
@@ -112,6 +148,15 @@ def _extract_secret_refs(request: WorkerRequest) -> tuple[str, ...]:
     return tuple(sorted(set(extracted)))
 
 
+def _worker_requires_sandbox_container(worker: Any, worker_type: str, runtime_mode: str) -> bool:
+    if hasattr(worker, "container_manager"):
+        return True
+    return runtime_mode in ("native_agent", "shell") and worker_type in (
+        "codex",
+        "antigravity",
+    )
+
+
 def resolve_execution_context(
     worker: Any,
     request: WorkerRequest,
@@ -121,6 +166,7 @@ def resolve_execution_context(
     session_id: str | None = None,
     attempt_count: int = 1,
     logical_execution_key: str | None = None,
+    secret_registry: SecretRegistry | None = None,
 ) -> ProviderExecutionContext:
     """Derive trusted execution context from final WorkerRequest and worker adapter."""
     worker_type = str(
@@ -157,10 +203,21 @@ def resolve_execution_context(
     )
 
     executable = _resolve_executable(worker, worker_type)
-    executor_image = _resolve_executor_image(worker, worker_type, runtime_mode, manifest_sandbox)
+    executor_image = _resolve_executor_image(
+        worker,
+        worker_type,
+        runtime_mode,
+        manifest_sandbox,
+        getattr(request, "image", None),
+    )
     is_container = _worker_requires_sandbox_container(worker, worker_type, runtime_mode)
     credential_refs = _extract_secret_refs(request)
-    auth_mech = _resolve_auth_mechanism(worker, worker_type, credential_refs)
+    auth_mech = _resolve_auth_mechanism(
+        worker,
+        worker_type,
+        credential_refs,
+        secret_registry,
+    )
 
     resolved_task_id = task_id or request.task_id or "task-unknown"
     resolved_key = (
@@ -191,17 +248,30 @@ class ProviderDiagnosticsService:
         self,
         *,
         secret_registry: SecretRegistry | None = None,
+        secret_env: Mapping[str, str] | None = None,
+        effective_api_key_configured: bool | None = None,
+        worker: Any | None = None,
         docker_probe_timeout: float = DEFAULT_DOCKER_PROBE_TIMEOUT_SECONDS,
         preflight_timeout: float = DEFAULT_PREFLIGHT_TIMEOUT_SECONDS,
     ) -> None:
         self.secret_registry = (
             secret_registry if secret_registry is not None else DEFAULT_SECRET_REGISTRY
         )
+        self.secret_env = dict(os.environ if secret_env is None else secret_env)
+        self.effective_api_key_configured = effective_api_key_configured
+        if self.effective_api_key_configured is None and worker is not None:
+            worker_type = str(getattr(worker, "worker_type", "")).lower()
+            self.effective_api_key_configured = _worker_api_key_configured(worker, worker_type)
         self.docker_probe_timeout = docker_probe_timeout
         self.preflight_timeout = preflight_timeout
 
     def check_credentials(self, context: ProviderExecutionContext) -> DiagnosticCheckResult:
-        return check_provider_credentials(context, self.secret_registry)
+        return check_provider_credentials(
+            context,
+            self.secret_registry,
+            secret_env=self.secret_env,
+            effective_api_key_configured=self.effective_api_key_configured,
+        )
 
     async def _probe_docker_process(self) -> tuple[int | None, str, str]:
         proc = await asyncio.create_subprocess_exec(
@@ -505,7 +575,10 @@ class ProviderDiagnosticsService:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            logger.exception("Unexpected error in pre-dispatch diagnostics: %s", exc)
+            logger.warning(
+                "Unexpected error in pre-dispatch diagnostics: %s",
+                type(exc).__name__,
+            )
             return ProviderPreDispatchReport(
                 report_id=report_id,
                 checked_at=checked_at,

@@ -4,23 +4,152 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Mapping
 from pathlib import Path
 
 from orchestrator.provider_diagnostics_types import (
     DiagnosticCheckResult,
     ProviderExecutionContext,
+    VerificationScope,
 )
-from sandbox.secrets import SecretRegistry
+from sandbox.secrets import (
+    RegisteredSecretDefinition,
+    SecretExposurePolicy,
+    SecretRegistry,
+    SecretScope,
+    SecretSource,
+)
 
-_MAX_DETAIL_LENGTH = 120
+
+def _credential_error_category(exc: Exception) -> str:
+    """Return an allowlisted error category without exposing exception contents."""
+    if isinstance(exc, ValueError):
+        return "invalid_format"
+    if isinstance(exc, OSError):
+        return "unreadable"
+    return "resolution_failed"
 
 
-def _truncate_exception(exc: Exception) -> str:
-    """Bound exception text before including it in operator-facing diagnostics."""
-    detail = str(exc)
-    if len(detail) <= _MAX_DETAIL_LENGTH:
-        return detail
-    return f"{detail[:_MAX_DETAIL_LENGTH - 3]}..."
+def _unready(
+    detail: str,
+    remediation: str,
+    *,
+    verification_scope: VerificationScope = "local_presence",
+) -> DiagnosticCheckResult:
+    return DiagnosticCheckResult(
+        name="credentials",
+        category="credentials",
+        status="unready",
+        detail=detail,
+        remediation=remediation,
+        verification_scope=verification_scope,
+        blocking=True,
+    )
+
+
+def _is_api_key_definition(definition: RegisteredSecretDefinition, expected_env_var: str) -> bool:
+    return bool(
+        definition
+        and (
+            definition.source_key.upper() == expected_env_var
+            or (definition.destination_env_var or "").upper() == expected_env_var
+        )
+    )
+
+
+def _registered_api_key_check(
+    context: ProviderExecutionContext,
+    secret_registry: SecretRegistry,
+    secret_env: Mapping[str, str],
+    *,
+    expected_env_var: str,
+    provider_label: str,
+) -> DiagnosticCheckResult | None:
+    """Validate a referenced provider key against its actual registered source."""
+    if not context.credential_refs:
+        return None
+
+    matching: list[RegisteredSecretDefinition] = []
+    missing_refs: list[str] = []
+    for ref in context.credential_refs:
+        definition = secret_registry.get(ref, task_id=context.task_id)
+        if definition is None:
+            missing_refs.append(ref)
+        elif _is_api_key_definition(definition, expected_env_var):
+            matching.append(definition)
+
+    if not matching:
+        if missing_refs:
+            return _unready(
+                f"Registered {provider_label} API key reference is missing from SecretRegistry.",
+                f"Register the referenced {provider_label} secret in SecretRegistry.",
+            )
+        return _unready(
+            f"Referenced secret does not map to {expected_env_var} for {provider_label}.",
+            f"Reference a registered {provider_label} secret backed by {expected_env_var}.",
+        )
+
+    last_failure: DiagnosticCheckResult | None = None
+    for definition in matching:
+        if definition.required_scope != SecretScope.PROVIDER_AUTH:
+            last_failure = _unready(
+                f"Registered {provider_label} API key lacks provider_auth scope.",
+                "Register the provider key with required_scope=provider_auth.",
+            )
+            continue
+        if definition.exposure_policy not in (
+            SecretExposurePolicy.SANDBOX_ENV,
+            SecretExposurePolicy.SANDBOX_FILE,
+        ):
+            last_failure = _unready(
+                f"Registered {provider_label} API key is not exposed to the worker sandbox.",
+                "Use exposure_policy=sandbox_env or sandbox_file for provider execution.",
+            )
+            continue
+        if definition.source == SecretSource.ENV:
+            if not str(secret_env.get(definition.source_key, "")).strip():
+                last_failure = _unready(
+                    f"Registered {provider_label} API key source is empty.",
+                    f"Set {definition.source_key} before dispatching the provider.",
+                )
+                continue
+        else:
+            last_failure = _unready(
+                f"Registered {provider_label} API key source cannot be verified by preflight.",
+                "Provide the provider key through the effective worker secret environment.",
+            )
+            continue
+        return DiagnosticCheckResult(
+            name="credentials",
+            category="credentials",
+            status="ready",
+            detail=f"{provider_label} API key resolved for provider execution.",
+            verification_scope="local_presence",
+            blocking=False,
+        )
+
+    return last_failure
+
+
+def _effective_api_key_check(
+    *,
+    configured: bool,
+    expected_env_var: str,
+    provider_label: str,
+) -> DiagnosticCheckResult:
+    if configured:
+        return DiagnosticCheckResult(
+            name="credentials",
+            category="credentials",
+            status="ready",
+            detail=f"{provider_label} API key is configured for provider execution.",
+            verification_scope="local_presence",
+            blocking=False,
+        )
+    return _unready(
+        f"{provider_label} API key is not configured for provider execution.",
+        f"Set {expected_env_var} in the effective worker configuration.",
+    )
 
 
 def resolve_codex_auth_path() -> Path:
@@ -46,40 +175,33 @@ def resolve_antigravity_token_path() -> Path:
 
 
 def check_codex_credentials(
-    context: ProviderExecutionContext, secret_registry: SecretRegistry
+    context: ProviderExecutionContext,
+    secret_registry: SecretRegistry,
+    *,
+    secret_env: Mapping[str, str] | None = None,
+    effective_api_key_configured: bool | None = None,
 ) -> DiagnosticCheckResult:
     """Validate Codex credentials for either API key or ChatGPT OAuth mode."""
     if context.auth_mechanism == "api_key":
-        has_ref = "openai_api_key" in [r.lower() for r in context.credential_refs]
-        reg_def = secret_registry.get("openai_api_key")
-        has_env = bool(os.environ.get("OPENAI_API_KEY", "").strip())
-        if has_ref and reg_def is None:
-            return DiagnosticCheckResult(
-                name="credentials",
-                category="credentials",
-                status="unready",
-                detail="Registered OpenAI API key reference is missing from SecretRegistry.",
-                remediation="Register secret 'openai_api_key' in SecretRegistry.",
-                verification_scope="local_presence",
-                blocking=True,
-            )
-        if not has_ref and not has_env:
-            return DiagnosticCheckResult(
-                name="credentials",
-                category="credentials",
-                status="unready",
-                detail="Codex API key is not configured in secret references or environment.",
-                remediation="Set OPENAI_API_KEY or register an authorized 'openai_api_key' secret.",
-                verification_scope="local_presence",
-                blocking=True,
-            )
-        return DiagnosticCheckResult(
-            name="credentials",
-            category="credentials",
-            status="ready",
-            detail="OpenAI API key configured for Codex execution.",
-            verification_scope="local_presence",
-            blocking=False,
+        env = os.environ if secret_env is None else secret_env
+        referenced = _registered_api_key_check(
+            context,
+            secret_registry,
+            env,
+            expected_env_var="OPENAI_API_KEY",
+            provider_label="OpenAI",
+        )
+        if referenced is not None:
+            return referenced
+        configured = (
+            effective_api_key_configured
+            if effective_api_key_configured is not None
+            else bool(str(env.get("OPENAI_API_KEY", "")).strip())
+        )
+        return _effective_api_key_check(
+            configured=configured,
+            expected_env_var="OPENAI_API_KEY",
+            provider_label="OpenAI",
         )
 
     auth_file = resolve_codex_auth_path()
@@ -106,7 +228,9 @@ def check_codex_credentials(
             name="credentials",
             category="credentials",
             status="unready",
-            detail=f"Codex auth.json is malformed or unreadable: {_truncate_exception(exc)}",
+            detail=(
+                "Codex auth.json is malformed or unreadable: " f"{_credential_error_category(exc)}"
+            ),
             remediation=(
                 "Re-authenticate with 'docker compose run --rm --no-deps worker codex login'."
             ),
@@ -170,7 +294,7 @@ def check_antigravity_credentials(context: ProviderExecutionContext) -> Diagnost
             name="credentials",
             category="credentials",
             status="unready",
-            detail=f"Antigravity token file is unreadable: {_truncate_exception(exc)}",
+            detail=("Antigravity token file is unreadable: " f"{_credential_error_category(exc)}"),
             remediation="Run 'scripts/bootstrap_antigravity_auth.sh' to recreate the token.",
             verification_scope="local_structure",
             blocking=True,
@@ -187,54 +311,59 @@ def check_antigravity_credentials(context: ProviderExecutionContext) -> Diagnost
 
 
 def check_openrouter_credentials(
-    context: ProviderExecutionContext, secret_registry: SecretRegistry
+    context: ProviderExecutionContext,
+    secret_registry: SecretRegistry,
+    *,
+    secret_env: Mapping[str, str] | None = None,
+    effective_api_key_configured: bool | None = None,
 ) -> DiagnosticCheckResult:
     """Validate OpenRouter API key configuration in registered secrets or environment."""
-    has_ref = "openrouter_api_key" in [r.lower() for r in context.credential_refs]
-    reg_def = secret_registry.get("openrouter_api_key")
-    if has_ref and reg_def is None:
-        return DiagnosticCheckResult(
-            name="credentials",
-            category="credentials",
-            status="unready",
-            detail="Registered OpenRouter API key reference is missing from SecretRegistry.",
-            remediation="Register secret 'openrouter_api_key' in SecretRegistry.",
-            verification_scope="local_presence",
-            blocking=True,
-        )
-
-    env_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
-    if not has_ref and not env_key:
-        return DiagnosticCheckResult(
-            name="credentials",
-            category="credentials",
-            status="unready",
-            detail="OpenRouter API key is not configured in secret references or environment.",
-            remediation="Set OPENROUTER_API_KEY in the environment or worker secrets.",
-            verification_scope="local_presence",
-            blocking=True,
-        )
-
-    return DiagnosticCheckResult(
-        name="credentials",
-        category="credentials",
-        status="ready",
-        detail="OpenRouter API key configured.",
-        verification_scope="local_presence",
-        blocking=False,
+    env = os.environ if secret_env is None else secret_env
+    referenced = _registered_api_key_check(
+        context,
+        secret_registry,
+        env,
+        expected_env_var="OPENROUTER_API_KEY",
+        provider_label="OpenRouter",
+    )
+    if referenced is not None:
+        return referenced
+    configured = (
+        effective_api_key_configured
+        if effective_api_key_configured is not None
+        else bool(str(env.get("OPENROUTER_API_KEY", "")).strip())
+    )
+    return _effective_api_key_check(
+        configured=configured,
+        expected_env_var="OPENROUTER_API_KEY",
+        provider_label="OpenRouter",
     )
 
 
 def check_provider_credentials(
-    context: ProviderExecutionContext, secret_registry: SecretRegistry
+    context: ProviderExecutionContext,
+    secret_registry: SecretRegistry,
+    *,
+    secret_env: Mapping[str, str] | None = None,
+    effective_api_key_configured: bool | None = None,
 ) -> DiagnosticCheckResult:
     """Entrypoint for validating credentials across all provider types."""
     if context.provider == "codex":
-        return check_codex_credentials(context, secret_registry)
+        return check_codex_credentials(
+            context,
+            secret_registry,
+            secret_env=secret_env,
+            effective_api_key_configured=effective_api_key_configured,
+        )
     if context.provider == "antigravity":
         return check_antigravity_credentials(context)
     if context.provider == "openrouter":
-        return check_openrouter_credentials(context, secret_registry)
+        return check_openrouter_credentials(
+            context,
+            secret_registry,
+            secret_env=secret_env,
+            effective_api_key_configured=effective_api_key_configured,
+        )
     return DiagnosticCheckResult(
         name="credentials",
         category="credentials",

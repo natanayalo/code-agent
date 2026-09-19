@@ -1713,7 +1713,9 @@ class TaskExecutionActivities:
 
         async def _execute_worker() -> WorkerResult:
             diagnostics_service = ProviderDiagnosticsService(
-                secret_registry=getattr(self.service, "secret_registry", DEFAULT_SECRET_REGISTRY)
+                secret_registry=getattr(self.service, "secret_registry", DEFAULT_SECRET_REGISTRY),
+                secret_env=getattr(self.service.worker, "secret_env", None),
+                worker=self.service.worker,
             )
             result, _progress = await execute_with_preflight(
                 self.service.worker,

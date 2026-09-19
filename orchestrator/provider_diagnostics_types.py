@@ -28,6 +28,8 @@ PreDispatchDecision = Literal[
     "preflight_rejected",
     "preflight_skipped",
     "preflight_error",
+    "preflight_timeout",
+    "preflight_budget_exhausted",
 ]
 
 

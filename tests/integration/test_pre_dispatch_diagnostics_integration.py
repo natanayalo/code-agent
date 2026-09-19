@@ -201,8 +201,13 @@ async def test_hanging_preflight_times_out_without_launching_worker() -> None:
     assert result.status == "error"
     assert result.failure_kind == "timeout"
     assert result.preflight_rejected
+    assert result.execution_not_started
     assert "worker launch was skipped" in (result.summary or "")
     assert "timed out" in progress
+    assert len(result.artifacts) == 1
+    assert result.artifacts[0].artifact_type == ArtifactType.PRE_DISPATCH_DIAGNOSTICS
+    assert result.artifacts[0].artifact_metadata["decision"] == "preflight_timeout"
+    assert result.artifacts[0].artifact_metadata["execution_started"] is False
 
 
 @pytest.mark.asyncio
@@ -238,7 +243,39 @@ async def test_preflight_elapsed_time_is_deducted_from_worker_timeout() -> None:
 
     assert not worker.run_called
     assert result.failure_kind == "timeout"
+    assert result.execution_not_started
+    assert len(result.artifacts) == 1
+    assert result.artifacts[0].artifact_metadata["decision"] == "preflight_budget_exhausted"
     assert "consumed the execution timeout envelope" in progress
+
+
+@pytest.mark.asyncio
+async def test_preflight_internal_error_is_a_terminal_audited_outcome() -> None:
+    worker = FakeWorker()
+    service = ProviderDiagnosticsService()
+    request = WorkerRequest(task_text="Internal preflight failure", session_id="sess-internal")
+
+    with patch.object(
+        service, "check_credentials", side_effect=RuntimeError("secret-value-must-not-leak")
+    ):
+        result, progress = await execute_with_preflight(
+            worker,
+            request,
+            worker_type="codex",
+            session_id="sess-internal",
+            timeout_seconds=30,
+            diagnostics_service=service,
+        )
+
+    assert not worker.run_called
+    assert result.execution_not_started
+    assert result.preflight_rejected
+    assert len(result.artifacts) == 1
+    metadata = result.artifacts[0].artifact_metadata
+    assert metadata["decision"] == "preflight_error"
+    assert metadata["execution_started"] is False
+    assert "secret-value-must-not-leak" not in (result.summary or "")
+    assert "rejected" in progress
 
 
 @pytest.mark.asyncio

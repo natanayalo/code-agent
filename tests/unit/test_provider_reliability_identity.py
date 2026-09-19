@@ -301,6 +301,7 @@ def test_preflight_only_rejection_is_detected() -> None:
             "artifact_type": "pre_dispatch_diagnostics",
             "artifact_metadata": {
                 "decision": "preflight_rejected",
+                "ready": False,
                 "execution_started": False,
             },
         }

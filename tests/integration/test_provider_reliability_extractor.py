@@ -121,7 +121,7 @@ def test_extractor_synthetic_database(tmp_path: Path) -> None:
     assert scout_rec.fallback_reason is not None
 
 
-def test_extractor_excludes_task_with_only_preflight_rejections(tmp_path: Path) -> None:
+def test_extractor_excludes_task_with_only_preflight_terminal_outcomes(tmp_path: Path) -> None:
     db_path = tmp_path / "preflight_only_rejection.db"
     db_url = f"sqlite+pysqlite:///{db_path}"
     engine = create_engine_from_url(db_url)
@@ -136,7 +136,8 @@ def test_extractor_excludes_task_with_only_preflight_rejections(tmp_path: Path) 
         {
             "artifact_type": ArtifactType.PRE_DISPATCH_DIAGNOSTICS.value,
             "artifact_metadata": {
-                "decision": "preflight_rejected",
+                "decision": "preflight_timeout",
+                "ready": False,
                 "execution_started": False,
             },
         }

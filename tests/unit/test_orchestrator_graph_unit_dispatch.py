@@ -115,7 +115,7 @@ def test_dispatch_job_raises_value_error_if_no_worker() -> None:
         dispatch_job(state)
 
 
-def test_preflight_rejection_does_not_retry_or_reroute() -> None:
+def test_execution_not_started_does_not_retry_or_reroute() -> None:
     state = OrchestratorState.model_validate(
         {
             "task": {"task_text": "demo"},
@@ -125,7 +125,8 @@ def test_preflight_rejection_does_not_retry_or_reroute() -> None:
             "result": {
                 "status": "error",
                 "failure_kind": "provider_auth",
-                "preflight_rejected": True,
+                "preflight_rejected": False,
+                "execution_not_started": True,
             },
         }
     )

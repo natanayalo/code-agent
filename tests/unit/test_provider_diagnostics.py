@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -99,8 +100,48 @@ def test_resolve_execution_context_codex_api_key(monkeypatch: pytest.MonkeyPatch
     assert ctx2.executor_image == "test-worker-image"
 
 
-def test_codex_api_key_registered_without_ambient_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+def test_resolve_execution_context_honors_request_image_for_persistent_sandbox() -> None:
+    worker = SimpleNamespace(
+        worker_type="openrouter",
+        default_runtime_mode="tool_loop",
+        container_manager=SimpleNamespace(default_image="worker-default:latest"),
+        runtime_adapter=SimpleNamespace(api_key="sk-openrouter-test"),
+    )
+    request = WorkerRequest(
+        task_text="Inspect code",
+        runtime_mode="tool_loop",
+        image="request-image:latest",
+    )
+    custom = resolve_execution_context(worker, request, worker_type="openrouter")
+    assert custom.executor_image == "request-image:latest"
+
+    default = resolve_execution_context(
+        worker,
+        request.model_copy(update={"image": None}),
+        worker_type="openrouter",
+    )
+    assert default.executor_image == "worker-default:latest"
+
+
+def test_resolve_execution_context_native_image_does_not_use_request_image() -> None:
+    worker = SimpleNamespace(
+        worker_type="codex",
+        default_runtime_mode="native_agent",
+        container_manager=SimpleNamespace(default_image="worker-default:latest"),
+        runtime_adapter=SimpleNamespace(auth_mode="chatgpt_oauth"),
+    )
+    request = WorkerRequest(
+        task_text="Inspect code",
+        runtime_mode="native_agent",
+        image="request-image:latest",
+        runtime_manifest={"sandbox": {"native_executor_image": "native-image:latest"}},
+    )
+    context = resolve_execution_context(worker, request, worker_type="codex")
+    assert context.executor_image == "native-image:latest"
+
+
+def test_codex_api_key_registered_with_nonempty_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-test")
     registry = SecretRegistry()
     registry.register(
         RegisteredSecretDefinition(
@@ -117,6 +158,82 @@ def test_codex_api_key_registered_without_ambient_env(monkeypatch: pytest.Monkey
     res = svc.check_credentials(ctx)
     assert res.status == "ready"
     assert not res.blocking
+
+
+def test_codex_api_key_registered_with_empty_source_is_unready(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    registry = SecretRegistry()
+    registry.register(
+        RegisteredSecretDefinition(
+            name="openai_api_key",
+            source=SecretSource.ENV,
+            source_key="OPENAI_API_KEY",
+            required_scope=SecretScope.PROVIDER_AUTH,
+            exposure_policy=SecretExposurePolicy.SANDBOX_ENV,
+            destination_env_var="OPENAI_API_KEY",
+        )
+    )
+    svc = ProviderDiagnosticsService(secret_registry=registry)
+    ctx = _make_context(auth_mechanism="api_key", credential_refs=("openai_api_key",))
+    res = svc.check_credentials(ctx)
+    assert res.status == "unready"
+    assert res.blocking
+    assert "source is empty" in res.detail
+
+
+def test_codex_openai_key_alias_is_validated(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-test")
+    registry = SecretRegistry()
+    registry.register(
+        RegisteredSecretDefinition(
+            name="openai_key",
+            source=SecretSource.ENV,
+            source_key="OPENAI_API_KEY",
+            required_scope=SecretScope.PROVIDER_AUTH,
+            exposure_policy=SecretExposurePolicy.SANDBOX_ENV,
+            destination_env_var="OPENAI_API_KEY",
+        )
+    )
+    svc = ProviderDiagnosticsService(secret_registry=registry)
+    ctx = _make_context(auth_mechanism="api_key", credential_refs=("openai_key",))
+    res = svc.check_credentials(ctx)
+    assert res.status == "ready"
+
+
+@pytest.mark.parametrize(
+    ("required_scope", "exposure_policy", "expected_detail"),
+    [
+        (SecretScope.CUSTOM, SecretExposurePolicy.SANDBOX_ENV, "lacks provider_auth scope"),
+        (SecretScope.PROVIDER_AUTH, SecretExposurePolicy.BROKER_ONLY, "not exposed"),
+    ],
+)
+def test_codex_registered_api_key_rejects_unsafe_definition(
+    monkeypatch: pytest.MonkeyPatch,
+    required_scope: SecretScope,
+    exposure_policy: SecretExposurePolicy,
+    expected_detail: str,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-test")
+    registry = SecretRegistry()
+    registry.register(
+        RegisteredSecretDefinition(
+            name="openai_api_key",
+            source=SecretSource.ENV,
+            source_key="OPENAI_API_KEY",
+            required_scope=required_scope,
+            exposure_policy=exposure_policy,
+            destination_env_var=(
+                "OPENAI_API_KEY" if exposure_policy == SecretExposurePolicy.SANDBOX_ENV else None
+            ),
+        )
+    )
+    svc = ProviderDiagnosticsService(secret_registry=registry)
+    ctx = _make_context(auth_mechanism="api_key", credential_refs=("openai_api_key",))
+    res = svc.check_credentials(ctx)
+    assert res.status == "unready"
+    assert expected_detail in res.detail
 
 
 def test_codex_api_key_unregistered_fails(monkeypatch: pytest.MonkeyPatch) -> None:
