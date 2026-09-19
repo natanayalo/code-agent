@@ -14,6 +14,13 @@
       },
       "failure_count": 1,
       "failure_rate": 0.1,
+      "failure_task_latency": {
+        "max_seconds": 326.24,
+        "mean_seconds": 326.24,
+        "median_seconds": 326.24,
+        "min_seconds": 326.24,
+        "p90_seconds": 326.24
+      },
       "insufficiency_reasons": [],
       "interventions": {
         "approvals_count": 0,
@@ -42,6 +49,13 @@
         "review_pass_rate": null,
         "verification_pass_rate": 0.0
       },
+      "successful_task_latency": {
+        "max_seconds": 402.8,
+        "mean_seconds": 165.2,
+        "median_seconds": 146.84,
+        "min_seconds": 93.54,
+        "p90_seconds": 402.8
+      },
       "task_class": "docs",
       "terminal_latency": {
         "max_seconds": 402.8,
@@ -68,6 +82,13 @@
       },
       "failure_count": 0,
       "failure_rate": 0.0,
+      "failure_task_latency": {
+        "max_seconds": null,
+        "mean_seconds": null,
+        "median_seconds": null,
+        "min_seconds": null,
+        "p90_seconds": null
+      },
       "insufficiency_reasons": [],
       "interventions": {
         "approvals_count": 0,
@@ -96,6 +117,13 @@
         "review_pass_rate": null,
         "verification_pass_rate": 0.0
       },
+      "successful_task_latency": {
+        "max_seconds": 633.6,
+        "mean_seconds": 282.34,
+        "median_seconds": 194.64,
+        "min_seconds": 137.28,
+        "p90_seconds": 616.72
+      },
       "task_class": "docs",
       "terminal_latency": {
         "max_seconds": 633.6,
@@ -120,6 +148,13 @@
       },
       "failure_count": 0,
       "failure_rate": 0.0,
+      "failure_task_latency": {
+        "max_seconds": null,
+        "mean_seconds": null,
+        "median_seconds": null,
+        "min_seconds": null,
+        "p90_seconds": null
+      },
       "insufficiency_reasons": [
         "insufficient_sample_size: 0 tasks (minimum 10)"
       ],
@@ -150,6 +185,13 @@
         "review_pass_rate": null,
         "verification_pass_rate": null
       },
+      "successful_task_latency": {
+        "max_seconds": null,
+        "mean_seconds": null,
+        "median_seconds": null,
+        "min_seconds": null,
+        "p90_seconds": null
+      },
       "task_class": "feature",
       "terminal_latency": {
         "max_seconds": null,
@@ -174,6 +216,13 @@
       },
       "failure_count": 5,
       "failure_rate": 0.5,
+      "failure_task_latency": {
+        "max_seconds": 25.54,
+        "mean_seconds": 24.3,
+        "median_seconds": 25.16,
+        "min_seconds": 22.06,
+        "p90_seconds": 25.54
+      },
       "insufficiency_reasons": [],
       "interventions": {
         "approvals_count": 0,
@@ -202,6 +251,13 @@
         "review_pass_rate": null,
         "verification_pass_rate": 0.0
       },
+      "successful_task_latency": {
+        "max_seconds": 216.54,
+        "mean_seconds": 184.77,
+        "median_seconds": 202.93,
+        "min_seconds": 127.75,
+        "p90_seconds": 216.54
+      },
       "task_class": "feature",
       "terminal_latency": {
         "max_seconds": 216.54,
@@ -228,6 +284,13 @@
       },
       "failure_count": 0,
       "failure_rate": 0.0,
+      "failure_task_latency": {
+        "max_seconds": null,
+        "mean_seconds": null,
+        "median_seconds": null,
+        "min_seconds": null,
+        "p90_seconds": null
+      },
       "insufficiency_reasons": [
         "insufficient_sample_size: 0 tasks (minimum 10)"
       ],
@@ -258,6 +321,13 @@
         "review_pass_rate": null,
         "verification_pass_rate": null
       },
+      "successful_task_latency": {
+        "max_seconds": null,
+        "mean_seconds": null,
+        "median_seconds": null,
+        "min_seconds": null,
+        "p90_seconds": null
+      },
       "task_class": "feature",
       "terminal_latency": {
         "max_seconds": null,
@@ -282,6 +352,13 @@
       },
       "failure_count": 5,
       "failure_rate": 0.5,
+      "failure_task_latency": {
+        "max_seconds": 517.43,
+        "mean_seconds": 379.33,
+        "median_seconds": 349.07,
+        "min_seconds": 267.08,
+        "p90_seconds": 517.43
+      },
       "insufficiency_reasons": [],
       "interventions": {
         "approvals_count": 0,
@@ -310,6 +387,13 @@
         "review_pass_rate": null,
         "verification_pass_rate": 0.0
       },
+      "successful_task_latency": {
+        "max_seconds": 431.08,
+        "mean_seconds": 363.42,
+        "median_seconds": 359.37,
+        "min_seconds": 299.54,
+        "p90_seconds": 431.08
+      },
       "task_class": "feature",
       "terminal_latency": {
         "max_seconds": 517.43,
@@ -336,6 +420,13 @@
       },
       "failure_count": 1,
       "failure_rate": 0.1667,
+      "failure_task_latency": {
+        "max_seconds": 320.68,
+        "mean_seconds": 320.68,
+        "median_seconds": 320.68,
+        "min_seconds": 320.68,
+        "p90_seconds": 320.68
+      },
       "insufficiency_reasons": [
         "insufficient_sample_size: 6 tasks (minimum 10)"
       ],
@@ -366,6 +457,13 @@
         "review_pass_rate": null,
         "verification_pass_rate": 0.0
       },
+      "successful_task_latency": {
+        "max_seconds": 533.73,
+        "mean_seconds": 440.71,
+        "median_seconds": 462.99,
+        "min_seconds": 347.89,
+        "p90_seconds": 533.73
+      },
       "task_class": "investigation",
       "terminal_latency": {
         "max_seconds": 533.73,
@@ -392,6 +490,13 @@
       },
       "failure_count": 6,
       "failure_rate": 0.6667,
+      "failure_task_latency": {
+        "max_seconds": 1130.31,
+        "mean_seconds": 886.38,
+        "median_seconds": 831.39,
+        "min_seconds": 677.67,
+        "p90_seconds": 1130.31
+      },
       "insufficiency_reasons": [
         "insufficient_sample_size: 9 tasks (minimum 10)"
       ],
@@ -422,6 +527,13 @@
         "review_pass_rate": null,
         "verification_pass_rate": 0.0
       },
+      "successful_task_latency": {
+        "max_seconds": 1436.95,
+        "mean_seconds": 1135.16,
+        "median_seconds": 1086.58,
+        "min_seconds": 881.93,
+        "p90_seconds": 1436.95
+      },
       "task_class": "investigation",
       "terminal_latency": {
         "max_seconds": 1436.95,
@@ -449,7 +561,7 @@
     "included_tasks_count": 55,
     "total_tasks_scanned": 434
   },
-  "generated_at": "2026-09-19T21:33:31.626169Z",
+  "generated_at": "2026-09-19T23:37:24.782095Z",
   "policy": {
     "as_of": "2026-09-19T21:32:22.562107Z",
     "confidence_level": 0.95,
@@ -545,6 +657,7 @@
           "accepted_count": 10,
           "accepted_rate_wilson_lower": 0.7225,
           "evidence_age_days": 1.0,
+          "failure_median_latency_seconds": null,
           "insufficiency_reasons": [],
           "is_eligible": true,
           "median_latency_seconds": 194.64,
@@ -552,12 +665,14 @@
           "oldest_evidence_timestamp": "2026-09-18T20:02:50.329182Z",
           "profile": "codex-native-executor-read-only",
           "rank": 1,
-          "sample_size": 10
+          "sample_size": 10,
+          "successful_median_latency_seconds": 194.64
         },
         {
           "accepted_count": 9,
           "accepted_rate_wilson_lower": 0.5958,
           "evidence_age_days": 1.0,
+          "failure_median_latency_seconds": 326.24,
           "insufficiency_reasons": [],
           "is_eligible": true,
           "median_latency_seconds": 150.67,
@@ -565,7 +680,8 @@
           "oldest_evidence_timestamp": "2026-09-18T19:52:16.291656Z",
           "profile": "antigravity-native-executor-read-only",
           "rank": 2,
-          "sample_size": 10
+          "sample_size": 10,
+          "successful_median_latency_seconds": 146.84
         }
       ],
       "recommended_profile": "codex-native-executor-read-only",
@@ -579,6 +695,7 @@
           "accepted_count": 0,
           "accepted_rate_wilson_lower": 0.0,
           "evidence_age_days": null,
+          "failure_median_latency_seconds": null,
           "insufficiency_reasons": [
             "insufficient_sample_size: 0 tasks (minimum 10)"
           ],
@@ -588,12 +705,14 @@
           "oldest_evidence_timestamp": null,
           "profile": "antigravity-native-executor",
           "rank": null,
-          "sample_size": 0
+          "sample_size": 0,
+          "successful_median_latency_seconds": null
         },
         {
           "accepted_count": 0,
           "accepted_rate_wilson_lower": 0.0,
           "evidence_age_days": null,
+          "failure_median_latency_seconds": null,
           "insufficiency_reasons": [
             "insufficient_sample_size: 0 tasks (minimum 10)"
           ],
@@ -603,7 +722,8 @@
           "oldest_evidence_timestamp": null,
           "profile": "codex-native-executor",
           "rank": null,
-          "sample_size": 0
+          "sample_size": 0,
+          "successful_median_latency_seconds": null
         }
       ],
       "recommended_profile": null,
@@ -617,6 +737,7 @@
           "accepted_count": 5,
           "accepted_rate_wilson_lower": 0.2366,
           "evidence_age_days": 0.0,
+          "failure_median_latency_seconds": 25.16,
           "insufficiency_reasons": [],
           "is_eligible": true,
           "median_latency_seconds": 76.65,
@@ -624,12 +745,14 @@
           "oldest_evidence_timestamp": "2026-09-19T17:21:54.289082Z",
           "profile": "antigravity-native-executor-read-only",
           "rank": 1,
-          "sample_size": 10
+          "sample_size": 10,
+          "successful_median_latency_seconds": 202.93
         },
         {
           "accepted_count": 5,
           "accepted_rate_wilson_lower": 0.2366,
           "evidence_age_days": 0.0,
+          "failure_median_latency_seconds": 349.07,
           "insufficiency_reasons": [],
           "is_eligible": true,
           "median_latency_seconds": 354.22,
@@ -637,7 +760,8 @@
           "oldest_evidence_timestamp": "2026-09-19T17:19:03.270870Z",
           "profile": "codex-native-executor-read-only",
           "rank": 2,
-          "sample_size": 10
+          "sample_size": 10,
+          "successful_median_latency_seconds": 359.37
         }
       ],
       "recommended_profile": "antigravity-native-executor-read-only",
@@ -651,6 +775,7 @@
           "accepted_count": 5,
           "accepted_rate_wilson_lower": 0.4365,
           "evidence_age_days": 0.1,
+          "failure_median_latency_seconds": 320.68,
           "insufficiency_reasons": [
             "insufficient_sample_size: 6 tasks (minimum 10)"
           ],
@@ -660,12 +785,14 @@
           "oldest_evidence_timestamp": "2026-09-19T16:59:20.320768Z",
           "profile": "antigravity-native-executor-read-only",
           "rank": null,
-          "sample_size": 6
+          "sample_size": 6,
+          "successful_median_latency_seconds": 462.99
         },
         {
           "accepted_count": 3,
           "accepted_rate_wilson_lower": 0.1206,
           "evidence_age_days": 0.0,
+          "failure_median_latency_seconds": 831.39,
           "insufficiency_reasons": [
             "insufficient_sample_size: 9 tasks (minimum 10)"
           ],
@@ -675,7 +802,8 @@
           "oldest_evidence_timestamp": "2026-09-19T17:14:03.297805Z",
           "profile": "codex-native-executor-read-only",
           "rank": null,
-          "sample_size": 9
+          "sample_size": 9,
+          "successful_median_latency_seconds": 1086.58
         }
       ],
       "recommended_profile": null,

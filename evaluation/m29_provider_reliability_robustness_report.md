@@ -2,7 +2,7 @@
 
 - **Status**: `partial`
 - **Evidence Scope**: `current_execution_cohort`
-- **Generated At**: `2026-09-19T21:33:57.071189+00:00`
+- **Generated At**: `2026-09-19T23:37:50.307178+00:00`
 - **Observation Reference (`as_of`)**: `2026-09-19T21:32:22.562107+00:00`
 - **Lookback Window**: 90 days (`2026-06-21T21:32:22.562107+00:00` to `2026-09-19T21:32:22.562107+00:00`)
 - **Minimum Samples Per Cell**: 10
@@ -77,7 +77,7 @@ Evaluates temporal stability across non-overlapping partitions of the 90-day win
 
 ## 4. Bootstrap Resampling Sensitivity
 
-Evaluates 10,000 deterministic bootstrap iterations (seed 29) resampling whole task observations independently per profile cell to preserve acceptance and latency correlation. Advisory-only descriptive results; no automated routing threshold is applied.
+Evaluates 10,000 deterministic bootstrap iterations (seed 29) resampling whole task observations independently per profile cell. Successful-task latency is the ranking tie-break metric; failure latency remains an operational metric in the canonical report. A separate Wave 3 paired supplement preserves topic-pair membership. Advisory-only descriptive results; no automated routing threshold is applied.
 
 ### Group: `docs` (read_only)
 - **Status**: `complete`

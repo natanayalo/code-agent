@@ -126,13 +126,18 @@ Temporal migration and rollback record is in the
   Refreshed canonical, operational, and robustness reports use that timestamp
   and a 10,000-iteration bootstrap with seed 29. The canonical report qualifies
   `feature/read_only` at $N=10$ vs $10$ (5/10 accepted for each provider) and
-  recommends `antigravity-native-executor-read-only` on lower median latency;
+  recommends `antigravity-native-executor-read-only` on lower successful-task
+  latency (202.93s versus 359.37s; terminal latency remains operational);
   `investigation/read_only` remains insufficient-data because authoritative
   `model_execution` identity is available for only $N=9$ Codex and $N=6$
   Antigravity cases, so the fail-closed extractor does not infer or backfill
-  missing samples. `feature/mutation` remains pending, robustness is `partial`
-  with no historical 45-day split, and M27 resumption remains deferred. Production
-  routing is static and unchanged.
+  missing samples. The feature recommendation is a terminal-completion/latency
+  advisory rather than an independently verified quality claim because persisted
+  verification warnings yield a strict 0% verification-pass metric. The committed
+  sanitized case manifest and paired supplement bind outcomes to the suite/build
+  without exposing the private bundle. `feature/mutation` remains pending,
+  robustness is `partial` with no historical 45-day split, and M27 resumption
+  remains deferred. Production routing is static and unchanged.
 
 ## Known limitations
 
