@@ -382,14 +382,17 @@ async def _evaluate_preflight_with_timeout(
     session_id: str | None,
     task_id: str | None,
     worker_type: str,
-) -> tuple[ProviderPreDispatchReport | None, float]:
+    context_timeout_seconds: float,
+) -> tuple[ProviderPreDispatchReport | None, float, bool]:
     """Evaluate preflight within its own deadline and report elapsed time."""
     loop = asyncio.get_running_loop()
     loop_start = loop.time()
+    preflight_timeout = min(service.preflight_timeout, max(0.0, context_timeout_seconds))
+    overall_budget_limited = context_timeout_seconds <= service.preflight_timeout
     try:
         report = await asyncio.wait_for(
             service.evaluate_pre_dispatch(context),
-            timeout=service.preflight_timeout,
+            timeout=preflight_timeout,
         )
     except TimeoutError:
         elapsed = loop.time() - loop_start
@@ -399,12 +402,13 @@ async def _evaluate_preflight_with_timeout(
                 "session_id": session_id,
                 "task_id": task_id,
                 "worker_type": worker_type,
-                "preflight_timeout_seconds": service.preflight_timeout,
+                "preflight_timeout_seconds": preflight_timeout,
+                "overall_budget_limited": overall_budget_limited,
                 "elapsed_seconds": elapsed,
             },
         )
-        return None, elapsed
-    return report, loop.time() - loop_start
+        return None, elapsed, overall_budget_limited
+    return report, loop.time() - loop_start, False
 
 
 def _preflight_timeout_result(
@@ -437,6 +441,39 @@ def _preflight_timeout_result(
             execution_not_started=True,
         ),
         "pre-dispatch diagnostics timed out before execution",
+    )
+
+
+def _preflight_budget_exhausted_result(
+    request: WorkerRequest,
+    context: ProviderExecutionContext,
+    timeout_seconds: float,
+) -> tuple[WorkerResult, str]:
+    """Build the terminal result when the outer deadline wins over preflight."""
+    report = _terminal_preflight_report(
+        context,
+        decision="preflight_budget_exhausted",
+        failure_kind="timeout",
+        next_action_hint="inspect_worker_configuration",
+        reason_code="preflight_budget_exhausted",
+        summary=(
+            "Provider pre-dispatch diagnostics consumed the execution timeout "
+            "envelope; worker launch was skipped."
+        ),
+    )
+    diagnostic_artifact = _preflight_diagnostic_artifact(report)
+    timeout_result = _timed_out_worker_result(timeout_seconds).model_copy(
+        update={
+            "summary": report.summary,
+            "workspace_id": request.workspace_id,
+            "artifacts": [diagnostic_artifact],
+            "preflight_rejected": True,
+            "execution_not_started": True,
+        }
+    )
+    return (
+        timeout_result,
+        "pre-dispatch diagnostics consumed the execution timeout envelope",
     )
 
 
@@ -559,13 +596,16 @@ async def execute_with_preflight(
         logical_execution_key=logical_execution_key,
         secret_registry=service.secret_registry,
     )
-    report, preflight_elapsed = await _evaluate_preflight_with_timeout(
+    report, preflight_elapsed, preflight_budget_exhausted = await _evaluate_preflight_with_timeout(
         service,
         ctx,
         session_id=session_id,
         task_id=task_id,
         worker_type=worker_type,
+        context_timeout_seconds=timeout_seconds,
     )
+    if report is None and preflight_budget_exhausted:
+        return _preflight_budget_exhausted_result(request, ctx, timeout_seconds)
     if report is None:
         return _preflight_timeout_result(request, ctx, service.preflight_timeout)
 
@@ -587,31 +627,7 @@ async def execute_with_preflight(
         )
 
     if remaining <= 0:
-        report = _terminal_preflight_report(
-            ctx,
-            decision="preflight_budget_exhausted",
-            failure_kind="timeout",
-            next_action_hint="inspect_worker_configuration",
-            reason_code="preflight_budget_exhausted",
-            summary=(
-                "Provider pre-dispatch diagnostics consumed the execution timeout "
-                "envelope; worker launch was skipped."
-            ),
-        )
-        diagnostic_artifact = _preflight_diagnostic_artifact(report)
-        timeout_result = _timed_out_worker_result(timeout_seconds).model_copy(
-            update={
-                "summary": report.summary,
-                "workspace_id": request.workspace_id,
-                "artifacts": [diagnostic_artifact],
-                "preflight_rejected": True,
-                "execution_not_started": True,
-            }
-        )
-        return (
-            timeout_result,
-            "pre-dispatch diagnostics consumed the execution timeout envelope",
-        )
+        return _preflight_budget_exhausted_result(request, ctx, timeout_seconds)
 
     result, progress = await _await_worker_with_timeout(
         worker,

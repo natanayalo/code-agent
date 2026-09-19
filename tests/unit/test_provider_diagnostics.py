@@ -202,6 +202,81 @@ def test_codex_openai_key_alias_is_validated(monkeypatch: pytest.MonkeyPatch) ->
     assert res.status == "ready"
 
 
+def test_codex_api_key_rejects_mismatched_destination() -> None:
+    registry = SecretRegistry(
+        [
+            RegisteredSecretDefinition(
+                name="misrouted_openai_key",
+                source=SecretSource.ENV,
+                source_key="OPENAI_API_KEY",
+                required_scope=SecretScope.PROVIDER_AUTH,
+                exposure_policy=SecretExposurePolicy.SANDBOX_ENV,
+                destination_env_var="OPENROUTER_API_KEY",
+            )
+        ]
+    )
+    svc = ProviderDiagnosticsService(
+        secret_registry=registry,
+        secret_env={"OPENAI_API_KEY": "sk-openai-test"},
+    )
+
+    res = svc.check_credentials(
+        _make_context(auth_mechanism="api_key", credential_refs=("misrouted_openai_key",))
+    )
+
+    assert res.status == "unready"
+    assert res.blocking
+    assert "wrong environment variable" in res.detail
+
+
+def test_codex_api_key_rejects_file_only_delivery() -> None:
+    registry = SecretRegistry(
+        [
+            RegisteredSecretDefinition(
+                name="file_only_openai_key",
+                source=SecretSource.FILE,
+                source_key="OPENAI_API_KEY",
+                required_scope=SecretScope.PROVIDER_AUTH,
+                exposure_policy=SecretExposurePolicy.SANDBOX_FILE,
+                destination_mount_name="openai-api-key",
+            )
+        ]
+    )
+    svc = ProviderDiagnosticsService(secret_registry=registry)
+
+    res = svc.check_credentials(
+        _make_context(auth_mechanism="api_key", credential_refs=("file_only_openai_key",))
+    )
+
+    assert res.status == "unready"
+    assert res.blocking
+    assert "file-only" in res.detail
+
+
+def test_codex_api_key_non_environment_source_is_unknown_until_resolvable() -> None:
+    definition = RegisteredSecretDefinition(
+        name="stored_openai_key",
+        source=SecretSource.SECRET_STORE,
+        source_key="provider/openai",
+        required_scope=SecretScope.PROVIDER_AUTH,
+        exposure_policy=SecretExposurePolicy.SANDBOX_ENV,
+        destination_env_var="OPENAI_API_KEY",
+    )
+    registry = SecretRegistry([definition])
+    context = _make_context(auth_mechanism="api_key", credential_refs=(definition.name,))
+
+    unknown = ProviderDiagnosticsService(secret_registry=registry).check_credentials(context)
+    resolved = ProviderDiagnosticsService(
+        secret_registry=registry,
+        secret_store={"provider/openai": "sk-openai-test"},
+    ).check_credentials(context)
+
+    assert unknown.status == "unknown"
+    assert unknown.blocking
+    assert "not locally inspectable" in unknown.detail
+    assert resolved.status == "ready"
+
+
 @pytest.mark.parametrize(
     ("required_scope", "exposure_policy", "expected_detail"),
     [

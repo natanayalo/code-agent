@@ -47,6 +47,24 @@ def _unready(
     )
 
 
+def _unknown(
+    detail: str,
+    remediation: str,
+    *,
+    verification_scope: VerificationScope = "local_presence",
+) -> DiagnosticCheckResult:
+    """Report a supported check whose backing material is outside local visibility."""
+    return DiagnosticCheckResult(
+        name="credentials",
+        category="credentials",
+        status="unknown",
+        detail=detail,
+        remediation=remediation,
+        verification_scope=verification_scope,
+        blocking=True,
+    )
+
+
 def _is_api_key_definition(definition: RegisteredSecretDefinition, expected_env_var: str) -> bool:
     return bool(
         definition
@@ -57,6 +75,109 @@ def _is_api_key_definition(definition: RegisteredSecretDefinition, expected_env_
     )
 
 
+def _source_value(
+    definition: RegisteredSecretDefinition,
+    *,
+    secret_env: Mapping[str, str],
+    secret_store: Mapping[str, str] | None,
+    file_store: Mapping[str, str] | None,
+    ephemeral_store: object | None,
+    task_id: str | None,
+) -> tuple[bool, str | None]:
+    """Return source inspectability and material without exposing the material."""
+    if definition.source == SecretSource.ENV:
+        return True, secret_env.get(definition.source_key)
+    if definition.source == SecretSource.SECRET_STORE:
+        if secret_store is None:
+            return False, None
+        return True, secret_store.get(definition.source_key)
+    if definition.source == SecretSource.FILE:
+        if file_store is None:
+            return False, None
+        return True, file_store.get(definition.source_key)
+    if definition.source == SecretSource.EPHEMERAL:
+        if ephemeral_store is None:
+            return False, None
+        try:
+            if isinstance(ephemeral_store, Mapping):
+                return True, ephemeral_store.get(definition.source_key)
+            getter = getattr(ephemeral_store, "get", None)
+            if getter is None:
+                return False, None
+            return True, getter(definition.source_key, task_id=task_id)
+        except Exception:
+            return False, None
+    return False, None
+
+
+def _validate_api_key_definition(
+    context: ProviderExecutionContext,
+    definition: RegisteredSecretDefinition,
+    *,
+    expected_env_var: str,
+    provider_label: str,
+    secret_env: Mapping[str, str],
+    secret_store: Mapping[str, str] | None,
+    file_store: Mapping[str, str] | None,
+    ephemeral_store: object | None,
+) -> DiagnosticCheckResult:
+    """Validate scope, delivery destination, and source resolution for one definition."""
+    if definition.required_scope != SecretScope.PROVIDER_AUTH:
+        return _unready(
+            f"Registered {provider_label} API key lacks provider_auth scope.",
+            "Register the provider key with required_scope=provider_auth.",
+        )
+    if definition.exposure_policy not in (
+        SecretExposurePolicy.SANDBOX_ENV,
+        SecretExposurePolicy.SANDBOX_FILE,
+    ):
+        return _unready(
+            f"Registered {provider_label} API key is not exposed to the worker sandbox.",
+            "Use exposure_policy=sandbox_env or sandbox_file for provider execution.",
+        )
+    if definition.exposure_policy != SecretExposurePolicy.SANDBOX_ENV:
+        return _unready(
+            f"Registered {provider_label} API key is file-only, but the provider consumes "
+            f"{expected_env_var} from its environment.",
+            f"Expose the {provider_label} API key with destination_env_var={expected_env_var}.",
+        )
+    if definition.destination_env_var != expected_env_var:
+        return _unready(
+            f"Registered {provider_label} API key is delivered to the wrong environment "
+            f"variable; expected {expected_env_var}.",
+            f"Set destination_env_var={expected_env_var} for the provider key.",
+        )
+
+    source_inspectable, source_value = _source_value(
+        definition,
+        secret_env=secret_env,
+        secret_store=secret_store,
+        file_store=file_store,
+        ephemeral_store=ephemeral_store,
+        task_id=context.task_id,
+    )
+    if not source_inspectable:
+        return _unknown(
+            f"Registered {provider_label} API key source resolution is not locally inspectable.",
+            "Verify the configured worker secret resolver can resolve the provider key "
+            "before dispatch.",
+        )
+    if not str(source_value or "").strip():
+        return _unready(
+            f"Registered {provider_label} API key source is empty.",
+            f"Populate the configured source for the {provider_label} API key before "
+            "dispatching the provider.",
+        )
+    return DiagnosticCheckResult(
+        name="credentials",
+        category="credentials",
+        status="ready",
+        detail=f"{provider_label} API key resolved for provider execution.",
+        verification_scope="local_presence",
+        blocking=False,
+    )
+
+
 def _registered_api_key_check(
     context: ProviderExecutionContext,
     secret_registry: SecretRegistry,
@@ -64,6 +185,9 @@ def _registered_api_key_check(
     *,
     expected_env_var: str,
     provider_label: str,
+    secret_store: Mapping[str, str] | None = None,
+    file_store: Mapping[str, str] | None = None,
+    ephemeral_store: object | None = None,
 ) -> DiagnosticCheckResult | None:
     """Validate a referenced provider key against its actual registered source."""
     if not context.credential_refs:
@@ -91,42 +215,19 @@ def _registered_api_key_check(
 
     last_failure: DiagnosticCheckResult | None = None
     for definition in matching:
-        if definition.required_scope != SecretScope.PROVIDER_AUTH:
-            last_failure = _unready(
-                f"Registered {provider_label} API key lacks provider_auth scope.",
-                "Register the provider key with required_scope=provider_auth.",
-            )
-            continue
-        if definition.exposure_policy not in (
-            SecretExposurePolicy.SANDBOX_ENV,
-            SecretExposurePolicy.SANDBOX_FILE,
-        ):
-            last_failure = _unready(
-                f"Registered {provider_label} API key is not exposed to the worker sandbox.",
-                "Use exposure_policy=sandbox_env or sandbox_file for provider execution.",
-            )
-            continue
-        if definition.source == SecretSource.ENV:
-            if not str(secret_env.get(definition.source_key, "")).strip():
-                last_failure = _unready(
-                    f"Registered {provider_label} API key source is empty.",
-                    f"Set {definition.source_key} before dispatching the provider.",
-                )
-                continue
-        else:
-            last_failure = _unready(
-                f"Registered {provider_label} API key source cannot be verified by preflight.",
-                "Provide the provider key through the effective worker secret environment.",
-            )
-            continue
-        return DiagnosticCheckResult(
-            name="credentials",
-            category="credentials",
-            status="ready",
-            detail=f"{provider_label} API key resolved for provider execution.",
-            verification_scope="local_presence",
-            blocking=False,
+        result = _validate_api_key_definition(
+            context,
+            definition,
+            expected_env_var=expected_env_var,
+            provider_label=provider_label,
+            secret_env=secret_env,
+            secret_store=secret_store,
+            file_store=file_store,
+            ephemeral_store=ephemeral_store,
         )
+        if result.status == "ready":
+            return result
+        last_failure = result
 
     return last_failure
 
@@ -180,6 +281,9 @@ def check_codex_credentials(
     *,
     secret_env: Mapping[str, str] | None = None,
     effective_api_key_configured: bool | None = None,
+    secret_store: Mapping[str, str] | None = None,
+    file_store: Mapping[str, str] | None = None,
+    ephemeral_store: object | None = None,
 ) -> DiagnosticCheckResult:
     """Validate Codex credentials for either API key or ChatGPT OAuth mode."""
     if context.auth_mechanism == "api_key":
@@ -190,6 +294,9 @@ def check_codex_credentials(
             env,
             expected_env_var="OPENAI_API_KEY",
             provider_label="OpenAI",
+            secret_store=secret_store,
+            file_store=file_store,
+            ephemeral_store=ephemeral_store,
         )
         if referenced is not None:
             return referenced
@@ -229,7 +336,7 @@ def check_codex_credentials(
             category="credentials",
             status="unready",
             detail=(
-                "Codex auth.json is malformed or unreadable: " f"{_credential_error_category(exc)}"
+                f"Codex auth.json is malformed or unreadable: {_credential_error_category(exc)}"
             ),
             remediation=(
                 "Re-authenticate with 'docker compose run --rm --no-deps worker codex login'."
@@ -294,7 +401,7 @@ def check_antigravity_credentials(context: ProviderExecutionContext) -> Diagnost
             name="credentials",
             category="credentials",
             status="unready",
-            detail=("Antigravity token file is unreadable: " f"{_credential_error_category(exc)}"),
+            detail=(f"Antigravity token file is unreadable: {_credential_error_category(exc)}"),
             remediation="Run 'scripts/bootstrap_antigravity_auth.sh' to recreate the token.",
             verification_scope="local_structure",
             blocking=True,
@@ -316,6 +423,9 @@ def check_openrouter_credentials(
     *,
     secret_env: Mapping[str, str] | None = None,
     effective_api_key_configured: bool | None = None,
+    secret_store: Mapping[str, str] | None = None,
+    file_store: Mapping[str, str] | None = None,
+    ephemeral_store: object | None = None,
 ) -> DiagnosticCheckResult:
     """Validate OpenRouter API key configuration in registered secrets or environment."""
     env = os.environ if secret_env is None else secret_env
@@ -325,6 +435,9 @@ def check_openrouter_credentials(
         env,
         expected_env_var="OPENROUTER_API_KEY",
         provider_label="OpenRouter",
+        secret_store=secret_store,
+        file_store=file_store,
+        ephemeral_store=ephemeral_store,
     )
     if referenced is not None:
         return referenced
@@ -346,6 +459,9 @@ def check_provider_credentials(
     *,
     secret_env: Mapping[str, str] | None = None,
     effective_api_key_configured: bool | None = None,
+    secret_store: Mapping[str, str] | None = None,
+    file_store: Mapping[str, str] | None = None,
+    ephemeral_store: object | None = None,
 ) -> DiagnosticCheckResult:
     """Entrypoint for validating credentials across all provider types."""
     if context.provider == "codex":
@@ -354,6 +470,9 @@ def check_provider_credentials(
             secret_registry,
             secret_env=secret_env,
             effective_api_key_configured=effective_api_key_configured,
+            secret_store=secret_store,
+            file_store=file_store,
+            ephemeral_store=ephemeral_store,
         )
     if context.provider == "antigravity":
         return check_antigravity_credentials(context)
@@ -363,6 +482,9 @@ def check_provider_credentials(
             secret_registry,
             secret_env=secret_env,
             effective_api_key_configured=effective_api_key_configured,
+            secret_store=secret_store,
+            file_store=file_store,
+            ephemeral_store=ephemeral_store,
         )
     return DiagnosticCheckResult(
         name="credentials",

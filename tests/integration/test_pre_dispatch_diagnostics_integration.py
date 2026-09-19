@@ -211,6 +211,37 @@ async def test_hanging_preflight_times_out_without_launching_worker() -> None:
 
 
 @pytest.mark.asyncio
+async def test_hanging_preflight_respects_short_overall_timeout() -> None:
+    worker = FakeWorker()
+    service = ProviderDiagnosticsService(preflight_timeout=5.0)
+    request = WorkerRequest(task_text="Short overall budget", session_id="sess-short-budget")
+
+    async def hang(_context: object) -> ProviderPreDispatchReport:
+        await asyncio.sleep(100)
+        raise AssertionError("unreachable")
+
+    started = asyncio.get_running_loop().time()
+    with patch.object(service, "evaluate_pre_dispatch", side_effect=hang):
+        result, progress = await execute_with_preflight(
+            worker,
+            request,
+            worker_type="codex",
+            session_id="sess-short-budget",
+            timeout_seconds=0.01,
+            diagnostics_service=service,
+        )
+    elapsed = asyncio.get_running_loop().time() - started
+
+    assert elapsed < 1.0
+    assert not worker.run_called
+    assert result.failure_kind == "timeout"
+    assert result.preflight_rejected
+    assert result.execution_not_started
+    assert "consumed the execution timeout envelope" in progress
+    assert result.artifacts[0].artifact_metadata["decision"] == "preflight_budget_exhausted"
+
+
+@pytest.mark.asyncio
 async def test_preflight_elapsed_time_is_deducted_from_worker_timeout() -> None:
     worker = FakeWorker()
     service = ProviderDiagnosticsService(preflight_timeout=1.0)

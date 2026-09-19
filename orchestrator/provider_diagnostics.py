@@ -249,6 +249,9 @@ class ProviderDiagnosticsService:
         *,
         secret_registry: SecretRegistry | None = None,
         secret_env: Mapping[str, str] | None = None,
+        secret_store: Mapping[str, str] | None = None,
+        file_store: Mapping[str, str] | None = None,
+        ephemeral_store: object | None = None,
         effective_api_key_configured: bool | None = None,
         worker: Any | None = None,
         docker_probe_timeout: float = DEFAULT_DOCKER_PROBE_TIMEOUT_SECONDS,
@@ -258,6 +261,21 @@ class ProviderDiagnosticsService:
             secret_registry if secret_registry is not None else DEFAULT_SECRET_REGISTRY
         )
         self.secret_env = dict(os.environ if secret_env is None else secret_env)
+        configured_secret_store = (
+            secret_store if secret_store is not None else getattr(worker, "secret_store", None)
+        )
+        configured_file_store = (
+            file_store if file_store is not None else getattr(worker, "file_store", None)
+        )
+        self.secret_store = (
+            dict(configured_secret_store) if configured_secret_store is not None else None
+        )
+        self.file_store = dict(configured_file_store) if configured_file_store is not None else None
+        self.ephemeral_store = (
+            ephemeral_store
+            if ephemeral_store is not None
+            else getattr(worker, "ephemeral_store", None)
+        )
         self.effective_api_key_configured = effective_api_key_configured
         if self.effective_api_key_configured is None and worker is not None:
             worker_type = str(getattr(worker, "worker_type", "")).lower()
@@ -271,6 +289,9 @@ class ProviderDiagnosticsService:
             self.secret_registry,
             secret_env=self.secret_env,
             effective_api_key_configured=self.effective_api_key_configured,
+            secret_store=self.secret_store,
+            file_store=self.file_store,
+            ephemeral_store=self.ephemeral_store,
         )
 
     async def _probe_docker_process(self) -> tuple[int | None, str, str]:
