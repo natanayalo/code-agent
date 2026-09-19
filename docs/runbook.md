@@ -75,6 +75,15 @@ Expected mounts:
 - `${CODE_AGENT_CODEX_AUTH_DIR}` -> `/root/.codex` (required)
 - `${CODE_AGENT_ANTIGRAVITY_AUTH_DIR}` -> `/root/.gemini` (optional unless Antigravity worker is used)
 
+Preflight and native execution share the same auth-directory resolution. Codex
+checks `CODE_AGENT_CODEX_AUTH_DIR`, then `CODEX_HOME`, then the user and
+container home defaults; OAuth uses the first directory containing `auth.json`.
+Antigravity checks `CODE_AGENT_ANTIGRAVITY_AUTH_DIR`, `GEMINI_HOME`,
+`CODE_AGENT_GEMINI_AUTH_DIR`, then the user and container home defaults; it
+uses the first directory containing the Antigravity OAuth token. If an earlier
+directory is configured but lacks the required credential, a later valid
+fallback is used by both preflight and execution.
+
 Bootstrap on host (ensure CLIs are installed and in PATH):
 
 ```bash

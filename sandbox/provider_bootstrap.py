@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -22,6 +24,73 @@ from sandbox.secrets import (
 
 class ProviderBootstrapError(Exception):
     """Raised when a trusted provider directory is missing required bootstrap files."""
+
+
+def _append_candidate(candidates: list[Path], value: str | None) -> None:
+    """Append a non-empty, expanded path once while preserving precedence."""
+    if not value or not value.strip():
+        return
+    candidate = Path(value).expanduser()
+    if candidate not in candidates:
+        candidates.append(candidate)
+
+
+def _first_directory_with_file(candidates: list[Path], filename: str | None) -> Path:
+    """Return the first candidate containing the required provider file."""
+    for candidate in candidates:
+        try:
+            if (filename is None and candidate.is_dir()) or (
+                filename is not None and (candidate / filename).is_file()
+            ):
+                return candidate
+        except OSError:
+            continue
+    return candidates[0]
+
+
+def resolve_codex_provider_dir(
+    environ: Mapping[str, str] | None = None,
+    *,
+    adapter_env: Mapping[str, str] | None = None,
+    required_file: str | None = "auth.json",
+) -> Path:
+    """Resolve the Codex directory used by diagnostics and native execution."""
+    process_env = os.environ if environ is None else environ
+    adapter_values = adapter_env or {}
+    candidates: list[Path] = []
+    _append_candidate(candidates, process_env.get("CODE_AGENT_CODEX_AUTH_DIR"))
+    _append_candidate(candidates, adapter_values.get("CODEX_HOME"))
+    _append_candidate(candidates, process_env.get("CODEX_HOME"))
+    try:
+        _append_candidate(candidates, str(Path.home() / ".codex"))
+    except OSError:  # pragma: no cover - platform home lookup failure
+        pass
+    _append_candidate(candidates, "/root/.codex")
+    return _first_directory_with_file(candidates, required_file)
+
+
+def resolve_antigravity_provider_dir(
+    environ: Mapping[str, str] | None = None,
+    *,
+    adapter_env: Mapping[str, str] | None = None,
+) -> Path:
+    """Resolve the Antigravity token directory used by diagnostics and execution."""
+    process_env = os.environ if environ is None else environ
+    adapter_values = adapter_env or {}
+    candidates: list[Path] = []
+    _append_candidate(candidates, process_env.get("CODE_AGENT_ANTIGRAVITY_AUTH_DIR"))
+    _append_candidate(candidates, adapter_values.get("GEMINI_HOME"))
+    _append_candidate(candidates, process_env.get("GEMINI_HOME"))
+    _append_candidate(candidates, process_env.get("CODE_AGENT_GEMINI_AUTH_DIR"))
+    try:
+        _append_candidate(candidates, str(Path.home() / ".gemini"))
+    except OSError:  # pragma: no cover - platform home lookup failure
+        pass
+    _append_candidate(candidates, "/root/.gemini")
+    return _first_directory_with_file(
+        candidates,
+        "antigravity-cli/antigravity-oauth-token",
+    )
 
 
 @dataclass(frozen=True)

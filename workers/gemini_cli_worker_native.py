@@ -130,33 +130,9 @@ def _native_gemini_home(workspace_path: Path, scratch_namespace: str | None) -> 
 
 def _antigravity_provider_dir(adapter: AntigravityCliRuntimeAdapter) -> Path:
     """Find the trusted AGY token directory without loading generic Gemini OAuth."""
-    candidates: list[Path] = []
-    configured_agy_dir = os.environ.get("CODE_AGENT_ANTIGRAVITY_AUTH_DIR")
-    if configured_agy_dir:
-        candidates.append(Path(configured_agy_dir))
-    adapter_gemini_home = adapter.env.get("GEMINI_HOME")
-    if adapter_gemini_home:
-        candidates.append(Path(adapter_gemini_home))
-    env_gemini_home = os.environ.get("GEMINI_HOME")
-    if env_gemini_home:
-        candidates.append(Path(env_gemini_home))
-    configured_auth_dir = os.environ.get("CODE_AGENT_GEMINI_AUTH_DIR")
-    if configured_auth_dir:
-        candidates.append(Path(configured_auth_dir))
-    try:
-        candidates.append(Path.home() / ".gemini")
-    except OSError:  # pragma: no cover - platform home lookup failure
-        pass
-    candidates.append(Path("/root/.gemini"))
+    from sandbox.provider_bootstrap import resolve_antigravity_provider_dir
 
-    for candidate in candidates:
-        provider_dir = candidate.expanduser()
-        try:
-            if (provider_dir / "antigravity-cli" / "antigravity-oauth-token").is_file():
-                return provider_dir
-        except OSError:
-            continue
-    return candidates[0].expanduser() if candidates else Path("/root/.gemini")
+    return resolve_antigravity_provider_dir(adapter_env=adapter.env)
 
 
 def _register_antigravity_token_fields(redactor: SecretRedactor, token: str) -> None:

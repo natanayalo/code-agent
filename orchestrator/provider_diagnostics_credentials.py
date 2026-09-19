@@ -12,6 +12,10 @@ from orchestrator.provider_diagnostics_types import (
     ProviderExecutionContext,
     VerificationScope,
 )
+from sandbox.provider_bootstrap import (
+    resolve_antigravity_provider_dir,
+    resolve_codex_provider_dir,
+)
 from sandbox.secrets import (
     RegisteredSecretDefinition,
     SecretExposurePolicy,
@@ -287,24 +291,12 @@ def _effective_api_key_check(
 
 def resolve_codex_auth_path() -> Path:
     """Return effective Codex auth.json path based on environment precedence."""
-    configured = os.environ.get("CODE_AGENT_CODEX_AUTH_DIR")
-    if configured:
-        return Path(configured).expanduser() / "auth.json"
-    codex_home = os.environ.get("CODEX_HOME")
-    if codex_home:
-        return Path(codex_home).expanduser() / "auth.json"
-    return Path.home() / ".codex" / "auth.json"
+    return resolve_codex_provider_dir() / "auth.json"
 
 
 def resolve_antigravity_token_path() -> Path:
     """Return effective Antigravity OAuth token path based on environment precedence."""
-    configured = os.environ.get("CODE_AGENT_ANTIGRAVITY_AUTH_DIR")
-    if configured:
-        return Path(configured).expanduser() / "antigravity-cli" / "antigravity-oauth-token"
-    gemini_home = os.environ.get("GEMINI_HOME")
-    if gemini_home:
-        return Path(gemini_home).expanduser() / "antigravity-cli" / "antigravity-oauth-token"
-    return Path.home() / ".gemini" / "antigravity-cli" / "antigravity-oauth-token"
+    return resolve_antigravity_provider_dir() / "antigravity-cli" / "antigravity-oauth-token"
 
 
 def check_codex_credentials(
