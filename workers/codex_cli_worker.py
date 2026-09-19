@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from apps.observability import (
@@ -25,7 +25,7 @@ from sandbox import (
     WorkspaceManagerError,
     WorkspaceRequest,
 )
-from sandbox.secrets import EphemeralSecretStore
+from sandbox.secrets import EphemeralSecretStore, SecretRegistry
 from sandbox.workspace import _mask_url_credentials, default_workspace_root
 from tools import (
     DEFAULT_TOOL_REGISTRY,
@@ -146,6 +146,8 @@ class CodexCliWorker(CodexCliWorkerNativeMixin, Worker):
         native_event_capture_enabled: bool = False,
         trusted_repo_patterns: list[str] | None = None,
         ephemeral_store: EphemeralSecretStore | None = None,
+        secret_registry: SecretRegistry | None = None,
+        secret_env: Mapping[str, str] | None = None,
     ) -> None:
         self.runtime_adapter = runtime_adapter
         self.tool_registry = tool_registry or DEFAULT_TOOL_REGISTRY
@@ -166,6 +168,8 @@ class CodexCliWorker(CodexCliWorkerNativeMixin, Worker):
         self.native_sandbox_mode = native_sandbox_mode.strip() or DEFAULT_CODEX_NATIVE_SANDBOX_MODE
         # Opt-in via CODE_AGENT_NATIVE_EVENT_CAPTURE_ENABLED.
         self.native_event_capture_enabled = native_event_capture_enabled
+        self.secret_registry = secret_registry
+        self.secret_env = secret_env
         self.trusted_repo_patterns: list[re.Pattern[str]] = []
         if trusted_repo_patterns:
             for pattern in trusted_repo_patterns:
@@ -427,6 +431,7 @@ class CodexCliWorker(CodexCliWorkerNativeMixin, Worker):
             DockerSandboxContainerError,
             DockerShellSessionError,
             OSError,
+            RuntimeError,
             UnknownToolError,
         ) as exc:
             result = _workspace_error_result(

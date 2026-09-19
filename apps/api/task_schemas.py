@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from db.enums import WorkerType
 from orchestrator.execution import SubmissionSession, TaskReplayRequest, validate_callback_url
-from sandbox.secrets import SecretRef
+from sandbox.secrets import DeprecatedLegacySecretsError, SecretRef
 
 
 class ScoutTriggerRequest(BaseModel):
@@ -60,11 +60,28 @@ class CreateTaskRequest(BaseModel):
     worker_profile_override: str | None = Field(default=None, min_length=1, max_length=255)
     constraints: dict[str, Any] = Field(default_factory=dict)
     budget: dict[str, Any] = Field(default_factory=dict)
-    secrets: dict[str, str] = Field(default_factory=dict)
+    secrets: dict[str, str] = Field(default_factory=dict, deprecated=True)
     secret_refs: tuple[SecretRef, ...] = Field(default_factory=tuple)
     tools: list[str] | None = None
     callback_url: str | None = Field(default=None, max_length=2048)
     session: SubmissionSession | None = None
+
+    @field_validator("secrets")
+    @classmethod
+    def _validate_no_raw_secrets(cls, v: dict[str, str]) -> dict[str, str]:
+        if v:
+            raise DeprecatedLegacySecretsError(
+                "Legacy raw secrets are no longer accepted. Use secret_refs instead."
+            )
+        return v
+
+    @field_validator("secret_refs")
+    @classmethod
+    def _validate_secret_refs(cls, v: tuple[SecretRef, ...]) -> tuple[SecretRef, ...]:
+        for ref in v:
+            if ref.metadata:
+                raise ValueError("SecretRef metadata must be empty for security policy compliance.")
+        return v
 
     @field_validator("callback_url")
     @classmethod
@@ -79,7 +96,6 @@ class SanitizedCreateTaskIngress:
     """Pre-sanitized ingress payload for task creation."""
 
     request: CreateTaskRequest
-    raw_secrets: dict[str, str] = field(repr=False)
 
 
 @dataclass
@@ -87,4 +103,3 @@ class SanitizedTaskReplayIngress:
     """Pre-sanitized ingress payload for task replay."""
 
     request: TaskReplayRequest | None
-    raw_secrets: dict[str, str] = field(repr=False)

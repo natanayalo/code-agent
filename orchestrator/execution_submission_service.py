@@ -51,15 +51,37 @@ from repositories import (
     WorkerRunRepository,
     session_scope,
 )
-from sandbox.ephemeral_store_postgres import PostgresEphemeralSecretStore
-from sandbox.ingress import IngressMigrationAdapter
-from sandbox.secrets import DEFAULT_SECRET_REGISTRY, SecretRef
+from sandbox.secrets import (
+    DEFAULT_SECRET_REGISTRY,
+    DeprecatedLegacySecretsError,
+    SecretRef,
+)
 
 logger = logging.getLogger("orchestrator.execution")
 
 
 def _normalize_and_validate_submission(self: Any, submission: TaskSubmission) -> TaskSubmission:
     """Normalize execution overrides and validate profile selections before persistence."""
+    if submission.secrets:
+        raise DeprecatedLegacySecretsError(
+            "Legacy raw secrets are no longer accepted. Use secret_refs instead."
+        )
+    registry = (
+        self.secret_registry
+        if getattr(self, "secret_registry", None) is not None
+        else DEFAULT_SECRET_REGISTRY
+    )
+    for ref in submission.secret_refs:
+        if ref.metadata:
+            raise TaskSubmissionValidationError(
+                f"Secret reference '{ref.name}' contains non-empty metadata, "
+                "which is not permitted at ingress."
+            )
+        definition = registry.get(ref.name)
+        if definition is None:
+            raise TaskSubmissionValidationError(
+                f"Secret reference '{ref.name}' is not registered in authoritative SecretRegistry"
+            )
     if (
         submission.worker_profile_override is not None
         and self.enable_worker_profiles
@@ -92,6 +114,10 @@ def replay_task(
     raw_secrets: dict[str, str] | None = None,
 ) -> TaskReplayResult:
     """Create a new task by replaying a prior terminal task with optional overrides."""
+    if raw_secrets or (replay_request is not None and replay_request.secrets):
+        raise DeprecatedLegacySecretsError(
+            "Legacy raw secrets are no longer accepted. Use secret_refs instead."
+        )
     source_snapshot = self.get_task(source_task_id)
     if source_snapshot is None:
         return TaskReplayResult(
@@ -120,7 +146,17 @@ def replay_task(
                 "could not be resolved for replay."
             ),
         )
-    submission, _ = loaded
+    submission, persisted_context = loaded
+    if getattr(persisted_context, "has_legacy_credentials", False):
+        if not (replay_request is not None and replay_request.secret_refs):
+            return TaskReplayResult(
+                status="validation_error",
+                source_task_id=source_task_id,
+                detail=(
+                    "This task uses legacy credentials. "
+                    "Submit a new task with registered secret_refs."
+                ),
+            )
     updates: dict[str, Any] = {}
     if replay_request is not None:
         if replay_request.worker_override is not None:
@@ -139,8 +175,6 @@ def replay_task(
                 replay_request.budget,
                 reserved_keys={"replayed_from"},
             )
-        if replay_request.secrets is not None:
-            updates["secrets"] = dict(replay_request.secrets)
         if replay_request.secret_refs is not None:
             updates["secret_refs"] = tuple(replay_request.secret_refs)
 
@@ -171,7 +205,7 @@ def replay_task(
     updates["constraints"]["replayed_from"] = [source_task_id, *existing_chain]
 
     submission = submission.model_copy(update=updates)
-    task_snapshot, _ = self.create_task(submission, raw_secrets=raw_secrets)
+    task_snapshot, _ = self.create_task(submission)
     logger.info(
         "Replayed task created from source",
         extra={
@@ -195,7 +229,6 @@ def _persist_submission(
     status: TaskStatus,
     max_attempts: int,
     delivery_key: DeliveryKey | None = None,
-    raw_secrets: dict[str, str] | None = None,
 ) -> tuple[_PersistedTaskContext | None, str | None]:
     """Create or restore the session scaffolding for a submitted task."""
     now = utc_now()
@@ -255,6 +288,8 @@ def _persist_submission(
         task_id = str(uuid.uuid4())
         trace_context = capture_trace_context()
 
+        assert not submission.secrets, "submission.secrets must be empty"
+
         task = task_repo.create(
             task_id=task_id,
             session_id=conversation_session.id,
@@ -264,7 +299,7 @@ def _persist_submission(
             callback_url=submission.callback_url,
             worker_override=submission.worker_override,
             budget=submission.budget,
-            secrets=dict(submission.secrets),
+            secrets={},
             secret_refs=submission.secret_refs,
             task_spec=task_spec,
             trace_context=trace_context,
@@ -277,18 +312,6 @@ def _persist_submission(
             repair_for_task_id=submission.repair_for_task_id,
             orchestration_runtime=OrchestrationRuntime.TEMPORAL,
         )
-        if raw_secrets:
-            store = PostgresEphemeralSecretStore(session)
-            adapted_refs = IngressMigrationAdapter.adapt_and_register_ephemeral(
-                {"task_text": "placeholder", "secrets": raw_secrets},
-                registry=DEFAULT_SECRET_REGISTRY,
-                ephemeral_store=store,
-                task_id=task_id,
-            )
-            task.secret_refs = [
-                ref.model_dump(mode="json") for ref in (*submission.secret_refs, *adapted_refs)
-            ]
-            session.flush()
         interaction_repo.sync_task_spec_flags(task_id=task.id, task_spec=task_spec)
         TemporalCommandRepository(session).enqueue(
             task_id=task.id,
@@ -389,6 +412,11 @@ def _load_submission_for_task(
             return None
         task_constraints = dict(task.constraints or {})
         worker_profile_override = task_constraints.pop("worker_profile_override", None)
+        task_secrets = dict(task.secrets or {})
+        task_secret_refs = tuple(SecretRef.model_validate(r) for r in (task.secret_refs or ()))
+        has_legacy_credentials = bool(task_secrets) or any(
+            r.name.startswith("ephem_") for r in task_secret_refs
+        )
         submission = TaskSubmission(
             task_text=task.task_text,
             repo_url=task.repo_url,
@@ -397,8 +425,8 @@ def _load_submission_for_task(
             worker_profile_override=worker_profile_override,
             constraints=task_constraints,
             budget=dict(task.budget or {}),
-            secrets=dict(task.secrets or {}),
-            secret_refs=tuple(SecretRef.model_validate(r) for r in (task.secret_refs or ())),
+            secrets={},
+            secret_refs=task_secret_refs,
             callback_url=task.callback_url,
             tools=task_constraints.get("tools"),
             priority=task.priority,
@@ -488,6 +516,7 @@ def _load_submission_for_task(
             orchestration_runtime=(
                 task.orchestration_runtime.value if task.orchestration_runtime is not None else None
             ),
+            has_legacy_credentials=has_legacy_credentials,
         )
         return submission, persisted
 

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import abc
 import enum
+import json
+import logging
 import re
 from collections.abc import Iterator, Mapping, Sequence
 from typing import Any, Final
@@ -28,9 +30,15 @@ _RE_FQDN: Final[re.Pattern[str]] = re.compile(
     r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$"
 )
 
+logger = logging.getLogger(__name__)
+
 
 class CapabilityViolationError(RuntimeError):
     """Raised when a capability grant or execution request violates security policy."""
+
+
+class DeprecatedLegacySecretsError(CapabilityViolationError):
+    """Raised when legacy raw secrets are used after the deprecation cutoff."""
 
 
 class SecretResolutionError(CapabilityViolationError):
@@ -477,7 +485,239 @@ class SecretRegistry:
         return iter(self._definitions.values())
 
 
-DEFAULT_SECRET_REGISTRY: Final[SecretRegistry] = SecretRegistry()
+def _parse_custom_secret_json(
+    raw_custom: str, existing_names: set[str]
+) -> list[RegisteredSecretDefinition]:
+    """Parse JSON array or object of custom secret definitions."""
+    definitions: list[RegisteredSecretDefinition] = []
+    try:
+        parsed = json.loads(raw_custom)
+    except (json.JSONDecodeError, ValueError) as exc:
+        logger.warning("Failed to parse CODE_AGENT_REGISTERED_SECRETS as JSON: %s", exc)
+        return []
+
+    items = parsed if isinstance(parsed, list) else [parsed]
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name", "")).strip()
+        if not name or name in existing_names:
+            continue
+        existing_names.add(name)
+        safe_prefix = name.upper().replace("-", "_")
+        raw_hosts = item.get("permitted_egress_hosts", ())
+        hosts = tuple(normalize_fqdn(h) for h in raw_hosts) if raw_hosts else ()
+        raw_policy = item.get("exposure_policy")
+        if raw_policy:
+            policy = SecretExposurePolicy(raw_policy)
+        elif hosts:
+            policy = SecretExposurePolicy.SANDBOX_ENV
+        else:
+            policy = SecretExposurePolicy.BROKER_ONLY
+
+        if policy == SecretExposurePolicy.SANDBOX_ENV:
+            dest_env = item.get("destination_env_var") or f"CODE_AGENT_SECRET_{safe_prefix}"
+            dest_mount = None
+        elif policy == SecretExposurePolicy.SANDBOX_FILE:
+            dest_env = None
+            dest_mount = item.get("destination_mount_name") or item.get("destination_mount_path")
+        else:
+            dest_env = None
+            dest_mount = None
+
+        definitions.append(
+            RegisteredSecretDefinition(
+                name=name,
+                source=SecretSource(item.get("source", SecretSource.ENV.value)),
+                source_key=str(item.get("source_key", safe_prefix)),
+                required_scope=SecretScope(item.get("required_scope", SecretScope.CUSTOM.value)),
+                exposure_policy=policy,
+                permitted_egress_hosts=hosts,
+                destination_env_var=dest_env,
+                destination_mount_path=dest_mount,
+            )
+        )
+    return definitions
+
+
+def _parse_custom_secret_delimited(
+    raw_custom: str, environ: Mapping[str, str], existing_names: set[str]
+) -> list[RegisteredSecretDefinition]:
+    """Parse comma-delimited custom secret specs with per-secret env overrides."""
+    definitions: list[RegisteredSecretDefinition] = []
+    for item in raw_custom.split(","):
+        raw_item = item.strip()
+        if not raw_item:
+            continue
+        if ":" in raw_item:
+            name, inline_spec = raw_item.split(":", 1)
+            name, inline_spec = name.strip(), inline_spec.strip()
+        else:
+            name, inline_spec = raw_item, ""
+
+        if not name or name in existing_names:
+            continue
+        existing_names.add(name)
+
+        safe_prefix = name.upper().replace("-", "_")
+        env_policy = (
+            (
+                environ.get(f"CODE_AGENT_SECRET_{safe_prefix}_POLICY")
+                or environ.get(f"CODE_AGENT_SECRET_{safe_prefix}_EXPOSURE_POLICY")
+                or ""
+            )
+            .strip()
+            .lower()
+        )
+        env_hosts = (
+            environ.get(f"CODE_AGENT_SECRET_{safe_prefix}_HOSTS")
+            or environ.get(f"CODE_AGENT_SECRET_{safe_prefix}_EGRESS_HOSTS")
+            or ""
+        ).strip()
+        env_dest = (
+            environ.get(f"CODE_AGENT_SECRET_{safe_prefix}_DESTINATION_ENV_VAR") or ""
+        ).strip()
+        env_source = (environ.get(f"CODE_AGENT_SECRET_{safe_prefix}_SOURCE_KEY") or "").strip()
+
+        if env_hosts:
+            hosts = tuple(normalize_fqdn(h) for h in re.split(r"[;,]", env_hosts) if h.strip())
+        elif inline_spec and inline_spec.lower() != "broker_only":
+            hosts = tuple(normalize_fqdn(h) for h in re.split(r"[;,]", inline_spec) if h.strip())
+        else:
+            hosts = ()
+
+        if env_policy:
+            policy = SecretExposurePolicy(env_policy)
+        elif inline_spec.lower() == "broker_only":
+            policy = SecretExposurePolicy.BROKER_ONLY
+        elif hosts:
+            policy = SecretExposurePolicy.SANDBOX_ENV
+        else:
+            policy = SecretExposurePolicy.BROKER_ONLY
+
+        dest_env = (
+            (env_dest or f"CODE_AGENT_SECRET_{safe_prefix}")
+            if policy == SecretExposurePolicy.SANDBOX_ENV
+            else None
+        )
+        source_key = env_source or safe_prefix
+
+        definitions.append(
+            RegisteredSecretDefinition(
+                name=name,
+                source=SecretSource.ENV,
+                source_key=source_key,
+                required_scope=SecretScope.CUSTOM,
+                exposure_policy=policy,
+                permitted_egress_hosts=hosts,
+                destination_env_var=dest_env,
+            )
+        )
+    return definitions
+
+
+def _parse_custom_secret_definitions(
+    environ: Mapping[str, str], existing_names: set[str]
+) -> list[RegisteredSecretDefinition]:
+    raw_custom = environ.get("CODE_AGENT_REGISTERED_SECRETS", "").strip()
+    if not raw_custom:
+        return []
+    if raw_custom.startswith(("[", "{")):
+        return _parse_custom_secret_json(raw_custom, existing_names)
+    return _parse_custom_secret_delimited(raw_custom, environ, existing_names)
+
+
+def create_authoritative_secret_registry(
+    environ: Mapping[str, str] | None = None,
+) -> SecretRegistry:
+    """Construct the authoritative SecretRegistry populated with standard platform definitions.
+
+    Custom secret definitions registered via `CODE_AGENT_REGISTERED_SECRETS` default to
+    `BROKER_ONLY` unless permitted egress hosts are configured (`CODE_AGENT_SECRET_<NAME>_HOSTS`
+    or inline/JSON spec). Secrets with empty permitted egress hosts are only eligible for
+    broker-side or network-disabled execution; submitting them to a network-enabled native worker
+    will fail closed during capability grant creation.
+    """
+    definitions = [
+        RegisteredSecretDefinition(
+            name="github_token",
+            source=SecretSource.ENV,
+            source_key="GITHUB_TOKEN",
+            required_scope=SecretScope.GIT_PUSH,
+            exposure_policy=SecretExposurePolicy.BROKER_ONLY,
+        ),
+        RegisteredSecretDefinition(
+            name="gh_token",
+            source=SecretSource.ENV,
+            source_key="GH_TOKEN",
+            required_scope=SecretScope.GIT_PUSH,
+            exposure_policy=SecretExposurePolicy.BROKER_ONLY,
+        ),
+        RegisteredSecretDefinition(
+            name="openai_api_key",
+            source=SecretSource.ENV,
+            source_key="OPENAI_API_KEY",
+            required_scope=SecretScope.PROVIDER_AUTH,
+            exposure_policy=SecretExposurePolicy.SANDBOX_ENV,
+            destination_env_var="OPENAI_API_KEY",
+            permitted_egress_hosts=("api.openai.com", "auth.openai.com"),
+        ),
+        RegisteredSecretDefinition(
+            name="openai_key",
+            source=SecretSource.ENV,
+            source_key="OPENAI_API_KEY",
+            required_scope=SecretScope.PROVIDER_AUTH,
+            exposure_policy=SecretExposurePolicy.SANDBOX_ENV,
+            destination_env_var="OPENAI_API_KEY",
+            permitted_egress_hosts=("api.openai.com", "auth.openai.com"),
+        ),
+        RegisteredSecretDefinition(
+            name="gemini_api_key",
+            source=SecretSource.ENV,
+            source_key="GEMINI_API_KEY",
+            required_scope=SecretScope.PROVIDER_AUTH,
+            exposure_policy=SecretExposurePolicy.SANDBOX_ENV,
+            destination_env_var="GEMINI_API_KEY",
+            permitted_egress_hosts=("generativelanguage.googleapis.com", "oauth2.googleapis.com"),
+        ),
+        RegisteredSecretDefinition(
+            name="openrouter_api_key",
+            source=SecretSource.ENV,
+            source_key="OPENROUTER_API_KEY",
+            required_scope=SecretScope.PROVIDER_AUTH,
+            exposure_policy=SecretExposurePolicy.SANDBOX_ENV,
+            destination_env_var="OPENROUTER_API_KEY",
+            permitted_egress_hosts=("openrouter.ai",),
+        ),
+    ]
+    if environ:
+        existing_names = {d.name for d in definitions}
+        definitions.extend(_parse_custom_secret_definitions(environ, existing_names))
+    return SecretRegistry(definitions)
+
+
+DEFAULT_SECRET_REGISTRY: Final[SecretRegistry] = create_authoritative_secret_registry()
+
+
+def validate_secret_refs(
+    refs: Sequence[SecretRef],
+    registry: SecretRegistry,
+    *,
+    allow_metadata: bool = False,
+    task_id: str | None = None,
+) -> None:
+    """Validate that secret references exist in registry and conform to safety policy."""
+    for ref in refs:
+        if not allow_metadata and ref.metadata:
+            raise CapabilityViolationError(
+                f"Secret reference '{ref.name}' contains non-empty metadata, "
+                "which is not permitted at ingress."
+            )
+        definition = registry.get(ref.name, task_id=task_id)
+        if definition is None:
+            raise SecretNotFoundError(
+                f"Secret reference '{ref.name}' is not registered in authoritative SecretRegistry"
+            )
 
 
 class SecretResolver:
@@ -632,6 +872,7 @@ __all__ = [
     "DEFAULT_SECRET_REGISTRY",
     "BrokerOnlySecretExposureError",
     "CapabilityViolationError",
+    "DeprecatedLegacySecretsError",
     "EphemeralSecretHandle",
     "EphemeralSecretRecord",
     "EphemeralSecretStore",
@@ -649,5 +890,7 @@ __all__ = [
     "SecretScope",
     "SecretSource",
     "UnauthorizedSecretError",
+    "create_authoritative_secret_registry",
     "normalize_fqdn",
+    "validate_secret_refs",
 ]

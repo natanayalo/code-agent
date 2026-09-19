@@ -157,7 +157,7 @@ Temporal migration and rollback record is in the
 1. Execute remaining M29 work following the reviewed post-wave conclusion (advisory
    Codex recommendation for `docs/read_only` only, partial robustness, and static
    production routing unchanged):
-   a. remove legacy raw-secret ingress and enforce opaque registered references;
+   a. [Completed] remove legacy raw-secret ingress and enforce opaque registered references (M29 Item 1a);
    b. add provider-specific pre-dispatch diagnostics;
    c. gather longitudinal and missing-cell current-cohort evidence;
    d. evaluate hierarchical budget controls separately.

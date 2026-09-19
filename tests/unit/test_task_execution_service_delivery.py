@@ -498,7 +498,7 @@ def test_create_task_persists_encryption_metadata() -> None:
 
     # 1. Without encryption key
     with patch.dict("os.environ", {"CODE_AGENT_ENCRYPTION_KEY": ""}, clear=False):
-        submission = execution_module.TaskSubmission(task_text="No encryption", secrets={"K": "V"})
+        submission = execution_module.TaskSubmission(task_text="No encryption")
         _, task_p = service.create_task(submission)
 
         with session_scope(session_factory) as session:
@@ -517,9 +517,7 @@ def test_create_task_persists_encryption_metadata() -> None:
         with patch.object(
             execution_module.Task.secrets.property.columns[0].type, "is_active", return_value=True
         ):
-            submission = execution_module.TaskSubmission(
-                task_text="With encryption", secrets={"K": "V"}
-            )
+            submission = execution_module.TaskSubmission(task_text="With encryption")
             _, task_p = service.create_task(submission)
 
             with session_scope(session_factory) as session:
@@ -543,6 +541,7 @@ def test_map_task_to_summary_includes_trace_metadata(monkeypatch) -> None:
     execution_module._clear_tracing_config_cache()
     monkeypatch.setenv("CODE_AGENT_ENABLE_TRACING", "1")
     monkeypatch.setenv("CODE_AGENT_TRACING_OTLP_ENDPOINT", "http://phoenix:6006/v1/traces")
+    monkeypatch.setenv("CODE_AGENT_TRACING_PROJECT_NAME", "code-agent")
 
     with session_scope(session_factory) as session:
         user = User(external_user_id="user-1")

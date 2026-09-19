@@ -90,6 +90,11 @@ from orchestrator.improvement_suggestions import ImprovementSuggestionScorer
 from orchestrator.operational_health import TemporalOperationalProbeProtocol
 from orchestrator.operational_health_types import ExecutionHealthMetrics, ReadinessSnapshot
 from sandbox import WorkspaceManager
+from sandbox.secrets import (
+    DEFAULT_SECRET_REGISTRY,
+    DeprecatedLegacySecretsError,
+    SecretRegistry,
+)
 from workers import Worker, WorkerProfile
 
 logger = logging.getLogger(__name__)
@@ -128,6 +133,7 @@ class TaskExecutionService:
         enforce_temporal_availability: bool = False,
         temporal_operational_probe: TemporalOperationalProbeProtocol | None = None,
         context_envelope_enabled: bool = True,
+        secret_registry: SecretRegistry | None = None,
     ) -> None:
         self.session_factory = session_factory
         self.worker = worker
@@ -152,6 +158,9 @@ class TaskExecutionService:
         self.enforce_temporal_availability = enforce_temporal_availability
         self.temporal_operational_probe = temporal_operational_probe
         self.context_envelope_enabled = context_envelope_enabled
+        self.secret_registry = (
+            secret_registry if secret_registry is not None else DEFAULT_SECRET_REGISTRY
+        )
 
     async def __aenter__(self) -> TaskExecutionService:
         """Enter the service lifecycle."""
@@ -177,7 +186,11 @@ class TaskExecutionService:
         raw_secrets: dict[str, str] | None = None,
     ) -> tuple[TaskSnapshot, _PersistedTaskContext]:
         """Persist a new task request and return the initial pollable snapshot."""
-        outcome = self.create_task_outcome(submission, raw_secrets=raw_secrets)
+        if raw_secrets or submission.secrets:
+            raise DeprecatedLegacySecretsError(
+                "Legacy raw secrets are no longer accepted. Use secret_refs instead."
+            )
+        outcome = self.create_task_outcome(submission)
         if outcome.persisted is None:
             raise RuntimeError("Expected a fresh task, but a duplicate delivery was returned.")
         return outcome.task_snapshot, outcome.persisted
@@ -190,6 +203,10 @@ class TaskExecutionService:
         raw_secrets: dict[str, str] | None = None,
     ) -> CreateTaskOutcome:
         """Persist a task request or return the previously created task for a duplicate delivery."""
+        if raw_secrets or submission.secrets:
+            raise DeprecatedLegacySecretsError(
+                "Legacy raw secrets are no longer accepted. Use secret_refs instead."
+            )
         submission = self._normalize_and_validate_submission(submission)
         if delivery_key is not None and delivery_key.channel != submission.session.channel:
             raise ValueError(
@@ -222,7 +239,6 @@ class TaskExecutionService:
             status=TaskStatus.PENDING,
             max_attempts=self.default_task_max_attempts,
             delivery_key=delivery_key,
-            raw_secrets=raw_secrets,
         )
         task_id = duplicate_task_id or (persisted.task_id if persisted is not None else None)
         if task_id is None:

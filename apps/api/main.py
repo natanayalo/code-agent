@@ -8,7 +8,10 @@ from collections.abc import AsyncIterator  # noqa: E402
 from contextlib import asynccontextmanager  # noqa: E402
 from typing import Any
 
-from fastapi import FastAPI  # noqa: E402
+from fastapi import FastAPI, Request, Response, status  # noqa: E402
+from fastapi.encoders import jsonable_encoder  # noqa: E402
+from fastapi.exceptions import RequestValidationError  # noqa: E402
+from fastapi.responses import JSONResponse  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 
 from apps.api.auth import (  # noqa: E402
@@ -43,6 +46,7 @@ from orchestrator.execution import (  # noqa: E402
     bootstrap_phoenix_project_id,
     shutdown_callback_dns_executor,
 )
+from sandbox.secrets import DeprecatedLegacySecretsError  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -169,6 +173,68 @@ def _register_routers(app: FastAPI) -> None:
     app.include_router(telegram_router)
 
 
+def _register_exception_handlers(app: FastAPI) -> None:
+    @app.exception_handler(DeprecatedLegacySecretsError)
+    async def deprecated_legacy_secrets_error_handler(
+        request: Request, exc: DeprecatedLegacySecretsError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            content={
+                "detail": {
+                    "code": "DeprecatedLegacySecretsError",
+                    "message": (
+                        "Legacy raw secrets are no longer accepted. Use secret_refs instead."
+                    ),
+                }
+            },
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_error_handler(
+        request: Request, exc: RequestValidationError
+    ) -> Response:
+        for err in exc.errors():
+            loc = tuple(str(x) for x in err.get("loc", ()))
+            ctx_err = err.get("ctx", {}).get("error")
+            if (
+                isinstance(ctx_err, DeprecatedLegacySecretsError)
+                or err.get("type") == "DeprecatedLegacySecretsError"
+                or "secrets" in loc
+            ):
+                return JSONResponse(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    content={
+                        "detail": {
+                            "code": "DeprecatedLegacySecretsError",
+                            "message": (
+                                "Legacy raw secrets are no longer accepted. "
+                                "Use secret_refs instead."
+                            ),
+                        }
+                    },
+                )
+            if "secret_refs" in loc:
+                return JSONResponse(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    content={
+                        "detail": {
+                            "code": "InvalidSecretRefError",
+                            "message": "Invalid secret reference in request.",
+                        }
+                    },
+                )
+        encoded_errors = jsonable_encoder(exc.errors())
+        if isinstance(encoded_errors, list):
+            for item in encoded_errors:
+                if isinstance(item, dict):
+                    item.pop("input", None)
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            content={"detail": encoded_errors},
+        )
+
+
 def create_app(
     *,
     task_service: TaskExecutionService | None = None,
@@ -182,6 +248,7 @@ def create_app(
         lifespan=_build_lifespan(task_service, auth_config),
     )
     _register_routers(app)
+    _register_exception_handlers(app)
     return app
 
 

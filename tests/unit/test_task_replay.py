@@ -13,6 +13,7 @@ from repositories import (
     create_session_factory,
     session_scope,
 )
+from sandbox.secrets import SecretRef
 from workers import Worker, WorkerProfile, WorkerRequest, WorkerResult
 
 
@@ -574,3 +575,38 @@ def test_replay_ignores_list_nested_malicious_provenance() -> None:
         assert "replayed_from" not in task.constraints["list"][2][1]
         # Audit trail still works
         assert task.constraints["replayed_from"] == [source_id]
+
+
+def test_replay_task_with_legacy_credentials_fails_closed_without_replacement_secret_refs() -> None:
+    service, session_factory = _make_service()
+    source_id = _create_terminal_task(service, session_factory)
+    with session_scope(session_factory) as session:
+        task = TaskRepository(session).get(source_id)
+        assert task is not None
+        task.secrets = {"LEGACY_KEY": "legacy_val"}
+        session.flush()
+
+    result = service.replay_task(source_task_id=source_id)
+    assert result.status == "validation_error"
+    assert "uses legacy credentials" in (result.detail or "")
+
+
+def test_replay_task_with_legacy_credentials_succeeds_with_replacement_secret_refs() -> None:
+    service, session_factory = _make_service()
+    source_id = _create_terminal_task(service, session_factory)
+    with session_scope(session_factory) as session:
+        task = TaskRepository(session).get(source_id)
+        assert task is not None
+        task.secrets = {"LEGACY_KEY": "legacy_val"}
+        session.flush()
+
+    replacement_request = execution_module.TaskReplayRequest(
+        secret_refs=(SecretRef(name="github_token"),)
+    )
+    result = service.replay_task(source_task_id=source_id, replay_request=replacement_request)
+    assert result.status == "created"
+    with session_scope(session_factory) as session:
+        new_task = TaskRepository(session).get(result.task_snapshot.task_id)
+        assert new_task is not None
+        assert new_task.secrets == {}
+        assert new_task.secret_refs == [{"name": "github_token", "metadata": []}]

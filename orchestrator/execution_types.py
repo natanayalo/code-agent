@@ -21,7 +21,7 @@ from orchestrator.execution_context import _PersistedTaskContext
 from orchestrator.execution_policy import validate_callback_url
 from orchestrator.operational_health_types import ExecutionHealthMetrics
 from orchestrator.state import AggregationRole, NodeExecutionMode, TaskSpec
-from sandbox.secrets import SecretRef
+from sandbox.secrets import DeprecatedLegacySecretsError, SecretRef
 from workers.base import normalize_worker_profile_name
 
 
@@ -87,6 +87,26 @@ class TaskSubmission(ExecutionModel):
         """Ensure callback URLs are safe for outbound progress delivery."""
         return validate_callback_url(value)
 
+    @field_validator("secrets")
+    @classmethod
+    def validate_secrets(cls, value: dict[str, str]) -> dict[str, str]:
+        if value:
+            raise DeprecatedLegacySecretsError(
+                "Legacy raw secrets are no longer accepted. Use secret_refs instead."
+            )
+        return value
+
+    @field_validator("secret_refs")
+    @classmethod
+    def validate_secret_refs_metadata(cls, value: tuple[SecretRef, ...]) -> tuple[SecretRef, ...]:
+        for ref in value:
+            if ref.metadata:
+                raise TaskSubmissionValidationError(
+                    f"Secret reference '{ref.name}' contains non-empty metadata, "
+                    "which is not permitted at ingress."
+                )
+        return value
+
 
 class TaskApprovalDecision(ExecutionModel):
     """Decision payload for a paused task approval checkpoint."""
@@ -103,6 +123,29 @@ class TaskReplayRequest(ExecutionModel):
     budget: dict[str, Any] | None = None
     secrets: dict[str, str] | None = None
     secret_refs: tuple[SecretRef, ...] | None = None
+
+    @field_validator("secrets")
+    @classmethod
+    def validate_secrets(cls, value: dict[str, str] | None) -> dict[str, str] | None:
+        if value:
+            raise DeprecatedLegacySecretsError(
+                "Legacy raw secrets are no longer accepted. Use secret_refs instead."
+            )
+        return value
+
+    @field_validator("secret_refs")
+    @classmethod
+    def validate_secret_refs_metadata(
+        cls, value: tuple[SecretRef, ...] | None
+    ) -> tuple[SecretRef, ...] | None:
+        if value is not None:
+            for ref in value:
+                if ref.metadata:
+                    raise TaskSubmissionValidationError(
+                        f"Secret reference '{ref.name}' contains non-empty metadata, "
+                        "which is not permitted at ingress."
+                    )
+        return value
 
 
 class TaskSubmissionValidationError(ValueError):
@@ -619,7 +662,7 @@ RESERVED_INTERNAL_CONSTRAINT_KEYS: frozenset[str] = frozenset(
 class TaskReplayResult:
     """Outcome of replaying a prior task."""
 
-    status: Literal["created", "not_found", "not_replayable"]
+    status: Literal["created", "not_found", "not_replayable", "validation_error"]
     task_snapshot: TaskSnapshot | None = None
     source_task_id: str | None = None
     detail: str | None = None

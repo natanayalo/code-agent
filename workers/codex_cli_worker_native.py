@@ -476,6 +476,7 @@ class CodexCliWorkerNativeMixin:
             SecretRegistry,
             SecretResolver,
             SecretScope,
+            create_authoritative_secret_registry,
         )
         from sandbox.trusted_context import TrustedSandboxExecutionContext
 
@@ -486,8 +487,18 @@ class CodexCliWorkerNativeMixin:
         except OSError:  # pragma: no cover
             pass
 
+        injected_registry = getattr(self, "secret_registry", None)
+        base_registry = (
+            injected_registry
+            if injected_registry is not None
+            else create_authoritative_secret_registry(
+                getattr(self, "secret_env", None) or os.environ
+            )
+        )
         registry = SecretRegistry(
-            ephemeral_store=getattr(self, "ephemeral_store", None), task_id=task_id
+            definitions=list(base_registry),
+            ephemeral_store=getattr(self, "ephemeral_store", None),
+            task_id=task_id,
         )
         has_api_key = "OPENAI_API_KEY" in request.secrets or any(
             _is_openai_api_key_secret(registry.get(ref.name, task_id=task_id))
@@ -495,7 +506,8 @@ class CodexCliWorkerNativeMixin:
         )
         bootstrap = ProviderBootstrapLoader.load(provider_dir, has_api_key=has_api_key)
         for d in bootstrap.definitions:
-            registry.register(d)
+            if d.name not in registry:
+                registry.register(d)
 
         sandbox_refs: list[SecretRef] = []
         for ref in request.secret_refs or ():
@@ -531,8 +543,13 @@ class CodexCliWorkerNativeMixin:
 
         validate_grant_for_execution(grant, secret_registry=registry)
 
+        secret_env = getattr(self, "secret_env", None)
+        if secret_env is None:
+            secret_env = os.environ
+
         resolver = SecretResolver(
             registry,
+            env=secret_env,
             file_store=bootstrap.file_store,
             ephemeral_store=getattr(self, "ephemeral_store", None),
             task_id=task_id,

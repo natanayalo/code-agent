@@ -63,6 +63,12 @@ def test_codex_native_prepare_request_secret_refs(monkeypatch, tmp_path):
                 return FakeDefinition()
             return None
 
+        def __iter__(self):
+            return iter([])
+
+        def __len__(self):
+            return 0
+
     class FakeResolved:
         def reveal_secret_value(self):
             return "secret_val"

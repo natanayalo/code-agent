@@ -24,3 +24,4 @@ class _PersistedTaskContext:
     decomposed_plan: dict[str, Any] | None = None
     node_outcomes: list[dict[str, Any]] = field(default_factory=list)
     orchestration_runtime: str | None = None
+    has_legacy_credentials: bool = False
