@@ -24,6 +24,7 @@ from sandbox import DockerSandboxContainerManager
 from sandbox.ephemeral_store_postgres import SessionFactoryEphemeralSecretStore
 from sandbox.secrets import (
     EphemeralSecretStore,
+    SecretRegistry,
     create_authoritative_secret_registry,
 )
 from sandbox.workspace import default_workspace_root
@@ -336,6 +337,7 @@ def _build_codex_worker(
     resolved_env: Mapping[str, str],
     container_manager: DockerSandboxContainerManager,
     ephemeral_store: EphemeralSecretStore,
+    secret_registry: SecretRegistry | None = None,
 ) -> CodexCliWorker:
     codex_runtime_mode = _resolve_default_runtime_mode(
         resolved_env.get(CODEX_RUNTIME_MODE_ENV_VAR),
@@ -347,6 +349,8 @@ def _build_codex_worker(
         runtime_adapter=CodexExecCliRuntimeAdapter.from_env(resolved_env),
         container_manager=container_manager,
         ephemeral_store=ephemeral_store,
+        secret_registry=secret_registry,
+        secret_env=resolved_env,
         default_runtime_mode=codex_runtime_mode,
         native_sandbox_mode=resolved_env.get(
             CODEX_SANDBOX_ENV_VAR,
@@ -365,6 +369,7 @@ def _build_gemini_worker(
     resolved_env: Mapping[str, str],
     container_manager: DockerSandboxContainerManager,
     ephemeral_store: EphemeralSecretStore,
+    secret_registry: SecretRegistry | None = None,
 ) -> GeminiCliWorker | None:
     legacy_gemini_bin = resolved_env.get(GEMINI_EXECUTABLE_ENV_VAR)
     legacy_bin_requests_antigravity = (
@@ -407,6 +412,8 @@ def _build_gemini_worker(
         runtime_adapter=runtime_adapter,
         container_manager=container_manager,
         ephemeral_store=ephemeral_store,
+        secret_registry=secret_registry,
+        secret_env=resolved_env,
         default_runtime_mode=gemini_runtime_mode,
         native_sandbox_enabled=_is_enabled(native_sandbox_value),
         native_event_capture_enabled=_is_native_event_capture_enabled(resolved_env),
@@ -548,9 +555,14 @@ def build_task_service_from_env(
     container_manager = _build_container_manager(resolved_env)
     resolved_workspace_root = _resolve_workspace_root(resolved_env)
     ephemeral_store = SessionFactoryEphemeralSecretStore(session_factory)
+    secret_registry = create_authoritative_secret_registry(resolved_env)
 
-    codex_worker = _build_codex_worker(resolved_env, container_manager, ephemeral_store)
-    gemini_worker = _build_gemini_worker(resolved_env, container_manager, ephemeral_store)
+    codex_worker = _build_codex_worker(
+        resolved_env, container_manager, ephemeral_store, secret_registry=secret_registry
+    )
+    gemini_worker = _build_gemini_worker(
+        resolved_env, container_manager, ephemeral_store, secret_registry=secret_registry
+    )
     openrouter_worker = _build_openrouter_worker(resolved_env, container_manager)
     shell_worker = ShellWorker(
         workspace_root=resolved_workspace_root,
@@ -602,5 +614,5 @@ def build_task_service_from_env(
         ),
         enforce_temporal_availability=True,
         context_envelope_enabled=_is_context_envelope_enabled(resolved_env),
-        secret_registry=create_authoritative_secret_registry(resolved_env),
+        secret_registry=secret_registry,
     )

@@ -223,6 +223,41 @@ def _check_no_raw_secrets(raw_body: Any) -> None:
                     ),
                 },
             )
+        raw_refs = raw_body.get("secret_refs")
+        if isinstance(raw_refs, list | tuple):
+            for ref in raw_refs:
+                if isinstance(ref, Mapping) and ref.get("metadata"):
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                        detail={
+                            "code": "InvalidSecretRefMetadataError",
+                            "message": (
+                                "SecretRef metadata must be empty for security policy compliance."
+                            ),
+                        },
+                    )
+
+
+async def get_sanitized_webhook_payload(request: Request) -> Any:
+    from fastapi.exceptions import RequestValidationError
+    from pydantic import ValidationError
+
+    from apps.api.routes.webhook import WebhookPayload
+
+    try:
+        raw_body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    _check_no_raw_secrets(raw_body)
+
+    if isinstance(raw_body, Mapping) and "secrets" in raw_body and not raw_body["secrets"]:
+        raw_body = {k: v for k, v in raw_body.items() if k != "secrets"}
+
+    try:
+        return WebhookPayload.model_validate(raw_body)
+    except ValidationError as e:
+        raise RequestValidationError(e.errors())
 
 
 async def get_sanitized_task_ingress(request: Request) -> SanitizedCreateTaskIngress:

@@ -9,7 +9,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from apps.api.config import SystemConfig
-from apps.api.dependencies import get_system_config, get_task_service, require_api_auth
+from apps.api.dependencies import (
+    get_sanitized_webhook_payload,
+    get_system_config,
+    get_task_service,
+    require_api_auth,
+)
 from apps.observability import (
     SESSION_ID_ATTRIBUTE,
     SPAN_KIND_AGENT,
@@ -126,7 +131,7 @@ def _to_task_submission(payload: WebhookPayload, config: SystemConfig) -> TaskSu
 
 @router.post("", response_model=TaskSnapshot, status_code=status.HTTP_202_ACCEPTED)
 def receive_webhook(
-    payload: WebhookPayload,
+    payload: WebhookPayload = Depends(get_sanitized_webhook_payload),
     task_service: TaskExecutionService = Depends(get_task_service),
     config: SystemConfig = Depends(get_system_config),
 ) -> TaskSnapshot:

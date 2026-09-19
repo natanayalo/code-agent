@@ -80,9 +80,7 @@ class CreateTaskRequest(BaseModel):
     def _validate_secret_refs(cls, v: tuple[SecretRef, ...]) -> tuple[SecretRef, ...]:
         for ref in v:
             if ref.metadata:
-                raise ValueError(
-                    f"SecretRef '{ref.name}' metadata must be empty for security policy compliance."
-                )
+                raise ValueError("SecretRef metadata must be empty for security policy compliance.")
         return v
 
     @field_validator("callback_url")

@@ -9,9 +9,7 @@ from contextlib import asynccontextmanager  # noqa: E402
 from typing import Any
 
 from fastapi import FastAPI, Request, Response, status  # noqa: E402
-from fastapi.exception_handlers import (  # noqa: E402
-    request_validation_exception_handler as default_request_validation_exception_handler,
-)
+from fastapi.encoders import jsonable_encoder  # noqa: E402
 from fastapi.exceptions import RequestValidationError  # noqa: E402
 from fastapi.responses import JSONResponse  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
@@ -186,7 +184,7 @@ def _register_exception_handlers(app: FastAPI) -> None:
                 "detail": {
                     "code": "DeprecatedLegacySecretsError",
                     "message": (
-                        "Legacy raw secrets are no longer accepted. " "Use secret_refs instead."
+                        "Legacy raw secrets are no longer accepted. Use secret_refs instead."
                     ),
                 }
             },
@@ -197,10 +195,12 @@ def _register_exception_handlers(app: FastAPI) -> None:
         request: Request, exc: RequestValidationError
     ) -> Response:
         for err in exc.errors():
+            loc = tuple(str(x) for x in err.get("loc", ()))
             ctx_err = err.get("ctx", {}).get("error")
             if (
                 isinstance(ctx_err, DeprecatedLegacySecretsError)
                 or err.get("type") == "DeprecatedLegacySecretsError"
+                or "secrets" in loc
             ):
                 return JSONResponse(
                     status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -214,7 +214,25 @@ def _register_exception_handlers(app: FastAPI) -> None:
                         }
                     },
                 )
-        return await default_request_validation_exception_handler(request, exc)
+            if "secret_refs" in loc:
+                return JSONResponse(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    content={
+                        "detail": {
+                            "code": "InvalidSecretRefError",
+                            "message": "Invalid secret reference in request.",
+                        }
+                    },
+                )
+        encoded_errors = jsonable_encoder(exc.errors())
+        if isinstance(encoded_errors, list):
+            for item in encoded_errors:
+                if isinstance(item, dict):
+                    item.pop("input", None)
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            content={"detail": encoded_errors},
+        )
 
 
 def create_app(

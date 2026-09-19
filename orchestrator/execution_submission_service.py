@@ -66,7 +66,11 @@ def _normalize_and_validate_submission(self: Any, submission: TaskSubmission) ->
         raise DeprecatedLegacySecretsError(
             "Legacy raw secrets are no longer accepted. Use secret_refs instead."
         )
-    registry = getattr(self, "secret_registry", None) or DEFAULT_SECRET_REGISTRY
+    registry = (
+        self.secret_registry
+        if getattr(self, "secret_registry", None) is not None
+        else DEFAULT_SECRET_REGISTRY
+    )
     for ref in submission.secret_refs:
         if ref.metadata:
             raise TaskSubmissionValidationError(

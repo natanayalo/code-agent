@@ -588,11 +588,22 @@ class GeminiCliWorkerNativeMixin:
             SecretRegistry,
             SecretResolver,
             SecretScope,
+            create_authoritative_secret_registry,
         )
         from sandbox.trusted_context import TrustedSandboxExecutionContext
 
+        injected_registry = getattr(self, "secret_registry", None)
+        base_registry = (
+            injected_registry
+            if injected_registry is not None
+            else create_authoritative_secret_registry(
+                getattr(self, "secret_env", None) or os.environ
+            )
+        )
         registry = SecretRegistry(
-            ephemeral_store=getattr(self, "ephemeral_store", None), task_id=task_id
+            definitions=list(base_registry),
+            ephemeral_store=getattr(self, "ephemeral_store", None),
+            task_id=task_id,
         )
         if self._is_antigravity_native_adapter():
             adapter = getattr(self, "runtime_adapter", None)
@@ -614,7 +625,8 @@ class GeminiCliWorkerNativeMixin:
             )
             bootstrap = ProviderBootstrapLoader.load(provider_dir, has_api_key=has_api_key)
         for d in bootstrap.definitions:
-            registry.register(d)
+            if d.name not in registry:
+                registry.register(d)
 
         sandbox_refs: list[SecretRef] = []
         for ref in request.secret_refs or ():
@@ -656,8 +668,13 @@ class GeminiCliWorkerNativeMixin:
 
         validate_grant_for_execution(grant, secret_registry=registry)
 
+        secret_env = getattr(self, "secret_env", None)
+        if secret_env is None:
+            secret_env = os.environ
+
         resolver = SecretResolver(
             registry,
+            env=secret_env,
             file_store=bootstrap.file_store,
             ephemeral_store=getattr(self, "ephemeral_store", None),
             task_id=task_id,
