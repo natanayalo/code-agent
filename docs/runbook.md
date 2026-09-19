@@ -761,11 +761,31 @@ The M29 live evidence wave harness (`scripts/e2e/run_m29_evidence_wave.py`) mana
   --branch master \
   --timeout-seconds 900 \
   --preflight-smoke
+
+# Wave 3: 40 read-only cases (20 investigation + 20 feature, 10 per provider/cell)
+.venv/bin/python scripts/e2e/run_m29_evidence_wave.py init \
+  --bundle-dir artifacts/m29_evidence_bundle_wave3 \
+  --suite-path evaluation/m29_live_provider_suite_wave3.json \
+  --build-sha "$(git rev-parse HEAD)" \
+  --target-repository-revision "$(git rev-parse origin/master)" \
+  --ack-live-read-only-evidence
+
+.venv/bin/python scripts/e2e/run_m29_evidence_wave.py status \
+  --bundle-dir artifacts/m29_evidence_bundle_wave3 \
+  --suite-path evaluation/m29_live_provider_suite_wave3.json
+
+.venv/bin/python scripts/e2e/run_m29_evidence_wave.py run-batch \
+  --bundle-dir artifacts/m29_evidence_bundle_wave3 \
+  --suite-path evaluation/m29_live_provider_suite_wave3.json \
+  --repo-key code-agent \
+  --branch master \
+  --timeout-seconds 900
 ```
 
 #### Bundles and Diagnostic Baselines
 - **Wave 1 Diagnostic Baseline**: `evaluation/m29_live_provider_suite.json` (28 tasks across investigation, feature, and docs), preserved immutably at `artifacts/m29_evidence_bundle_wave1_diagnostic/bundle.json`. Captures the historical `gpt-5.4-mini` retirement event.
 - **Wave 2 Live Evidence**: `evaluation/m29_live_provider_suite_wave2.json` (20 docs tasks across 10 balanced pairs), tracked at `artifacts/m29_evidence_bundle_wave2/bundle.json`. Powered to meet the canonical sample floor ($N=10$ vs $10$).
+- **Wave 3 Live Evidence**: `evaluation/m29_live_provider_suite_wave3.json` (40 read-only tasks across 20 balanced investigation/feature pairs), tracked privately at `artifacts/m29_evidence_bundle_wave3/bundle.json`. The ignored bundle pins the harness build and target repository revision, and preserves terminal outcomes without reruns.
 
 #### Invariants & failure semantics
 - **Strict Read-Only Delivery**: All evidence cases enforce `delivery_mode=summary`, low risk, read-only mode, and zero changed files.
