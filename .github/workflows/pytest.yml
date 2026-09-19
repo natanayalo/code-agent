@@ -64,6 +64,9 @@ jobs:
       - name: Run integration pytest suite with coverage gate
         env:
           CODE_AGENT_TEST_POSTGRES_URL: postgresql+psycopg://postgres:postgres@127.0.0.1:5432/code_agent_test
+          # Integration tests use deterministic in-process workers by default;
+          # the dedicated pre-dispatch suite opts back in to real diagnostics.
+          CODE_AGENT_PRE_DISPATCH_DIAGNOSTICS_ENABLED: "0"
         run: |
           poetry run pytest tests/integration \
             --cov=apps \

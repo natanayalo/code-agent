@@ -39,7 +39,8 @@ class FakeWorker(Worker):
 
 
 @pytest.fixture(autouse=True)
-def reset_probes() -> None:
+def reset_probes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CODE_AGENT_PRE_DISPATCH_DIAGNOSTICS_ENABLED", "1")
     clear_probe_cache()
     yield
     clear_probe_cache()
