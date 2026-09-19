@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 
 from apps.api.config import SystemConfig
@@ -56,10 +56,15 @@ def get_runtime_manifest(
 
 @router.get("/provider-diagnostics", response_model=SystemProviderDiagnosticsReport)
 async def get_provider_diagnostics(
+    request: Request,
     required_providers: list[str] | None = Query(default=None),
 ) -> SystemProviderDiagnosticsReport:
     """Return provider readiness diagnostics for this API process host."""
-    service = ProviderDiagnosticsService()
+    task_service = getattr(request.app.state, "task_service", None)
+    service = ProviderDiagnosticsService(
+        worker=getattr(task_service, "worker", None),
+        secret_registry=getattr(task_service, "secret_registry", None),
+    )
     req_set = set(required_providers) if required_providers else None
     return await service.evaluate_all_providers(
         required_providers=req_set,

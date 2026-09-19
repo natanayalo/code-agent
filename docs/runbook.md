@@ -36,7 +36,10 @@ The CLI-binary check is intentionally scoped to what the host can verify. For
 container execution it records the configured executable as **unverified**
 inside the image and remains non-blocking; it does not guarantee that a binary
 will be present in the image. Host-native execution checks the executable on
-the host `PATH`. Use the diagnostics CLI for an operator-visible snapshot:
+the host `PATH`. Use the diagnostics CLI for an operator-visible snapshot. When
+run outside the configured task-service process, it reports a limited
+host-level probe and fails required-provider checks closed because it cannot
+inspect the concrete worker configuration:
 
 ```bash
 .venv/bin/python scripts/check_provider_diagnostics.py \

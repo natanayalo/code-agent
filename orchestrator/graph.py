@@ -585,6 +585,7 @@ async def execute_with_preflight(
         secret_registry=secret_registry,
         secret_env=getattr(worker, "secret_env", None),
         worker=worker,
+        worker_type=worker_type,
     )
     ctx = resolve_execution_context(
         worker,

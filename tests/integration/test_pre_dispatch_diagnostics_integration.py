@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -429,3 +431,44 @@ async def test_cli_diagnostics_filters_target_providers_and_rejects_unknown_requ
         assert code == 2
         mock_eval.assert_not_awaited()
         assert "Unknown required provider(s): nonexistent" in capsys.readouterr().err
+
+
+@pytest.mark.asyncio
+async def test_cli_required_openrouter_fails_when_worker_docker_is_unavailable(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worker = SimpleNamespace(
+        default_runtime_mode="tool_loop",
+        runtime_adapter=SimpleNamespace(api_key="sk-openrouter-test"),
+        container_manager=SimpleNamespace(default_image="openrouter-worker:latest"),
+    )
+    service = ProviderDiagnosticsService(workers={"openrouter": worker}, secret_env={})
+    monkeypatch.setattr(
+        service,
+        "check_docker_daemon",
+        AsyncMock(
+            return_value=DiagnosticCheckResult(
+                name="docker_daemon",
+                category="container_runtime",
+                status="unready",
+                detail="Docker daemon unavailable.",
+                verification_scope="local_runtime",
+                blocking=True,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        "scripts.check_provider_diagnostics.ProviderDiagnosticsService",
+        lambda: service,
+    )
+
+    code = await _async_main(_parse_args(["--required", "openrouter", "--json"]))
+    payload = json.loads(capsys.readouterr().out)
+
+    assert code == 1
+    assert not payload["required_providers_ready"]
+    assert payload["providers"]["openrouter"]["ready"] is False
+    assert any(
+        check["name"] == "docker_daemon" for check in payload["providers"]["openrouter"]["checks"]
+    )

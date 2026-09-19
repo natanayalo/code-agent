@@ -472,6 +472,37 @@ def test_openrouter_explicit_invalid_provider_reference_fails_closed() -> None:
     assert "wrong environment variable" in res.detail
 
 
+def test_openrouter_ignores_explicit_openai_reference() -> None:
+    registry = SecretRegistry(
+        [
+            RegisteredSecretDefinition(
+                name="openai_api_key",
+                source=SecretSource.ENV,
+                source_key="OPENAI_API_KEY",
+                required_scope=SecretScope.PROVIDER_AUTH,
+                exposure_policy=SecretExposurePolicy.SANDBOX_ENV,
+                destination_env_var="OPENAI_API_KEY",
+            )
+        ]
+    )
+    svc = ProviderDiagnosticsService(
+        secret_registry=registry,
+        secret_env={"OPENROUTER_API_KEY": "sk-openrouter-test"},
+        effective_api_key_configured=True,
+    )
+
+    res = svc.check_credentials(
+        _make_context(
+            provider="openrouter",
+            auth_mechanism="api_key",
+            credential_refs=("openai_api_key",),
+        )
+    )
+
+    assert res.status == "ready"
+    assert not res.blocking
+
+
 def test_openrouter_skips_cli_check() -> None:
     svc = ProviderDiagnosticsService()
     ctx = _make_context(provider="openrouter", auth_mechanism="api_key", executable=None)
@@ -555,7 +586,15 @@ async def test_evaluate_pre_dispatch_cancellation_propagates() -> None:
 
 @pytest.mark.asyncio
 async def test_evaluate_all_providers_respects_required() -> None:
-    svc = ProviderDiagnosticsService()
+    svc = ProviderDiagnosticsService(
+        workers={
+            "codex": SimpleNamespace(
+                worker_type="codex",
+                default_runtime_mode="native_agent",
+                container_manager=SimpleNamespace(default_image="worker:latest"),
+            )
+        }
+    )
     with (
         patch.object(svc, "check_credentials") as mock_cred,
         patch.object(svc, "check_docker_daemon", new_callable=AsyncMock) as mock_docker,
@@ -606,8 +645,91 @@ async def test_evaluate_all_providers_respects_required() -> None:
 
 
 @pytest.mark.asyncio
+async def test_evaluate_all_providers_uses_openrouter_worker_container_contract() -> None:
+    from workers.facade import WorkerFacade
+
+    worker = SimpleNamespace(
+        default_runtime_mode="tool_loop",
+        runtime_adapter=SimpleNamespace(api_key="sk-openrouter-test"),
+        container_manager=SimpleNamespace(default_image="openrouter-worker:latest"),
+    )
+    svc = ProviderDiagnosticsService(
+        worker=WorkerFacade(openrouter_worker=worker),
+        secret_env={},
+    )
+    docker_unavailable = DiagnosticCheckResult(
+        name="docker_daemon",
+        category="container_runtime",
+        status="unready",
+        detail="Docker daemon unavailable.",
+        verification_scope="local_runtime",
+        blocking=True,
+    )
+
+    with patch.object(
+        svc,
+        "check_docker_daemon",
+        new_callable=AsyncMock,
+        return_value=docker_unavailable,
+    ) as mock_docker:
+        report = await svc.evaluate_all_providers(
+            required_providers={"openrouter"},
+            target_providers={"openrouter"},
+        )
+
+    assert not report.providers["openrouter"].ready
+    assert not report.required_providers_ready
+    mock_docker.assert_awaited_once()
+    assert any(check.name == "docker_daemon" for check in report.providers["openrouter"].checks)
+
+
+@pytest.mark.asyncio
+async def test_workerless_operator_probe_is_limited_and_not_ready() -> None:
+    svc = ProviderDiagnosticsService(secret_env={"OPENROUTER_API_KEY": "sk-openrouter-test"})
+    ready_docker = DiagnosticCheckResult(
+        name="docker_daemon",
+        category="container_runtime",
+        status="ready",
+        detail="Docker daemon is responsive.",
+        verification_scope="local_runtime",
+        blocking=False,
+    )
+    ready_image = DiagnosticCheckResult(
+        name="executor_image",
+        category="container_runtime",
+        status="ready",
+        detail="Executor image is available.",
+        verification_scope="local_runtime",
+        blocking=False,
+    )
+
+    with (
+        patch.object(svc, "check_docker_daemon", new_callable=AsyncMock, return_value=ready_docker),
+        patch.object(svc, "check_executor_image", new_callable=AsyncMock, return_value=ready_image),
+    ):
+        report = await svc.evaluate_all_providers(
+            required_providers={"openrouter"},
+            target_providers={"openrouter"},
+        )
+
+    openrouter = report.providers["openrouter"]
+    assert not openrouter.ready
+    assert not report.required_providers_ready
+    assert "LIMITED_HOST_PROBE" in (openrouter.summary or "")
+    assert any(check.name == "worker_configuration" for check in openrouter.checks)
+
+
+@pytest.mark.asyncio
 async def test_evaluate_all_providers_restricts_targets_and_invalid_required_is_unready() -> None:
-    svc = ProviderDiagnosticsService()
+    svc = ProviderDiagnosticsService(
+        workers={
+            "codex": SimpleNamespace(
+                worker_type="codex",
+                default_runtime_mode="native_agent",
+                container_manager=SimpleNamespace(default_image="worker:latest"),
+            )
+        }
+    )
     ready = DiagnosticCheckResult(
         name="credentials",
         category="credentials",

@@ -254,12 +254,29 @@ class ProviderDiagnosticsService:
         ephemeral_store: object | None = None,
         effective_api_key_configured: bool | None = None,
         worker: Any | None = None,
+        worker_type: str | None = None,
+        workers: Mapping[str, Any] | None = None,
         docker_probe_timeout: float = DEFAULT_DOCKER_PROBE_TIMEOUT_SECONDS,
         preflight_timeout: float = DEFAULT_PREFLIGHT_TIMEOUT_SECONDS,
     ) -> None:
         self.secret_registry = (
             secret_registry if secret_registry is not None else DEFAULT_SECRET_REGISTRY
         )
+        self.worker = worker
+        self.worker_type = worker_type
+        configured_workers = dict(workers or {})
+        if not configured_workers and worker is not None:
+            available_workers = getattr(worker, "available_workers", None)
+            if callable(available_workers):
+                configured_workers = dict(available_workers())
+            else:
+                resolved_worker_type = worker_type or getattr(worker, "worker_type", None)
+                if resolved_worker_type:
+                    configured_workers = {str(resolved_worker_type).lower(): worker}
+        self.workers = {
+            str(worker_type).lower(): concrete_worker
+            for worker_type, concrete_worker in configured_workers.items()
+        }
         self.secret_env = dict(os.environ if secret_env is None else secret_env)
         configured_secret_store = (
             secret_store if secret_store is not None else getattr(worker, "secret_store", None)
@@ -278,20 +295,43 @@ class ProviderDiagnosticsService:
         )
         self.effective_api_key_configured = effective_api_key_configured
         if self.effective_api_key_configured is None and worker is not None:
-            worker_type = str(getattr(worker, "worker_type", "")).lower()
-            self.effective_api_key_configured = _worker_api_key_configured(worker, worker_type)
+            resolved_worker_type = str(worker_type or getattr(worker, "worker_type", "")).lower()
+            if resolved_worker_type:
+                self.effective_api_key_configured = _worker_api_key_configured(
+                    worker, resolved_worker_type
+                )
         self.docker_probe_timeout = docker_probe_timeout
         self.preflight_timeout = preflight_timeout
 
+    def _worker_for_provider(self, provider: str) -> Any | None:
+        """Return the concrete configured worker for an operator probe."""
+        return self.workers.get(provider.lower())
+
     def check_credentials(self, context: ProviderExecutionContext) -> DiagnosticCheckResult:
+        worker = self._worker_for_provider(context.provider)
+        worker_secret_env = getattr(worker, "secret_env", None) if worker is not None else None
+        secret_env = self.secret_env if worker_secret_env is None else dict(worker_secret_env)
+        secret_store = self.secret_store
+        if worker is not None and getattr(worker, "secret_store", None) is not None:
+            secret_store = dict(worker.secret_store)
+        file_store = self.file_store
+        if worker is not None and getattr(worker, "file_store", None) is not None:
+            file_store = dict(worker.file_store)
+        effective_api_key_configured = self.effective_api_key_configured
+        if effective_api_key_configured is None and worker is not None:
+            effective_api_key_configured = _worker_api_key_configured(worker, context.provider)
         return check_provider_credentials(
             context,
             self.secret_registry,
-            secret_env=self.secret_env,
-            effective_api_key_configured=self.effective_api_key_configured,
-            secret_store=self.secret_store,
-            file_store=self.file_store,
-            ephemeral_store=self.ephemeral_store,
+            secret_env=secret_env,
+            effective_api_key_configured=effective_api_key_configured,
+            secret_store=secret_store,
+            file_store=file_store,
+            ephemeral_store=(
+                getattr(worker, "ephemeral_store", self.ephemeral_store)
+                if worker is not None
+                else self.ephemeral_store
+            ),
         )
 
     async def _probe_docker_process(self) -> tuple[int | None, str, str]:
@@ -619,6 +659,102 @@ class ProviderDiagnosticsService:
                 summary=f"PRE_DISPATCH_INTERNAL_ERROR: {type(exc).__name__}",
             )
 
+    @staticmethod
+    def _limited_host_probe_check() -> DiagnosticCheckResult:
+        """Describe why a worker-less operator snapshot cannot establish readiness."""
+        return DiagnosticCheckResult(
+            name="worker_configuration",
+            category="provider_configuration",
+            status="unknown",
+            detail=(
+                "Limited host-level probe: the configured concrete worker is unavailable, "
+                "so provider readiness cannot be established."
+            ),
+            remediation="Run the snapshot from the configured task-service process.",
+            verification_scope="local_presence",
+            blocking=True,
+        )
+
+    def _mark_limited_host_probe(
+        self,
+        report: ProviderPreDispatchReport,
+    ) -> ProviderPreDispatchReport:
+        """Keep worker-less operator snapshots fail-closed and visibly limited."""
+        check = self._limited_host_probe_check()
+        summary_suffix = " Concrete worker configuration was not inspected."
+        if report.ready:
+            return report.model_copy(
+                update={
+                    "decision": "preflight_rejected",
+                    "ready": False,
+                    "checks": [*report.checks, check],
+                    "failure_kind": "provider_error",
+                    "next_action_hint": "inspect_worker_configuration",
+                    "reason_code": "worker_configuration_unavailable",
+                    "summary": f"LIMITED_HOST_PROBE: {check.detail}",
+                }
+            )
+        return report.model_copy(
+            update={
+                "checks": [*report.checks, check],
+                "summary": f"{report.summary or 'Provider probe failed.'}{summary_suffix}",
+            }
+        )
+
+    def _operator_context(
+        self,
+        provider: str,
+    ) -> tuple[ProviderExecutionContext, bool]:
+        """Build an operator context and report whether it uses a concrete worker."""
+        worker = self._worker_for_provider(provider)
+        if worker is not None:
+            runtime_mode = getattr(worker, "default_runtime_mode", None)
+            if runtime_mode is None:
+                runtime_mode = "tool_loop" if provider == "openrouter" else "native_agent"
+            request = WorkerRequest(
+                task_text="Check provider readiness",
+                worker_type=provider,  # type: ignore[arg-type]
+                runtime_mode=str(runtime_mode),  # type: ignore[arg-type]
+            )
+            return (
+                resolve_execution_context(
+                    worker,
+                    request,
+                    worker_type=provider,
+                    task_id=f"system-probe:{provider}",
+                    logical_execution_key=f"system_probe:{provider}",
+                    secret_registry=self.secret_registry,
+                ),
+                True,
+            )
+
+        executable = (
+            "codex" if provider == "codex" else "agy" if provider == "antigravity" else None
+        )
+        auth_mechanism = (
+            "chatgpt_oauth"
+            if provider == "codex"
+            else "antigravity_oauth"
+            if provider == "antigravity"
+            else "api_key"
+        )
+        return (
+            ProviderExecutionContext(
+                provider=provider,
+                worker_profile=None,
+                runtime_mode="native_agent",
+                model=None,
+                reasoning_effort=None,
+                executable=executable,
+                executor_image=DEFAULT_NATIVE_AGENT_IMAGE,
+                auth_mechanism=auth_mechanism,  # type: ignore[arg-type]
+                credential_refs=(),
+                is_container_execution=True,
+                logical_execution_key=f"system_probe:{provider}",
+            ),
+            False,
+        )
+
     async def evaluate_all_providers(
         self,
         required_providers: set[str] | None = None,
@@ -639,28 +775,11 @@ class ProviderDiagnosticsService:
         for prov in supported:
             if prov not in target_set:
                 continue
-            executable = "codex" if prov == "codex" else "agy" if prov == "antigravity" else None
-            auth_mech = (
-                "chatgpt_oauth"
-                if prov == "codex"
-                else "antigravity_oauth"
-                if prov == "antigravity"
-                else "api_key"
+            ctx, uses_concrete_worker = self._operator_context(prov)
+            report = await self.evaluate_pre_dispatch(ctx)
+            reports[prov] = (
+                report if uses_concrete_worker else self._mark_limited_host_probe(report)
             )
-            ctx = ProviderExecutionContext(
-                provider=prov,
-                worker_profile=None,
-                runtime_mode="native_agent",
-                model=None,
-                reasoning_effort=None,
-                executable=executable,
-                executor_image=DEFAULT_NATIVE_AGENT_IMAGE,
-                auth_mechanism=auth_mech,  # type: ignore[arg-type]
-                credential_refs=(),
-                is_container_execution=(prov in ("codex", "antigravity")),
-                logical_execution_key=f"system_probe:{prov}",
-            )
-            reports[prov] = await self.evaluate_pre_dispatch(ctx)
 
         all_ready = (
             bool(target_set)

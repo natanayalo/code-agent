@@ -1736,6 +1736,7 @@ class TaskExecutionActivities:
                 secret_registry=getattr(self.service, "secret_registry", DEFAULT_SECRET_REGISTRY),
                 secret_env=getattr(selected_worker, "secret_env", None),
                 worker=selected_worker,
+                worker_type=selected_worker_type,
             )
             result, _progress = await execute_with_preflight(
                 selected_worker,

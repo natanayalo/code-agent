@@ -75,6 +75,22 @@ def _is_api_key_definition(definition: RegisteredSecretDefinition, expected_env_
     )
 
 
+def _is_provider_api_key_definition(
+    definition: RegisteredSecretDefinition,
+    *,
+    expected_env_var: str,
+    provider_label: str,
+) -> bool:
+    """Match a reference to the selected provider's credential identity."""
+    if _is_api_key_definition(definition, expected_env_var):
+        return True
+    provider_name = provider_label.lower().replace(" ", "_")
+    normalized_name = definition.name.lower().replace("-", "_")
+    return (
+        definition.required_scope == SecretScope.PROVIDER_AUTH and provider_name in normalized_name
+    )
+
+
 def _is_named_provider_key_reference(ref: str, expected_env_var: str) -> bool:
     """Recognize legacy provider-key reference names when their definitions are absent."""
     expected_names = {
@@ -211,8 +227,10 @@ def _registered_api_key_check(
         if definition is None:
             if _is_named_provider_key_reference(ref, expected_env_var):
                 missing_provider_refs.append(ref)
-        elif definition.required_scope == SecretScope.PROVIDER_AUTH or _is_api_key_definition(
-            definition, expected_env_var
+        elif _is_provider_api_key_definition(
+            definition,
+            expected_env_var=expected_env_var,
+            provider_label=provider_label,
         ):
             matching.append(definition)
 

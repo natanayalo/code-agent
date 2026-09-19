@@ -16,7 +16,13 @@ DEFAULT_DOCKER_PROBE_TIMEOUT_SECONDS: Final[float] = 3.0
 PROBE_CACHE_TTL_SECONDS: Final[float] = 15.0
 
 DiagnosticStatus = Literal["ready", "unready", "unknown"]
-DiagnosticCategory = Literal["credentials", "container_runtime", "cli_binary", "capacity"]
+DiagnosticCategory = Literal[
+    "credentials",
+    "container_runtime",
+    "cli_binary",
+    "capacity",
+    "provider_configuration",
+]
 VerificationScope = Literal[
     "local_presence",
     "local_structure",
