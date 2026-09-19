@@ -118,6 +118,7 @@ class ArtifactType(StrEnum):
     REVIEW_RESULT = "review_result"
     INDEPENDENT_REVIEW_RESULT = "independent_review_result"
     CONTEXT_ENVELOPE = "context_envelope"
+    PRE_DISPATCH_DIAGNOSTICS = "pre_dispatch_diagnostics"
 
 
 class TimelineEventType(StrEnum):

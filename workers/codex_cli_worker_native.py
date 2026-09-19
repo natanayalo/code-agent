@@ -469,7 +469,10 @@ class CodexCliWorkerNativeMixin:
             NetworkEgressPolicy,
             validate_grant_for_execution,
         )
-        from sandbox.provider_bootstrap import ProviderBootstrapLoader
+        from sandbox.provider_bootstrap import (
+            ProviderBootstrapLoader,
+            resolve_codex_provider_dir,
+        )
         from sandbox.secrets import (
             SecretExposurePolicy,
             SecretRef,
@@ -479,13 +482,6 @@ class CodexCliWorkerNativeMixin:
             create_authoritative_secret_registry,
         )
         from sandbox.trusted_context import TrustedSandboxExecutionContext
-
-        provider_dir = Path(os.environ.get("CODE_AGENT_CODEX_AUTH_DIR", Path.home() / ".codex"))
-        try:
-            if not provider_dir.exists() and Path("/root/.codex").exists():
-                provider_dir = Path("/root/.codex")
-        except OSError:  # pragma: no cover
-            pass
 
         injected_registry = getattr(self, "secret_registry", None)
         base_registry = (
@@ -504,7 +500,15 @@ class CodexCliWorkerNativeMixin:
             _is_openai_api_key_secret(registry.get(ref.name, task_id=task_id))
             for ref in request.secret_refs or ()
         )
-        bootstrap = ProviderBootstrapLoader.load(provider_dir, has_api_key=has_api_key)
+        provider_dir = resolve_codex_provider_dir(
+            adapter_env=getattr(getattr(self, "runtime_adapter", None), "env", None),
+            required_file=None if has_api_key else "auth.json",
+        )
+        bootstrap = ProviderBootstrapLoader.load(
+            provider_dir,
+            provider="codex",
+            has_api_key=has_api_key,
+        )
         for d in bootstrap.definitions:
             if d.name not in registry:
                 registry.register(d)

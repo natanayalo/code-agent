@@ -158,7 +158,7 @@ Temporal migration and rollback record is in the
    Codex recommendation for `docs/read_only` only, partial robustness, and static
    production routing unchanged):
    a. [Completed] remove legacy raw-secret ingress and enforce opaque registered references (M29 Item 1a);
-   b. add provider-specific pre-dispatch diagnostics;
+   b. [Completed] add provider-specific pre-dispatch diagnostics (M29 Item 1b);
    c. gather longitudinal and missing-cell current-cohort evidence;
    d. evaluate hierarchical budget controls separately.
 2. Use the M28 report as a scoped safety/effectiveness signal only; do not

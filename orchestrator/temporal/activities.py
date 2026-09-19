@@ -44,7 +44,6 @@ from orchestrator.execution_resume_service import (
 from orchestrator.execution_types import ProgressEvent, ProgressPhase
 from orchestrator.graph import (
     _aggregate_decomposed_results,
-    _await_worker_with_timeout,
     _build_worker_request,
     _effective_input_evidence,
     _resolve_orchestrator_timeout_seconds,
@@ -58,6 +57,7 @@ from orchestrator.graph import (
     build_rejected_session_state_update,
     build_review_result_node,
     check_approval,
+    execute_with_preflight,
     summarize_result,
 )
 from orchestrator.node_execution import (
@@ -84,6 +84,7 @@ from orchestrator.nodes.provisioning import (
 )
 from orchestrator.nodes.utils import _available_workers
 from orchestrator.nodes.verification import build_verify_result_node
+from orchestrator.provider_diagnostics import ProviderDiagnosticsService
 from orchestrator.state import (
     DecomposedTaskPlan,
     NodeOutcome,
@@ -117,12 +118,25 @@ from repositories import (
     TemporalTaskStateRepository,
     session_scope,
 )
+from sandbox import DEFAULT_SECRET_REGISTRY
 from sandbox.scratch import scratch_namespace_component
 from workers import ArtifactReference, WorkerResult
 
 logger = logging.getLogger(__name__)
 
 EXECUTION_CAPACITY_LEASE_SECONDS = 60
+
+
+def _resolve_selected_worker(worker: Any, worker_type: str) -> Any:
+    """Resolve the concrete worker that will execute a routed Temporal node."""
+    get_worker = getattr(worker, "get_worker", None)
+    if not callable(get_worker):
+        return worker
+    selected = get_worker(worker_type)
+    if selected is None:
+        raise RuntimeError(f"No concrete worker is available for routed worker '{worker_type}'.")
+    return selected
+
 
 EXCLUDED_TEMPORAL_SNAPSHOT_FIELDS: frozenset[str] = frozenset(
     {
@@ -792,6 +806,7 @@ class TaskExecutionActivities:
             session_factory=self.service.session_factory,
             context_envelope_enabled=getattr(self.service, "context_envelope_enabled", True),
             workspace_path_resolver=(lambda ws_id: ws_root / ws_id) if ws_root else None,
+            secret_registry=getattr(self.service, "secret_registry", DEFAULT_SECRET_REGISTRY),
         )
         self.verify_result_node = build_verify_result_node(
             enable_independent_verifier=self.service.enable_independent_verifier,
@@ -1708,13 +1723,31 @@ class TaskExecutionActivities:
         if digest != node_activity.effective_input_digest:
             raise ValueError("Node activity input digest changed before execution.")
 
+        selected_worker_type = str(
+            request.worker_type
+            or state.dispatch.worker_type
+            or state.route.chosen_worker
+            or "unknown"
+        )
+        selected_worker = _resolve_selected_worker(self.service.worker, selected_worker_type)
+
         async def _execute_worker() -> WorkerResult:
-            result, _progress = await _await_worker_with_timeout(
-                self.service.worker,
+            diagnostics_service = ProviderDiagnosticsService(
+                secret_registry=getattr(self.service, "secret_registry", DEFAULT_SECRET_REGISTRY),
+                secret_env=getattr(selected_worker, "secret_env", None),
+                worker=selected_worker,
+                worker_type=selected_worker_type,
+            )
+            result, _progress = await execute_with_preflight(
+                selected_worker,
                 request,
-                worker_type=state.dispatch.worker_type or state.route.chosen_worker or "unknown",
+                worker_type=selected_worker_type,
                 session_id=request.session_id,
                 timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
+                task_id=state.task.task_id,
+                attempt_count=node_activity.logical_attempt,
+                logical_execution_key=node_activity.logical_activity_key,
+                diagnostics_service=diagnostics_service,
             )
             if result is not None and node_envelope_artifact is not None:
                 result = result.model_copy(

@@ -23,6 +23,38 @@ does not authorize a non-reproducible installation. Use an explicitly approved
 setup command or the existing non-reproducible-install policy when appropriate,
 then replay the task. No host-side repository execution is introduced.
 
+## Provider pre-dispatch diagnostics
+
+Before a worker is launched, the orchestrator evaluates the selected concrete
+worker's credential contract and runtime prerequisites. Container-backed
+workers must have a responsive Docker daemon and an available executor image;
+an unready prerequisite blocks launch and persists a diagnostic artifact with
+the task attempt. OpenRouter uses its configured HTTP API client and does not
+require a provider CLI binary.
+
+The CLI-binary check is intentionally scoped to what the host can verify. For
+container execution it records the configured executable as **unverified**
+inside the image and remains non-blocking; it does not guarantee that a binary
+will be present in the image. Host-native execution checks the executable on
+the host `PATH`. The diagnostics CLI loads the configured worker adapters and
+container settings directly from environment variables, so it can report a
+genuinely ready provider without booting the database-backed task service. Use
+it for an operator-visible snapshot:
+
+```bash
+.venv/bin/python scripts/check_provider_diagnostics.py \
+  --providers codex,antigravity,openrouter \
+  --required codex,openrouter
+```
+
+The API snapshot remains a limited host-level probe when the API process does
+not have access to the configured task-service workers; in that case it fails
+required-provider checks closed rather than declaring readiness.
+
+If a task is rejected before dispatch, inspect its persisted
+`pre-dispatch-diagnostics.json` artifact and apply the reported remediation
+before replaying the task.
+
 Temporal histories use the `task-delivery-acceptance-v1` patch marker to adopt the
 delivery activity's terminal outcome. Older histories retain their recorded
 workflow-return behavior for replay compatibility; persisted task acceptance uses
@@ -42,6 +74,15 @@ Expected mounts:
 
 - `${CODE_AGENT_CODEX_AUTH_DIR}` -> `/root/.codex` (required)
 - `${CODE_AGENT_ANTIGRAVITY_AUTH_DIR}` -> `/root/.gemini` (optional unless Antigravity worker is used)
+
+Preflight and native execution share the same auth-directory resolution. Codex
+checks `CODE_AGENT_CODEX_AUTH_DIR`, then `CODEX_HOME`, then the user and
+container home defaults; OAuth uses the first directory containing `auth.json`.
+Antigravity checks `CODE_AGENT_ANTIGRAVITY_AUTH_DIR`, `GEMINI_HOME`,
+`CODE_AGENT_GEMINI_AUTH_DIR`, then the user and container home defaults; it
+uses the first directory containing the Antigravity OAuth token. If an earlier
+directory is configured but lacks the required credential, a later valid
+fallback is used by both preflight and execution.
 
 Bootstrap on host (ensure CLIs are installed and in PATH):
 

@@ -19,11 +19,13 @@ from apps.runtime import coerce_positive_int_env as _coerce_positive_int
 from db.enums import WorkerRuntimeMode
 from orchestrator.brain import RuleBasedOrchestratorBrain
 from orchestrator.execution import ProgressNotifier, TaskExecutionService
+from orchestrator.provider_diagnostics import ProviderDiagnosticsService
 from repositories import create_engine_from_url, create_session_factory
 from sandbox import DockerSandboxContainerManager
 from sandbox.ephemeral_store_postgres import SessionFactoryEphemeralSecretStore
 from sandbox.secrets import (
     EphemeralSecretStore,
+    InMemoryEphemeralSecretStore,
     SecretRegistry,
     create_authoritative_secret_registry,
 )
@@ -480,6 +482,35 @@ def _build_container_manager(resolved_env: Mapping[str, str]) -> DockerSandboxCo
         if resolved_sandbox_image
         else DockerSandboxContainerManager()
     )
+
+
+def build_provider_diagnostics_service_from_env(
+    environ: Mapping[str, str] | None = None,
+) -> ProviderDiagnosticsService:
+    """Build diagnostics against configured workers without bootstrapping the task service."""
+    resolved_env = os.environ if environ is None else environ
+    container_manager = _build_container_manager(resolved_env)
+    secret_registry = create_authoritative_secret_registry(resolved_env)
+    ephemeral_store = InMemoryEphemeralSecretStore()
+    codex_worker = _build_codex_worker(
+        resolved_env,
+        container_manager,
+        ephemeral_store,
+        secret_registry=secret_registry,
+    )
+    gemini_worker = _build_gemini_worker(
+        resolved_env,
+        container_manager,
+        ephemeral_store,
+        secret_registry=secret_registry,
+    )
+    openrouter_worker = _build_openrouter_worker(resolved_env, container_manager)
+    worker = WorkerFacade(
+        codex_worker=codex_worker,
+        antigravity_worker=gemini_worker,
+        openrouter_worker=openrouter_worker,
+    )
+    return ProviderDiagnosticsService(worker=worker, secret_registry=secret_registry)
 
 
 def _resolve_workspace_root(resolved_env: Mapping[str, str]) -> Path:

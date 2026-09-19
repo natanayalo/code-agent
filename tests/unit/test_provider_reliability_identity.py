@@ -8,7 +8,11 @@ from unittest.mock import MagicMock
 
 from db.enums import TimelineEventType
 from db.models import OrchestrationRuntime, Task, TaskStatus, WorkerRun, WorkerRuntimeMode
-from evaluation.provider_reliability_extractor import _extract_single_task, _validate_task_candidate
+from evaluation.provider_reliability_extractor import (
+    _extract_single_task,
+    _task_was_only_preflight_rejected,
+    _validate_task_candidate,
+)
 from evaluation.provider_reliability_identity import (
     ExecutionIdentity,
     is_execution_identity_matching,
@@ -288,6 +292,33 @@ def test_smoke_task_constraint_exclusion() -> None:
     )
     reason, _, _, _ = _validate_task_candidate(smoke_task, policy)
     assert reason == "evaluation_smoke"
+
+
+def test_preflight_only_rejection_is_detected() -> None:
+    run = _make_run("codex-native-executor-read-only", {})
+    run.artifact_index = [
+        {
+            "artifact_type": "pre_dispatch_diagnostics",
+            "artifact_metadata": {
+                "decision": "preflight_rejected",
+                "ready": False,
+                "execution_started": False,
+            },
+        }
+    ]
+    task = _make_task(runs=[run])
+
+    assert _task_was_only_preflight_rejected(task)
+    reason, _, _, _ = _validate_task_candidate(
+        task,
+        ReliabilityReportPolicy(
+            schema_version=2,
+            as_of=datetime.now(UTC),
+            window_start_at=datetime.now(UTC),
+            window_end_at=datetime.now(UTC),
+        ),
+    )
+    assert reason == "preflight_only_rejection"
 
 
 def test_resolve_identity_decomposed_nodes_agreement() -> None:

@@ -7,6 +7,7 @@ import copy
 import hashlib
 import json
 import logging
+import os
 import re
 from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
@@ -24,7 +25,8 @@ from apps.observability import (
     set_span_status_from_outcome,
     start_optional_span,
 )
-from db.enums import TimelineEventType
+from db.base import utc_now
+from db.enums import ArtifactType, TimelineEventType
 from db.models import Task
 from db.utils import compute_interaction_content_hash
 from memory.admission import (
@@ -68,6 +70,15 @@ from orchestrator.nodes.verification import (
     verify_result as verify_result,
 )
 from orchestrator.performance_routing import PerformanceRoutingPolicy
+from orchestrator.provider_diagnostics import (
+    ProviderDiagnosticsService,
+    resolve_execution_context,
+)
+from orchestrator.provider_diagnostics_types import (
+    ProviderExecutionContext,
+    ProviderPreDispatchReport,
+    compute_report_id,
+)
 from orchestrator.review import REPAIR_REQUEST_CONSTRAINT, SEVERITY_RANK, review_result
 from orchestrator.runtime_manifest import build_runtime_manifest
 from orchestrator.scout_proposals import (
@@ -104,8 +115,16 @@ from repositories.sqlalchemy import (
     SessionStateRepository,
 )
 from repositories.sqlalchemy_plan import ExecutionPlanRepository
+from sandbox.secrets import SecretRegistry
 from tools.numeric import coerce_positive_int_like
-from workers import ArtifactReference, Worker, WorkerProfile, WorkerRequest, WorkerResult
+from workers import (
+    ArtifactReference,
+    FailureKind,
+    Worker,
+    WorkerProfile,
+    WorkerRequest,
+    WorkerResult,
+)
 from workers.constants import (
     DEFAULT_ORCHESTRATOR_GRACE_SECONDS,
     DEFAULT_WORKER_TIMEOUT_SECONDS,
@@ -172,7 +191,7 @@ def _resolve_orchestrator_timeout_seconds(state: OrchestratorState) -> int:
     return DEFAULT_ORCHESTRATOR_TIMEOUT_SECONDS
 
 
-def _timed_out_worker_result(timeout_seconds: int) -> WorkerResult:
+def _timed_out_worker_result(timeout_seconds: float) -> WorkerResult:
     """Build a structured timeout result for the outer orchestrator envelope."""
     return WorkerResult(
         status="failure",
@@ -294,7 +313,7 @@ async def _await_worker_with_timeout(
     *,
     worker_type: str,
     session_id: str | None,
-    timeout_seconds: int,
+    timeout_seconds: float,
 ) -> tuple[WorkerResult, str]:
     """Run a worker behind the outer orchestrator timeout/cancel envelope."""
 
@@ -354,6 +373,273 @@ async def _await_worker_with_timeout(
         )
         return _unexpected_worker_error_result(exc), "worker crashed unexpectedly"
     return result, "worker result received"
+
+
+async def _evaluate_preflight_with_timeout(
+    service: ProviderDiagnosticsService,
+    context: ProviderExecutionContext,
+    *,
+    session_id: str | None,
+    task_id: str | None,
+    worker_type: str,
+    context_timeout_seconds: float,
+) -> tuple[ProviderPreDispatchReport | None, float, bool]:
+    """Evaluate preflight within its own deadline and report elapsed time."""
+    loop = asyncio.get_running_loop()
+    loop_start = loop.time()
+    preflight_timeout = min(service.preflight_timeout, max(0.0, context_timeout_seconds))
+    overall_budget_limited = context_timeout_seconds <= service.preflight_timeout
+    try:
+        report = await asyncio.wait_for(
+            service.evaluate_pre_dispatch(context),
+            timeout=preflight_timeout,
+        )
+    except TimeoutError:
+        elapsed = loop.time() - loop_start
+        logger.warning(
+            "Provider pre-dispatch diagnostics timed out",
+            extra={
+                "session_id": session_id,
+                "task_id": task_id,
+                "worker_type": worker_type,
+                "preflight_timeout_seconds": preflight_timeout,
+                "overall_budget_limited": overall_budget_limited,
+                "elapsed_seconds": elapsed,
+            },
+        )
+        return None, elapsed, overall_budget_limited
+    return report, loop.time() - loop_start, False
+
+
+def _preflight_timeout_result(
+    request: WorkerRequest,
+    context: ProviderExecutionContext,
+    timeout_seconds: float,
+) -> tuple[WorkerResult, str]:
+    """Build the terminal result when preflight does not finish in time."""
+    report = _terminal_preflight_report(
+        context,
+        decision="preflight_timeout",
+        failure_kind="timeout",
+        next_action_hint="inspect_worker_configuration",
+        reason_code="preflight_timeout",
+        summary=(
+            "Provider pre-dispatch diagnostics exceeded its timeout "
+            f"({timeout_seconds}s); worker launch was skipped."
+        ),
+    )
+    diagnostic_artifact = _preflight_diagnostic_artifact(report)
+    return (
+        WorkerResult(
+            status="error",
+            summary=report.summary,
+            failure_kind="timeout",
+            next_action_hint="inspect_worker_configuration",
+            workspace_id=request.workspace_id,
+            artifacts=[diagnostic_artifact],
+            preflight_rejected=True,
+            execution_not_started=True,
+        ),
+        "pre-dispatch diagnostics timed out before execution",
+    )
+
+
+def _preflight_budget_exhausted_result(
+    request: WorkerRequest,
+    context: ProviderExecutionContext,
+    timeout_seconds: float,
+) -> tuple[WorkerResult, str]:
+    """Build the terminal result when the outer deadline wins over preflight."""
+    report = _terminal_preflight_report(
+        context,
+        decision="preflight_budget_exhausted",
+        failure_kind="timeout",
+        next_action_hint="inspect_worker_configuration",
+        reason_code="preflight_budget_exhausted",
+        summary=(
+            "Provider pre-dispatch diagnostics consumed the execution timeout "
+            "envelope; worker launch was skipped."
+        ),
+    )
+    diagnostic_artifact = _preflight_diagnostic_artifact(report)
+    timeout_result = _timed_out_worker_result(timeout_seconds).model_copy(
+        update={
+            "summary": report.summary,
+            "workspace_id": request.workspace_id,
+            "artifacts": [diagnostic_artifact],
+            "preflight_rejected": True,
+            "execution_not_started": True,
+        }
+    )
+    return (
+        timeout_result,
+        "pre-dispatch diagnostics consumed the execution timeout envelope",
+    )
+
+
+def _terminal_preflight_report(
+    context: ProviderExecutionContext,
+    *,
+    decision: Literal["preflight_timeout", "preflight_budget_exhausted"],
+    failure_kind: FailureKind,
+    next_action_hint: str,
+    reason_code: str,
+    summary: str,
+) -> ProviderPreDispatchReport:
+    """Create audit evidence for a preflight terminal path without provider execution."""
+    checked_at = utc_now()
+    return ProviderPreDispatchReport(
+        report_id=compute_report_id(context.logical_execution_key or "unknown"),
+        checked_at=checked_at,
+        execution_environment_id=os.environ.get("HOSTNAME", "local"),
+        logical_execution_key=context.logical_execution_key or "unknown",
+        provider=context.provider,
+        worker_profile=context.worker_profile,
+        runtime_mode=context.runtime_mode,
+        model=context.model,
+        decision=decision,
+        ready=False,
+        execution_started=False,
+        checks=[],
+        failure_kind=failure_kind,
+        next_action_hint=next_action_hint,
+        reason_code=reason_code,
+        summary=summary,
+    )
+
+
+def _preflight_rejection_result(
+    request: WorkerRequest,
+    report: ProviderPreDispatchReport,
+    diagnostic_artifact: ArtifactReference,
+    *,
+    session_id: str | None,
+    task_id: str | None,
+    worker_type: str,
+) -> tuple[WorkerResult, str]:
+    """Build the structured result and audit artifact for a rejected launch."""
+    logger.warning(
+        "Provider pre-dispatch diagnostics rejected worker launch",
+        extra={
+            "session_id": session_id,
+            "task_id": task_id,
+            "worker_type": worker_type,
+            "report_id": report.report_id,
+            "failure_kind": report.failure_kind,
+            "decision": report.decision,
+        },
+    )
+    return (
+        WorkerResult(
+            status="error",
+            summary=report.summary or "Pre-dispatch diagnostics check failed.",
+            failure_kind=report.failure_kind or "provider_error",
+            next_action_hint=report.next_action_hint or "fix_provider_prerequisites",
+            workspace_id=request.workspace_id,
+            artifacts=[diagnostic_artifact],
+            preflight_rejected=True,
+            execution_not_started=True,
+        ),
+        "pre-dispatch diagnostics rejected execution",
+    )
+
+
+def _preflight_diagnostic_artifact(report: ProviderPreDispatchReport) -> ArtifactReference:
+    """Convert a preflight report into its persisted worker-result artifact."""
+    return ArtifactReference(
+        name="pre-dispatch-diagnostics.json",
+        uri=f"diagnostics://{report.report_id}",
+        artifact_type=ArtifactType.PRE_DISPATCH_DIAGNOSTICS,
+        artifact_metadata=report.model_dump(mode="json"),
+    )
+
+
+async def execute_with_preflight(
+    worker: Worker,
+    request: WorkerRequest,
+    *,
+    worker_type: str,
+    session_id: str | None,
+    timeout_seconds: float,
+    diagnostics_service: ProviderDiagnosticsService | None = None,
+    secret_registry: SecretRegistry | None = None,
+    task_id: str | None = None,
+    attempt_count: int = 1,
+    logical_execution_key: str | None = None,
+) -> tuple[WorkerResult, str]:
+    """Execute worker behind pre-dispatch diagnostic gate and orchestrator timeout envelope."""
+    diagnostics_enabled = os.environ.get(
+        "CODE_AGENT_PRE_DISPATCH_DIAGNOSTICS_ENABLED", "1"
+    ).strip().lower() not in ("0", "false", "no", "off")
+
+    if not diagnostics_enabled:
+        return await _await_worker_with_timeout(
+            worker,
+            request,
+            worker_type=worker_type,
+            session_id=session_id,
+            timeout_seconds=timeout_seconds,
+        )
+
+    service = diagnostics_service or ProviderDiagnosticsService(
+        secret_registry=secret_registry,
+        secret_env=getattr(worker, "secret_env", None),
+        worker=worker,
+        worker_type=worker_type,
+    )
+    ctx = resolve_execution_context(
+        worker,
+        request,
+        worker_type=worker_type,
+        task_id=task_id,
+        session_id=session_id,
+        attempt_count=attempt_count,
+        logical_execution_key=logical_execution_key,
+        secret_registry=service.secret_registry,
+    )
+    report, preflight_elapsed, preflight_budget_exhausted = await _evaluate_preflight_with_timeout(
+        service,
+        ctx,
+        session_id=session_id,
+        task_id=task_id,
+        worker_type=worker_type,
+        context_timeout_seconds=timeout_seconds,
+    )
+    if report is None and preflight_budget_exhausted:
+        return _preflight_budget_exhausted_result(request, ctx, timeout_seconds)
+    if report is None:
+        return _preflight_timeout_result(request, ctx, service.preflight_timeout)
+
+    remaining = max(
+        0.0,
+        timeout_seconds - preflight_elapsed,
+    )
+
+    diagnostic_artifact = _preflight_diagnostic_artifact(report)
+
+    if not report.ready:
+        return _preflight_rejection_result(
+            request,
+            report,
+            diagnostic_artifact,
+            session_id=session_id,
+            task_id=task_id,
+            worker_type=worker_type,
+        )
+
+    if remaining <= 0:
+        return _preflight_budget_exhausted_result(request, ctx, timeout_seconds)
+
+    result, progress = await _await_worker_with_timeout(
+        worker,
+        request,
+        worker_type=worker_type,
+        session_id=session_id,
+        timeout_seconds=remaining,
+    )
+    if result is not None:
+        result = result.model_copy(update={"artifacts": [*result.artifacts, diagnostic_artifact]})
+    return result, progress
 
 
 # [Moved to orchestrator/nodes/utils.py]
@@ -661,6 +947,7 @@ def _skipped_node_result(node: DecomposedTaskNode, reason: str) -> WorkerResult:
         files_changed=[],
         test_results=[],
         artifacts=[],
+        execution_not_started=True,
     )
 
 
@@ -781,6 +1068,8 @@ async def _execute_decomposed_node(
     effective_input_digest: str,
     task_trace_id: str | None,
     node_envelope_artifact: ArtifactReference | None = None,
+    diagnostics_service: ProviderDiagnosticsService | None = None,
+    secret_registry: SecretRegistry | None = None,
 ) -> tuple[WorkerResult | None, NodeOutcome | None]:
     """Dispatch one node through durable persistence or the legacy fallback."""
     if session_factory is not None and state.task.task_id and plan_id is not None:
@@ -795,12 +1084,17 @@ async def _execute_decomposed_node(
         )
 
         async def execute_worker() -> WorkerResult:
-            result, _progress = await _await_worker_with_timeout(
+            result, _progress = await execute_with_preflight(
                 worker,
                 request,
                 worker_type=state.dispatch.worker_type or state.route.chosen_worker or "unknown",
                 session_id=request.session_id,
                 timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
+                diagnostics_service=diagnostics_service,
+                secret_registry=secret_registry,
+                task_id=state.task.task_id,
+                attempt_count=logical_attempt,
+                logical_execution_key=activity_request.logical_activity_key,
             )
             if result is not None and node_envelope_artifact is not None:
                 result = result.model_copy(
@@ -819,12 +1113,22 @@ async def _execute_decomposed_node(
                 return outcome.result if outcome is not None else None, outcome
             except NodeActivityInProgress:
                 await asyncio.sleep(1)
-    result, _progress = await _await_worker_with_timeout(
+    fallback_key = (
+        logical_activity_key(plan_id, node.node_id, logical_attempt)
+        if plan_id is not None
+        else f"{state.task.task_id}:{node.node_id}:attempt:{logical_attempt}"
+    )
+    result, _progress = await execute_with_preflight(
         worker,
         request,
         worker_type=state.dispatch.worker_type or state.route.chosen_worker or "unknown",
         session_id=request.session_id,
         timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
+        diagnostics_service=diagnostics_service,
+        secret_registry=secret_registry,
+        task_id=state.task.task_id,
+        attempt_count=logical_attempt,
+        logical_execution_key=fallback_key,
     )
     if result is not None and node_envelope_artifact is not None:
         result = result.model_copy(
@@ -859,6 +1163,12 @@ def _aggregate_decomposed_results(outcomes: list[NodeOutcome]) -> WorkerResult:
         outcome.result for outcome in outcomes if outcome.result.status == "success"
     ]
     failed_results = [outcome.result for outcome in outcomes if outcome.result.status != "success"]
+    execution_not_started = bool(outcomes) and all(
+        outcome.result.execution_not_started for outcome in outcomes
+    )
+    preflight_rejected = execution_not_started and any(
+        outcome.result.preflight_rejected for outcome in outcomes
+    )
     status: Literal["success", "failure"] = (
         "failure" if failed is not None or skipped else "success"
     )
@@ -926,6 +1236,8 @@ def _aggregate_decomposed_results(outcomes: list[NodeOutcome]) -> WorkerResult:
             if status == "failure"
             else "persist_memory"
         ),
+        preflight_rejected=preflight_rejected,
+        execution_not_started=execution_not_started,
     )
 
 
@@ -936,6 +1248,8 @@ async def _await_decomposed_nodes(
     *,
     workspace_path_resolver: Callable[[str], Path] | None = None,
     context_envelope_enabled: bool = True,
+    diagnostics_service: ProviderDiagnosticsService | None = None,
+    secret_registry: SecretRegistry | None = None,
 ) -> tuple[WorkerResult, list[NodeOutcome], dict[str, Any] | None]:
     """Run ready decomposed nodes one at a time in the shared workspace."""
     plan = state.decomposed_plan
@@ -1079,6 +1393,8 @@ async def _await_decomposed_nodes(
                 effective_input_digest=digest,
                 task_trace_id=task_trace_id,
                 node_envelope_artifact=node_envelope_artifact,
+                diagnostics_service=diagnostics_service,
+                secret_registry=secret_registry,
             )
             if result is None:
                 logger.warning("Node execution result is None, falling back to failure default.")
@@ -2462,6 +2778,8 @@ def _compute_route_escalation(
 ) -> RouteDecision | None:
     if state.attempt_count == 0 or state.dispatch.worker_type is None:
         return None
+    if state.result is not None and getattr(state.result, "execution_not_started", False):
+        return None
 
     prior_worker: WorkerType = state.dispatch.worker_type
     escalation_reason: str | None = None
@@ -2795,6 +3113,8 @@ def _resolve_brain_retry_context(state: OrchestratorState) -> tuple[WorkerType |
 
     if state.attempt_count <= 0 or prior_worker is None:
         return None, None
+    if state.result is not None and getattr(state.result, "execution_not_started", False):
+        return prior_worker, None
     if state.verification is not None and state.verification.status == "failed":
         verification_failure_kind = state.verification.failure_kind or "unknown"
         if verification_failure_kind in _VERIFICATION_FAILURE_REROUTE_KINDS:
@@ -3336,6 +3656,8 @@ def build_await_result_node(
     session_factory: Callable[[], Session] | None = None,
     context_envelope_enabled: bool = True,
     workspace_path_resolver: Callable[[str], Path] | None = None,
+    diagnostics_service: ProviderDiagnosticsService | None = None,
+    secret_registry: SecretRegistry | None = None,
 ) -> Callable[[OrchestratorState], Awaitable[dict[str, Any]]]:
     """Create the await-result node around the workers wired into the graph."""
     available_workers = _available_workers(worker)
@@ -3368,14 +3690,15 @@ def build_await_result_node(
                     frozenset(available_workers.keys()),
                 )
             else:
-                bound_worker = available_workers.get(worker_type or "")
+                bound_worker = available_workers.get(str(worker_type or ""))
                 if bound_worker is None:
-                    result = _worker_unavailable_result(
+                    result, progress_updates = _build_unavailable_route_result(
+                        state,
                         worker_type,
-                        available_workers=frozenset(available_workers.keys()),
+                        requested_profile,
+                        available_profile_names,
+                        frozenset(available_workers.keys()),
                     )
-                    progress_message = f"worker unavailable: {worker_type or 'unknown'}"
-                    progress_updates = _progress_update(state, progress_message)
                 else:
                     if (
                         state.decomposed_plan
@@ -3388,6 +3711,8 @@ def build_await_result_node(
                             session_factory=session_factory,
                             workspace_path_resolver=workspace_path_resolver,
                             context_envelope_enabled=context_envelope_enabled,
+                            diagnostics_service=diagnostics_service,
+                            secret_registry=secret_registry,
                         )
                         progress_message = "sequential task nodes completed"
                         request = _build_worker_request(state)
@@ -3449,12 +3774,20 @@ def build_await_result_node(
                         curr_manifest["context_envelope_status"] = envelope_status
                         request = request.model_copy(update={"runtime_manifest": curr_manifest})
 
-                        result, progress_message = await _await_worker_with_timeout(
+                        logical_key = (
+                            f"{state.task.task_id}:attempt:{state.attempt_count or 1}:primary"
+                        )
+                        result, progress_message = await execute_with_preflight(
                             bound_worker,
                             request,
                             worker_type=worker_type or "unknown",
                             session_id=request.session_id,
                             timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
+                            diagnostics_service=diagnostics_service,
+                            secret_registry=secret_registry,
+                            task_id=state.task.task_id,
+                            attempt_count=state.attempt_count or 1,
+                            logical_execution_key=logical_key,
                         )
                         if result is not None and envelope_artifact is not None:
                             result = result.model_copy(

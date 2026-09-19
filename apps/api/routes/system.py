@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 
 from apps.api.config import SystemConfig
 from apps.api.dependencies import get_system_config, require_any_valid_auth
+from orchestrator.provider_diagnostics import ProviderDiagnosticsService
+from orchestrator.provider_diagnostics_types import SystemProviderDiagnosticsReport
 from orchestrator.runtime_manifest import RuntimeManifest, build_runtime_manifest
 from tools.registry import DEFAULT_TOOL_REGISTRY, ToolDefinition
 
@@ -49,4 +51,22 @@ def get_runtime_manifest(
     return build_runtime_manifest(
         default_image=config.default_image,
         workspace_root=config.workspace_root,
+    )
+
+
+@router.get("/provider-diagnostics", response_model=SystemProviderDiagnosticsReport)
+async def get_provider_diagnostics(
+    request: Request,
+    required_providers: list[str] | None = Query(default=None),
+) -> SystemProviderDiagnosticsReport:
+    """Return provider readiness diagnostics for this API process host."""
+    task_service = getattr(request.app.state, "task_service", None)
+    service = ProviderDiagnosticsService(
+        worker=getattr(task_service, "worker", None),
+        secret_registry=getattr(task_service, "secret_registry", None),
+    )
+    req_set = set(required_providers) if required_providers else None
+    return await service.evaluate_all_providers(
+        required_providers=req_set,
+        target="api_process",
     )

@@ -30,7 +30,8 @@ from workers import WorkerCommand, WorkerResult
 
 
 @pytest.mark.asyncio
-async def test_await_decomposed_nodes():
+async def test_await_decomposed_nodes(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("CODE_AGENT_PRE_DISPATCH_DIAGNOSTICS_ENABLED", "0")
     node1 = DecomposedTaskNode(
         node_id="n1",
         title="Node 1",
@@ -82,6 +83,7 @@ async def test_await_decomposed_nodes():
 def test_timed_out_and_cancelled_results():
     r1 = _timed_out_worker_result(30)
     assert r1.status == "failure" and r1.failure_kind == "timeout"
+    assert not r1.execution_not_started
 
     r2 = _cancelled_worker_result()
     assert r2.status == "failure" and r2.failure_kind == "timeout"

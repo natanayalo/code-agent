@@ -27,6 +27,8 @@ file_exceptions:
   orchestrator/context_envelope.py: Versioned ContextEnvelope contracts, validation, redaction, and assembly kept cohesive to preserve the pre-dispatch audit boundary.
   tests/unit/test_context_envelope.py: Comprehensive unit test suite covering ContextEnvelope contracts, assembly, truncation, redaction, git revision, and digest reproducibility.
   orchestrator/nodes/delivery.py: Delivery logic orchestrates broker-owned secret resolution and Git commands.
+  tests/unit/test_provider_diagnostics.py: Comprehensive diagnostic unit coverage for provider_diagnostics.py and provider_diagnostics_credentials.py; narrow branch-targeting tests across two tightly coupled modules cannot be split without duplicating shared fixtures.
+  orchestrator/provider_diagnostics.py: Provider pre-dispatch diagnostics keeps trusted execution-context resolution, prerequisite probes, and report assembly together as one auditable boundary.
 function_exceptions:
   tests/unit/test_codex_cli_worker_coverage.py:
     test_codex_native_prepare_request_secret_refs: Mock setup for worker isolation coverage tests.
@@ -63,12 +65,15 @@ function_exceptions:
     _persist_submission: Creates initial DB scaffolding for a task; must run in a single cohesive transaction.
     replay_task: Clones task state, flags, and specs for replay; requires dense DB model interactions.
   orchestrator/graph.py:
+    execute_with_preflight: Coordinates context resolution, bounded diagnostics, terminal audit artifacts, and the worker timeout envelope in one execution boundary.
     _apply_brain_route_suggestion: Applies routing suggestions by merging them securely into state; tightly coupled mapping block.
     _build_worker_request: Builds worker request constraints and task specs.
     _aggregate_decomposed_results: Aggregates all node-level worker outputs into the existing parent WorkerResult contract; keeping the field mapping together prevents delivery and memory fields from being dropped.
     _await_decomposed_nodes: Sequential DAG execution loop coordinates dependency readiness, retries, shared worker context, and permission-blocked resume state.
     await_result: Worker-result boundary includes the sequential decomposed execution branch while preserving single-worker behavior.
     build_await_result_node: Domain callable builder for awaiting worker results, handling parsing, progress, and fallback logic cleanly without artificial splitting.
+  orchestrator/provider_diagnostics.py:
+    resolve_execution_context: Projects the final request, worker adapter, secret registry, and sandbox image into one authoritative execution identity.
   orchestrator/task_spec.py:
     apply_task_spec_brain_suggestion: Merges AI suggestions into TaskSpec; involves deep nested dictionary and model updates.
     build_task_spec: Parses raw request into structured contract; highly coupled to input validation rules.
