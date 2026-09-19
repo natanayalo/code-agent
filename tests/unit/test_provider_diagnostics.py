@@ -403,6 +403,75 @@ def test_openrouter_credentials_missing(monkeypatch: pytest.MonkeyPatch) -> None
     assert "OpenRouter API key is not configured" in res.detail
 
 
+def test_openrouter_ignores_unrelated_task_secret_when_adapter_is_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Delivery credentials must not override the provider's configured API key."""
+    from workers.openrouter_adapter import OpenRouterCliRuntimeAdapter
+
+    monkeypatch.setattr("workers.openrouter_adapter.OpenAI", lambda **_kwargs: object())
+    adapter = OpenRouterCliRuntimeAdapter(api_key="sk-openrouter-configured")
+    worker = SimpleNamespace(worker_type="openrouter", runtime_adapter=adapter)
+    svc = ProviderDiagnosticsService(
+        worker=worker,
+        secret_registry=SecretRegistry(
+            [
+                RegisteredSecretDefinition(
+                    name="github_token",
+                    source=SecretSource.ENV,
+                    source_key="GITHUB_TOKEN",
+                    required_scope=SecretScope.GIT_PUSH,
+                    exposure_policy=SecretExposurePolicy.BROKER_ONLY,
+                )
+            ]
+        ),
+        secret_env={},
+    )
+
+    res = svc.check_credentials(
+        _make_context(
+            provider="openrouter",
+            auth_mechanism="api_key",
+            credential_refs=("github_token",),
+        )
+    )
+
+    assert res.status == "ready"
+    assert not res.blocking
+
+
+def test_openrouter_explicit_invalid_provider_reference_fails_closed() -> None:
+    registry = SecretRegistry(
+        [
+            RegisteredSecretDefinition(
+                name="invalid_openrouter_key",
+                source=SecretSource.ENV,
+                source_key="OPENROUTER_API_KEY",
+                required_scope=SecretScope.PROVIDER_AUTH,
+                exposure_policy=SecretExposurePolicy.SANDBOX_ENV,
+                destination_env_var="OPENAI_API_KEY",
+            )
+        ]
+    )
+    svc = ProviderDiagnosticsService(
+        secret_registry=registry,
+        secret_env={"OPENROUTER_API_KEY": "sk-openrouter-test"},
+        effective_api_key_configured=True,
+    )
+
+    res = svc.check_credentials(
+        _make_context(
+            provider="openrouter",
+            auth_mechanism="api_key",
+            credential_refs=("invalid_openrouter_key",),
+        )
+    )
+
+    assert res.status == "unready"
+    assert res.blocking
+    assert "wrong environment variable" in res.detail
+
+
 def test_openrouter_skips_cli_check() -> None:
     svc = ProviderDiagnosticsService()
     ctx = _make_context(provider="openrouter", auth_mechanism="api_key", executable=None)

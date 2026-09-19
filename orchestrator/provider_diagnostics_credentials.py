@@ -75,6 +75,17 @@ def _is_api_key_definition(definition: RegisteredSecretDefinition, expected_env_
     )
 
 
+def _is_named_provider_key_reference(ref: str, expected_env_var: str) -> bool:
+    """Recognize legacy provider-key reference names when their definitions are absent."""
+    expected_names = {
+        expected_env_var.lower(),
+        expected_env_var.lower().removesuffix("_api_key") + "_api_key",
+    }
+    if expected_env_var == "OPENAI_API_KEY":
+        expected_names.add("openai_key")
+    return ref.lower() in expected_names
+
+
 def _source_value(
     definition: RegisteredSecretDefinition,
     *,
@@ -194,24 +205,27 @@ def _registered_api_key_check(
         return None
 
     matching: list[RegisteredSecretDefinition] = []
-    missing_refs: list[str] = []
+    missing_provider_refs: list[str] = []
     for ref in context.credential_refs:
         definition = secret_registry.get(ref, task_id=context.task_id)
         if definition is None:
-            missing_refs.append(ref)
-        elif _is_api_key_definition(definition, expected_env_var):
+            if _is_named_provider_key_reference(ref, expected_env_var):
+                missing_provider_refs.append(ref)
+        elif definition.required_scope == SecretScope.PROVIDER_AUTH or _is_api_key_definition(
+            definition, expected_env_var
+        ):
             matching.append(definition)
 
     if not matching:
-        if missing_refs:
+        if missing_provider_refs:
             return _unready(
                 f"Registered {provider_label} API key reference is missing from SecretRegistry.",
                 f"Register the referenced {provider_label} secret in SecretRegistry.",
             )
-        return _unready(
-            f"Referenced secret does not map to {expected_env_var} for {provider_label}.",
-            f"Reference a registered {provider_label} secret backed by {expected_env_var}.",
-        )
+        # Other task secrets (for example github_token used for delivery) do not
+        # select or replace the provider credential. The effective worker
+        # configuration is checked independently below.
+        return None
 
     last_failure: DiagnosticCheckResult | None = None
     for definition in matching:

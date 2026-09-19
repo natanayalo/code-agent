@@ -23,6 +23,31 @@ does not authorize a non-reproducible installation. Use an explicitly approved
 setup command or the existing non-reproducible-install policy when appropriate,
 then replay the task. No host-side repository execution is introduced.
 
+## Provider pre-dispatch diagnostics
+
+Before a worker is launched, the orchestrator evaluates the selected concrete
+worker's credential contract and runtime prerequisites. Container-backed
+workers must have a responsive Docker daemon and an available executor image;
+an unready prerequisite blocks launch and persists a diagnostic artifact with
+the task attempt. OpenRouter uses its configured HTTP API client and does not
+require a provider CLI binary.
+
+The CLI-binary check is intentionally scoped to what the host can verify. For
+container execution it records the configured executable as **unverified**
+inside the image and remains non-blocking; it does not guarantee that a binary
+will be present in the image. Host-native execution checks the executable on
+the host `PATH`. Use the diagnostics CLI for an operator-visible snapshot:
+
+```bash
+.venv/bin/python scripts/check_provider_diagnostics.py \
+  --providers codex,antigravity,openrouter \
+  --required codex,openrouter
+```
+
+If a task is rejected before dispatch, inspect its persisted
+`pre-dispatch-diagnostics.json` artifact and apply the reported remediation
+before replaying the task.
+
 Temporal histories use the `task-delivery-acceptance-v1` patch marker to adopt the
 delivery activity's terminal outcome. Older histories retain their recorded
 workflow-return behavior for replay compatibility; persisted task acceptance uses

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -13,10 +14,12 @@ from orchestrator.node_execution import (
     NodeActivityRequest,
     NodeActivityResultRef,
 )
+from orchestrator.provider_diagnostics_types import DiagnosticCheckResult
 from orchestrator.state import OrchestratorState
 from orchestrator.temporal.activities import TaskExecutionActivities, _source_file_changes
 from sandbox.scratch import scratch_namespace_component
 from workers import WorkerRequest
+from workers.facade import WorkerFacade
 
 
 def _state(*, with_dependency: bool = False) -> OrchestratorState:
@@ -55,6 +58,38 @@ def _activity(state: OrchestratorState) -> TaskExecutionActivities:
 
 def _worker_request() -> WorkerRequest:
     return WorkerRequest(task_text="Run node")
+
+
+class _ExecutingNodeExecutionService:
+    captured: dict[str, object] = {}
+
+    def __init__(self, _session_factory) -> None:
+        pass
+
+    async def execute(self, **kwargs):
+        result = await kwargs["execute_worker"]()
+        self.captured["worker_result"] = result
+        return (
+            NodeActivityResultRef(
+                node_id="node",
+                logical_activity_key="node-activity:v1:plan:node:1",
+                status="failed",
+                result_digest="b" * 64,
+                continuation="retry_node",
+            ),
+            None,
+        )
+
+
+def _ready_credentials(_service, _context) -> DiagnosticCheckResult:
+    return DiagnosticCheckResult(
+        name="credentials",
+        category="credentials",
+        status="ready",
+        detail="Configured for test.",
+        verification_scope="local_presence",
+        blocking=False,
+    )
 
 
 def test_source_file_changes_excludes_only_the_current_node_scratch() -> None:
@@ -120,6 +155,80 @@ async def test_run_decomposed_node_reconstructs_request_and_returns_compact_refe
     assert result["status"] == "completed"
     assert captured["effective_input_summary"] == {}
     assert captured["request"].scratch_namespace == "node-activity:v1:plan:node:1"
+
+
+@pytest.mark.anyio
+async def test_run_decomposed_node_preflights_the_selected_facade_worker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from workers.openrouter_cli_worker import OpenRouterCliWorker
+
+    monkeypatch.setenv("CODE_AGENT_PRE_DISPATCH_DIAGNOSTICS_ENABLED", "1")
+    state = _state()
+    concrete_worker = OpenRouterCliWorker(
+        runtime_adapter=SimpleNamespace(api_key="sk-openrouter-test"),
+        workspace_manager=SimpleNamespace(),
+        container_manager=SimpleNamespace(default_image="openrouter-worker:latest"),
+    )
+    worker_run = AsyncMock(side_effect=AssertionError("Docker preflight must block the worker"))
+    concrete_worker.run = worker_run
+    activity = _activity(state)
+    activity.service.worker = WorkerFacade(openrouter_worker=concrete_worker)
+    digest = "a" * 64
+    _ExecutingNodeExecutionService.captured = {}
+    docker_check = AsyncMock(
+        return_value=DiagnosticCheckResult(
+            name="docker_daemon",
+            category="container_runtime",
+            status="unready",
+            detail="Docker daemon unavailable for test.",
+            verification_scope="local_runtime",
+            blocking=True,
+        )
+    )
+
+    monkeypatch.setattr(activities_module, "NodeExecutionService", _ExecutingNodeExecutionService)
+    monkeypatch.setattr(
+        activities_module,
+        "_build_worker_request",
+        lambda *args, **kwargs: WorkerRequest(
+            task_text="Run node",
+            worker_type="openrouter",
+            runtime_mode="tool_loop",
+        ),
+    )
+    monkeypatch.setattr(activities_module, "_effective_input_evidence", lambda *args: ({}, digest))
+    monkeypatch.setattr(activities_module.activity, "heartbeat", lambda: None)
+    monkeypatch.setattr(
+        activities_module.ProviderDiagnosticsService,
+        "check_credentials",
+        _ready_credentials,
+    )
+    monkeypatch.setattr(
+        activities_module.ProviderDiagnosticsService,
+        "check_docker_daemon",
+        docker_check,
+    )
+
+    result = await activity.run_decomposed_node(
+        "task",
+        NodeActivityRequest(
+            task_id="task",
+            plan_id="plan",
+            node_id="node",
+            logical_attempt=1,
+            logical_activity_key="node-activity:v1:plan:node:1",
+            effective_input_digest=digest,
+        ).model_dump(mode="json"),
+    )
+
+    worker_result = _ExecutingNodeExecutionService.captured["worker_result"]
+    assert result["status"] == "failed"
+    assert worker_result.preflight_rejected
+    assert worker_result.execution_not_started
+    assert worker_result.artifacts[0].artifact_metadata["provider"] == "openrouter"
+    docker_check.assert_awaited_once()
+    worker_run.assert_not_awaited()
 
 
 @pytest.mark.anyio
