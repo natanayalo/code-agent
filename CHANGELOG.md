@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: add provider-specific pre-dispatch diagnostics (M29 Item 1b) ([#407](https://github.com/natanayalo/code-agent/pull/407))
+
 - Feat: remove legacy raw-secret ingress and enforce registered secret references (M29 Item 1a) ([#406](https://github.com/natanayalo/code-agent/pull/406))
 
 - Feat: implement model-aware execution cohorts and publish M29 Wave 2 evidence ([#402](https://github.com/natanayalo/code-agent/pull/402))
