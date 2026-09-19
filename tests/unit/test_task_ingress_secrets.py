@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextlib
 from datetime import UTC, datetime
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -454,3 +454,113 @@ def test_create_task_empty_registry_duplicate_delivery_fails_closed() -> None:
         match="is not registered in authoritative SecretRegistry",
     ):
         empty_service.create_task_outcome(dup_submission, delivery_key=delivery_key)
+
+
+def test_ingress_rejects_raw_secrets_with_zero_leakage_in_logs_and_traces(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Verify raw secrets are rejected without leaking into logs or trace spans."""
+    service = _StubTaskService()
+    tasks_canary = "tasks-trace-log-canary-secret-1122"
+    webhook_canary = "webhook-trace-log-canary-secret-3344"
+
+    with (
+        patch("apps.api.routes.tasks.set_span_input_output") as mock_tasks_span,
+        patch("apps.api.routes.webhook.set_span_input_output") as mock_webhook_span,
+        _client(service) as client,
+    ):
+        resp1 = client.post(
+            "/tasks",
+            json={"task_text": "Tasks test", "secrets": {"API_KEY": tasks_canary}},
+        )
+        resp2 = client.post(
+            "/webhook",
+            json={"task_text": "Webhook test", "secrets": {"API_KEY": webhook_canary}},
+        )
+
+    assert resp1.status_code == 422
+    assert resp2.status_code == 422
+    assert tasks_canary not in resp1.text and webhook_canary not in resp2.text
+    assert tasks_canary not in caplog.text and webhook_canary not in caplog.text
+    assert mock_tasks_span.call_count == 0
+    assert mock_webhook_span.call_count == 0
+    assert service.create_calls == []
+
+
+def test_custom_secret_definitions_json_parsing() -> None:
+    """Verify JSON custom secret definition parsing with policies, hosts, and mounts."""
+    import json
+
+    from sandbox.secrets import SecretExposurePolicy
+
+    json_payload = json.dumps(
+        [
+            {
+                "name": "json_sandbox_secret",
+                "permitted_egress_hosts": ["api.vendor.com"],
+                "exposure_policy": "sandbox_env",
+                "destination_env_var": "CODE_AGENT_SECRET_VENDOR_API_KEY",
+            },
+            {
+                "name": "json_file_secret",
+                "permitted_egress_hosts": ["api.vendor.com"],
+                "exposure_policy": "sandbox_file",
+                "destination_mount_path": "/run/secrets/code-agent/vendor_secret",
+            },
+            {
+                "name": "json_broker_secret",
+                "source_key": "CUSTOM_BROKER_KEY",
+            },
+            "invalid_non_dict_entry",
+        ]
+    )
+    registry = create_authoritative_secret_registry({"CODE_AGENT_REGISTERED_SECRETS": json_payload})
+
+    sandbox_def = registry.require("json_sandbox_secret")
+    assert sandbox_def.exposure_policy == SecretExposurePolicy.SANDBOX_ENV
+    assert sandbox_def.permitted_egress_hosts == ("api.vendor.com",)
+    assert sandbox_def.destination_env_var == "CODE_AGENT_SECRET_VENDOR_API_KEY"
+    assert sandbox_def.destination_mount_path is None
+
+    file_def = registry.require("json_file_secret")
+    assert file_def.exposure_policy == SecretExposurePolicy.SANDBOX_FILE
+    assert file_def.destination_mount_path == "/run/secrets/code-agent/vendor_secret"
+
+    broker_def = registry.require("json_broker_secret")
+    assert broker_def.exposure_policy == SecretExposurePolicy.BROKER_ONLY
+    assert broker_def.source_key == "CUSTOM_BROKER_KEY"
+
+    # Malformed JSON falls back safely
+    bad_registry = create_authoritative_secret_registry(
+        {"CODE_AGENT_REGISTERED_SECRETS": "{not_valid_json"}
+    )
+    assert "json_sandbox_secret" not in bad_registry
+
+
+def test_custom_secret_definitions_inline_delimited_parsing() -> None:
+    """Verify inline host and broker_only spec parsing in delimited registered secrets."""
+    from sandbox.secrets import SecretExposurePolicy
+
+    registry = create_authoritative_secret_registry(
+        {
+            "CODE_AGENT_REGISTERED_SECRETS": (
+                "inline_token:vendor.api.com;other.com, "
+                "broker_only_token:broker_only, "
+                "plain_token"
+            ),
+            "CODE_AGENT_SECRET_PLAIN_TOKEN_HOSTS": "plain.api.com",
+            "CODE_AGENT_SECRET_PLAIN_TOKEN_POLICY": "sandbox_env",
+        }
+    )
+
+    inline_def = registry.require("inline_token")
+    assert inline_def.exposure_policy == SecretExposurePolicy.SANDBOX_ENV
+    assert "vendor.api.com" in inline_def.permitted_egress_hosts
+    assert "other.com" in inline_def.permitted_egress_hosts
+
+    broker_def = registry.require("broker_only_token")
+    assert broker_def.exposure_policy == SecretExposurePolicy.BROKER_ONLY
+
+    plain_def = registry.require("plain_token")
+    assert plain_def.exposure_policy == SecretExposurePolicy.SANDBOX_ENV
+    assert "plain.api.com" in plain_def.permitted_egress_hosts

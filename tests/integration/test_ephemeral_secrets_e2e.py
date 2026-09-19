@@ -189,3 +189,165 @@ def test_native_worker_resolves_submitted_registered_secret_reference(session_fa
     assert resolved.reveal_secret_value() == "sk-test-authoritative-canary-456"
     assert resolved.destination_env_var == "OPENAI_API_KEY"
     assert "sk-test-authoritative-canary-456" not in str(task.secrets)
+
+
+def test_custom_registered_secret_submission_and_persistence(session_factory):
+    """Verify custom registered secrets are accepted at submission and stored safely."""
+    secret_env = {
+        "OPENAI_API_KEY": "sk-test-key-12345",
+        "CODE_AGENT_REGISTERED_SECRETS": "custom_token,broker_token",
+        "CODE_AGENT_SECRET_CUSTOM_TOKEN_HOSTS": "api.openai.com,auth.openai.com",
+        "CUSTOM_TOKEN": "custom-canary-secret-8888",
+        "BROKER_TOKEN": "broker-canary-secret-9999",
+    }
+    authoritative_registry = create_authoritative_secret_registry(secret_env)
+    worker = CodexCliWorker(
+        runtime_adapter=MagicMock(),
+        secret_registry=authoritative_registry,
+        secret_env=secret_env,
+    )
+    task_service = TaskExecutionService(
+        session_factory=session_factory,
+        worker=worker,
+        secret_registry=authoritative_registry,
+    )
+    app = create_app(
+        task_service=task_service,
+        auth_config=ApiAuthConfig(shared_secret=DEFAULT_SHARED_SECRET),
+    )
+
+    with TestClient(app) as client:
+        client.headers["X-Webhook-Token"] = DEFAULT_SHARED_SECRET
+        response = client.post(
+            "/tasks",
+            json={
+                "task_text": "Run agent with custom registered secret",
+                "secret_refs": [
+                    {"name": "openai_api_key"},
+                    {"name": "custom_token"},
+                    {"name": "broker_token"},
+                ],
+            },
+        )
+        assert response.status_code == 202
+        task_id = response.json()["task_id"]
+
+    with session_scope(session_factory) as session:
+        task = TaskRepository(session).get(task_id)
+    assert task is not None
+    assert task.secrets == {}
+    assert len(task.secret_refs) == 3
+    assert "custom-canary-secret-8888" not in str(task.secrets)
+
+
+def test_custom_registered_secret_native_worker_capability_grant(tmp_path):
+    """Verify custom registered secret with configured audience succeeds in native worker."""
+    secret_env = {
+        "OPENAI_API_KEY": "sk-test-key-12345",
+        "CODE_AGENT_REGISTERED_SECRETS": "custom_token,broker_token",
+        "CODE_AGENT_SECRET_CUSTOM_TOKEN_HOSTS": "api.openai.com,auth.openai.com",
+        "CUSTOM_TOKEN": "custom-canary-secret-8888",
+        "BROKER_TOKEN": "broker-canary-secret-9999",
+    }
+    authoritative_registry = create_authoritative_secret_registry(secret_env)
+
+    # Verify custom definitions
+    custom_def = authoritative_registry.require("custom_token")
+    assert custom_def.exposure_policy == SecretExposurePolicy.SANDBOX_ENV
+    assert "api.openai.com" in custom_def.permitted_egress_hosts
+    assert custom_def.destination_env_var == "CODE_AGENT_SECRET_CUSTOM_TOKEN"
+
+    broker_def = authoritative_registry.require("broker_token")
+    assert broker_def.exposure_policy == SecretExposurePolicy.BROKER_ONLY
+
+    worker = CodexCliWorker(
+        runtime_adapter=MagicMock(),
+        secret_registry=authoritative_registry,
+        secret_env=secret_env,
+    )
+    worker_request = WorkerRequest(
+        task_id="task-custom-grant",
+        session_id="session-custom-grant",
+        task_text="Run agent with custom registered secret",
+        repo_url="https://github.com/example/repo",
+        branch="main",
+        secret_refs=[
+            SecretRef(name="openai_api_key"),
+            SecretRef(name="custom_token"),
+            SecretRef(name="broker_token"),
+        ],
+        secrets={},
+    )
+    repo_dir = tmp_path / "custom_repo"
+    repo_dir.mkdir()
+    workspace = WorkspaceHandle(
+        workspace_id="task-custom-grant",
+        task_id="task-custom-grant",
+        workspace_path=repo_dir,
+        repo_path=repo_dir,
+        repo_url="https://github.com/example/repo",
+        branch="main",
+        cleanup_policy=WorkspaceCleanupPolicy(delete_on_success=False, retain_on_failure=True),
+    )
+    run_request, _ = worker._prepare_native_agent_run_request(
+        request=worker_request,
+        workspace=workspace,
+        runtime_settings=CliRuntimeSettings(worker_timeout_seconds=30),
+        runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+        system_prompt_override=None,
+    )
+
+    context = run_request.context
+    assert context is not None
+    assert context.grant.allowed_egress_hosts == CODEX_API_KEY_HOSTS
+    assert "custom_token" in context.grant.allowed_secret_refs
+    assert "broker_token" not in context.grant.allowed_secret_refs
+
+    resolved = context.secret_resolver.resolve_for_sandbox(
+        SecretRef(name="custom_token"), context.grant
+    )
+    assert resolved.reveal_secret_value() == "custom-canary-secret-8888"
+    assert resolved.destination_env_var == "CODE_AGENT_SECRET_CUSTOM_TOKEN"
+
+
+def test_custom_registered_secret_audience_mismatch_fails_grant(tmp_path):
+    """Verify custom sandbox secret with incompatible audience fails grant construction."""
+    secret_env = {
+        "OPENAI_API_KEY": "sk-test-key-12345",
+        "CODE_AGENT_REGISTERED_SECRETS": "restricted_token",
+        "CODE_AGENT_SECRET_RESTRICTED_TOKEN_HOSTS": "restricted.internal.net",
+        "RESTRICTED_TOKEN": "restricted-secret-value",
+    }
+    authoritative_registry = create_authoritative_secret_registry(secret_env)
+    worker = CodexCliWorker(
+        runtime_adapter=MagicMock(),
+        secret_registry=authoritative_registry,
+        secret_env=secret_env,
+    )
+    worker_request = WorkerRequest(
+        task_id="task-mismatch",
+        task_text="Run with audience mismatch",
+        repo_url="https://github.com/example/repo",
+        branch="main",
+        secret_refs=[SecretRef(name="openai_api_key"), SecretRef(name="restricted_token")],
+        secrets={},
+    )
+    repo_dir = tmp_path / "mismatch_repo"
+    repo_dir.mkdir()
+    workspace = WorkspaceHandle(
+        workspace_id="task-mismatch",
+        task_id="task-mismatch",
+        workspace_path=repo_dir,
+        repo_path=repo_dir,
+        repo_url="https://github.com/example/repo",
+        branch="main",
+        cleanup_policy=WorkspaceCleanupPolicy(delete_on_success=False, retain_on_failure=True),
+    )
+    with pytest.raises(CapabilityViolationError, match="exceeds sandbox secret audience"):
+        worker._prepare_native_agent_run_request(
+            request=worker_request,
+            workspace=workspace,
+            runtime_settings=CliRuntimeSettings(worker_timeout_seconds=30),
+            runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+            system_prompt_override=None,
+        )

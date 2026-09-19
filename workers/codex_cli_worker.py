@@ -431,6 +431,7 @@ class CodexCliWorker(CodexCliWorkerNativeMixin, Worker):
             DockerSandboxContainerError,
             DockerShellSessionError,
             OSError,
+            RuntimeError,
             UnknownToolError,
         ) as exc:
             result = _workspace_error_result(
