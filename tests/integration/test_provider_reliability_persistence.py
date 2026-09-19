@@ -186,8 +186,11 @@ def _persist_rejection(session_factory: object, task_id: str, result: WorkerResu
 
 
 @pytest.mark.asyncio
-async def test_preflight_rejection_persists_into_extractor_evidence(tmp_path: Path) -> None:
+async def test_preflight_rejection_persists_into_extractor_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Exercise the gate and production outcome persistence before extraction."""
+    monkeypatch.setenv("CODE_AGENT_PRE_DISPATCH_DIAGNOSTICS_ENABLED", "1")
     db_url = f"sqlite+pysqlite:///{tmp_path / 'persisted_preflight_rejection.db'}"
     engine = create_engine_from_url(db_url)
     Base.metadata.create_all(engine)
