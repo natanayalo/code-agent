@@ -555,12 +555,11 @@ def test_custom_secret_definitions_inline_delimited_parsing() -> None:
 
     inline_def = registry.require("inline_token")
     assert inline_def.exposure_policy == SecretExposurePolicy.SANDBOX_ENV
-    assert "vendor.api.com" in inline_def.permitted_egress_hosts
-    assert "other.com" in inline_def.permitted_egress_hosts
+    assert inline_def.permitted_egress_hosts == ("vendor.api.com", "other.com")
 
     broker_def = registry.require("broker_only_token")
     assert broker_def.exposure_policy == SecretExposurePolicy.BROKER_ONLY
 
     plain_def = registry.require("plain_token")
     assert plain_def.exposure_policy == SecretExposurePolicy.SANDBOX_ENV
-    assert "plain.api.com" in plain_def.permitted_egress_hosts
+    assert plain_def.permitted_egress_hosts == ("plain.api.com",)

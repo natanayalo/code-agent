@@ -254,7 +254,7 @@ def test_custom_registered_secret_native_worker_capability_grant(tmp_path):
     # Verify custom definitions
     custom_def = authoritative_registry.require("custom_token")
     assert custom_def.exposure_policy == SecretExposurePolicy.SANDBOX_ENV
-    assert "api.openai.com" in custom_def.permitted_egress_hosts
+    assert custom_def.permitted_egress_hosts == ("api.openai.com", "auth.openai.com")
     assert custom_def.destination_env_var == "CODE_AGENT_SECRET_CUSTOM_TOKEN"
 
     broker_def = authoritative_registry.require("broker_token")
