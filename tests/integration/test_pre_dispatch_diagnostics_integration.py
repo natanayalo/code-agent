@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -438,37 +437,79 @@ async def test_cli_required_openrouter_fails_when_worker_docker_is_unavailable(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    worker = SimpleNamespace(
-        default_runtime_mode="tool_loop",
-        runtime_adapter=SimpleNamespace(api_key="sk-openrouter-test"),
-        container_manager=SimpleNamespace(default_image="openrouter-worker:latest"),
-    )
-    service = ProviderDiagnosticsService(workers={"openrouter": worker}, secret_env={})
-    monkeypatch.setattr(
-        service,
-        "check_docker_daemon",
-        AsyncMock(
-            return_value=DiagnosticCheckResult(
-                name="docker_daemon",
-                category="container_runtime",
-                status="unready",
-                detail="Docker daemon unavailable.",
-                verification_scope="local_runtime",
-                blocking=True,
-            )
-        ),
-    )
-    monkeypatch.setattr(
-        "scripts.check_provider_diagnostics.ProviderDiagnosticsService",
-        lambda: service,
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-openrouter-test")
+    docker_unready = DiagnosticCheckResult(
+        name="docker_daemon",
+        category="container_runtime",
+        status="unready",
+        detail="Docker daemon unavailable.",
+        verification_scope="local_runtime",
+        blocking=True,
     )
 
-    code = await _async_main(_parse_args(["--required", "openrouter", "--json"]))
+    with patch.object(
+        ProviderDiagnosticsService,
+        "check_docker_daemon",
+        new_callable=AsyncMock,
+        return_value=docker_unready,
+    ):
+        code = await _async_main(_parse_args(["--required", "openrouter", "--json"]))
     payload = json.loads(capsys.readouterr().out)
 
     assert code == 1
     assert not payload["required_providers_ready"]
     assert payload["providers"]["openrouter"]["ready"] is False
+    assert not any(
+        check["name"] == "worker_configuration"
+        for check in payload["providers"]["openrouter"]["checks"]
+    )
     assert any(
         check["name"] == "docker_daemon" for check in payload["providers"]["openrouter"]["checks"]
     )
+
+
+@pytest.mark.asyncio
+async def test_cli_required_openrouter_uses_configured_worker_and_can_report_ready(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-openrouter-test")
+    docker_ready = DiagnosticCheckResult(
+        name="docker_daemon",
+        category="container_runtime",
+        status="ready",
+        detail="Docker daemon available.",
+        verification_scope="local_runtime",
+        blocking=False,
+    )
+    image_ready = DiagnosticCheckResult(
+        name="executor_image",
+        category="container_runtime",
+        status="ready",
+        detail="Executor image available.",
+        verification_scope="local_runtime",
+        blocking=False,
+    )
+
+    with (
+        patch.object(
+            ProviderDiagnosticsService,
+            "check_docker_daemon",
+            new_callable=AsyncMock,
+            return_value=docker_ready,
+        ),
+        patch.object(
+            ProviderDiagnosticsService,
+            "check_executor_image",
+            new_callable=AsyncMock,
+            return_value=image_ready,
+        ),
+    ):
+        code = await _async_main(_parse_args(["--required", "openrouter", "--json"]))
+    payload = json.loads(capsys.readouterr().out)
+
+    assert code == 0
+    assert payload["required_providers_ready"]
+    openrouter_report = payload["providers"]["openrouter"]
+    assert openrouter_report["ready"]
+    assert not any(check["name"] == "worker_configuration" for check in openrouter_report["checks"])

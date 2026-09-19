@@ -36,16 +36,20 @@ The CLI-binary check is intentionally scoped to what the host can verify. For
 container execution it records the configured executable as **unverified**
 inside the image and remains non-blocking; it does not guarantee that a binary
 will be present in the image. Host-native execution checks the executable on
-the host `PATH`. Use the diagnostics CLI for an operator-visible snapshot. When
-run outside the configured task-service process, it reports a limited
-host-level probe and fails required-provider checks closed because it cannot
-inspect the concrete worker configuration:
+the host `PATH`. The diagnostics CLI loads the configured worker adapters and
+container settings directly from environment variables, so it can report a
+genuinely ready provider without booting the database-backed task service. Use
+it for an operator-visible snapshot:
 
 ```bash
 .venv/bin/python scripts/check_provider_diagnostics.py \
   --providers codex,antigravity,openrouter \
   --required codex,openrouter
 ```
+
+The API snapshot remains a limited host-level probe when the API process does
+not have access to the configured task-service workers; in that case it fails
+required-provider checks closed rather than declaring readiness.
 
 If a task is rejected before dispatch, inspect its persisted
 `pre-dispatch-diagnostics.json` artifact and apply the reported remediation

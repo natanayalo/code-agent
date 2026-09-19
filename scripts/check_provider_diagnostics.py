@@ -8,7 +8,7 @@ import asyncio
 import json
 import sys
 
-from orchestrator.provider_diagnostics import ProviderDiagnosticsService
+from apps.api.task_service_factory import build_provider_diagnostics_service_from_env
 from orchestrator.provider_diagnostics_types import SystemProviderDiagnosticsReport
 
 
@@ -77,7 +77,7 @@ async def _async_main(args: argparse.Namespace) -> int:
         names = ", ".join(sorted(unknown_required))
         print(f"Unknown required provider(s): {names}", file=sys.stderr)
         return 2
-    service = ProviderDiagnosticsService()
+    service = build_provider_diagnostics_service_from_env()
     report = await service.evaluate_all_providers(
         required_providers=required_set,
         target="cli",
