@@ -27,6 +27,7 @@ file_exceptions:
   orchestrator/context_envelope.py: Versioned ContextEnvelope contracts, validation, redaction, and assembly kept cohesive to preserve the pre-dispatch audit boundary.
   tests/unit/test_context_envelope.py: Comprehensive unit test suite covering ContextEnvelope contracts, assembly, truncation, redaction, git revision, and digest reproducibility.
   orchestrator/nodes/delivery.py: Delivery logic orchestrates broker-owned secret resolution and Git commands.
+  tests/unit/test_provider_diagnostics.py: Comprehensive diagnostic unit coverage for provider_diagnostics.py and provider_diagnostics_credentials.py; narrow branch-targeting tests across two tightly coupled modules cannot be split without duplicating shared fixtures.
 function_exceptions:
   tests/unit/test_codex_cli_worker_coverage.py:
     test_codex_native_prepare_request_secret_refs: Mock setup for worker isolation coverage tests.

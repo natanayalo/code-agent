@@ -98,6 +98,21 @@ def test_get_runtime_manifest_returns_operating_contract(
     assert all(action["request_only"] is True for action in data["maintenance_actions"])
 
 
+def test_get_provider_diagnostics_endpoint(client: TestClient) -> None:
+    """The /system/provider-diagnostics endpoint returns provider readiness."""
+    response = client.get(
+        "/system/provider-diagnostics",
+        headers={API_SHARED_SECRET_HEADER: ("a" * 32)},  # gitleaks:allow
+    )
+    assert response.status_code == status.HTTP_200_OK
+    data = response.json()
+    assert data["target"] == "api_process"
+    assert "providers" in data
+    assert "codex" in data["providers"]
+    assert "antigravity" in data["providers"]
+    assert "openrouter" in data["providers"]
+
+
 def test_system_endpoints_require_auth(client: TestClient) -> None:
     """The /system routes reject unauthenticated requests."""
     response1 = client.get("/system/tools")
@@ -108,3 +123,6 @@ def test_system_endpoints_require_auth(client: TestClient) -> None:
 
     response3 = client.get("/system/runtime-manifest")
     assert response3.status_code == status.HTTP_401_UNAUTHORIZED
+
+    response4 = client.get("/system/provider-diagnostics")
+    assert response4.status_code == status.HTTP_401_UNAUTHORIZED

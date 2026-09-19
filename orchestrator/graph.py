@@ -7,6 +7,7 @@ import copy
 import hashlib
 import json
 import logging
+import os
 import re
 from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
@@ -24,7 +25,7 @@ from apps.observability import (
     set_span_status_from_outcome,
     start_optional_span,
 )
-from db.enums import TimelineEventType
+from db.enums import ArtifactType, TimelineEventType
 from db.models import Task
 from db.utils import compute_interaction_content_hash
 from memory.admission import (
@@ -68,6 +69,10 @@ from orchestrator.nodes.verification import (
     verify_result as verify_result,
 )
 from orchestrator.performance_routing import PerformanceRoutingPolicy
+from orchestrator.provider_diagnostics import (
+    ProviderDiagnosticsService,
+    resolve_execution_context,
+)
 from orchestrator.review import REPAIR_REQUEST_CONSTRAINT, SEVERITY_RANK, review_result
 from orchestrator.runtime_manifest import build_runtime_manifest
 from orchestrator.scout_proposals import (
@@ -354,6 +359,85 @@ async def _await_worker_with_timeout(
         )
         return _unexpected_worker_error_result(exc), "worker crashed unexpectedly"
     return result, "worker result received"
+
+
+async def execute_with_preflight(
+    worker: Worker,
+    request: WorkerRequest,
+    *,
+    worker_type: str,
+    session_id: str | None,
+    timeout_seconds: int,
+    diagnostics_service: ProviderDiagnosticsService | None = None,
+    task_id: str | None = None,
+    attempt_count: int = 1,
+    logical_execution_key: str | None = None,
+) -> tuple[WorkerResult, str]:
+    """Execute worker behind pre-dispatch diagnostic gate and orchestrator timeout envelope."""
+    diagnostics_enabled = os.environ.get(
+        "CODE_AGENT_PRE_DISPATCH_DIAGNOSTICS_ENABLED", "1"
+    ).strip().lower() not in ("0", "false", "no", "off")
+
+    if not diagnostics_enabled:
+        return await _await_worker_with_timeout(
+            worker,
+            request,
+            worker_type=worker_type,
+            session_id=session_id,
+            timeout_seconds=timeout_seconds,
+        )
+
+    service = diagnostics_service or ProviderDiagnosticsService()
+    ctx = resolve_execution_context(
+        worker,
+        request,
+        worker_type=worker_type,
+        task_id=task_id,
+        session_id=session_id,
+        attempt_count=attempt_count,
+        logical_execution_key=logical_execution_key,
+    )
+    report = await service.evaluate_pre_dispatch(ctx)
+
+    diagnostic_artifact = ArtifactReference(
+        name="pre-dispatch-diagnostics.json",
+        uri=f"diagnostics://{report.report_id}",
+        artifact_type=ArtifactType.PRE_DISPATCH_DIAGNOSTICS,
+        artifact_metadata=report.model_dump(mode="json"),
+    )
+
+    if not report.ready:
+        logger.warning(
+            "Provider pre-dispatch diagnostics rejected worker launch",
+            extra={
+                "session_id": session_id,
+                "task_id": task_id,
+                "worker_type": worker_type,
+                "report_id": report.report_id,
+                "failure_kind": report.failure_kind,
+                "decision": report.decision,
+            },
+        )
+        rejected_result = WorkerResult(
+            status="error",
+            summary=report.summary or "Pre-dispatch diagnostics check failed.",
+            failure_kind=report.failure_kind or "provider_error",
+            next_action_hint=report.next_action_hint or "fix_provider_prerequisites",
+            workspace_id=request.workspace_id,
+            artifacts=[diagnostic_artifact],
+        )
+        return rejected_result, "pre-dispatch diagnostics rejected execution"
+
+    result, progress = await _await_worker_with_timeout(
+        worker,
+        request,
+        worker_type=worker_type,
+        session_id=session_id,
+        timeout_seconds=timeout_seconds,
+    )
+    if result is not None:
+        result = result.model_copy(update={"artifacts": [*result.artifacts, diagnostic_artifact]})
+    return result, progress
 
 
 # [Moved to orchestrator/nodes/utils.py]
@@ -781,6 +865,7 @@ async def _execute_decomposed_node(
     effective_input_digest: str,
     task_trace_id: str | None,
     node_envelope_artifact: ArtifactReference | None = None,
+    diagnostics_service: ProviderDiagnosticsService | None = None,
 ) -> tuple[WorkerResult | None, NodeOutcome | None]:
     """Dispatch one node through durable persistence or the legacy fallback."""
     if session_factory is not None and state.task.task_id and plan_id is not None:
@@ -795,12 +880,16 @@ async def _execute_decomposed_node(
         )
 
         async def execute_worker() -> WorkerResult:
-            result, _progress = await _await_worker_with_timeout(
+            result, _progress = await execute_with_preflight(
                 worker,
                 request,
                 worker_type=state.dispatch.worker_type or state.route.chosen_worker or "unknown",
                 session_id=request.session_id,
                 timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
+                diagnostics_service=diagnostics_service,
+                task_id=state.task.task_id,
+                attempt_count=logical_attempt,
+                logical_execution_key=activity_request.logical_activity_key,
             )
             if result is not None and node_envelope_artifact is not None:
                 result = result.model_copy(
@@ -819,12 +908,21 @@ async def _execute_decomposed_node(
                 return outcome.result if outcome is not None else None, outcome
             except NodeActivityInProgress:
                 await asyncio.sleep(1)
-    result, _progress = await _await_worker_with_timeout(
+    fallback_key = (
+        logical_activity_key(plan_id, node.node_id, logical_attempt)
+        if plan_id is not None
+        else f"{state.task.task_id}:{node.node_id}:attempt:{logical_attempt}"
+    )
+    result, _progress = await execute_with_preflight(
         worker,
         request,
         worker_type=state.dispatch.worker_type or state.route.chosen_worker or "unknown",
         session_id=request.session_id,
         timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
+        diagnostics_service=diagnostics_service,
+        task_id=state.task.task_id,
+        attempt_count=logical_attempt,
+        logical_execution_key=fallback_key,
     )
     if result is not None and node_envelope_artifact is not None:
         result = result.model_copy(
@@ -936,6 +1034,7 @@ async def _await_decomposed_nodes(
     *,
     workspace_path_resolver: Callable[[str], Path] | None = None,
     context_envelope_enabled: bool = True,
+    diagnostics_service: ProviderDiagnosticsService | None = None,
 ) -> tuple[WorkerResult, list[NodeOutcome], dict[str, Any] | None]:
     """Run ready decomposed nodes one at a time in the shared workspace."""
     plan = state.decomposed_plan
@@ -1079,6 +1178,7 @@ async def _await_decomposed_nodes(
                 effective_input_digest=digest,
                 task_trace_id=task_trace_id,
                 node_envelope_artifact=node_envelope_artifact,
+                diagnostics_service=diagnostics_service,
             )
             if result is None:
                 logger.warning("Node execution result is None, falling back to failure default.")
@@ -3336,6 +3436,7 @@ def build_await_result_node(
     session_factory: Callable[[], Session] | None = None,
     context_envelope_enabled: bool = True,
     workspace_path_resolver: Callable[[str], Path] | None = None,
+    diagnostics_service: ProviderDiagnosticsService | None = None,
 ) -> Callable[[OrchestratorState], Awaitable[dict[str, Any]]]:
     """Create the await-result node around the workers wired into the graph."""
     available_workers = _available_workers(worker)
@@ -3368,14 +3469,15 @@ def build_await_result_node(
                     frozenset(available_workers.keys()),
                 )
             else:
-                bound_worker = available_workers.get(worker_type or "")
+                bound_worker = available_workers.get(str(worker_type or ""))
                 if bound_worker is None:
-                    result = _worker_unavailable_result(
+                    result, progress_updates = _build_unavailable_route_result(
+                        state,
                         worker_type,
-                        available_workers=frozenset(available_workers.keys()),
+                        requested_profile,
+                        available_profile_names,
+                        frozenset(available_workers.keys()),
                     )
-                    progress_message = f"worker unavailable: {worker_type or 'unknown'}"
-                    progress_updates = _progress_update(state, progress_message)
                 else:
                     if (
                         state.decomposed_plan
@@ -3388,6 +3490,7 @@ def build_await_result_node(
                             session_factory=session_factory,
                             workspace_path_resolver=workspace_path_resolver,
                             context_envelope_enabled=context_envelope_enabled,
+                            diagnostics_service=diagnostics_service,
                         )
                         progress_message = "sequential task nodes completed"
                         request = _build_worker_request(state)
@@ -3449,12 +3552,19 @@ def build_await_result_node(
                         curr_manifest["context_envelope_status"] = envelope_status
                         request = request.model_copy(update={"runtime_manifest": curr_manifest})
 
-                        result, progress_message = await _await_worker_with_timeout(
+                        logical_key = (
+                            f"{state.task.task_id}:attempt:{state.attempt_count or 1}:primary"
+                        )
+                        result, progress_message = await execute_with_preflight(
                             bound_worker,
                             request,
                             worker_type=worker_type or "unknown",
                             session_id=request.session_id,
                             timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
+                            diagnostics_service=diagnostics_service,
+                            task_id=state.task.task_id,
+                            attempt_count=state.attempt_count or 1,
+                            logical_execution_key=logical_key,
                         )
                         if result is not None and envelope_artifact is not None:
                             result = result.model_copy(

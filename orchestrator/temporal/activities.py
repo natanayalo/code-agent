@@ -44,7 +44,6 @@ from orchestrator.execution_resume_service import (
 from orchestrator.execution_types import ProgressEvent, ProgressPhase
 from orchestrator.graph import (
     _aggregate_decomposed_results,
-    _await_worker_with_timeout,
     _build_worker_request,
     _effective_input_evidence,
     _resolve_orchestrator_timeout_seconds,
@@ -58,6 +57,7 @@ from orchestrator.graph import (
     build_rejected_session_state_update,
     build_review_result_node,
     check_approval,
+    execute_with_preflight,
     summarize_result,
 )
 from orchestrator.node_execution import (
@@ -1709,12 +1709,15 @@ class TaskExecutionActivities:
             raise ValueError("Node activity input digest changed before execution.")
 
         async def _execute_worker() -> WorkerResult:
-            result, _progress = await _await_worker_with_timeout(
+            result, _progress = await execute_with_preflight(
                 self.service.worker,
                 request,
                 worker_type=state.dispatch.worker_type or state.route.chosen_worker or "unknown",
                 session_id=request.session_id,
                 timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
+                task_id=state.task.task_id,
+                attempt_count=node_activity.logical_attempt,
+                logical_execution_key=node_activity.logical_activity_key,
             )
             if result is not None and node_envelope_artifact is not None:
                 result = result.model_copy(
