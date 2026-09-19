@@ -264,6 +264,56 @@ def test_verification_passes_delivery_fails(tmp_path: Path) -> None:
     assert cell.stage_outcome_rates.delivery_pass_rate == 0.0
 
 
+def test_completed_task_with_production_verification_warning_is_not_verification_pass(
+    tmp_path: Path,
+) -> None:
+    """Preserve production warning semantics: completion is accepted, verification is not passed."""
+    db_path = tmp_path / "test_verification_warning.db"
+    db_url = f"sqlite+pysqlite:///{db_path}"
+    engine = create_engine_from_url(db_url)
+    Base.metadata.create_all(engine)
+
+    task = _create_task(
+        task_id="completed-verification-warning",
+        status=TaskStatus.COMPLETED,
+        verification_cmds=["pytest"],
+    )
+    task.timeline_events.append(
+        TaskTimelineEvent(
+            attempt_number=0,
+            sequence_number=len(task.timeline_events),
+            event_type=TimelineEventType.VERIFICATION_COMPLETED,
+            created_at=task.created_at + timedelta(minutes=2),
+            payload={
+                "status": "warning",
+                "summary": "Verification warning: no test results reported by worker.",
+                "items": [
+                    {"label": "worker_status", "status": "passed"},
+                    {"label": "tests", "status": "warning"},
+                    {"label": "independent_verifier", "status": "passed"},
+                ],
+                "deterministic_verification": {"status": "passed"},
+            },
+        )
+    )
+
+    with Session(engine) as session:
+        session.add(task)
+        session.commit()
+
+    policy = ReliabilityReportPolicy(
+        as_of=NOW,
+        window_start_at=NOW - timedelta(days=30),
+        window_end_at=NOW + timedelta(days=1),
+        min_samples=1,
+    )
+    report = extract_provider_reliability_report(db_url, policy)
+    cell = [c for c in report.evidence_cells if c.profile == "codex-native-executor"][0]
+
+    assert cell.accepted_count == 1
+    assert cell.stage_outcome_rates.verification_pass_rate == 0.0
+
+
 def test_review_stage_outcome_and_applicability(tmp_path: Path) -> None:
     """Ensure review pass requires review artifact and parses ReviewResult outcome."""
     db_path = tmp_path / "test_review_applicability.db"

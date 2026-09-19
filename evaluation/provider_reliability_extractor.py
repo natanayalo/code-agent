@@ -144,32 +144,26 @@ def _validate_task_candidate(
         return "non_temporal_runtime", None, None, None
     if task.runtime_mode != WorkerRuntimeMode.NATIVE_AGENT:
         return "non_native_agent_mode", None, None, None
-
     if not task.task_spec or not isinstance(task.task_spec, dict):
         return "malformed_missing_task_spec", None, None, None
     if not task.task_spec.get("task_type") or not isinstance(task.task_spec.get("task_type"), str):
         return "malformed_missing_task_spec", None, None, None
-
     run_profiles = {r.worker_profile for r in task.worker_runs if r.worker_profile}
     if len(run_profiles) > 1:
         return "mixed_profile_execution", None, None, None
-
     profile = next(iter(run_profiles)) if run_profiles else task.chosen_profile
     if not profile:
         return "malformed_missing_profile", None, None, None
-
     mode = determine_task_mutation_mode(task.task_spec, task.constraints, profile)
     if not mode:
         return "malformed_missing_mode", None, None, None
     if not is_profile_compatible_with_mode(profile, mode):
         return "incompatible_profile_mode", None, None, None
-
     consistent, terminal_ts = verify_timeline_consistency(
         task.status, task.timeline_events, task.updated_at
     )
     if not consistent or terminal_ts is None:
         return "malformed_inconsistent_timeline", None, None, None
-
     if terminal_ts.tzinfo is None:
         terminal_ts = terminal_ts.replace(tzinfo=UTC)
     if not (policy.window_start_at <= terminal_ts <= policy.window_end_at):
@@ -185,20 +179,16 @@ def _extract_single_task(
     reason, mode, terminal_ts, profile = _validate_task_candidate(task, policy)
     if reason or not mode or not terminal_ts or not profile:
         return None, reason
-
     runs = sorted(
         task.worker_runs,
         key=lambda r: (r.started_at or datetime.min.replace(tzinfo=UTC), r.id or ""),
     )
-
     task_class = str(task.task_spec["task_type"])  # type: ignore[index]
     accepted = task.status == TaskStatus.COMPLETED
     c = task.constraints or {}
-
     clarifications, approvals, has_override, duration = extract_task_interaction_metrics(
         task, c, terminal_ts
     )
-
     stages = check_task_stages(task, runs)
     identity, identity_status = resolve_task_execution_identity(task, runs)
 
@@ -439,6 +429,12 @@ def _aggregate_cell(
     overrides = sum(1 for t in tasks if t.has_override)
     budget_count = sum(1 for t in tasks if t.has_budget)
     durations = [t.duration_seconds for t in tasks if t.duration_seconds is not None]
+    successful_durations = [
+        t.duration_seconds for t in tasks if t.accepted and t.duration_seconds is not None
+    ]
+    failure_durations = [
+        t.duration_seconds for t in tasks if not t.accepted and t.duration_seconds is not None
+    ]
 
     if policy.evidence_scope == "operational":
         is_eligible = False
@@ -471,6 +467,8 @@ def _aggregate_cell(
         manual_overrides_count=overrides,
         manual_override_rate=round(overrides / n, 4) if n else 0.0,
         terminal_latency=_calculate_latencies(durations),
+        successful_task_latency=_calculate_latencies(successful_durations),
+        failure_task_latency=_calculate_latencies(failure_durations),
         budget_field_coverage=BudgetCoverageMetrics(
             budget_reported_count=budget_count,
             budget_coverage_rate=round(budget_count / n, 4) if n else 0.0,

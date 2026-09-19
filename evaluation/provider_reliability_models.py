@@ -131,7 +131,7 @@ class InterventionMetrics(StrictModel):
 
 
 class LatencyMetrics(StrictModel):
-    """Task terminal latency distribution in seconds."""
+    """Task latency distribution in seconds for a selected outcome subset."""
 
     median_seconds: float | None = Field(default=None, ge=0.0)
     mean_seconds: float | None = Field(default=None, ge=0.0)
@@ -168,6 +168,8 @@ class ProviderReliabilityEvidenceCell(StrictModel):
     manual_overrides_count: int = Field(ge=0)
     manual_override_rate: float = Field(ge=0.0, le=1.0)
     terminal_latency: LatencyMetrics
+    successful_task_latency: LatencyMetrics = Field(default_factory=LatencyMetrics)
+    failure_task_latency: LatencyMetrics = Field(default_factory=LatencyMetrics)
     budget_field_coverage: BudgetCoverageMetrics
     is_eligible: bool = False
     insufficiency_reasons: list[str] = Field(default_factory=list)
@@ -180,6 +182,8 @@ class CandidateRanking(StrictModel):
     is_eligible: bool
     accepted_rate_wilson_lower: float = Field(ge=0.0, le=1.0)
     median_latency_seconds: float | None = Field(default=None, ge=0.0)
+    successful_median_latency_seconds: float | None = Field(default=None, ge=0.0)
+    failure_median_latency_seconds: float | None = Field(default=None, ge=0.0)
     rank: int | None = Field(default=None, ge=1)
     insufficiency_reasons: list[str] = Field(default_factory=list)
     sample_size: int = Field(default=0, ge=0)

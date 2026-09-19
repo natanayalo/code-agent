@@ -87,6 +87,8 @@ ALLOWED_KEYS_BY_LEVEL: dict[str, frozenset[str]] = {
             "manual_overrides_count",
             "manual_override_rate",
             "terminal_latency",
+            "successful_task_latency",
+            "failure_task_latency",
             "budget_field_coverage",
             "is_eligible",
             "insufficiency_reasons",
@@ -143,6 +145,8 @@ ALLOWED_KEYS_BY_LEVEL: dict[str, frozenset[str]] = {
             "is_eligible",
             "accepted_rate_wilson_lower",
             "median_latency_seconds",
+            "successful_median_latency_seconds",
+            "failure_median_latency_seconds",
             "rank",
             "insufficiency_reasons",
             "sample_size",
@@ -236,10 +240,11 @@ def _validate_cell_structure(cell: dict[str, Any], path: str) -> None:
         _validate_dict_keys(
             cell["interventions"], ALLOWED_KEYS_BY_LEVEL["interventions"], f"{path}.interventions"
         )
-    if "terminal_latency" in cell:
-        _validate_dict_keys(
-            cell["terminal_latency"], ALLOWED_KEYS_BY_LEVEL["latency"], f"{path}.latency"
-        )
+    for latency_key in ("terminal_latency", "successful_task_latency", "failure_task_latency"):
+        if latency_key in cell:
+            _validate_dict_keys(
+                cell[latency_key], ALLOWED_KEYS_BY_LEVEL["latency"], f"{path}.{latency_key}"
+            )
     if "budget_field_coverage" in cell:
         _validate_dict_keys(
             cell["budget_field_coverage"], ALLOWED_KEYS_BY_LEVEL["budget"], f"{path}.budget"
@@ -334,6 +339,11 @@ def _render_header(report: ProviderReliabilityReport) -> list[str]:
         f"- **Minimum Samples Per Cell**: `{p.min_samples}`",
         f"- **Confidence Level**: `{int(p.confidence_level * 100)}%` (Wilson score interval)",
         "",
+        "Acceptance is terminal task completion. Verification pass rate is a separate "
+        "strict stage metric; a completed task can carry a verification warning and still "
+        "be accepted. Recommendation latency tie-breaks use successful-task latency, while "
+        "terminal latency remains an operational end-to-end metric.",
+        "",
     ]
 
 
@@ -358,6 +368,46 @@ def _render_exclusions(report: ProviderReliabilityReport) -> list[str]:
         for reason, count in sorted(ex.by_reason.items()):
             lines.append(f"| `{escape_markdown(reason)}` | {count} |")
         lines.append("")
+    return lines
+
+
+def _render_candidate_rankings(rec: Any) -> list[str]:
+    """Render ranking rows with terminal, successful, and failure latency metrics."""
+    lines = [
+        "| Rank | Profile | Eligible | N (Acc) | Wilson 95% Lower | "
+        "Terminal Med | Success Med | Failure Med | Recency | Notes |",
+        "|---|---|---|---|---|---|---|---|---|---|",
+    ]
+    for cand in rec.rankings:
+        rank_str = str(cand.rank) if cand.rank is not None else "-"
+        terminal_lat_str = (
+            f"{cand.median_latency_seconds:.1f}s"
+            if cand.median_latency_seconds is not None
+            else "N/A"
+        )
+        success_lat_str = (
+            f"{cand.successful_median_latency_seconds:.1f}s"
+            if cand.successful_median_latency_seconds is not None
+            else "N/A"
+        )
+        failure_lat_str = (
+            f"{cand.failure_median_latency_seconds:.1f}s"
+            if cand.failure_median_latency_seconds is not None
+            else "N/A"
+        )
+        recency_str = (
+            f"{cand.evidence_age_days:.1f}d ago" if cand.evidence_age_days is not None else "N/A"
+        )
+        notes = ", ".join(cand.insufficiency_reasons) if cand.insufficiency_reasons else "eligible"
+        lines.append(
+            f"| {rank_str} | `{escape_markdown(cand.profile)}` | "
+            f"{'yes' if cand.is_eligible else 'no'} | "
+            f"{cand.sample_size} ({cand.accepted_count}) | "
+            f"{cand.accepted_rate_wilson_lower:.4f} | {terminal_lat_str} | "
+            f"{success_lat_str} | {failure_lat_str} | {recency_str} | "
+            f"{escape_markdown(notes)} |"
+        )
+    lines.append("")
     return lines
 
 
@@ -398,38 +448,7 @@ def _render_recommendations(report: ProviderReliabilityReport) -> list[str]:
         lines.append("")
 
         if rec.rankings:
-            lines.extend(
-                [
-                    "| Rank | Profile | Eligible | N (Acc) | Wilson 95% Lower | "
-                    "Med Latency | Recency | Notes |",
-                    "|---|---|---|---|---|---|---|---|",
-                ]
-            )
-            for cand in rec.rankings:
-                rank_str = str(cand.rank) if cand.rank is not None else "-"
-                lat_str = (
-                    f"{cand.median_latency_seconds:.1f}s"
-                    if cand.median_latency_seconds is not None
-                    else "N/A"
-                )
-                recency_str = (
-                    f"{cand.evidence_age_days:.1f}d ago"
-                    if cand.evidence_age_days is not None
-                    else "N/A"
-                )
-                notes = (
-                    ", ".join(cand.insufficiency_reasons)
-                    if cand.insufficiency_reasons
-                    else "eligible"
-                )
-                lines.append(
-                    f"| {rank_str} | `{escape_markdown(cand.profile)}` | "
-                    f"{'yes' if cand.is_eligible else 'no'} | "
-                    f"{cand.sample_size} ({cand.accepted_count}) | "
-                    f"{cand.accepted_rate_wilson_lower:.4f} | {lat_str} | "
-                    f"{recency_str} | {escape_markdown(notes)} |"
-                )
-            lines.append("")
+            lines.extend(_render_candidate_rankings(rec))
     return lines
 
 
@@ -446,8 +465,9 @@ def _render_evidence_cells(report: ProviderReliabilityReport) -> list[str]:
     lines.extend(
         [
             "| Task Class | Profile | Mode | N | Accepted Rate (95% CI) | Failures | "
-            "Repairs | Interventions | Overrides | Med Latency | Budget Cov |",
-            "|---|---|---|---|---|---|---|---|---|---|---|",
+            "Repairs | Interventions | Overrides | Terminal Med | Success Med | "
+            "Failure Med | Budget Cov |",
+            "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
         ]
     )
     for c in report.evidence_cells:
@@ -457,9 +477,19 @@ def _render_evidence_cells(report: ProviderReliabilityReport) -> list[str]:
         int_str = (
             f"{c.interventions.human_interventions_count} ({c.interventions.intervention_rate:.2f})"
         )
-        lat_str = (
+        terminal_lat_str = (
             f"{c.terminal_latency.median_seconds:.1f}s"
             if c.terminal_latency.median_seconds is not None
+            else "N/A"
+        )
+        success_lat_str = (
+            f"{c.successful_task_latency.median_seconds:.1f}s"
+            if c.successful_task_latency.median_seconds is not None
+            else "N/A"
+        )
+        failure_lat_str = (
+            f"{c.failure_task_latency.median_seconds:.1f}s"
+            if c.failure_task_latency.median_seconds is not None
             else "N/A"
         )
         fail_summary = (
@@ -471,7 +501,8 @@ def _render_evidence_cells(report: ProviderReliabilityReport) -> list[str]:
             f"| `{escape_markdown(c.task_class)}` | `{escape_markdown(c.profile)}` | "
             f"`{escape_markdown(c.mutation_mode)}` | {c.sample_size} | "
             f"{ci_str} | {escape_markdown(fail_summary)} | {rep_str} | {int_str} | "
-            f"{c.manual_overrides_count} | {lat_str} | "
+            f"{c.manual_overrides_count} | {terminal_lat_str} | {success_lat_str} | "
+            f"{failure_lat_str} | "
             f"{c.budget_field_coverage.budget_coverage_rate:.2f} |"
         )
     lines.append("")

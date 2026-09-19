@@ -21,6 +21,7 @@ from evaluation.provider_reliability_models import (
 )
 from evaluation.provider_reliability_recommendation import generate_recommendations
 from evaluation.provider_reliability_robustness import (
+    _run_bootstrap_iterations,
     evaluate_robustness_snapshot,
     partition_temporal_cohort_tasks,
     partition_window_tasks,
@@ -33,6 +34,16 @@ from evaluation.provider_reliability_robustness_report import (
 )
 
 AS_OF = datetime(2026, 9, 17, 12, 0, 0, tzinfo=UTC)
+
+
+class _FixedChoicesRng:
+    """Return each profile's observations unchanged for deterministic tie-break testing."""
+
+    @staticmethod
+    def choices(
+        observations: list[tuple[bool, float | None]], k: int
+    ) -> list[tuple[bool, float | None]]:
+        return list(observations)
 
 
 def _make_evidence(
@@ -212,6 +223,24 @@ def test_recommendation_missing_median_latency_tie_break() -> None:
     recs = generate_recommendations(cells, as_of=AS_OF)
     rec = next(r for r in recs if r.task_class == "feature" and r.mutation_mode == "mutation")
     assert rec.recommended_profile == "antigravity-native-executor"
+
+
+def test_bootstrap_tie_break_uses_successful_latency_not_failure_latency() -> None:
+    """Fast failures must not outrank slower successful work when acceptance ties."""
+    profile_obs = {
+        "codex-native-executor": [(True, 100.0)] * 5 + [(False, None)] * 5,
+        "antigravity-native-executor": [(True, 200.0)] * 5 + [(False, None)] * 5,
+    }
+    wins, ranks = _run_bootstrap_iterations(
+        profile_obs,
+        ["codex-native-executor", "antigravity-native-executor"],
+        iterations=1,
+        confidence_level=0.95,
+        rng=_FixedChoicesRng(),
+    )
+    assert wins["codex-native-executor"] == 1
+    assert wins["antigravity-native-executor"] == 0
+    assert ranks["codex-native-executor"]["1"] == 1
 
 
 def test_deterministic_bootstrap_same_seed_reproducibility() -> None:
