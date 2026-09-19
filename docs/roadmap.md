@@ -394,18 +394,21 @@ route decision
 
 ### Current Evidence State and Post-Wave Decision
 
-- **Evidence Base**: M29 Wave 2 live evidence collection (`artifacts/m29_evidence_bundle_wave2/bundle.json`) completed 20 paired tasks in `docs` (`read_only`) under verified current-cohort runtime identities (`codex:gpt-5.6-luna/high` and `antigravity:gemini-3.8-flash/medium`).
-- **Advisory Recommendation**: The canonical current-cohort advisory report (`evaluation/m29_provider_reliability_report.{json,md}`) qualifies `docs` (`read_only`) at the canonical sample floor ($N=10$ vs $10$) and recommends `codex-native-executor-read-only` ($10/10$ accepted, Wilson 95% lower bound $0.7225$, median latency $194.64\text{s}$) over `antigravity-native-executor-read-only` ($9/10$ accepted, Wilson 95% lower bound $0.5958$, median latency $150.67\text{s}$). Codex achieved a $66.06\%$ win probability across 10,000 bootstrap iterations.
-- **Robustness Status**: Reported truthfully as `partial` (`evaluation/m29_provider_reliability_robustness_report.{json,md}`). The single 20-task execution wave lacks historical current-cohort samples ($0$ tasks in historical 45-day split), so window sensitivity and temporal split consistency cannot yet be proven.
-- **Missing Current-Cohort Cells**: Target cells `feature` (`mutation`), `feature` (`read_only`), and `investigation` (`read_only`) have zero tasks in the current execution cohort ($N=0$) and remain explicitly labeled `insufficient-data` with fallback reason `no_eligible_candidates: all candidates lack sufficient samples`.
-- **Operational Diagnostic View**: Preserves full 90-day accounting across all model vintages ($288$ included tasks) for diagnostic failure taxonomy without candidate rankings or active recommendations (`evaluation/m29_provider_reliability_operational_report.{json,md}`).
+- **Evidence Base**: M29 Wave 3 (`artifacts/m29_evidence_bundle_wave3/bundle.json`, ignored/private) completed 40 frozen read-only cases: 20 investigation and 20 feature cases, with 10 cases per provider/cell. The bundle pins build `a32719d114fab93c8e63e81153229ac900748a5c`, target `origin/master` revision `f0b4cb8139d1497857d1b67e106a6170cbbed05c`, and terminal timestamp `2026-09-19T21:32:22.562107Z`. All cases reached immutable terminal outcomes (18 completed, 22 failed); all were Temporal/native executions, had zero changed files, and had no unresolved interactions or gate failures.
+- **Advisory Recommendations**: The refreshed canonical current-cohort report (`evaluation/m29_provider_reliability_report.{json,md}`) retains the Wave 2 `docs/read_only` recommendation for `codex-native-executor-read-only` (10/10 accepted versus 9/10). Wave 3 qualifies `feature/read_only` at $N=10$ vs $10$ (5/10 accepted for each provider) and recommends `antigravity-native-executor-read-only` on lower median latency ($76.65\text{s}$ versus $354.22\text{s}$); the tied Wilson lower bound is $0.2366$ and the robustness bootstrap gives Antigravity a $58.61\%$ win probability.
+- **Investigation Evidence Gap**: `investigation/read_only` is not qualified. The fail-closed identity filter finds only $N=9$ Codex and $N=6$ Antigravity cases with authoritative `model_execution` metadata (accepted counts 3 and 5), so it reports `insufficient-data` rather than inferring or backfilling missing identities. `feature/mutation` remains pending at $N=0$.
+- **Robustness Status**: Reported truthfully as `partial` (`evaluation/m29_provider_reliability_robustness_report.{json,md}`). The current cohort has no historical 45-day split ($0$ tasks), so longitudinal consistency cannot yet be proven; the feature/read-only bootstrap uses 10,000 iterations with seed 29.
+- **Operational Diagnostic View**: Preserves 90-day accounting across all model vintages without active recommendations (`evaluation/m29_provider_reliability_operational_report.{json,md}`).
 - **Static Production Routing**: Production routing remains strictly unchanged (static heuristic/checked-in metrics intact). No automated or manual runtime routing changes are made from this evidence.
-- **Deferred Autonomy**: M27 autonomy policy remains deferred; a $66.06\%$ bootstrap win probability from one clustered wave does not satisfy M27 entry gates.
+- **Deferred Autonomy**: M27 autonomy policy remains deferred; a single clustered wave and partial robustness do not satisfy M27 entry gates.
 
 ### Exit criteria
 
 - every enabled profile has current evidence or is explicitly labeled
-  insufficient-data (partially satisfied: `docs/read_only` has current evidence; `feature/mutation`, `feature/read_only`, and `investigation/read_only` are explicitly labeled `insufficient-data`; remaining current-cohort evidence collection is in progress)
+  insufficient-data (partially satisfied: `docs/read_only` and `feature/read_only`
+  have current evidence; `feature/mutation` and `investigation/read_only` are
+  explicitly labeled `insufficient-data`; identity-complete investigation and
+  mutation evidence remain in progress)
 - unavailable provider capabilities fail before or during dispatch with a
   typed reason and actionable operator guidance (unresolved: provider-specific pre-dispatch diagnostics and fail-closed registered secret reference gating remain pending)
 - the operator can explain and reproduce every recommended profile choice from
@@ -417,7 +420,7 @@ route decision
 
 1. Remove legacy raw-secret ingress and enforce opaque registered references (`RegisteredSecretDefinition` fail-closed gating).
 2. Add provider-specific pre-dispatch diagnostics (validating credentials, CLI binaries, and container runtime readiness prior to dispatch).
-3. Gather longitudinal and missing-cell current-cohort evidence (`feature/mutation`, `feature/read_only`, `investigation/read_only` across temporal cohorts).
+3. Gather identity-complete `investigation/read_only` evidence and `feature/mutation` evidence, then repeat comparable waves for longitudinal current-cohort consistency.
 4. Evaluate hierarchical budget controls separately (task, node, repair, wall time, and concurrency limits).
 
 ## M30 — GitHub-Native Task and Delivery Control

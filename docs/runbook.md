@@ -782,10 +782,41 @@ The M29 live evidence wave harness (`scripts/e2e/run_m29_evidence_wave.py`) mana
   --timeout-seconds 900
 ```
 
+After the final case reaches a terminal state, use the bundle's latest
+`terminal_at` value as one frozen `--as-of` timestamp for all three report
+commands. The repository `.env` may point `DATABASE_URL` at the local SQLite
+test database; report generation must instead use the live Compose PostgreSQL
+URL (with the values from `.env`):
+
+```bash
+LIVE_DATABASE_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:5432/${POSTGRES_DB}"
+AS_OF="<last terminal_at from bundle.json>"
+
+DATABASE_URL="$LIVE_DATABASE_URL" .venv/bin/python scripts/e2e/run_provider_reliability_report.py \
+  --database-url-env DATABASE_URL --evidence-scope current_execution_cohort \
+  --lookback-days 90 --min-samples 10 --as-of "$AS_OF" \
+  --json-output evaluation/m29_provider_reliability_report.json \
+  --markdown-output evaluation/m29_provider_reliability_report.md
+
+DATABASE_URL="$LIVE_DATABASE_URL" .venv/bin/python scripts/e2e/run_provider_reliability_report.py \
+  --database-url-env DATABASE_URL --evidence-scope operational \
+  --lookback-days 90 --min-samples 10 --as-of "$AS_OF" \
+  --json-output evaluation/m29_provider_reliability_operational_report.json \
+  --markdown-output evaluation/m29_provider_reliability_operational_report.md
+
+DATABASE_URL="$LIVE_DATABASE_URL" .venv/bin/python scripts/e2e/run_provider_reliability_robustness.py \
+  --database-url-env DATABASE_URL --evidence-scope current_execution_cohort \
+  --lookback-days 90 --min-samples 10 --as-of "$AS_OF" \
+  --bootstrap-iterations 10000 --bootstrap-seed 29 \
+  --json-output evaluation/m29_provider_reliability_robustness_report.json \
+  --markdown-output evaluation/m29_provider_reliability_robustness_report.md
+```
+
 #### Bundles and Diagnostic Baselines
 - **Wave 1 Diagnostic Baseline**: `evaluation/m29_live_provider_suite.json` (28 tasks across investigation, feature, and docs), preserved immutably at `artifacts/m29_evidence_bundle_wave1_diagnostic/bundle.json`. Captures the historical `gpt-5.4-mini` retirement event.
 - **Wave 2 Live Evidence**: `evaluation/m29_live_provider_suite_wave2.json` (20 docs tasks across 10 balanced pairs), tracked at `artifacts/m29_evidence_bundle_wave2/bundle.json`. Powered to meet the canonical sample floor ($N=10$ vs $10$).
 - **Wave 3 Live Evidence**: `evaluation/m29_live_provider_suite_wave3.json` (40 read-only tasks across 20 balanced investigation/feature pairs), tracked privately at `artifacts/m29_evidence_bundle_wave3/bundle.json`. The ignored bundle pins the harness build and target repository revision, and preserves terminal outcomes without reruns.
+- **Wave 3 observed result**: all 40 cases reached immutable terminal outcomes (18 completed, 22 failed), with zero changed files and no interaction or runtime gate failures. The canonical report qualifies `feature/read_only` at 10 samples per provider; `investigation/read_only` remains below the sample floor after fail-closed authoritative identity filtering.
 
 #### Invariants & failure semantics
 - **Strict Read-Only Delivery**: All evidence cases enforce `delivery_mode=summary`, low risk, read-only mode, and zero changed files.

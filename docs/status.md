@@ -113,19 +113,26 @@ Temporal migration and rollback record is in the
   public-field sanitization without modifying live routing. Following the discovery of
   OpenAI's `gpt-5.4-mini` retirement, the evaluation architecture was reshaped to
   enforce authoritative, model-aware execution cohorts (`provider`, `model`,
-  `reasoning_effort`) before aggregation. Wave 1 is retained immutably as a diagnostic
-  baseline (`artifacts/m29_evidence_bundle_wave1_diagnostic/`), and Wave 2
-  (`artifacts/m29_evidence_bundle_wave2/`, 20 paired docs tasks) establishes dual-candidate
-  sample floor qualification ($N=10$ vs $10$) in `docs` (`read_only`) under verified current
-  cohorts (`codex: gpt-5.6-luna/high`, `antigravity: gemini-3.8-flash/medium`), recommending
-  `codex-native-executor-read-only` (10/10 accepted, Wilson lower bound 0.7225, 66.06% bootstrap
-  win probability). Two distinct views are published: canonical current-cohort report
-  (`evaluation/m29_provider_reliability_report.{json,md}`) and operational diagnostic report
-  (`evaluation/m29_provider_reliability_operational_report.{json,md}`). Robustness status is
-  reported as `partial` to truthfully reflect that temporal consistency requires longitudinal data.
-  The post-wave review confirmed that production routing remains static and unchanged, target
-  cells `feature/mutation`, `feature/read_only`, and `investigation/read_only` remain
-  insufficient-data ($N=0$), and M27 resumption remains deferred.
+  `reasoning_effort`) before aggregation. Wave 1 remains an immutable diagnostic
+  baseline, Wave 2 established `docs/read_only`, and Wave 3
+  (`artifacts/m29_evidence_bundle_wave3/bundle.json`, ignored/private) completed
+  40 frozen read-only cases (20 investigation and 20 feature; 10 per
+  provider/cell) at build `a32719d114fab93c8e63e81153229ac900748a5c`. All 40
+  cases reached immutable terminal outcomes (18 completed, 22 failed), with
+  zero changed files, zero unresolved interactions/gates, and Temporal/native
+  execution throughout. The fixed Wave 3 terminal timestamp is
+  `2026-09-19T21:32:22.562107Z`.
+
+  Refreshed canonical, operational, and robustness reports use that timestamp
+  and a 10,000-iteration bootstrap with seed 29. The canonical report qualifies
+  `feature/read_only` at $N=10$ vs $10$ (5/10 accepted for each provider) and
+  recommends `antigravity-native-executor-read-only` on lower median latency;
+  `investigation/read_only` remains insufficient-data because authoritative
+  `model_execution` identity is available for only $N=9$ Codex and $N=6$
+  Antigravity cases, so the fail-closed extractor does not infer or backfill
+  missing samples. `feature/mutation` remains pending, robustness is `partial`
+  with no historical 45-day split, and M27 resumption remains deferred. Production
+  routing is static and unchanged.
 
 ## Known limitations
 
@@ -154,12 +161,14 @@ Temporal migration and rollback record is in the
 
 ## Next slices only
 
-1. Execute remaining M29 work following the reviewed post-wave conclusion (advisory
-   Codex recommendation for `docs/read_only` only, partial robustness, and static
-   production routing unchanged):
+1. Execute remaining M29 work following the reviewed Wave 3 conclusion (advisory
+   Codex recommendation for `docs/read_only`, Antigravity recommendation for
+   `feature/read_only`, partial robustness, and static production routing
+   unchanged):
    a. [Completed] remove legacy raw-secret ingress and enforce opaque registered references (M29 Item 1a);
    b. [Completed] add provider-specific pre-dispatch diagnostics (M29 Item 1b);
-   c. gather longitudinal and missing-cell current-cohort evidence;
+   c. gather identity-complete `investigation/read_only` evidence, plus
+      `feature/mutation` and longitudinal current-cohort evidence;
    d. evaluate hierarchical budget controls separately.
 2. Use the M28 report as a scoped safety/effectiveness signal only; do not
    change routing or add semantic retrieval without further evidence.
