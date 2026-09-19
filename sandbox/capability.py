@@ -14,7 +14,6 @@ from sandbox.ingress import (
     ConflictingSecretDeclarationError,
     DeprecatedLegacySecretsError,
     IngressMigrationAdapter,
-    LegacyIngressTaskRequest,
     sanitize_legacy_ingress_payload,
 )
 from sandbox.secrets import (
@@ -39,7 +38,9 @@ from sandbox.secrets import (
     SecretScope,
     SecretSource,
     UnauthorizedSecretError,
+    create_authoritative_secret_registry,
     normalize_fqdn,
+    validate_secret_refs,
 )
 from tools.registry import (
     DEFAULT_TOOL_REGISTRY,
@@ -497,7 +498,6 @@ __all__ = [
     "FileSystemAccessPolicy",
     "InMemoryEphemeralSecretStore",
     "IngressMigrationAdapter",
-    "LegacyIngressTaskRequest",
     "MissingSecretScopeError",
     "MissingTaskContextError",
     "NetworkEgressPolicy",
@@ -515,8 +515,10 @@ __all__ = [
     "SecretSource",
     "ToolCapabilityTag",
     "UnauthorizedSecretError",
+    "create_authoritative_secret_registry",
     "normalize_fqdn",
     "parse_memory_bytes",
     "sanitize_legacy_ingress_payload",
     "validate_grant_for_execution",
+    "validate_secret_refs",
 ]

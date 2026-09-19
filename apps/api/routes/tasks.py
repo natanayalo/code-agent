@@ -75,7 +75,6 @@ def submit_task(
             worker_profile_override=ingress.request.worker_profile_override,
             constraints=ingress.request.constraints,
             budget=ingress.request.budget,
-            secrets=ingress.request.secrets,
             secret_refs=ingress.request.secret_refs,
             tools=ingress.request.tools,
             callback_url=ingress.request.callback_url,
@@ -88,7 +87,7 @@ def submit_task(
         )
 
         try:
-            task_snapshot, _ = task_service.create_task(submission, raw_secrets=ingress.raw_secrets)
+            task_snapshot, _ = task_service.create_task(submission)
             set_current_span_attribute(TASK_ID_ATTRIBUTE, task_snapshot.task_id)
             set_current_span_attribute(SESSION_ID_ATTRIBUTE, task_snapshot.session_id)
             return task_snapshot
@@ -282,13 +281,24 @@ def replay_task(
         result = task_service.replay_task(
             source_task_id=task_id,
             replay_request=ingress.request,
-            raw_secrets=ingress.raw_secrets,
         )
     except TaskSubmissionValidationError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(exc),
         ) from exc
+    if result.status == "validation_error":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": "legacy_source_credentials_not_replayable",
+                "message": (
+                    result.detail
+                    or "This task uses legacy credentials. "
+                    "Submit a new task with registered secret_refs."
+                ),
+            },
+        )
     if result.status == "not_found":
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

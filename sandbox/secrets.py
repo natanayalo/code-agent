@@ -33,6 +33,10 @@ class CapabilityViolationError(RuntimeError):
     """Raised when a capability grant or execution request violates security policy."""
 
 
+class DeprecatedLegacySecretsError(CapabilityViolationError):
+    """Raised when legacy raw secrets are used after the deprecation cutoff."""
+
+
 class SecretResolutionError(CapabilityViolationError):
     pass
 
@@ -477,7 +481,103 @@ class SecretRegistry:
         return iter(self._definitions.values())
 
 
-DEFAULT_SECRET_REGISTRY: Final[SecretRegistry] = SecretRegistry()
+def create_authoritative_secret_registry(
+    environ: Mapping[str, str] | None = None,
+) -> SecretRegistry:
+    """Construct the authoritative SecretRegistry populated with standard platform definitions."""
+    definitions = [
+        RegisteredSecretDefinition(
+            name="github_token",
+            source=SecretSource.ENV,
+            source_key="GITHUB_TOKEN",
+            required_scope=SecretScope.GIT_PUSH,
+            exposure_policy=SecretExposurePolicy.BROKER_ONLY,
+        ),
+        RegisteredSecretDefinition(
+            name="gh_token",
+            source=SecretSource.ENV,
+            source_key="GH_TOKEN",
+            required_scope=SecretScope.GIT_PUSH,
+            exposure_policy=SecretExposurePolicy.BROKER_ONLY,
+        ),
+        RegisteredSecretDefinition(
+            name="openai_api_key",
+            source=SecretSource.ENV,
+            source_key="OPENAI_API_KEY",
+            required_scope=SecretScope.PROVIDER_AUTH,
+            exposure_policy=SecretExposurePolicy.SANDBOX_ENV,
+            destination_env_var="OPENAI_API_KEY",
+            permitted_egress_hosts=("api.openai.com", "auth.openai.com"),
+        ),
+        RegisteredSecretDefinition(
+            name="openai_key",
+            source=SecretSource.ENV,
+            source_key="OPENAI_API_KEY",
+            required_scope=SecretScope.PROVIDER_AUTH,
+            exposure_policy=SecretExposurePolicy.SANDBOX_ENV,
+            destination_env_var="OPENAI_API_KEY",
+            permitted_egress_hosts=("api.openai.com", "auth.openai.com"),
+        ),
+        RegisteredSecretDefinition(
+            name="gemini_api_key",
+            source=SecretSource.ENV,
+            source_key="GEMINI_API_KEY",
+            required_scope=SecretScope.PROVIDER_AUTH,
+            exposure_policy=SecretExposurePolicy.SANDBOX_ENV,
+            destination_env_var="GEMINI_API_KEY",
+            permitted_egress_hosts=("generativelanguage.googleapis.com", "oauth2.googleapis.com"),
+        ),
+        RegisteredSecretDefinition(
+            name="openrouter_api_key",
+            source=SecretSource.ENV,
+            source_key="OPENROUTER_API_KEY",
+            required_scope=SecretScope.PROVIDER_AUTH,
+            exposure_policy=SecretExposurePolicy.SANDBOX_ENV,
+            destination_env_var="OPENROUTER_API_KEY",
+            permitted_egress_hosts=("openrouter.ai",),
+        ),
+    ]
+    if environ:
+        custom_secrets = environ.get("CODE_AGENT_REGISTERED_SECRETS", "")
+        for item in custom_secrets.split(","):
+            name = item.strip()
+            if not name or any(d.name == name for d in definitions):
+                continue
+            definitions.append(
+                RegisteredSecretDefinition(
+                    name=name,
+                    source=SecretSource.ENV,
+                    source_key=name.upper(),
+                    required_scope=SecretScope.CUSTOM,
+                    exposure_policy=SecretExposurePolicy.SANDBOX_ENV,
+                    destination_env_var=f"CODE_AGENT_SECRET_{name.upper().replace('-', '_')}",
+                )
+            )
+    return SecretRegistry(definitions)
+
+
+DEFAULT_SECRET_REGISTRY: Final[SecretRegistry] = create_authoritative_secret_registry()
+
+
+def validate_secret_refs(
+    refs: Sequence[SecretRef],
+    registry: SecretRegistry,
+    *,
+    allow_metadata: bool = False,
+    task_id: str | None = None,
+) -> None:
+    """Validate that secret references exist in registry and conform to safety policy."""
+    for ref in refs:
+        if not allow_metadata and ref.metadata:
+            raise CapabilityViolationError(
+                f"Secret reference '{ref.name}' contains non-empty metadata, "
+                "which is not permitted at ingress."
+            )
+        definition = registry.get(ref.name, task_id=task_id)
+        if definition is None:
+            raise SecretNotFoundError(
+                f"Secret reference '{ref.name}' is not registered in authoritative SecretRegistry"
+            )
 
 
 class SecretResolver:
@@ -632,6 +732,7 @@ __all__ = [
     "DEFAULT_SECRET_REGISTRY",
     "BrokerOnlySecretExposureError",
     "CapabilityViolationError",
+    "DeprecatedLegacySecretsError",
     "EphemeralSecretHandle",
     "EphemeralSecretRecord",
     "EphemeralSecretStore",
@@ -649,5 +750,7 @@ __all__ = [
     "SecretScope",
     "SecretSource",
     "UnauthorizedSecretError",
+    "create_authoritative_secret_registry",
     "normalize_fqdn",
+    "validate_secret_refs",
 ]

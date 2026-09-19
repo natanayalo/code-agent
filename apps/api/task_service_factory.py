@@ -22,7 +22,10 @@ from orchestrator.execution import ProgressNotifier, TaskExecutionService
 from repositories import create_engine_from_url, create_session_factory
 from sandbox import DockerSandboxContainerManager
 from sandbox.ephemeral_store_postgres import SessionFactoryEphemeralSecretStore
-from sandbox.secrets import EphemeralSecretStore
+from sandbox.secrets import (
+    EphemeralSecretStore,
+    create_authoritative_secret_registry,
+)
 from sandbox.workspace import default_workspace_root
 from workers import (
     AntigravityCliRuntimeAdapter,
@@ -599,4 +602,5 @@ def build_task_service_from_env(
         ),
         enforce_temporal_availability=True,
         context_envelope_enabled=_is_context_envelope_enabled(resolved_env),
+        secret_registry=create_authoritative_secret_registry(resolved_env),
     )
