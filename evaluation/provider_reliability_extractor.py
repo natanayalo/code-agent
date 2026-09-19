@@ -38,6 +38,9 @@ from evaluation.provider_reliability_models import (
     TaskExclusionSummary,
     WilsonConfidenceInterval,
 )
+from evaluation.provider_reliability_preflight import (
+    task_was_only_preflight_rejected as _task_was_only_preflight_rejected,
+)
 from evaluation.provider_reliability_recommendation import (
     determine_report_status,
     generate_recommendations,
@@ -133,6 +136,8 @@ def _validate_task_candidate(
         return "evaluation_smoke", None, None, None
     if task.status == TaskStatus.CANCELLED:
         return "cancelled", None, None, None
+    if _task_was_only_preflight_rejected(task):
+        return "preflight_only_rejection", None, None, None
     if task.status in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS):
         return "incomplete", None, None, None
     if task.orchestration_runtime != OrchestrationRuntime.TEMPORAL:

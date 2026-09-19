@@ -289,6 +289,7 @@ class WorkerResult(WorkerModel):
     memory_to_persist: list[WorkerMemoryEntry] = Field(default_factory=list)
     delivery_metadata: dict[str, Any] | None = None
     next_action_hint: str | None = None
+    preflight_rejected: bool = False
     stdout: Any | None = None
     stderr: Any | None = None
 

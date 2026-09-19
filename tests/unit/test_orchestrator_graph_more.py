@@ -30,7 +30,8 @@ from workers import WorkerCommand, WorkerResult
 
 
 @pytest.mark.asyncio
-async def test_await_decomposed_nodes():
+async def test_await_decomposed_nodes(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("CODE_AGENT_PRE_DISPATCH_DIAGNOSTICS_ENABLED", "0")
     node1 = DecomposedTaskNode(
         node_id="n1",
         title="Node 1",

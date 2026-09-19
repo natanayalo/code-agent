@@ -1,5 +1,3 @@
-"""Provider-specific pre-dispatch diagnostics service and execution gate."""
-
 from __future__ import annotations
 
 import asyncio
@@ -24,12 +22,25 @@ from orchestrator.provider_diagnostics_types import (
     compute_report_id,
 )
 from sandbox.native_agent_executor import DEFAULT_NATIVE_AGENT_IMAGE
-from sandbox.secrets import SecretRegistry
+from sandbox.secrets import DEFAULT_SECRET_REGISTRY, SecretRegistry
 from workers.base import FailureKind, WorkerRequest
 
 logger = logging.getLogger(__name__)
 
 _PROBE_CACHE: dict[str, tuple[float, DiagnosticCheckResult]] = {}
+_MAX_DETAIL_BYTES = 120
+
+
+def _optional_string(value: Any) -> str | None:
+    """Accept only real string metadata at the diagnostics model boundary."""
+    return value if isinstance(value, str) else None
+
+
+def _truncate_detail(value: str) -> str:
+    """Keep operator-facing diagnostics bounded and safe to display."""
+    if len(value) <= _MAX_DETAIL_BYTES:
+        return value
+    return f"{value[: _MAX_DETAIL_BYTES - 3]}..."
 
 
 def _get_cached_check(cache_key: str) -> DiagnosticCheckResult | None:
@@ -44,13 +55,12 @@ def _set_cached_check(cache_key: str, check: DiagnosticCheckResult) -> None:
 
 
 def clear_probe_cache() -> None:
-    """Clear all in-memory probe check caches (useful for testing)."""
     _PROBE_CACHE.clear()
 
 
 def _resolve_executable(worker: Any, worker_type: str) -> str | None:
     executable = getattr(getattr(worker, "runtime_adapter", None), "executable", None)
-    if not executable:
+    if not isinstance(executable, str) or not executable:
         if worker_type == "codex":
             executable = os.environ.get("CODE_AGENT_CODEX_CLI_BIN", "codex")
         elif worker_type == "antigravity":
@@ -71,6 +81,29 @@ def _resolve_auth_mechanism(worker: Any, worker_type: str, credential_refs: tupl
     if worker_type == "openrouter":
         return "api_key"
     return "none"
+
+
+def _worker_requires_sandbox_container(worker: Any, worker_type: str, runtime_mode: str) -> bool:
+    if hasattr(worker, "container_manager"):
+        return True
+    return runtime_mode in ("native_agent", "shell") and worker_type in (
+        "codex",
+        "antigravity",
+    )
+
+
+def _resolve_executor_image(
+    worker: Any, worker_type: str, runtime_mode: str, manifest_sandbox: dict[str, Any]
+) -> str:
+    manager = getattr(worker, "container_manager", None)
+    worker_default = _optional_string(getattr(manager, "default_image", None))
+    if worker_default and (worker_type == "openrouter" or runtime_mode in ("tool_loop", "shell")):
+        return worker_default
+    return (
+        _optional_string(manifest_sandbox.get("native_executor_image"))
+        or os.environ.get("CODE_AGENT_NATIVE_AGENT_EXECUTOR_IMAGE")
+        or DEFAULT_NATIVE_AGENT_IMAGE
+    )
 
 
 def _extract_secret_refs(request: WorkerRequest) -> tuple[str, ...]:
@@ -101,9 +134,9 @@ def resolve_execution_context(
     manifest_sandbox = (request.runtime_manifest or {}).get("sandbox") or {}
 
     worker_profile = (
-        getattr(request, "worker_profile", None)
-        or manifest_worker.get("worker_profile")
-        or getattr(getattr(worker, "runtime_adapter", None), "profile", None)
+        _optional_string(getattr(request, "worker_profile", None))
+        or _optional_string(manifest_worker.get("worker_profile"))
+        or _optional_string(getattr(getattr(worker, "runtime_adapter", None), "profile", None))
     )
     runtime_mode = str(
         getattr(request, "runtime_mode", None)
@@ -111,26 +144,21 @@ def resolve_execution_context(
         or getattr(worker, "default_runtime_mode", "native_agent")
     )
     model = (
-        getattr(request, "model", None)
-        or manifest_worker.get("model")
-        or getattr(getattr(worker, "runtime_adapter", None), "model", None)
+        _optional_string(getattr(request, "model", None))
+        or _optional_string(manifest_worker.get("model"))
+        or _optional_string(getattr(getattr(worker, "runtime_adapter", None), "model", None))
     )
     reasoning_effort = (
-        getattr(request, "reasoning_effort", None)
-        or manifest_worker.get("reasoning_effort")
-        or getattr(getattr(worker, "runtime_adapter", None), "reasoning_effort", None)
+        _optional_string(getattr(request, "reasoning_effort", None))
+        or _optional_string(manifest_worker.get("reasoning_effort"))
+        or _optional_string(
+            getattr(getattr(worker, "runtime_adapter", None), "reasoning_effort", None)
+        )
     )
 
     executable = _resolve_executable(worker, worker_type)
-    executor_image = (
-        manifest_sandbox.get("native_executor_image")
-        or os.environ.get("CODE_AGENT_NATIVE_AGENT_EXECUTOR_IMAGE")
-        or DEFAULT_NATIVE_AGENT_IMAGE
-    )
-    is_container = runtime_mode in ("native_agent", "shell") and worker_type in (
-        "codex",
-        "antigravity",
-    )
+    executor_image = _resolve_executor_image(worker, worker_type, runtime_mode, manifest_sandbox)
+    is_container = _worker_requires_sandbox_container(worker, worker_type, runtime_mode)
     credential_refs = _extract_secret_refs(request)
     auth_mech = _resolve_auth_mechanism(worker, worker_type, credential_refs)
 
@@ -159,8 +187,6 @@ def resolve_execution_context(
 
 
 class ProviderDiagnosticsService:
-    """Performs pre-dispatch inspections against resolved execution contexts."""
-
     def __init__(
         self,
         *,
@@ -168,12 +194,13 @@ class ProviderDiagnosticsService:
         docker_probe_timeout: float = DEFAULT_DOCKER_PROBE_TIMEOUT_SECONDS,
         preflight_timeout: float = DEFAULT_PREFLIGHT_TIMEOUT_SECONDS,
     ) -> None:
-        self.secret_registry = secret_registry or SecretRegistry()
+        self.secret_registry = (
+            secret_registry if secret_registry is not None else DEFAULT_SECRET_REGISTRY
+        )
         self.docker_probe_timeout = docker_probe_timeout
         self.preflight_timeout = preflight_timeout
 
     def check_credentials(self, context: ProviderExecutionContext) -> DiagnosticCheckResult:
-        """Validate credential availability and local structure for the configured auth path."""
         return check_provider_credentials(context, self.secret_registry)
 
     async def _probe_docker_process(self) -> tuple[int | None, str, str]:
@@ -230,7 +257,7 @@ class ProviderDiagnosticsService:
                     blocking=False,
                 )
             else:
-                err_summary = err.splitlines()[0] if err else f"exit code {code}"
+                err_summary = _truncate_detail(err.splitlines()[0] if err else f"exit code {code}")
                 res = DiagnosticCheckResult(
                     name="docker_daemon",
                     category="container_runtime",
@@ -362,8 +389,8 @@ class ProviderDiagnosticsService:
                 category="cli_binary",
                 status="ready",
                 detail=(
-                    f"Configured executable '{executable}' is valid; "
-                    "internal image binary presence verified via pinned image build."
+                    f"Configured executable '{executable}' presence inside container image "
+                    "is unverified at this stage."
                 ),
                 verification_scope="local_presence",
                 blocking=False,
@@ -502,13 +529,22 @@ class ProviderDiagnosticsService:
         self,
         required_providers: set[str] | None = None,
         target: str = "local",
+        target_providers: set[str] | None = None,
     ) -> SystemProviderDiagnosticsReport:
-        """Run diagnostics for all supported providers and generate an operator snapshot."""
+        """Run diagnostics for selected providers and generate an operator snapshot."""
         now = utc_now()
         reports: dict[str, ProviderPreDispatchReport] = {}
-        supported = ["codex", "antigravity", "openrouter"]
+        supported = ("codex", "antigravity", "openrouter")
+        supported_set = set(supported)
+        target_set = (
+            {provider.lower() for provider in target_providers}
+            if target_providers is not None
+            else set(supported)
+        )
 
         for prov in supported:
+            if prov not in target_set:
+                continue
             executable = "codex" if prov == "codex" else "agy" if prov == "antigravity" else None
             auth_mech = (
                 "chatgpt_oauth"
@@ -532,9 +568,23 @@ class ProviderDiagnosticsService:
             )
             reports[prov] = await self.evaluate_pre_dispatch(ctx)
 
-        all_ready = all(r.ready for r in reports.values())
-        req_set = {p.lower() for p in (required_providers or supported)}
-        req_ready = all(r.ready for prov, r in reports.items() if prov.lower() in req_set)
+        all_ready = (
+            bool(target_set)
+            and target_set <= supported_set
+            and all(
+                reports.get(provider) is not None and reports[provider].ready
+                for provider in target_set
+            )
+        )
+        req_set = (
+            {provider.lower() for provider in required_providers}
+            if required_providers is not None
+            else target_set
+        )
+        required_set_valid = bool(req_set) and req_set <= supported_set
+        req_ready = required_set_valid and all(
+            reports.get(provider) is not None and reports[provider].ready for provider in req_set
+        )
 
         return SystemProviderDiagnosticsReport(
             checked_at=now,

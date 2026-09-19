@@ -344,6 +344,48 @@ async def test_evaluate_all_providers_respects_required() -> None:
         assert report.required_providers_ready
 
 
+@pytest.mark.asyncio
+async def test_evaluate_all_providers_restricts_targets_and_invalid_required_is_unready() -> None:
+    svc = ProviderDiagnosticsService()
+    ready = DiagnosticCheckResult(
+        name="credentials",
+        category="credentials",
+        status="ready",
+        detail="ok",
+        verification_scope="local_presence",
+        blocking=False,
+    )
+    with (
+        patch.object(svc, "check_credentials", return_value=ready),
+        patch.object(svc, "check_docker_daemon", new_callable=AsyncMock) as mock_docker,
+        patch.object(svc, "check_executor_image", new_callable=AsyncMock) as mock_image,
+    ):
+        mock_docker.return_value = DiagnosticCheckResult(
+            name="docker_daemon",
+            category="container_runtime",
+            status="ready",
+            detail="up",
+            verification_scope="local_runtime",
+            blocking=False,
+        )
+        mock_image.return_value = DiagnosticCheckResult(
+            name="executor_image",
+            category="container_runtime",
+            status="ready",
+            detail="available",
+            verification_scope="local_runtime",
+            blocking=False,
+        )
+        report = await svc.evaluate_all_providers(
+            target_providers={"codex"},
+            required_providers={"nonexistent"},
+        )
+
+    assert set(report.providers) == {"codex"}
+    assert report.all_ready
+    assert not report.required_providers_ready
+
+
 # ---------------------------------------------------------------------------
 # Additional coverage tests — provider_diagnostics.py
 # ---------------------------------------------------------------------------
@@ -389,6 +431,89 @@ def test_resolve_auth_mechanism_openrouter() -> None:
     request = WorkerRequest(task_text="Hello")
     ctx = resolve_execution_context(FakeORWorker(), request, task_id="t1")
     assert ctx.auth_mechanism == "api_key"
+
+
+def test_resolve_execution_context_uses_concrete_container_backend() -> None:
+    class _ContainerManager:
+        default_image = "sandbox-openrouter:test"
+
+    class _OpenRouterWorker:
+        worker_type = "openrouter"
+        default_runtime_mode = "tool_loop"
+        container_manager = _ContainerManager()
+
+    request = WorkerRequest(
+        task_text="Hello",
+        runtime_mode="tool_loop",
+        runtime_manifest={"sandbox": {"native_executor_image": "native-agent:test"}},
+    )
+    ctx = resolve_execution_context(_OpenRouterWorker(), request, task_id="t-openrouter")
+    assert ctx.is_container_execution
+    assert ctx.executor_image == "sandbox-openrouter:test"
+
+
+def test_codex_tool_loop_with_concrete_container_backend_requires_docker() -> None:
+    class _ContainerManager:
+        default_image = "sandbox-codex:test"
+
+    class _CodexWorker:
+        worker_type = "codex"
+        default_runtime_mode = "tool_loop"
+        container_manager = _ContainerManager()
+
+    request = WorkerRequest(task_text="Hello", runtime_mode="tool_loop")
+    ctx = resolve_execution_context(_CodexWorker(), request, task_id="t-codex")
+    assert ctx.is_container_execution
+    assert ctx.runtime_mode == "tool_loop"
+
+
+@pytest.mark.asyncio
+async def test_concrete_container_backends_probe_docker_when_unavailable() -> None:
+    class _ContainerManager:
+        default_image = "sandbox:test"
+
+    class _Worker:
+        def __init__(self, worker_type: str) -> None:
+            self.worker_type = worker_type
+            self.default_runtime_mode = "tool_loop"
+            self.container_manager = _ContainerManager()
+
+    ready_credentials = DiagnosticCheckResult(
+        name="credentials",
+        category="credentials",
+        status="ready",
+        detail="ok",
+        verification_scope="local_presence",
+        blocking=False,
+    )
+    docker_unready = DiagnosticCheckResult(
+        name="docker_daemon",
+        category="container_runtime",
+        status="unready",
+        detail="Docker unavailable",
+        verification_scope="local_runtime",
+        blocking=True,
+    )
+    service = ProviderDiagnosticsService()
+    with (
+        patch.object(service, "check_credentials", return_value=ready_credentials),
+        patch.object(service, "check_docker_daemon", new_callable=AsyncMock) as mock_docker,
+    ):
+        mock_docker.return_value = docker_unready
+        for worker_type in ("openrouter", "codex"):
+            worker = _Worker(worker_type)
+            request = WorkerRequest(
+                task_text="Hello",
+                worker_type=worker_type,  # type: ignore[arg-type]
+                runtime_mode="tool_loop",
+            )
+            context = resolve_execution_context(worker, request, worker_type=worker_type)
+            report = await service.evaluate_pre_dispatch(context)
+            assert context.is_container_execution
+            assert not report.ready
+            assert any(check.name == "docker_daemon" for check in report.checks)
+
+    assert mock_docker.await_count == 2
 
 
 # ---- check_docker_daemon uncovered branches ----------------------------------

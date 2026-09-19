@@ -121,6 +121,42 @@ def test_extractor_synthetic_database(tmp_path: Path) -> None:
     assert scout_rec.fallback_reason is not None
 
 
+def test_extractor_excludes_task_with_only_preflight_rejections(tmp_path: Path) -> None:
+    db_path = tmp_path / "preflight_only_rejection.db"
+    db_url = f"sqlite+pysqlite:///{db_path}"
+    engine = create_engine_from_url(db_url)
+    Base.metadata.create_all(engine)
+    task = _create_task(
+        task_id="preflight-only",
+        status=TaskStatus.FAILED,
+        profile="codex-native-executor",
+        failure_kind="provider_auth",
+    )
+    task.worker_runs[0].artifact_index = [
+        {
+            "artifact_type": ArtifactType.PRE_DISPATCH_DIAGNOSTICS.value,
+            "artifact_metadata": {
+                "decision": "preflight_rejected",
+                "execution_started": False,
+            },
+        }
+    ]
+    with Session(engine) as session:
+        session.add(task)
+        session.commit()
+
+    policy = ReliabilityReportPolicy(
+        as_of=NOW,
+        window_start_at=NOW - timedelta(days=30),
+        window_end_at=NOW + timedelta(days=1),
+        min_samples=1,
+    )
+    report = extract_provider_reliability_report(db_url, policy)
+
+    assert report.exclusions.by_reason["preflight_only_rejection"] == 1
+    assert report.exclusions.included_tasks_count == 0
+
+
 def test_cli_execution_and_clean_outputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Test CLI runs cleanly, respects flags, and writes deterministic sanitized reports."""
     db_url = _seed_test_database(tmp_path)

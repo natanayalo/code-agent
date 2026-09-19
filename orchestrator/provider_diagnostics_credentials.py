@@ -12,6 +12,16 @@ from orchestrator.provider_diagnostics_types import (
 )
 from sandbox.secrets import SecretRegistry
 
+_MAX_DETAIL_LENGTH = 120
+
+
+def _truncate_exception(exc: Exception) -> str:
+    """Bound exception text before including it in operator-facing diagnostics."""
+    detail = str(exc)
+    if len(detail) <= _MAX_DETAIL_LENGTH:
+        return detail
+    return f"{detail[:_MAX_DETAIL_LENGTH - 3]}..."
+
 
 def resolve_codex_auth_path() -> Path:
     """Return effective Codex auth.json path based on environment precedence."""
@@ -78,7 +88,7 @@ def check_codex_credentials(
             name="credentials",
             category="credentials",
             status="unready",
-            detail=f"Codex OAuth auth.json not found at {auth_file}.",
+            detail="Codex OAuth auth.json not found in the configured auth directory.",
             remediation=(
                 "Run: 'docker compose run --rm --no-deps worker codex login' "
                 "or set CODE_AGENT_CODEX_AUTH_DIR."
@@ -96,7 +106,7 @@ def check_codex_credentials(
             name="credentials",
             category="credentials",
             status="unready",
-            detail=f"Codex auth.json at {auth_file} is malformed or unreadable: {exc}",
+            detail=f"Codex auth.json is malformed or unreadable: {_truncate_exception(exc)}",
             remediation=(
                 "Re-authenticate with 'docker compose run --rm --no-deps worker codex login'."
             ),
@@ -126,7 +136,7 @@ def check_antigravity_credentials(context: ProviderExecutionContext) -> Diagnost
                 status="unready",
                 detail=(
                     "Found oauth_creds.json, but native Antigravity requires "
-                    f"antigravity-oauth-token. Missing token at {token_path}."
+                    "antigravity-oauth-token. The token file is missing."
                 ),
                 remediation=(
                     "Run 'scripts/bootstrap_antigravity_auth.sh' with "
@@ -139,7 +149,10 @@ def check_antigravity_credentials(context: ProviderExecutionContext) -> Diagnost
             name="credentials",
             category="credentials",
             status="unready",
-            detail=f"Antigravity OAuth token not found at {token_path}.",
+            detail=(
+                "Antigravity OAuth token not found (token file absent from the configured "
+                "auth directory)."
+            ),
             remediation=(
                 "Run 'scripts/bootstrap_antigravity_auth.sh' with "
                 "CODE_AGENT_ANTIGRAVITY_AUTH_DIR set."
@@ -157,7 +170,7 @@ def check_antigravity_credentials(context: ProviderExecutionContext) -> Diagnost
             name="credentials",
             category="credentials",
             status="unready",
-            detail=f"Antigravity token at {token_path} is unreadable: {exc}",
+            detail=f"Antigravity token file is unreadable: {_truncate_exception(exc)}",
             remediation="Run 'scripts/bootstrap_antigravity_auth.sh' to recreate the token.",
             verification_scope="local_structure",
             blocking=True,

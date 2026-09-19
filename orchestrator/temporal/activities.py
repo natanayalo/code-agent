@@ -84,6 +84,7 @@ from orchestrator.nodes.provisioning import (
 )
 from orchestrator.nodes.utils import _available_workers
 from orchestrator.nodes.verification import build_verify_result_node
+from orchestrator.provider_diagnostics import ProviderDiagnosticsService
 from orchestrator.state import (
     DecomposedTaskPlan,
     NodeOutcome,
@@ -117,6 +118,7 @@ from repositories import (
     TemporalTaskStateRepository,
     session_scope,
 )
+from sandbox import DEFAULT_SECRET_REGISTRY
 from sandbox.scratch import scratch_namespace_component
 from workers import ArtifactReference, WorkerResult
 
@@ -792,6 +794,7 @@ class TaskExecutionActivities:
             session_factory=self.service.session_factory,
             context_envelope_enabled=getattr(self.service, "context_envelope_enabled", True),
             workspace_path_resolver=(lambda ws_id: ws_root / ws_id) if ws_root else None,
+            secret_registry=getattr(self.service, "secret_registry", DEFAULT_SECRET_REGISTRY),
         )
         self.verify_result_node = build_verify_result_node(
             enable_independent_verifier=self.service.enable_independent_verifier,
@@ -1709,6 +1712,9 @@ class TaskExecutionActivities:
             raise ValueError("Node activity input digest changed before execution.")
 
         async def _execute_worker() -> WorkerResult:
+            diagnostics_service = ProviderDiagnosticsService(
+                secret_registry=getattr(self.service, "secret_registry", DEFAULT_SECRET_REGISTRY)
+            )
             result, _progress = await execute_with_preflight(
                 self.service.worker,
                 request,
@@ -1718,6 +1724,7 @@ class TaskExecutionActivities:
                 task_id=state.task.task_id,
                 attempt_count=node_activity.logical_attempt,
                 logical_execution_key=node_activity.logical_activity_key,
+                diagnostics_service=diagnostics_service,
             )
             if result is not None and node_envelope_artifact is not None:
                 result = result.model_copy(

@@ -115,6 +115,27 @@ def test_dispatch_job_raises_value_error_if_no_worker() -> None:
         dispatch_job(state)
 
 
+def test_preflight_rejection_does_not_retry_or_reroute() -> None:
+    state = OrchestratorState.model_validate(
+        {
+            "task": {"task_text": "demo"},
+            "route": {"chosen_worker": "codex", "route_reason": "initial"},
+            "dispatch": {"worker_type": "codex"},
+            "attempt_count": 1,
+            "result": {
+                "status": "error",
+                "failure_kind": "provider_auth",
+                "preflight_rejected": True,
+            },
+        }
+    )
+
+    assert _compute_route_escalation(state, frozenset({"codex", "antigravity"})) is None
+    prior_worker, retry_strategy = _resolve_brain_retry_context(state)
+    assert prior_worker == "codex"
+    assert retry_strategy is None
+
+
 def test_worker_profile_model_and_effort_projected_to_worker_request() -> None:
     """WorkerProfile model and reasoning_effort route through dispatch into WorkerRequest."""
     profile = WorkerProfile(

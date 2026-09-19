@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -176,6 +177,70 @@ async def test_preflight_bypassed_when_disabled(monkeypatch: pytest.MonkeyPatch)
 
 
 @pytest.mark.asyncio
+async def test_hanging_preflight_times_out_without_launching_worker() -> None:
+    worker = FakeWorker()
+    service = ProviderDiagnosticsService(preflight_timeout=0.01)
+    request = WorkerRequest(task_text="Hanging preflight", session_id="sess-timeout")
+
+    async def hang(_context: object) -> ProviderPreDispatchReport:
+        await asyncio.sleep(100)
+        raise AssertionError("unreachable")
+
+    with patch.object(service, "evaluate_pre_dispatch", side_effect=hang):
+        result, progress = await execute_with_preflight(
+            worker,
+            request,
+            worker_type="codex",
+            session_id="sess-timeout",
+            timeout_seconds=30,
+            diagnostics_service=service,
+        )
+
+    assert not worker.run_called
+    assert result.status == "error"
+    assert result.failure_kind == "timeout"
+    assert result.preflight_rejected
+    assert "worker launch was skipped" in (result.summary or "")
+    assert "timed out" in progress
+
+
+@pytest.mark.asyncio
+async def test_preflight_elapsed_time_is_deducted_from_worker_timeout() -> None:
+    worker = FakeWorker()
+    service = ProviderDiagnosticsService(preflight_timeout=1.0)
+    request = WorkerRequest(task_text="Slow preflight", session_id="sess-budget")
+    report = ProviderPreDispatchReport(
+        report_id="slow-preflight-report",
+        checked_at=utc_now(),
+        execution_environment_id="local",
+        logical_execution_key="sess-budget:attempt:1:primary",
+        provider="codex",
+        runtime_mode="native_agent",
+        decision="preflight_passed",
+        ready=True,
+        execution_started=False,
+    )
+
+    async def slow_ready(_context: object) -> ProviderPreDispatchReport:
+        await asyncio.sleep(0.02)
+        return report
+
+    with patch.object(service, "evaluate_pre_dispatch", side_effect=slow_ready):
+        result, progress = await execute_with_preflight(
+            worker,
+            request,
+            worker_type="codex",
+            session_id="sess-budget",
+            timeout_seconds=0.01,
+            diagnostics_service=service,
+        )
+
+    assert not worker.run_called
+    assert result.failure_kind == "timeout"
+    assert "consumed the execution timeout envelope" in progress
+
+
+@pytest.mark.asyncio
 async def test_decomposed_node_distinct_report_ids_for_parallel_nodes() -> None:
     worker = FakeWorker()
     req = WorkerRequest(task_text="Decomposed node 1", session_id="sess-dag")
@@ -261,3 +326,37 @@ async def test_cli_diagnostics_runner_exit_codes() -> None:
         args_fail = _parse_args(["--required", "codex", "--json"])
         code_fail = await _async_main(args_fail)
         assert code_fail == 1
+
+
+@pytest.mark.asyncio
+async def test_cli_diagnostics_filters_target_providers_and_rejects_unknown_required(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from orchestrator.provider_diagnostics_types import SystemProviderDiagnosticsReport
+
+    with patch.object(
+        ProviderDiagnosticsService, "evaluate_all_providers", new_callable=AsyncMock
+    ) as mock_eval:
+        now = utc_now()
+        mock_eval.return_value = SystemProviderDiagnosticsReport(
+            checked_at=now,
+            expires_at=now,
+            target="cli",
+            execution_environment_id="local",
+            providers={},
+            all_ready=True,
+            required_providers_ready=True,
+        )
+        code = await _async_main(_parse_args(["--providers", "codex"]))
+        assert code == 0
+        mock_eval.assert_awaited_once_with(
+            required_providers=None,
+            target="cli",
+            target_providers={"codex"},
+        )
+
+        mock_eval.reset_mock()
+        code = await _async_main(_parse_args(["--required", "nonexistent"]))
+        assert code == 2
+        mock_eval.assert_not_awaited()
+        assert "Unknown required provider(s): nonexistent" in capsys.readouterr().err

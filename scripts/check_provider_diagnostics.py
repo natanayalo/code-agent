@@ -61,15 +61,27 @@ def _print_text_summary(report: SystemProviderDiagnosticsReport) -> None:
 
 
 async def _async_main(args: argparse.Namespace) -> int:
+    known_providers = {"codex", "antigravity", "openrouter"}
+    target_set = (
+        {p.strip().lower() for p in args.providers.split(",") if p.strip()}
+        if args.providers
+        else None
+    )
     required_set = (
         {p.strip().lower() for p in args.required.split(",") if p.strip()}
         if args.required
         else None
     )
+    unknown_required = (required_set or set()) - known_providers
+    if unknown_required:
+        names = ", ".join(sorted(unknown_required))
+        print(f"Unknown required provider(s): {names}", file=sys.stderr)
+        return 2
     service = ProviderDiagnosticsService()
     report = await service.evaluate_all_providers(
         required_providers=required_set,
         target="cli",
+        target_providers=target_set,
     )
 
     if args.output_json:
