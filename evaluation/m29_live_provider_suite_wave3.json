@@ -1,0 +1,406 @@
+{
+  "suite_name": "m29-live-provider-evidence-wave3",
+  "schema_version": 1,
+  "cases": [
+    {
+      "case_id": "m29-w3-inv-01-outbox-antigravity",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "outbox-idempotency",
+      "pair_group": "m29-w3-investigation-01-outbox-idempotency",
+      "pair_order": 1,
+      "prompt": "Investigate transactional command outbox idempotency and duplicate delivery handling. Trace how start, signal, and cancellation commands avoid duplicate Temporal effects, and summarize findings without modifying files."
+    },
+    {
+      "case_id": "m29-w3-inv-01-outbox-codex",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "outbox-idempotency",
+      "pair_group": "m29-w3-investigation-01-outbox-idempotency",
+      "pair_order": 2,
+      "prompt": "Investigate transactional command outbox idempotency and duplicate delivery handling. Trace how start, signal, and cancellation commands avoid duplicate Temporal effects, and summarize findings without modifying files."
+    },
+    {
+      "case_id": "m29-w3-feat-01-github-intake-codex",
+      "task_class": "feature",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "github-issue-intake",
+      "pair_group": "m29-w3-feature-01-github-issue-intake",
+      "pair_order": 1,
+      "prompt": "Propose a feature for authenticated GitHub issue event intake that creates an explicit operator-started task. Summarize the smallest safe interface and idempotency considerations without modifying files."
+    },
+    {
+      "case_id": "m29-w3-feat-01-github-intake-antigravity",
+      "task_class": "feature",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "github-issue-intake",
+      "pair_group": "m29-w3-feature-01-github-issue-intake",
+      "pair_order": 2,
+      "prompt": "Propose a feature for authenticated GitHub issue event intake that creates an explicit operator-started task. Summarize the smallest safe interface and idempotency considerations without modifying files."
+    },
+    {
+      "case_id": "m29-w3-inv-02-cancellation-codex",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "cancellation-semantics",
+      "pair_group": "m29-w3-investigation-02-cancellation-semantics",
+      "pair_order": 1,
+      "prompt": "Investigate Temporal cancellation semantics for queued and running tasks. Trace terminal state handling, signal delivery, and reconciliation behavior, and summarize findings without modifying files."
+    },
+    {
+      "case_id": "m29-w3-inv-02-cancellation-antigravity",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "cancellation-semantics",
+      "pair_group": "m29-w3-investigation-02-cancellation-semantics",
+      "pair_order": 2,
+      "prompt": "Investigate Temporal cancellation semantics for queued and running tasks. Trace terminal state handling, signal delivery, and reconciliation behavior, and summarize findings without modifying files."
+    },
+    {
+      "case_id": "m29-w3-feat-02-identity-codex",
+      "task_class": "feature",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "external-identity-linking",
+      "pair_group": "m29-w3-feature-02-external-identity-linking",
+      "pair_order": 2,
+      "prompt": "Propose a feature for linking GitHub issue, branch, commit, and pull-request identities to one task timeline. Summarize the smallest safe persistence view and operator value without modifying files."
+    },
+    {
+      "case_id": "m29-w3-feat-02-identity-antigravity",
+      "task_class": "feature",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "external-identity-linking",
+      "pair_group": "m29-w3-feature-02-external-identity-linking",
+      "pair_order": 1,
+      "prompt": "Propose a feature for linking GitHub issue, branch, commit, and pull-request identities to one task timeline. Summarize the smallest safe persistence view and operator value without modifying files."
+    },
+    {
+      "case_id": "m29-w3-inv-03-interactions-antigravity",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "interaction-resume",
+      "pair_group": "m29-w3-investigation-03-interaction-resume",
+      "pair_order": 1,
+      "prompt": "Investigate operator interaction resume behavior. Trace pending response persistence and workflow continuation after an operator reply, and summarize findings without modifying files."
+    },
+    {
+      "case_id": "m29-w3-inv-03-interactions-codex",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "interaction-resume",
+      "pair_group": "m29-w3-investigation-03-interaction-resume",
+      "pair_order": 2,
+      "prompt": "Investigate operator interaction resume behavior. Trace pending response persistence and workflow continuation after an operator reply, and summarize findings without modifying files."
+    },
+    {
+      "case_id": "m29-w3-feat-03-idempotent-events-antigravity",
+      "task_class": "feature",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "github-event-idempotency",
+      "pair_group": "m29-w3-feature-03-github-event-idempotency",
+      "pair_order": 2,
+      "prompt": "Propose a feature for deduplicating reordered GitHub deliveries before they create tasks or timeline events. Summarize the smallest safe identity and replay behavior without modifying files."
+    },
+    {
+      "case_id": "m29-w3-feat-03-idempotent-events-codex",
+      "task_class": "feature",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "github-event-idempotency",
+      "pair_group": "m29-w3-feature-03-github-event-idempotency",
+      "pair_order": 1,
+      "prompt": "Propose a feature for deduplicating reordered GitHub deliveries before they create tasks or timeline events. Summarize the smallest safe identity and replay behavior without modifying files."
+    },
+    {
+      "case_id": "m29-w3-inv-04-reconciliation-codex",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "terminal-reconciliation",
+      "pair_group": "m29-w3-investigation-04-terminal-reconciliation",
+      "pair_order": 1,
+      "prompt": "Investigate terminal reconciliation and degraded-state detection. Trace how outbox, worker, interaction-wait, and terminal-divergence signals become task state and operator guidance, and summarize findings without modifying files."
+    },
+    {
+      "case_id": "m29-w3-inv-04-reconciliation-antigravity",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "terminal-reconciliation",
+      "pair_group": "m29-w3-investigation-04-terminal-reconciliation",
+      "pair_order": 2,
+      "prompt": "Investigate terminal reconciliation and degraded-state detection. Trace how outbox, worker, interaction-wait, and terminal-divergence signals become task state and operator guidance, and summarize findings without modifying files."
+    },
+    {
+      "case_id": "m29-w3-feat-04-pr-ci-sync-codex",
+      "task_class": "feature",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "pull-request-ci-sync",
+      "pair_group": "m29-w3-feature-04-pull-request-ci-sync",
+      "pair_order": 2,
+      "prompt": "Propose a feature for showing GitHub pull-request and check state in the operator inbox with direct links and safe next actions. Summarize the smallest safe read-side interface without modifying files."
+    },
+    {
+      "case_id": "m29-w3-feat-04-pr-ci-sync-antigravity",
+      "task_class": "feature",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "pull-request-ci-sync",
+      "pair_group": "m29-w3-feature-04-pull-request-ci-sync",
+      "pair_order": 1,
+      "prompt": "Propose a feature for showing GitHub pull-request and check state in the operator inbox with direct links and safe next actions. Summarize the smallest safe read-side interface without modifying files."
+    },
+    {
+      "case_id": "m29-w3-inv-05-diagnostics-antigravity",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "provider-diagnostics",
+      "pair_group": "m29-w3-investigation-05-provider-diagnostics",
+      "pair_order": 1,
+      "prompt": "Investigate provider-specific pre-dispatch diagnostics for credentials, CLI binaries, and container readiness. Trace fail-closed remediation paths and explain why worker freshness alone is insufficient, without modifying files."
+    },
+    {
+      "case_id": "m29-w3-inv-05-diagnostics-codex",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "provider-diagnostics",
+      "pair_group": "m29-w3-investigation-05-provider-diagnostics",
+      "pair_order": 2,
+      "prompt": "Investigate provider-specific pre-dispatch diagnostics for credentials, CLI binaries, and container readiness. Trace fail-closed remediation paths and explain why worker freshness alone is insufficient, without modifying files."
+    },
+    {
+      "case_id": "m29-w3-feat-05-safe-actions-antigravity",
+      "task_class": "feature",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "safe-task-actions",
+      "pair_group": "m29-w3-feature-05-safe-task-actions",
+      "pair_order": 2,
+      "prompt": "Propose a feature for explicit task actions such as start, replay, cancel, and approve. Summarize the smallest safe operator contract and activity record without modifying files."
+    },
+    {
+      "case_id": "m29-w3-feat-05-safe-actions-codex",
+      "task_class": "feature",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "safe-task-actions",
+      "pair_group": "m29-w3-feature-05-safe-task-actions",
+      "pair_order": 1,
+      "prompt": "Propose a feature for explicit task actions such as start, replay, cancel, and approve. Summarize the smallest safe operator contract and activity record without modifying files."
+    },
+    {
+      "case_id": "m29-w3-inv-06-secrets-codex",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "registered-secret-references",
+      "pair_group": "m29-w3-investigation-06-registered-secret-references",
+      "pair_order": 1,
+      "prompt": "Investigate registered credential reference enforcement across ingress, capability grants, and provider bootstrap. Trace how sensitive values are stripped and unresolved references fail closed, and summarize findings without modifying files."
+    },
+    {
+      "case_id": "m29-w3-inv-06-secrets-antigravity",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "registered-secret-references",
+      "pair_group": "m29-w3-investigation-06-registered-secret-references",
+      "pair_order": 2,
+      "prompt": "Investigate registered credential reference enforcement across ingress, capability grants, and provider bootstrap. Trace how sensitive values are stripped and unresolved references fail closed, and summarize findings without modifying files."
+    },
+    {
+      "case_id": "m29-w3-feat-06-alert-dedup-antigravity",
+      "task_class": "feature",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "alert-deduplication",
+      "pair_group": "m29-w3-feature-06-alert-deduplication",
+      "pair_order": 1,
+      "prompt": "Propose a feature for deduplicating, throttling, acknowledging, and resolving readiness alerts. Summarize the smallest safe reason-code contract without exposing private values or raw task text, without modifying files."
+    },
+    {
+      "case_id": "m29-w3-feat-06-alert-dedup-codex",
+      "task_class": "feature",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "alert-deduplication",
+      "pair_group": "m29-w3-feature-06-alert-deduplication",
+      "pair_order": 2,
+      "prompt": "Propose a feature for deduplicating, throttling, acknowledging, and resolving readiness alerts. Summarize the smallest safe reason-code contract without exposing private values or raw task text, without modifying files."
+    },
+    {
+      "case_id": "m29-w3-inv-07-context-codex",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "context-envelope-redaction",
+      "pair_group": "m29-w3-investigation-07-context-envelope-redaction",
+      "pair_order": 2,
+      "prompt": "Investigate versioned ContextEnvelope assembly and artifact persistence. Trace repository, session, memory, dependency, and redaction boundaries before worker dispatch, and summarize findings without modifying files."
+    },
+    {
+      "case_id": "m29-w3-inv-07-context-antigravity",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "context-envelope-redaction",
+      "pair_group": "m29-w3-investigation-07-context-envelope-redaction",
+      "pair_order": 1,
+      "prompt": "Investigate versioned ContextEnvelope assembly and artifact persistence. Trace repository, session, memory, dependency, and redaction boundaries before worker dispatch, and summarize findings without modifying files."
+    },
+    {
+      "case_id": "m29-w3-feat-07-scheduled-read-only-antigravity",
+      "task_class": "feature",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "scheduled-read-only-maintenance",
+      "pair_group": "m29-w3-feature-07-scheduled-read-only-maintenance",
+      "pair_order": 2,
+      "prompt": "Propose a feature for scheduled read-only checks such as health summaries and system checks. Summarize the smallest safe Temporal schedule and task lifecycle without modifying files."
+    },
+    {
+      "case_id": "m29-w3-feat-07-scheduled-read-only-codex",
+      "task_class": "feature",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "scheduled-read-only-maintenance",
+      "pair_group": "m29-w3-feature-07-scheduled-read-only-maintenance",
+      "pair_order": 1,
+      "prompt": "Propose a feature for scheduled read-only checks such as health summaries and system checks. Summarize the smallest safe Temporal schedule and task lifecycle without modifying files."
+    },
+    {
+      "case_id": "m29-w3-inv-08-cohorts-antigravity",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "execution-cohort-filtering",
+      "pair_group": "m29-w3-investigation-08-execution-cohort-filtering",
+      "pair_order": 2,
+      "prompt": "Investigate model-aware execution cohort filtering for provider reliability reports. Trace authoritative provider, model, and reasoning-effort identity checks and explain how unknown vintages are excluded, without modifying files."
+    },
+    {
+      "case_id": "m29-w3-inv-08-cohorts-codex",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "execution-cohort-filtering",
+      "pair_group": "m29-w3-investigation-08-execution-cohort-filtering",
+      "pair_order": 1,
+      "prompt": "Investigate model-aware execution cohort filtering for provider reliability reports. Trace authoritative provider, model, and reasoning-effort identity checks and explain how unknown vintages are excluded, without modifying files."
+    },
+    {
+      "case_id": "m29-w3-feat-08-schedule-history-codex",
+      "task_class": "feature",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "schedule-history",
+      "pair_group": "m29-w3-feature-08-schedule-history",
+      "pair_order": 2,
+      "prompt": "Propose a feature for showing schedule identity, run history, next execution, final status, and artifacts in the dashboard. Summarize the smallest safe read-side view without modifying files."
+    },
+    {
+      "case_id": "m29-w3-feat-08-schedule-history-antigravity",
+      "task_class": "feature",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "schedule-history",
+      "pair_group": "m29-w3-feature-08-schedule-history",
+      "pair_order": 1,
+      "prompt": "Propose a feature for showing schedule identity, run history, next execution, final status, and artifacts in the dashboard. Summarize the smallest safe read-side view without modifying files."
+    },
+    {
+      "case_id": "m29-w3-inv-09-robustness-codex",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "robustness-temporal-splits",
+      "pair_group": "m29-w3-investigation-09-robustness-temporal-splits",
+      "pair_order": 2,
+      "prompt": "Investigate M29 robustness analysis across 30, 60, and 90-day windows and non-overlapping temporal cohorts. Trace bootstrap eligibility and partial-status handling, and summarize findings without modifying files."
+    },
+    {
+      "case_id": "m29-w3-inv-09-robustness-antigravity",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "robustness-temporal-splits",
+      "pair_group": "m29-w3-investigation-09-robustness-temporal-splits",
+      "pair_order": 1,
+      "prompt": "Investigate M29 robustness analysis across 30, 60, and 90-day windows and non-overlapping temporal cohorts. Trace bootstrap eligibility and partial-status handling, and summarize findings without modifying files."
+    },
+    {
+      "case_id": "m29-w3-feat-09-temporal-queries-antigravity",
+      "task_class": "feature",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "temporal-query-status",
+      "pair_group": "m29-w3-feature-09-temporal-query-status",
+      "pair_order": 2,
+      "prompt": "Propose a feature for a Temporal Query that exposes current task status, plan, and pending operator decisions. Summarize the smallest safe read-only interface without modifying files."
+    },
+    {
+      "case_id": "m29-w3-feat-09-temporal-queries-codex",
+      "task_class": "feature",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "temporal-query-status",
+      "pair_group": "m29-w3-feature-09-temporal-query-status",
+      "pair_order": 1,
+      "prompt": "Propose a feature for a Temporal Query that exposes current task status, plan, and pending operator decisions. Summarize the smallest safe read-only interface without modifying files."
+    },
+    {
+      "case_id": "m29-w3-inv-10-readiness-antigravity",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "execution-readiness",
+      "pair_group": "m29-w3-investigation-10-execution-readiness",
+      "pair_order": 2,
+      "prompt": "Investigate dependency-aware execution readiness and its stable degraded reason codes. Trace Postgres, Temporal, dispatcher, worker, outbox, and reconciliation checks, and summarize findings without modifying files."
+    },
+    {
+      "case_id": "m29-w3-inv-10-readiness-codex",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "execution-readiness",
+      "pair_group": "m29-w3-investigation-10-execution-readiness",
+      "pair_order": 1,
+      "prompt": "Investigate dependency-aware execution readiness and its stable degraded reason codes. Trace Postgres, Temporal, dispatcher, worker, outbox, and reconciliation checks, and summarize findings without modifying files."
+    },
+    {
+      "case_id": "m29-w3-feat-10-temporal-updates-codex",
+      "task_class": "feature",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "temporal-updates",
+      "pair_group": "m29-w3-feature-10-temporal-updates",
+      "pair_order": 2,
+      "prompt": "Propose a feature for Temporal Updates covering clarify, approve or reject, capability grant, node retry, budget increase, and worker switch. Summarize the smallest safe authenticated contract without modifying files."
+    },
+    {
+      "case_id": "m29-w3-feat-10-temporal-updates-antigravity",
+      "task_class": "feature",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "temporal-updates",
+      "pair_group": "m29-w3-feature-10-temporal-updates",
+      "pair_order": 1,
+      "prompt": "Propose a feature for Temporal Updates covering clarify, approve or reject, capability grant, node retry, budget increase, and worker switch. Summarize the smallest safe authenticated contract without modifying files."
+    }
+  ]
+}

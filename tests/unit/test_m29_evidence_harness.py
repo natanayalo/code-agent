@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from evaluation.m29_evidence_models import (
     TOTAL_CASES,
+    WAVE3_CASES,
     M29BundleIdentity,
     M29EvidenceBundle,
     M29EvidenceCase,
@@ -26,10 +27,17 @@ from scripts.e2e.run_m29_evidence_wave import (
 )
 
 SUITE_PATH = Path("evaluation/m29_live_provider_suite.json")
+WAVE3_SUITE_PATH = Path("evaluation/m29_live_provider_suite_wave3.json")
 
 
 def _load_canonical_suite() -> M29EvidenceSuite:
     raw = json.loads(SUITE_PATH.read_text(encoding="utf-8"))
+    return M29EvidenceSuite.model_validate(raw)
+
+
+def _load_wave3_suite() -> M29EvidenceSuite:
+    """Load the frozen Wave 3 read-only evidence suite."""
+    raw = json.loads(WAVE3_SUITE_PATH.read_text(encoding="utf-8"))
     return M29EvidenceSuite.model_validate(raw)
 
 
@@ -76,6 +84,52 @@ def test_docs_pairs_counterbalance_ordering_bias() -> None:
         ), f"Group {i} and {i + 1} did not alternate"
 
 
+def test_wave3_has_two_balanced_read_only_cells() -> None:
+    suite = _load_wave3_suite()
+    assert len(suite.cases) == WAVE3_CASES
+
+    for task_class in ("investigation", "feature"):
+        cases = [case for case in suite.cases if case.task_class == task_class]
+        assert len(cases) == 20
+        assert {case.mutation_mode for case in cases} == {"read_only"}
+        for profile in (
+            "antigravity-native-executor-read-only",
+            "codex-native-executor-read-only",
+        ):
+            assert len([case for case in cases if case.worker_profile == profile]) == 10
+
+        groups: dict[str, list[M29EvidenceCase]] = {}
+        for case in cases:
+            groups.setdefault(case.pair_group or "", []).append(case)
+        assert len(groups) == 10
+        first_providers = []
+        for pair in groups.values():
+            ordered = sorted(pair, key=lambda case: case.pair_order or 0)
+            assert ordered[0].topic == ordered[1].topic
+            assert ordered[0].prompt == ordered[1].prompt
+            first_providers.append(ordered[0].worker_profile)
+        assert all(
+            first_providers[i] != first_providers[i + 1] for i in range(len(first_providers) - 1)
+        )
+
+
+def test_wave3_prompts_classify_as_safe_declared_task_types() -> None:
+    suite = _load_wave3_suite()
+    for case in suite.cases:
+        kind = _classify_task_kind(case.prompt)
+        spec = build_task_spec(
+            task_text=case.prompt,
+            repo_url=None,
+            target_branch=None,
+            task_kind=kind,
+            constraints={"read_only": True, "delivery_mode": "summary"},
+        )
+        assert spec.task_type == case.task_class
+        assert spec.risk_level == "low"
+        assert not spec.requires_clarification
+        assert not spec.requires_permission
+
+
 def test_all_28_prompts_classify_deterministically_without_gates() -> None:
     suite = _load_canonical_suite()
     for case in suite.cases:
@@ -115,6 +169,11 @@ def test_suite_validation_rejects_malformed_distributions() -> None:
     raw_missing["cases"].pop()
     with pytest.raises(ValidationError, match=f"exactly {TOTAL_CASES} cases"):
         M29EvidenceSuite.model_validate(raw_missing)
+
+    wave3_raw = json.loads(WAVE3_SUITE_PATH.read_text(encoding="utf-8"))
+    wave3_raw["cases"][1]["prompt"] = "A different paired prompt without modifying files."
+    with pytest.raises(ValidationError, match="must match topic and prompt"):
+        M29EvidenceSuite.model_validate(wave3_raw)
 
 
 def test_bundle_identity_and_outcomes() -> None:

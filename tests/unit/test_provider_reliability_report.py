@@ -143,6 +143,7 @@ def _make_dummy_cell(
     profile: str,
     wilson_lower: float,
     median_latency: float | None,
+    successful_median_latency: float | None = None,
     is_eligible: bool = True,
     sample_size: int | None = None,
     accepted: int | None = None,
@@ -178,6 +179,11 @@ def _make_dummy_cell(
         manual_overrides_count=0,
         manual_override_rate=0.0,
         terminal_latency=LatencyMetrics(median_seconds=median_latency),
+        successful_task_latency=LatencyMetrics(
+            median_seconds=(
+                median_latency if successful_median_latency is None else successful_median_latency
+            )
+        ),
         budget_field_coverage=BudgetCoverageMetrics(
             budget_reported_count=10, budget_coverage_rate=1.0
         ),
@@ -199,17 +205,33 @@ def test_recommendation_ranking_and_deterministic_ties() -> None:
     assert recs[0].rankings[1].profile == "codex-native-executor"
     assert recs[0].rankings[1].rank == 2
 
-    # Equal Wilson lower, tie-break by latency
+    # Equal Wilson lower, tie-break by successful-task latency
     c1_lat = _make_dummy_cell("codex-native-executor", wilson_lower=0.80, median_latency=40.0)
     c2_lat = _make_dummy_cell("antigravity-native-executor", wilson_lower=0.80, median_latency=80.0)
     recs_lat = generate_recommendations([c1_lat, c2_lat])
     assert recs_lat[0].recommended_profile == "codex-native-executor"
 
-    # Equal Wilson lower and latency, tie-break by alphabetical profile name
+    # Equal Wilson lower and successful-task latency, tie-break by alphabetical profile name
     c1_alpha = _make_dummy_cell("beta-native-executor", wilson_lower=0.80, median_latency=50.0)
     c2_alpha = _make_dummy_cell("alpha-native-executor", wilson_lower=0.80, median_latency=50.0)
     recs_alpha = generate_recommendations([c1_alpha, c2_alpha])
     assert recs_alpha[0].recommended_profile == "alpha-native-executor"
+
+    # Terminal latency is operational-only and must not win a tie over successful latency.
+    c1_terminal = _make_dummy_cell(
+        "codex-native-executor",
+        wilson_lower=0.80,
+        median_latency=500.0,
+        successful_median_latency=100.0,
+    )
+    c2_terminal = _make_dummy_cell(
+        "antigravity-native-executor",
+        wilson_lower=0.80,
+        median_latency=50.0,
+        successful_median_latency=200.0,
+    )
+    recs_terminal = generate_recommendations([c1_terminal, c2_terminal])
+    assert recs_terminal[0].recommended_profile == "codex-native-executor"
 
 
 def test_recommendation_fallback_when_insufficient_candidates() -> None:
@@ -237,6 +259,26 @@ def test_recommendation_fallback_when_insufficient_candidates() -> None:
     recs_0 = generate_recommendations([c_none])
     assert recs_0[0].recommended_profile is None
     assert "no_eligible_candidates" in str(recs_0[0].fallback_reason)
+
+    c_zero_codex = _make_dummy_cell(
+        "codex-native-executor",
+        wilson_lower=0.0,
+        median_latency=None,
+        sample_size=10,
+        accepted=0,
+    )
+    c_zero_antigravity = _make_dummy_cell(
+        "antigravity-native-executor",
+        wilson_lower=0.0,
+        median_latency=None,
+        sample_size=10,
+        accepted=0,
+    )
+    recs_zero_success = generate_recommendations([c_zero_codex, c_zero_antigravity])
+    assert recs_zero_success[0].recommended_profile is None
+    assert recs_zero_success[0].fallback_reason == (
+        "no_successful_candidates: all eligible candidates have zero accepted tasks"
+    )
 
 
 def test_sanitization_guardrail_rejects_private_fields() -> None:

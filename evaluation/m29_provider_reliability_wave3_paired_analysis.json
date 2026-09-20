@@ -1,0 +1,60 @@
+{
+  "analyses": [
+    {
+      "antigravity_only_completed_count": 0,
+      "bootstrap": {
+        "antigravity_faster_success_latency_probability": 1.0,
+        "antigravity_higher_acceptance_probability": 0.0,
+        "codex_higher_acceptance_probability": 0.0,
+        "identity_complete_pairs": 10,
+        "iterations": 10000,
+        "seed": 29,
+        "tied_acceptance_probability": 1.0
+      },
+      "both_completed_count": 5,
+      "codex_only_completed_count": 0,
+      "identity_complete_pair_count": 10,
+      "neither_completed_count": 5,
+      "pair_count": 10,
+      "successful_latency_differences": {
+        "max_seconds": -108.68,
+        "mean_seconds": -178.65,
+        "median_seconds": -150.79,
+        "min_seconds": -287.75,
+        "sample_size": 5
+      },
+      "task_class": "feature"
+    },
+    {
+      "antigravity_only_completed_count": 2,
+      "bootstrap": {
+        "antigravity_faster_success_latency_probability": 1.0,
+        "antigravity_higher_acceptance_probability": 0.6761,
+        "codex_higher_acceptance_probability": 0.0,
+        "identity_complete_pairs": 5,
+        "iterations": 10000,
+        "seed": 29,
+        "tied_acceptance_probability": 0.3239
+      },
+      "both_completed_count": 3,
+      "codex_only_completed_count": 0,
+      "identity_complete_pair_count": 5,
+      "neither_completed_count": 5,
+      "pair_count": 10,
+      "successful_latency_differences": {
+        "max_seconds": -527.27,
+        "mean_seconds": -723.06,
+        "median_seconds": -552.85,
+        "min_seconds": -1089.06,
+        "sample_size": 3
+      },
+      "task_class": "investigation"
+    }
+  ],
+  "as_of": "2026-09-19T21:32:22.562107Z",
+  "build_sha": "a32719d114fab93c8e63e81153229ac900748a5c",
+  "manifest_sha256": "3c4b31645c16d2ec72e9f45f318731165cb917e8b0229838cfd2f45df4691e70",
+  "schema_version": 1,
+  "suite_name": "m29-live-provider-evidence-wave3",
+  "suite_sha256": "5c9fc97979495bbfbe55115c16f22e419925f1079960e90e5a8db2b8b94e99f6"
+}

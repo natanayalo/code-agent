@@ -1,188 +1,131 @@
 # M29 Provider Reliability Threshold Analysis
 
-This document provides the empirical comparison, execution cohort analysis, and sensitivity evaluation across minimum-sample floors `5`, `10`, and `20` over a 90-day window (`2026-06-20` to `2026-09-18`), following the completion of the 20-task M29 Wave 2 live evidence collection and model-aware execution cohort isolation.
+This is the refreshed, offline advisory analysis for M29 Wave 3. It uses the
+canonical current-execution-cohort report, operational diagnostic report, and
+robustness report generated at the one frozen terminal timestamp
+`2026-09-19T21:32:22.562107Z`. Production routing and
+`evaluation/routing_metrics.json` are unchanged.
 
-This analysis is strictly offline and advisory. **Production routing remains strictly unchanged (heuristic/static fallback); no live routing or `evaluation/routing_metrics.json` are modified.**
+## 1. Evidence provenance and integrity
 
----
+Wave 3 is pinned to:
 
-## 1. Executive Summary & Policy Decisions
+- suite: `evaluation/m29_live_provider_suite_wave3.json`
+- harness build: `a32719d114fab93c8e63e81153229ac900748a5c`
+- target repository revision: `f0b4cb8139d1497857d1b67e106a6170cbbed05c`
+- suite SHA-256: `5c9fc97979495bbfbe55115c16f22e419925f1079960e90e5a8db2b8b94e99f6`
+- sanitized case manifest SHA-256: `d49ffb5e278621744f8bc1c6880054df9bce02b2a569df67446d81412cee4b0c`
+- advisory report SHA-256: `9ec0c05ae293719489f82a6403325766832f172b7983d647d28d241d382ae9f1`
+- operational report SHA-256: `bf77df26c13de971a2aa6caaedd66aa24002b147096d9a34903fe591594949d9`
+- robustness report SHA-256: `931be8c1ae3a6b48fa80134f43d6275bf4b4eeddde04b5acab21d9385b5ad383`
+- paired supplement SHA-256: `08faffb4d9b28e1dd39810f386ca6e296aff884779a1cff838485f87f6111c4c`
+- ignored/private bundle: `artifacts/m29_evidence_bundle_wave3/bundle.json`
 
-Following the discovery in Wave 1 that OpenAI retired `gpt-5.4-mini` for ChatGPT-authenticated Codex users on August 31, 2026, the evaluation architecture was reshaped from naive profile grouping to authoritative, model-aware execution cohorts (`provider`, `model`, `reasoning_effort`) extracted directly from worker run budget usage metadata (`budget_usage["native_agent"]["model_execution"]`).
+The frozen suite contains 40 adjacent, counterbalanced provider pairs: 20
+investigation cases and 20 feature cases, with 10 cases per provider/cell.
+Every case reached an immutable terminal outcome (18 completed, 22 failed).
+The bundle records 20 Codex and 20 Antigravity cases, all in Temporal/native
+execution, with zero changed files, zero unresolved interactions, and zero gate
+failures. Completed cases were never rerun; only in-flight cases were resumed.
 
-Two distinct versioned report views (schema v2) are published:
-1. **Canonical Current-Cohort Advisory Report** (`evaluation/m29_provider_reliability_report.{json,md}`):
-   - **Scope**: `current_execution_cohort`.
-   - Strictly filters evidence to the verified, currently active provider configurations:
-     - Codex: `gpt-5.6-luna` (reasoning effort: `high`)
-     - Antigravity: `gemini-3.8-flash` (reasoning effort: `medium`)
-   - Zero heuristic inference; tasks with missing, mixed, or mismatched models are excluded from aggregation.
-   - **Floor Qualification**: Wave 2 powers `docs` (`read_only`) to achieve full dual-candidate qualification at the canonical sample floor ($N=10$ vs $10$):
-     - **Rank 1**: `codex-native-executor-read-only` ($10/10 = 100\%$ accepted, Wilson 95% lower bound: $0.7225$, median latency: $194.6\text{s}$).
-     - **Rank 2**: `antigravity-native-executor-read-only` ($9/10 = 90\%$ accepted, Wilson 95% lower bound: $0.5958$, median latency: $150.7\text{s}$).
-     - **Advisory Recommendation**: `codex-native-executor-read-only`.
-   - The other three canonical target cells (`feature/mutation`, `feature/read_only`, `investigation/read_only`) have zero tasks in the current execution cohort and report `insufficient_sample_size: 0 tasks (minimum 10)` with clean fallback reasons.
-   - **Robustness Status**: Truthfully reported as `partial`. While the $N=10$ sample floor is met and 10,000 bootstrap iterations confirm a 66.1% win probability for Codex vs 33.9% for Antigravity, a single execution cluster cannot establish temporal split consistency or window sensitivity.
-2. **Operational Diagnostic Report** (`evaluation/m29_provider_reliability_operational_report.{json,md}`):
-   - **Scope**: `operational`.
-   - Admits all valid historical tasks regardless of model vintage to provide complete 90-day system accounting, diagnostic failure taxonomy, Wave 1 deprecation documentation, and verifier delegation breakdown.
-   - **Status**: Strictly `diagnostic_only`. Active provider recommendations and candidate rankings are suppressed (`recommended_profile: None`, `is_eligible: False`, `rank: None`) to prevent misleading head-to-head comparisons across heterogeneous model vintages.
+The failure taxonomy in the bundle is 10 `infra_verifier_unavailable`, 5
+`tool_runtime`, 2 `unknown`, and 5 `worker_failure`. These failures remain
+evidence and are not silently converted to passes.
 
----
+## 2. Report accounting
 
-## 2. Evidence Accounting & Provenance Audit
+The canonical extractor is deliberately fail-closed: it accepts only tasks with
+authoritative `budget_usage["native_agent"]["model_execution"]` identity
+matching the pinned provider, model, and reasoning effort. It does not infer
+identity from profile names or task text.
 
-All evaluations were extracted with strict read-only transactions (`SET TRANSACTION READ ONLY`) against the Compose PostgreSQL database.
+| Metric | Canonical current cohort | Operational diagnostic |
+|---|---:|---:|
+| Tasks scanned | 434 | 434 |
+| Included tasks | 55 | 328 |
+| Excluded tasks | 379 | 106 |
+| `unknown_execution_identity` | 273 | 0 |
+| `non_temporal_runtime` | 81 | 81 |
+| `malformed_inconsistent_timeline` | 10 | 10 |
+| `cancelled` | 9 | 9 |
+| `evaluation_smoke` | 4 | 4 |
+| `non_native_agent_mode` | 2 | 2 |
 
-### Provenance Timestamps & Identities
-- **Observation Reference (`as_of`)**: `2026-09-18T21:08:09Z`
-- **Evidence Window**: `2026-06-20T21:08:09Z` to `2026-09-18T21:08:09Z` (90 days)
-- **Wave 1 Diagnostic Baseline**: Preserved immutably at `artifacts/m29_evidence_bundle_wave1_diagnostic/bundle.json`.
-- **Wave 2 Live Evidence Bundle**: Preserved at `artifacts/m29_evidence_bundle_wave2/bundle.json`.
-- **Harness Build SHA**: `a97e96b993ade6156f29fa439982babf17549867`
-- **Target Repository Revision**: `9eb38ed72b38f1aef41ac63ecc9c401da3acef2b` (`origin/master`)
+The operational view is `diagnostic_only`; it intentionally does not rank
+heterogeneous model vintages.
 
-### Accounting Reconciliation
+For the Wave 3 cases specifically, all five identity-incomplete investigation
+outcomes were failures: one intended Codex case and four intended Antigravity
+cases. The public manifest records those terminal failures and their
+`unknown_execution_identity` exclusions without inferring a provider. This is
+why investigation/read-only remains insufficient-data rather than a provider
+quality claim.
 
-| Metric | Canonical Current-Cohort View | Operational Diagnostic View |
-|---|---|---|
-| **Total Tasks Scanned** | 392 | 392 |
-| **Included in Evidence** | 20 | 288 |
-| **Excluded Tasks** | 372 | 104 |
-| **Accounting Invariant** | $20 + 372 = 392$ | $288 + 104 = 392$ |
+## 3. Canonical cell results
 
-### Breakdown of Exclusions
+The canonical policy uses a 90-day lookback, a 10-sample floor per compatible
+candidate, and 95% Wilson lower bounds.
 
-| Reason | Canonical Count | Operational Count | Description |
-|---|---|---|---|
-| `unknown_execution_identity` | 268 | 0 | Tasks from legacy runs lacking authoritative `model_execution` budget metadata. |
-| `non_temporal_runtime` | 81 | 81 | Pre-Temporal legacy tasks. |
-| `malformed_inconsistent_timeline` | 10 | 10 | Tasks failing internal terminal timeline sequence validation. |
-| `cancelled` | 9 | 9 | Tasks cancelled by operator prior to terminal outcome. |
-| `evaluation_smoke` | 2 | 2 | Preflight smoke tasks tagged with `exclude_from_provider_reliability: True`. |
-| `non_native_agent_mode` | 2 | 2 | Tasks executed in non-native agent modes. |
+| Task class | Mode | Codex | Antigravity | Decision |
+|---|---|---:|---:|---|
+| `docs` | `read_only` | N=10, 10 accepted | N=10, 9 accepted | Recommend Codex |
+| `feature` | `mutation` | N=0 | N=0 | Insufficient data |
+| `feature` | `read_only` | N=10, 5 accepted, success median 359.37s | N=10, 5 accepted, success median 202.93s | Recommend Antigravity |
+| `investigation` | `read_only` | N=9, 3 accepted | N=6, 5 accepted | Insufficient data |
 
----
+`feature/read_only` is qualified at the canonical sample floor. Both providers
+have Wilson lower bound `0.2366`; Antigravity ranks first on the lower median
+successful-task latency and is the advisory recommendation. Its median failure
+latency is `25.16s` versus Codex `349.07s`, while median terminal latency is
+`76.65s` versus `354.22s`. Reporting all three distributions prevents the
+recommendation from rewarding fast failures as if they were successful work.
+The 10,000-iteration, seed-29 unpaired bootstrap assigns Antigravity a `58.61%`
+first-rank probability under this successful-latency tie-break.
 
-## 3. Catalog Profile Coverage
+Acceptance is terminal task completion, not an assertion that every optional
+stage passed. Persisted production-shaped `verification_completed` events with
+status `warning` are applicable but not passed; a completed task carrying that
+warning remains accepted. Therefore the feature/read-only cells' verification
+pass rate of `0.0` is a strict stage metric and not an independently verified
+quality rate. The recommendation is a terminal-completion/latency advisory,
+not a claim of independently verified feature quality.
 
-### Canonical Current-Cohort Coverage (`schema_version: 2`)
+## 4. Paired analysis and robustness interpretation
 
-| Profile | Mode | Expected Cohort | Evidence Present | Total Samples | Eligible (Floor 10) |
-|---|---|---|---|---|---|
-| `codex-native-executor` | `mutation` | `codex:gpt-5.6-luna/high` | no | 0 | no |
-| `codex-native-executor-read-only` | `read_only` | `codex:gpt-5.6-luna/high` | yes | 10 | **yes** |
-| `antigravity-native-executor` | `mutation` | `antigravity:gemini-3.8-flash/medium` | no | 0 | no |
-| `antigravity-native-executor-read-only` | `read_only` | `antigravity:gemini-3.8-flash/medium` | yes | 10 | **yes** |
+The committed paired supplement (`evaluation/m29_provider_reliability_wave3_paired_analysis.{json,md}`)
+resamples complete topic pairs with seed 29 and 10,000 iterations. It is a
+descriptive supplement to the existing unpaired bootstrap, not a forecast or
+routing threshold.
 
-### Operational View Coverage (Historical Across All Models)
+| Task class | Pairs | Both completed | Codex only | Antigravity only | Neither | Identity-complete pairs | Successful AG-Codex median delta |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `feature` | 10 | 5 | 0 | 0 | 5 | 10 | `-150.79s` |
+| `investigation` | 10 | 3 | 0 | 2 | 5 | 5 | `-552.85s` |
 
-| Profile | Mode | Evidence Present | Total Samples | Eligible (Floor 10) | Eligible (Floor 20) |
-|---|---|---|---|---|---|
-| `codex-native-executor` | `mutation` | yes | 38 | **yes** | **yes** |
-| `codex-native-executor-read-only` | `read_only` | yes | 87 | **yes** | **yes** |
-| `antigravity-native-executor` | `mutation` | yes | 83 | **yes** | **yes** |
-| `antigravity-native-executor-read-only` | `read_only` | yes | 80 | **yes** | **yes** |
+The feature pair outcomes are symmetric on acceptance (five both completed and
+five neither), while Antigravity is faster in all five identity-complete
+successful pairs. Investigation pairing remains descriptive only because five
+pairs are not identity-complete and the cell is below the sample floor.
 
----
+The robustness report is `partial`. The current cohort has no included tasks in
+the historical 45-day split, so longitudinal consistency and temporal window
+sensitivity are not established. `feature/mutation` and
+`investigation/read_only` remain `insufficient_data` in the robustness report.
 
-## 4. Cross-Threshold Comparison by Task Class
+## 5. Decision record and remaining work
 
-### 4.1. `docs` (read_only) — Canonical Current Cohort Focus
-
-- **Floor 5 (Exploratory)**:
-  - Rank 1: `codex-native-executor-read-only` ($N=10$, Acc=10, Wilson Lower=0.7225, Med Latency=194.6s)
-  - Rank 2: `antigravity-native-executor-read-only` ($N=10$, Acc=9, Wilson Lower=0.5958, Med Latency=150.7s)
-  - Recommendation: `codex-native-executor-read-only`
-- **Floor 10 (Canonical Floor — Satisfied)**:
-  - Rank 1: `codex-native-executor-read-only` ($N=10$, Acc=10, Wilson Lower=0.7225)
-  - Rank 2: `antigravity-native-executor-read-only` ($N=10$, Acc=9, Wilson Lower=0.5958)
-  - Recommendation: `codex-native-executor-read-only`
-- **Floor 20 (Conservative Sensitivity)**:
-  - Both candidates have $N=10 < 20$.
-  - Fallback: `no_eligible_candidates: all candidates lack sufficient samples`
-  - Recommendation: _None_
-- **Assessment**:
-  Wave 2 successfully delivers 20 live docs tasks (10 paired topics across Codex and Antigravity) executing under verified current-cohort credentials. Codex achieved 10/10 completed runs with zero errors. Antigravity achieved 9/10 completed runs (1 failure due to independent verifier delegation). Codex ranks #1 on Wilson lower bound ($0.7225$ vs $0.5958$) and wins in 66.1% of bootstrap iterations.
-
-### 4.2. Other Task Classes in Canonical Cohort View
-
-The canonical M29 target groups encompass four specific cells:
-- `docs` (read_only): Qualified ($N=10$ vs $10$) $\rightarrow$ Recommended: `codex-native-executor-read-only`.
-- `feature` (mutation): $N=0$ in current cohort $\rightarrow$ fallback: `no_eligible_candidates`.
-- `feature` (read_only): $N=0$ in current cohort $\rightarrow$ fallback: `no_eligible_candidates`.
-- `investigation` (read_only): $N=0$ in current cohort $\rightarrow$ fallback: `no_eligible_candidates`.
-
-### 4.3. Operational 90-Day Diagnostic Perspective
-
-In the operational diagnostic view (aggregating across all model vintages over the 90-day window):
-- **Report Status**: `diagnostic_only`.
-- Active recommendations are suppressed (`recommended_profile: None`, `rank: None`, `is_eligible: False`) with explicit fallback reason `diagnostic_scope: operational scope aggregates heterogeneous model vintages; recommendations are valid only in current_execution_cohort`.
-- Historical sample sizes and raw pass rates remain fully inspectable for systems diagnostics:
-  - `feature` (mutation): $N=74$ Antigravity ($67.7\%$ lower bound), $N=25$ Codex ($44.5\%$ lower bound).
-  - `feature` (read_only): $N=34$ Codex ($53.8\%$ lower bound), $N=30$ Antigravity ($45.5\%$ lower bound).
-  - `investigation` (read_only): $N=15$ Codex ($79.6\%$ lower bound), $N=12$ Antigravity ($46.8\%$ lower bound).
-
----
-
-## 5. Failure Mode & Provider Diagnostics
-
-### Wave 1 vs Wave 2 Diagnostic Comparison
-
-1. **Wave 1 Deprecation Event (September 17, 2026)**:
-   - All 8 Codex read-only tasks failed with `worker_failure` (exit code 400) due to OpenAI's retirement of `gpt-5.4-mini` for ChatGPT accounts on August 31, 2026.
-   - 2 Antigravity docs tasks failed with `infra_verifier_unavailable` when independent verification delegated to the unavailable Codex mini model.
-   - Preserved as diagnostic baseline at `artifacts/m29_evidence_bundle_wave1_diagnostic/`.
-2. **Wave 2 Reshaped Execution (September 18–19, 2026)**:
-   - Updated Codex configuration to `gpt-5.6-luna` (high reasoning effort) and Antigravity to `gemini-3.8-flash` (medium reasoning effort).
-   - Preflight smoke verification validated live container model resolution and proved early exclusion of smoke tasks as `evaluation_smoke`.
-   - Codex read-only executed 10/10 tasks cleanly ($100\%$ acceptance, zero errors, median duration $194.6\text{s}$).
-   - Antigravity read-only executed 9/10 tasks cleanly ($90\%$ acceptance, median duration $150.7\text{s}$). The single failure on `m29-w2-docs-05` cleanly resolved to `infra_verifier_unavailable` via timeline failure event precedence over worker run verifier outcome.
-
----
-
-## 6. Conclusions & Change Controls
-
-1. **Statistically Truthful Delivery**:
-   - Model-aware execution cohort filtering guarantees that evidence cells represent uniform, verified runtime configurations.
-   - Upstream cohort filtering guarantees that two models for the same profile cannot both enter the candidate pool and artificially satisfy the $\ge 2$ candidates rule.
-   - Wave 2 qualifies `docs/read_only` at the canonical sample floor ($N=10$), while robustness status is explicitly reported as `partial` to acknowledge that temporal consistency cannot be claimed from a single timestamp cluster.
-2. **Production Routing Integrity**:
-   - **Production routing remains strictly unchanged.** Production routing continues to use the existing static/checked-in metrics. Any runtime routing update is reserved for future explicit policy slices with full change controls.
-
----
-
-## 7. Post-Wave Decision Record
-
-Following review of the Wave 2 evidence, the following definitive post-wave decisions are formally recorded:
-
-1. **Advisory Recommendation for `docs/read_only`**:
-   - Wave 2 satisfies the canonical dual-candidate sample floor ($N=10$ vs $10$) under verified current execution cohorts (`codex:gpt-5.6-luna/high` vs `antigravity:gemini-3.8-flash/medium`).
-   - The canonical advisory report (`evaluation/m29_provider_reliability_report.json`) recommends `codex-native-executor-read-only` based on $10/10$ accepted tasks ($100\%$ acceptance rate, Wilson 95% CI $[0.7225, 1.0]$, median latency $194.64\text{s}$, $2$ verifier repairs) over `antigravity-native-executor-read-only` ($9/10$ accepted tasks, Wilson 95% CI $[0.5958, 0.9821]$, median latency $150.67\text{s}$, $1$ typed failure: `infra_verifier_unavailable`).
-   - In 10,000 bootstrap iterations (seed 29), Codex achieved a $66.06\%$ win probability ($6,606$ wins) versus Antigravity's $33.94\%$ ($3,394$ wins).
-   - This recommendation is strictly advisory.
-
-2. **No Production Routing Policy Changes**:
-   - **Production routing policy remains strictly unchanged.** Production routing continues to use static heuristic / checked-in configuration (`evaluation/routing_metrics.json` is untouched).
-   - Neither automatic nor manual runtime routing changes will be made from this single evidence wave.
-   - Any future live routing update requires multi-cohort stability, broad task class representation, and a dedicated, reversible policy PR with explicit change controls.
-
-3. **No M27 Resumption**:
-   - Milestone M27 (reliability-based autonomy) remains deferred.
-   - A $66.06\%$ bootstrap win probability from a single clustered 20-task execution wave and the complete lack of historical current-cohort evidence ($0$ tasks in the historical 45-day split; robustness status `partial`) are insufficient to satisfy M27 entry conditions.
-   - Promoting actions from blocking approval to `proceed_with_flag` or `notify_only` requires longitudinal, multi-cohort proof of stability that a single 20-task cluster cannot provide.
-
-4. **Target Cells Lacking Evidence Remain Insufficient-Data**:
-   - The other three canonical target cells have zero samples under verified current-cohort identities:
-     - `feature` (`mutation`): $N=0$ (`insufficient_sample_size: 0 tasks (minimum 10)`)
-     - `feature` (`read_only`): $N=0$ (`insufficient_sample_size: 0 tasks (minimum 10)`)
-     - `investigation` (`read_only`): $N=0$ (`insufficient_sample_size: 0 tasks (minimum 10)`)
-   - Each cell reports fallback reason `no_eligible_candidates: all candidates lack sufficient samples`, with candidate rankings and recommended profiles suppressed (`null`). They remain explicitly labeled `insufficient-data`.
-
-5. **Milestone M29 Status & Ordered Next Slices**:
-   - Milestone M29 remains active; completing the post-wave review does not declare M29 complete.
-   - The remaining M29 work is ordered as follows:
-     1. Remove legacy raw-secret ingress and enforce opaque registered references (`RegisteredSecretDefinition` fail-closed gating).
-     2. Add provider-specific pre-dispatch diagnostics (validating credentials, CLI binaries, and container runtime readiness prior to dispatch).
-     3. Gather longitudinal and missing-cell current-cohort evidence (expanding coverage to `feature` and `investigation` cells across separated temporal cohorts).
-     4. Evaluate hierarchical budget controls separately (per-task, per-node, repair loops, wall time, and concurrency limits).
+1. Qualify `docs/read_only` with the existing Codex advisory recommendation.
+2. Qualify `feature/read_only` with the Antigravity terminal-completion/latency
+   advisory, with the verification-stage limitation stated above.
+3. Keep `investigation/read_only` insufficient-data until an identity-complete
+   wave supplies 10 samples per provider.
+4. Persist configured and actual execution identity before dispatch in a future
+   worker/runtime follow-up so early failures are attributable without
+   historical backfill. This PR intentionally does not change the production
+   worker/database contract.
+5. Keep `feature/mutation` pending; it requires a separate mutable-evaluation
+   contract with explicit delivery and cleanup safeguards.
+6. Keep longitudinal consistency pending; the historical split is empty.
+7. Keep M27 deferred and production routing static. Any future routing change
+   requires a separate reviewed, reversible policy change with held-out
+   validation.

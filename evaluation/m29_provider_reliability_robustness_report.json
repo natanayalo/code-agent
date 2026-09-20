@@ -49,11 +49,43 @@
       "task_class": "feature"
     },
     {
-      "candidates": [],
-      "eligible_profiles": [],
-      "fallback_reason": "insufficient_eligible_candidates: 0 eligible profile(s) meet the sample floor (10); at least 2 required",
+      "candidates": [
+        {
+          "profile": "antigravity-native-executor-read-only",
+          "rank_counts": {
+            "1": 5861,
+            "2": 4139
+          },
+          "rank_probabilities": {
+            "1": 0.5861,
+            "2": 0.4139
+          },
+          "sample_size": 10,
+          "win_count": 5861,
+          "win_probability": 0.5861
+        },
+        {
+          "profile": "codex-native-executor-read-only",
+          "rank_counts": {
+            "1": 4139,
+            "2": 5861
+          },
+          "rank_probabilities": {
+            "1": 0.4139,
+            "2": 0.5861
+          },
+          "sample_size": 10,
+          "win_count": 4139,
+          "win_probability": 0.4139
+        }
+      ],
+      "eligible_profiles": [
+        "antigravity-native-executor-read-only",
+        "codex-native-executor-read-only"
+      ],
+      "fallback_reason": null,
       "mutation_mode": "read_only",
-      "status": "insufficient_data",
+      "status": "complete",
       "task_class": "feature"
     },
     {
@@ -68,19 +100,19 @@
   "exclusions": {
     "by_reason": {
       "cancelled": 9,
-      "evaluation_smoke": 2,
+      "evaluation_smoke": 4,
       "malformed_inconsistent_timeline": 10,
       "non_native_agent_mode": 2,
       "non_temporal_runtime": 81,
-      "unknown_execution_identity": 268
+      "unknown_execution_identity": 273
     },
-    "excluded_tasks_count": 372,
-    "included_tasks_count": 20,
-    "total_tasks_scanned": 392
+    "excluded_tasks_count": 379,
+    "included_tasks_count": 55,
+    "total_tasks_scanned": 434
   },
-  "generated_at": "2026-09-18T21:39:01.826911Z",
+  "generated_at": "2026-09-19T23:37:50.307178Z",
   "policy": {
-    "as_of": "2026-09-18T21:08:09Z",
+    "as_of": "2026-09-19T21:32:22.562107Z",
     "bootstrap_iterations": 10000,
     "bootstrap_seed": 29,
     "confidence_level": 0.95,
@@ -135,8 +167,8 @@
     "min_samples": 10,
     "schema_version": 2,
     "temporal_split_days": 45,
-    "window_end_at": "2026-09-18T21:08:09Z",
-    "window_start_at": "2026-06-20T21:08:09Z",
+    "window_end_at": "2026-09-19T21:32:22.562107Z",
+    "window_start_at": "2026-06-21T21:32:22.562107Z",
     "windows_days": [
       30,
       60,
@@ -158,6 +190,7 @@
               "accepted_count": 0,
               "accepted_rate_wilson_lower": 0.0,
               "evidence_age_days": null,
+              "failure_median_latency_seconds": null,
               "insufficiency_reasons": [
                 "insufficient_sample_size: 0 tasks (minimum 10)"
               ],
@@ -167,12 +200,14 @@
               "oldest_evidence_timestamp": null,
               "profile": "antigravity-native-executor-read-only",
               "rank": null,
-              "sample_size": 0
+              "sample_size": 0,
+              "successful_median_latency_seconds": null
             },
             {
               "accepted_count": 0,
               "accepted_rate_wilson_lower": 0.0,
               "evidence_age_days": null,
+              "failure_median_latency_seconds": null,
               "insufficiency_reasons": [
                 "insufficient_sample_size: 0 tasks (minimum 10)"
               ],
@@ -182,7 +217,8 @@
               "oldest_evidence_timestamp": null,
               "profile": "codex-native-executor-read-only",
               "rank": null,
-              "sample_size": 0
+              "sample_size": 0,
+              "successful_median_latency_seconds": null
             }
           ],
           "recommended_profile": null,
@@ -196,6 +232,7 @@
               "accepted_count": 0,
               "accepted_rate_wilson_lower": 0.0,
               "evidence_age_days": null,
+              "failure_median_latency_seconds": null,
               "insufficiency_reasons": [
                 "insufficient_sample_size: 0 tasks (minimum 10)"
               ],
@@ -205,12 +242,14 @@
               "oldest_evidence_timestamp": null,
               "profile": "antigravity-native-executor",
               "rank": null,
-              "sample_size": 0
+              "sample_size": 0,
+              "successful_median_latency_seconds": null
             },
             {
               "accepted_count": 0,
               "accepted_rate_wilson_lower": 0.0,
               "evidence_age_days": null,
+              "failure_median_latency_seconds": null,
               "insufficiency_reasons": [
                 "insufficient_sample_size: 0 tasks (minimum 10)"
               ],
@@ -220,7 +259,8 @@
               "oldest_evidence_timestamp": null,
               "profile": "codex-native-executor",
               "rank": null,
-              "sample_size": 0
+              "sample_size": 0,
+              "successful_median_latency_seconds": null
             }
           ],
           "recommended_profile": null,
@@ -234,6 +274,7 @@
               "accepted_count": 0,
               "accepted_rate_wilson_lower": 0.0,
               "evidence_age_days": null,
+              "failure_median_latency_seconds": null,
               "insufficiency_reasons": [
                 "insufficient_sample_size: 0 tasks (minimum 10)"
               ],
@@ -243,12 +284,14 @@
               "oldest_evidence_timestamp": null,
               "profile": "antigravity-native-executor-read-only",
               "rank": null,
-              "sample_size": 0
+              "sample_size": 0,
+              "successful_median_latency_seconds": null
             },
             {
               "accepted_count": 0,
               "accepted_rate_wilson_lower": 0.0,
               "evidence_age_days": null,
+              "failure_median_latency_seconds": null,
               "insufficiency_reasons": [
                 "insufficient_sample_size: 0 tasks (minimum 10)"
               ],
@@ -258,7 +301,8 @@
               "oldest_evidence_timestamp": null,
               "profile": "codex-native-executor-read-only",
               "rank": null,
-              "sample_size": 0
+              "sample_size": 0,
+              "successful_median_latency_seconds": null
             }
           ],
           "recommended_profile": null,
@@ -272,6 +316,7 @@
               "accepted_count": 0,
               "accepted_rate_wilson_lower": 0.0,
               "evidence_age_days": null,
+              "failure_median_latency_seconds": null,
               "insufficiency_reasons": [
                 "insufficient_sample_size: 0 tasks (minimum 10)"
               ],
@@ -281,12 +326,14 @@
               "oldest_evidence_timestamp": null,
               "profile": "antigravity-native-executor-read-only",
               "rank": null,
-              "sample_size": 0
+              "sample_size": 0,
+              "successful_median_latency_seconds": null
             },
             {
               "accepted_count": 0,
               "accepted_rate_wilson_lower": 0.0,
               "evidence_age_days": null,
+              "failure_median_latency_seconds": null,
               "insufficiency_reasons": [
                 "insufficient_sample_size: 0 tasks (minimum 10)"
               ],
@@ -296,19 +343,20 @@
               "oldest_evidence_timestamp": null,
               "profile": "codex-native-executor-read-only",
               "rank": null,
-              "sample_size": 0
+              "sample_size": 0,
+              "successful_median_latency_seconds": null
             }
           ],
           "recommended_profile": null,
           "task_class": "investigation"
         }
       ],
-      "window_end_at": "2026-08-04T21:08:09Z",
-      "window_start_at": "2026-06-20T21:08:09Z"
+      "window_end_at": "2026-08-05T21:32:22.562107Z",
+      "window_start_at": "2026-06-21T21:32:22.562107Z"
     },
     {
       "cohort_name": "recent",
-      "included_tasks_count": 20,
+      "included_tasks_count": 55,
       "recommendations": [
         {
           "fallback_reason": null,
@@ -317,7 +365,8 @@
             {
               "accepted_count": 10,
               "accepted_rate_wilson_lower": 0.7225,
-              "evidence_age_days": 0.0,
+              "evidence_age_days": 1.0,
+              "failure_median_latency_seconds": null,
               "insufficiency_reasons": [],
               "is_eligible": true,
               "median_latency_seconds": 194.64,
@@ -325,12 +374,14 @@
               "oldest_evidence_timestamp": "2026-09-18T20:02:50.329182Z",
               "profile": "codex-native-executor-read-only",
               "rank": 1,
-              "sample_size": 10
+              "sample_size": 10,
+              "successful_median_latency_seconds": 194.64
             },
             {
               "accepted_count": 9,
               "accepted_rate_wilson_lower": 0.5958,
-              "evidence_age_days": 0.0,
+              "evidence_age_days": 1.0,
+              "failure_median_latency_seconds": 326.24,
               "insufficiency_reasons": [],
               "is_eligible": true,
               "median_latency_seconds": 150.67,
@@ -338,7 +389,8 @@
               "oldest_evidence_timestamp": "2026-09-18T19:52:16.291656Z",
               "profile": "antigravity-native-executor-read-only",
               "rank": 2,
-              "sample_size": 10
+              "sample_size": 10,
+              "successful_median_latency_seconds": 146.84
             }
           ],
           "recommended_profile": "codex-native-executor-read-only",
@@ -352,6 +404,7 @@
               "accepted_count": 0,
               "accepted_rate_wilson_lower": 0.0,
               "evidence_age_days": null,
+              "failure_median_latency_seconds": null,
               "insufficiency_reasons": [
                 "insufficient_sample_size: 0 tasks (minimum 10)"
               ],
@@ -361,12 +414,14 @@
               "oldest_evidence_timestamp": null,
               "profile": "antigravity-native-executor",
               "rank": null,
-              "sample_size": 0
+              "sample_size": 0,
+              "successful_median_latency_seconds": null
             },
             {
               "accepted_count": 0,
               "accepted_rate_wilson_lower": 0.0,
               "evidence_age_days": null,
+              "failure_median_latency_seconds": null,
               "insufficiency_reasons": [
                 "insufficient_sample_size: 0 tasks (minimum 10)"
               ],
@@ -376,10 +431,49 @@
               "oldest_evidence_timestamp": null,
               "profile": "codex-native-executor",
               "rank": null,
-              "sample_size": 0
+              "sample_size": 0,
+              "successful_median_latency_seconds": null
             }
           ],
           "recommended_profile": null,
+          "task_class": "feature"
+        },
+        {
+          "fallback_reason": null,
+          "mutation_mode": "read_only",
+          "rankings": [
+            {
+              "accepted_count": 5,
+              "accepted_rate_wilson_lower": 0.2366,
+              "evidence_age_days": 0.0,
+              "failure_median_latency_seconds": 25.16,
+              "insufficiency_reasons": [],
+              "is_eligible": true,
+              "median_latency_seconds": 76.65,
+              "newest_evidence_timestamp": "2026-09-19T21:32:22.559768Z",
+              "oldest_evidence_timestamp": "2026-09-19T17:21:54.289082Z",
+              "profile": "antigravity-native-executor-read-only",
+              "rank": 1,
+              "sample_size": 10,
+              "successful_median_latency_seconds": 202.93
+            },
+            {
+              "accepted_count": 5,
+              "accepted_rate_wilson_lower": 0.2366,
+              "evidence_age_days": 0.0,
+              "failure_median_latency_seconds": 349.07,
+              "insufficiency_reasons": [],
+              "is_eligible": true,
+              "median_latency_seconds": 354.22,
+              "newest_evidence_timestamp": "2026-09-19T21:31:54.369846Z",
+              "oldest_evidence_timestamp": "2026-09-19T17:19:03.270870Z",
+              "profile": "codex-native-executor-read-only",
+              "rank": 2,
+              "sample_size": 10,
+              "successful_median_latency_seconds": 359.37
+            }
+          ],
+          "recommended_profile": "antigravity-native-executor-read-only",
           "task_class": "feature"
         },
         {
@@ -387,85 +481,51 @@
           "mutation_mode": "read_only",
           "rankings": [
             {
-              "accepted_count": 0,
-              "accepted_rate_wilson_lower": 0.0,
-              "evidence_age_days": null,
+              "accepted_count": 5,
+              "accepted_rate_wilson_lower": 0.4365,
+              "evidence_age_days": 0.1,
+              "failure_median_latency_seconds": 320.68,
               "insufficiency_reasons": [
-                "insufficient_sample_size: 0 tasks (minimum 10)"
+                "insufficient_sample_size: 6 tasks (minimum 10)"
               ],
               "is_eligible": false,
-              "median_latency_seconds": null,
-              "newest_evidence_timestamp": null,
-              "oldest_evidence_timestamp": null,
+              "median_latency_seconds": 408.83,
+              "newest_evidence_timestamp": "2026-09-19T20:00:38.116336Z",
+              "oldest_evidence_timestamp": "2026-09-19T16:59:20.320768Z",
               "profile": "antigravity-native-executor-read-only",
               "rank": null,
-              "sample_size": 0
+              "sample_size": 6,
+              "successful_median_latency_seconds": 462.99
             },
             {
-              "accepted_count": 0,
-              "accepted_rate_wilson_lower": 0.0,
-              "evidence_age_days": null,
+              "accepted_count": 3,
+              "accepted_rate_wilson_lower": 0.1206,
+              "evidence_age_days": 0.0,
+              "failure_median_latency_seconds": 831.39,
               "insufficiency_reasons": [
-                "insufficient_sample_size: 0 tasks (minimum 10)"
+                "insufficient_sample_size: 9 tasks (minimum 10)"
               ],
               "is_eligible": false,
-              "median_latency_seconds": null,
-              "newest_evidence_timestamp": null,
-              "oldest_evidence_timestamp": null,
+              "median_latency_seconds": 902.79,
+              "newest_evidence_timestamp": "2026-09-19T21:27:12.398801Z",
+              "oldest_evidence_timestamp": "2026-09-19T17:14:03.297805Z",
               "profile": "codex-native-executor-read-only",
               "rank": null,
-              "sample_size": 0
-            }
-          ],
-          "recommended_profile": null,
-          "task_class": "feature"
-        },
-        {
-          "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
-          "mutation_mode": "read_only",
-          "rankings": [
-            {
-              "accepted_count": 0,
-              "accepted_rate_wilson_lower": 0.0,
-              "evidence_age_days": null,
-              "insufficiency_reasons": [
-                "insufficient_sample_size: 0 tasks (minimum 10)"
-              ],
-              "is_eligible": false,
-              "median_latency_seconds": null,
-              "newest_evidence_timestamp": null,
-              "oldest_evidence_timestamp": null,
-              "profile": "antigravity-native-executor-read-only",
-              "rank": null,
-              "sample_size": 0
-            },
-            {
-              "accepted_count": 0,
-              "accepted_rate_wilson_lower": 0.0,
-              "evidence_age_days": null,
-              "insufficiency_reasons": [
-                "insufficient_sample_size: 0 tasks (minimum 10)"
-              ],
-              "is_eligible": false,
-              "median_latency_seconds": null,
-              "newest_evidence_timestamp": null,
-              "oldest_evidence_timestamp": null,
-              "profile": "codex-native-executor-read-only",
-              "rank": null,
-              "sample_size": 0
+              "sample_size": 9,
+              "successful_median_latency_seconds": 1086.58
             }
           ],
           "recommended_profile": null,
           "task_class": "investigation"
         }
       ],
-      "window_end_at": "2026-09-18T21:08:09Z",
-      "window_start_at": "2026-08-04T21:08:09Z"
+      "window_end_at": "2026-09-19T21:32:22.562107Z",
+      "window_start_at": "2026-08-05T21:32:22.562107Z"
     }
   ],
   "windows": [
     {
-      "included_tasks_count": 20,
+      "included_tasks_count": 55,
       "recommendations": [
         {
           "fallback_reason": null,
@@ -474,7 +534,8 @@
             {
               "accepted_count": 10,
               "accepted_rate_wilson_lower": 0.7225,
-              "evidence_age_days": 0.0,
+              "evidence_age_days": 1.0,
+              "failure_median_latency_seconds": null,
               "insufficiency_reasons": [],
               "is_eligible": true,
               "median_latency_seconds": 194.64,
@@ -482,12 +543,14 @@
               "oldest_evidence_timestamp": "2026-09-18T20:02:50.329182Z",
               "profile": "codex-native-executor-read-only",
               "rank": 1,
-              "sample_size": 10
+              "sample_size": 10,
+              "successful_median_latency_seconds": 194.64
             },
             {
               "accepted_count": 9,
               "accepted_rate_wilson_lower": 0.5958,
-              "evidence_age_days": 0.0,
+              "evidence_age_days": 1.0,
+              "failure_median_latency_seconds": 326.24,
               "insufficiency_reasons": [],
               "is_eligible": true,
               "median_latency_seconds": 150.67,
@@ -495,7 +558,8 @@
               "oldest_evidence_timestamp": "2026-09-18T19:52:16.291656Z",
               "profile": "antigravity-native-executor-read-only",
               "rank": 2,
-              "sample_size": 10
+              "sample_size": 10,
+              "successful_median_latency_seconds": 146.84
             }
           ],
           "recommended_profile": "codex-native-executor-read-only",
@@ -509,6 +573,7 @@
               "accepted_count": 0,
               "accepted_rate_wilson_lower": 0.0,
               "evidence_age_days": null,
+              "failure_median_latency_seconds": null,
               "insufficiency_reasons": [
                 "insufficient_sample_size: 0 tasks (minimum 10)"
               ],
@@ -518,12 +583,14 @@
               "oldest_evidence_timestamp": null,
               "profile": "antigravity-native-executor",
               "rank": null,
-              "sample_size": 0
+              "sample_size": 0,
+              "successful_median_latency_seconds": null
             },
             {
               "accepted_count": 0,
               "accepted_rate_wilson_lower": 0.0,
               "evidence_age_days": null,
+              "failure_median_latency_seconds": null,
               "insufficiency_reasons": [
                 "insufficient_sample_size: 0 tasks (minimum 10)"
               ],
@@ -533,10 +600,49 @@
               "oldest_evidence_timestamp": null,
               "profile": "codex-native-executor",
               "rank": null,
-              "sample_size": 0
+              "sample_size": 0,
+              "successful_median_latency_seconds": null
             }
           ],
           "recommended_profile": null,
+          "task_class": "feature"
+        },
+        {
+          "fallback_reason": null,
+          "mutation_mode": "read_only",
+          "rankings": [
+            {
+              "accepted_count": 5,
+              "accepted_rate_wilson_lower": 0.2366,
+              "evidence_age_days": 0.0,
+              "failure_median_latency_seconds": 25.16,
+              "insufficiency_reasons": [],
+              "is_eligible": true,
+              "median_latency_seconds": 76.65,
+              "newest_evidence_timestamp": "2026-09-19T21:32:22.559768Z",
+              "oldest_evidence_timestamp": "2026-09-19T17:21:54.289082Z",
+              "profile": "antigravity-native-executor-read-only",
+              "rank": 1,
+              "sample_size": 10,
+              "successful_median_latency_seconds": 202.93
+            },
+            {
+              "accepted_count": 5,
+              "accepted_rate_wilson_lower": 0.2366,
+              "evidence_age_days": 0.0,
+              "failure_median_latency_seconds": 349.07,
+              "insufficiency_reasons": [],
+              "is_eligible": true,
+              "median_latency_seconds": 354.22,
+              "newest_evidence_timestamp": "2026-09-19T21:31:54.369846Z",
+              "oldest_evidence_timestamp": "2026-09-19T17:19:03.270870Z",
+              "profile": "codex-native-executor-read-only",
+              "rank": 2,
+              "sample_size": 10,
+              "successful_median_latency_seconds": 359.37
+            }
+          ],
+          "recommended_profile": "antigravity-native-executor-read-only",
           "task_class": "feature"
         },
         {
@@ -544,72 +650,38 @@
           "mutation_mode": "read_only",
           "rankings": [
             {
-              "accepted_count": 0,
-              "accepted_rate_wilson_lower": 0.0,
-              "evidence_age_days": null,
+              "accepted_count": 5,
+              "accepted_rate_wilson_lower": 0.4365,
+              "evidence_age_days": 0.1,
+              "failure_median_latency_seconds": 320.68,
               "insufficiency_reasons": [
-                "insufficient_sample_size: 0 tasks (minimum 10)"
+                "insufficient_sample_size: 6 tasks (minimum 10)"
               ],
               "is_eligible": false,
-              "median_latency_seconds": null,
-              "newest_evidence_timestamp": null,
-              "oldest_evidence_timestamp": null,
+              "median_latency_seconds": 408.83,
+              "newest_evidence_timestamp": "2026-09-19T20:00:38.116336Z",
+              "oldest_evidence_timestamp": "2026-09-19T16:59:20.320768Z",
               "profile": "antigravity-native-executor-read-only",
               "rank": null,
-              "sample_size": 0
+              "sample_size": 6,
+              "successful_median_latency_seconds": 462.99
             },
             {
-              "accepted_count": 0,
-              "accepted_rate_wilson_lower": 0.0,
-              "evidence_age_days": null,
+              "accepted_count": 3,
+              "accepted_rate_wilson_lower": 0.1206,
+              "evidence_age_days": 0.0,
+              "failure_median_latency_seconds": 831.39,
               "insufficiency_reasons": [
-                "insufficient_sample_size: 0 tasks (minimum 10)"
+                "insufficient_sample_size: 9 tasks (minimum 10)"
               ],
               "is_eligible": false,
-              "median_latency_seconds": null,
-              "newest_evidence_timestamp": null,
-              "oldest_evidence_timestamp": null,
+              "median_latency_seconds": 902.79,
+              "newest_evidence_timestamp": "2026-09-19T21:27:12.398801Z",
+              "oldest_evidence_timestamp": "2026-09-19T17:14:03.297805Z",
               "profile": "codex-native-executor-read-only",
               "rank": null,
-              "sample_size": 0
-            }
-          ],
-          "recommended_profile": null,
-          "task_class": "feature"
-        },
-        {
-          "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
-          "mutation_mode": "read_only",
-          "rankings": [
-            {
-              "accepted_count": 0,
-              "accepted_rate_wilson_lower": 0.0,
-              "evidence_age_days": null,
-              "insufficiency_reasons": [
-                "insufficient_sample_size: 0 tasks (minimum 10)"
-              ],
-              "is_eligible": false,
-              "median_latency_seconds": null,
-              "newest_evidence_timestamp": null,
-              "oldest_evidence_timestamp": null,
-              "profile": "antigravity-native-executor-read-only",
-              "rank": null,
-              "sample_size": 0
-            },
-            {
-              "accepted_count": 0,
-              "accepted_rate_wilson_lower": 0.0,
-              "evidence_age_days": null,
-              "insufficiency_reasons": [
-                "insufficient_sample_size: 0 tasks (minimum 10)"
-              ],
-              "is_eligible": false,
-              "median_latency_seconds": null,
-              "newest_evidence_timestamp": null,
-              "oldest_evidence_timestamp": null,
-              "profile": "codex-native-executor-read-only",
-              "rank": null,
-              "sample_size": 0
+              "sample_size": 9,
+              "successful_median_latency_seconds": 1086.58
             }
           ],
           "recommended_profile": null,
@@ -617,11 +689,11 @@
         }
       ],
       "window_days": 30,
-      "window_end_at": "2026-09-18T21:08:09Z",
-      "window_start_at": "2026-08-19T21:08:09Z"
+      "window_end_at": "2026-09-19T21:32:22.562107Z",
+      "window_start_at": "2026-08-20T21:32:22.562107Z"
     },
     {
-      "included_tasks_count": 20,
+      "included_tasks_count": 55,
       "recommendations": [
         {
           "fallback_reason": null,
@@ -630,7 +702,8 @@
             {
               "accepted_count": 10,
               "accepted_rate_wilson_lower": 0.7225,
-              "evidence_age_days": 0.0,
+              "evidence_age_days": 1.0,
+              "failure_median_latency_seconds": null,
               "insufficiency_reasons": [],
               "is_eligible": true,
               "median_latency_seconds": 194.64,
@@ -638,12 +711,14 @@
               "oldest_evidence_timestamp": "2026-09-18T20:02:50.329182Z",
               "profile": "codex-native-executor-read-only",
               "rank": 1,
-              "sample_size": 10
+              "sample_size": 10,
+              "successful_median_latency_seconds": 194.64
             },
             {
               "accepted_count": 9,
               "accepted_rate_wilson_lower": 0.5958,
-              "evidence_age_days": 0.0,
+              "evidence_age_days": 1.0,
+              "failure_median_latency_seconds": 326.24,
               "insufficiency_reasons": [],
               "is_eligible": true,
               "median_latency_seconds": 150.67,
@@ -651,7 +726,8 @@
               "oldest_evidence_timestamp": "2026-09-18T19:52:16.291656Z",
               "profile": "antigravity-native-executor-read-only",
               "rank": 2,
-              "sample_size": 10
+              "sample_size": 10,
+              "successful_median_latency_seconds": 146.84
             }
           ],
           "recommended_profile": "codex-native-executor-read-only",
@@ -665,6 +741,7 @@
               "accepted_count": 0,
               "accepted_rate_wilson_lower": 0.0,
               "evidence_age_days": null,
+              "failure_median_latency_seconds": null,
               "insufficiency_reasons": [
                 "insufficient_sample_size: 0 tasks (minimum 10)"
               ],
@@ -674,12 +751,14 @@
               "oldest_evidence_timestamp": null,
               "profile": "antigravity-native-executor",
               "rank": null,
-              "sample_size": 0
+              "sample_size": 0,
+              "successful_median_latency_seconds": null
             },
             {
               "accepted_count": 0,
               "accepted_rate_wilson_lower": 0.0,
               "evidence_age_days": null,
+              "failure_median_latency_seconds": null,
               "insufficiency_reasons": [
                 "insufficient_sample_size: 0 tasks (minimum 10)"
               ],
@@ -689,10 +768,49 @@
               "oldest_evidence_timestamp": null,
               "profile": "codex-native-executor",
               "rank": null,
-              "sample_size": 0
+              "sample_size": 0,
+              "successful_median_latency_seconds": null
             }
           ],
           "recommended_profile": null,
+          "task_class": "feature"
+        },
+        {
+          "fallback_reason": null,
+          "mutation_mode": "read_only",
+          "rankings": [
+            {
+              "accepted_count": 5,
+              "accepted_rate_wilson_lower": 0.2366,
+              "evidence_age_days": 0.0,
+              "failure_median_latency_seconds": 25.16,
+              "insufficiency_reasons": [],
+              "is_eligible": true,
+              "median_latency_seconds": 76.65,
+              "newest_evidence_timestamp": "2026-09-19T21:32:22.559768Z",
+              "oldest_evidence_timestamp": "2026-09-19T17:21:54.289082Z",
+              "profile": "antigravity-native-executor-read-only",
+              "rank": 1,
+              "sample_size": 10,
+              "successful_median_latency_seconds": 202.93
+            },
+            {
+              "accepted_count": 5,
+              "accepted_rate_wilson_lower": 0.2366,
+              "evidence_age_days": 0.0,
+              "failure_median_latency_seconds": 349.07,
+              "insufficiency_reasons": [],
+              "is_eligible": true,
+              "median_latency_seconds": 354.22,
+              "newest_evidence_timestamp": "2026-09-19T21:31:54.369846Z",
+              "oldest_evidence_timestamp": "2026-09-19T17:19:03.270870Z",
+              "profile": "codex-native-executor-read-only",
+              "rank": 2,
+              "sample_size": 10,
+              "successful_median_latency_seconds": 359.37
+            }
+          ],
+          "recommended_profile": "antigravity-native-executor-read-only",
           "task_class": "feature"
         },
         {
@@ -700,72 +818,38 @@
           "mutation_mode": "read_only",
           "rankings": [
             {
-              "accepted_count": 0,
-              "accepted_rate_wilson_lower": 0.0,
-              "evidence_age_days": null,
+              "accepted_count": 5,
+              "accepted_rate_wilson_lower": 0.4365,
+              "evidence_age_days": 0.1,
+              "failure_median_latency_seconds": 320.68,
               "insufficiency_reasons": [
-                "insufficient_sample_size: 0 tasks (minimum 10)"
+                "insufficient_sample_size: 6 tasks (minimum 10)"
               ],
               "is_eligible": false,
-              "median_latency_seconds": null,
-              "newest_evidence_timestamp": null,
-              "oldest_evidence_timestamp": null,
+              "median_latency_seconds": 408.83,
+              "newest_evidence_timestamp": "2026-09-19T20:00:38.116336Z",
+              "oldest_evidence_timestamp": "2026-09-19T16:59:20.320768Z",
               "profile": "antigravity-native-executor-read-only",
               "rank": null,
-              "sample_size": 0
+              "sample_size": 6,
+              "successful_median_latency_seconds": 462.99
             },
             {
-              "accepted_count": 0,
-              "accepted_rate_wilson_lower": 0.0,
-              "evidence_age_days": null,
+              "accepted_count": 3,
+              "accepted_rate_wilson_lower": 0.1206,
+              "evidence_age_days": 0.0,
+              "failure_median_latency_seconds": 831.39,
               "insufficiency_reasons": [
-                "insufficient_sample_size: 0 tasks (minimum 10)"
+                "insufficient_sample_size: 9 tasks (minimum 10)"
               ],
               "is_eligible": false,
-              "median_latency_seconds": null,
-              "newest_evidence_timestamp": null,
-              "oldest_evidence_timestamp": null,
+              "median_latency_seconds": 902.79,
+              "newest_evidence_timestamp": "2026-09-19T21:27:12.398801Z",
+              "oldest_evidence_timestamp": "2026-09-19T17:14:03.297805Z",
               "profile": "codex-native-executor-read-only",
               "rank": null,
-              "sample_size": 0
-            }
-          ],
-          "recommended_profile": null,
-          "task_class": "feature"
-        },
-        {
-          "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
-          "mutation_mode": "read_only",
-          "rankings": [
-            {
-              "accepted_count": 0,
-              "accepted_rate_wilson_lower": 0.0,
-              "evidence_age_days": null,
-              "insufficiency_reasons": [
-                "insufficient_sample_size: 0 tasks (minimum 10)"
-              ],
-              "is_eligible": false,
-              "median_latency_seconds": null,
-              "newest_evidence_timestamp": null,
-              "oldest_evidence_timestamp": null,
-              "profile": "antigravity-native-executor-read-only",
-              "rank": null,
-              "sample_size": 0
-            },
-            {
-              "accepted_count": 0,
-              "accepted_rate_wilson_lower": 0.0,
-              "evidence_age_days": null,
-              "insufficiency_reasons": [
-                "insufficient_sample_size: 0 tasks (minimum 10)"
-              ],
-              "is_eligible": false,
-              "median_latency_seconds": null,
-              "newest_evidence_timestamp": null,
-              "oldest_evidence_timestamp": null,
-              "profile": "codex-native-executor-read-only",
-              "rank": null,
-              "sample_size": 0
+              "sample_size": 9,
+              "successful_median_latency_seconds": 1086.58
             }
           ],
           "recommended_profile": null,
@@ -773,11 +857,11 @@
         }
       ],
       "window_days": 60,
-      "window_end_at": "2026-09-18T21:08:09Z",
-      "window_start_at": "2026-07-20T21:08:09Z"
+      "window_end_at": "2026-09-19T21:32:22.562107Z",
+      "window_start_at": "2026-07-21T21:32:22.562107Z"
     },
     {
-      "included_tasks_count": 20,
+      "included_tasks_count": 55,
       "recommendations": [
         {
           "fallback_reason": null,
@@ -786,7 +870,8 @@
             {
               "accepted_count": 10,
               "accepted_rate_wilson_lower": 0.7225,
-              "evidence_age_days": 0.0,
+              "evidence_age_days": 1.0,
+              "failure_median_latency_seconds": null,
               "insufficiency_reasons": [],
               "is_eligible": true,
               "median_latency_seconds": 194.64,
@@ -794,12 +879,14 @@
               "oldest_evidence_timestamp": "2026-09-18T20:02:50.329182Z",
               "profile": "codex-native-executor-read-only",
               "rank": 1,
-              "sample_size": 10
+              "sample_size": 10,
+              "successful_median_latency_seconds": 194.64
             },
             {
               "accepted_count": 9,
               "accepted_rate_wilson_lower": 0.5958,
-              "evidence_age_days": 0.0,
+              "evidence_age_days": 1.0,
+              "failure_median_latency_seconds": 326.24,
               "insufficiency_reasons": [],
               "is_eligible": true,
               "median_latency_seconds": 150.67,
@@ -807,7 +894,8 @@
               "oldest_evidence_timestamp": "2026-09-18T19:52:16.291656Z",
               "profile": "antigravity-native-executor-read-only",
               "rank": 2,
-              "sample_size": 10
+              "sample_size": 10,
+              "successful_median_latency_seconds": 146.84
             }
           ],
           "recommended_profile": "codex-native-executor-read-only",
@@ -821,6 +909,7 @@
               "accepted_count": 0,
               "accepted_rate_wilson_lower": 0.0,
               "evidence_age_days": null,
+              "failure_median_latency_seconds": null,
               "insufficiency_reasons": [
                 "insufficient_sample_size: 0 tasks (minimum 10)"
               ],
@@ -830,12 +919,14 @@
               "oldest_evidence_timestamp": null,
               "profile": "antigravity-native-executor",
               "rank": null,
-              "sample_size": 0
+              "sample_size": 0,
+              "successful_median_latency_seconds": null
             },
             {
               "accepted_count": 0,
               "accepted_rate_wilson_lower": 0.0,
               "evidence_age_days": null,
+              "failure_median_latency_seconds": null,
               "insufficiency_reasons": [
                 "insufficient_sample_size: 0 tasks (minimum 10)"
               ],
@@ -845,10 +936,49 @@
               "oldest_evidence_timestamp": null,
               "profile": "codex-native-executor",
               "rank": null,
-              "sample_size": 0
+              "sample_size": 0,
+              "successful_median_latency_seconds": null
             }
           ],
           "recommended_profile": null,
+          "task_class": "feature"
+        },
+        {
+          "fallback_reason": null,
+          "mutation_mode": "read_only",
+          "rankings": [
+            {
+              "accepted_count": 5,
+              "accepted_rate_wilson_lower": 0.2366,
+              "evidence_age_days": 0.0,
+              "failure_median_latency_seconds": 25.16,
+              "insufficiency_reasons": [],
+              "is_eligible": true,
+              "median_latency_seconds": 76.65,
+              "newest_evidence_timestamp": "2026-09-19T21:32:22.559768Z",
+              "oldest_evidence_timestamp": "2026-09-19T17:21:54.289082Z",
+              "profile": "antigravity-native-executor-read-only",
+              "rank": 1,
+              "sample_size": 10,
+              "successful_median_latency_seconds": 202.93
+            },
+            {
+              "accepted_count": 5,
+              "accepted_rate_wilson_lower": 0.2366,
+              "evidence_age_days": 0.0,
+              "failure_median_latency_seconds": 349.07,
+              "insufficiency_reasons": [],
+              "is_eligible": true,
+              "median_latency_seconds": 354.22,
+              "newest_evidence_timestamp": "2026-09-19T21:31:54.369846Z",
+              "oldest_evidence_timestamp": "2026-09-19T17:19:03.270870Z",
+              "profile": "codex-native-executor-read-only",
+              "rank": 2,
+              "sample_size": 10,
+              "successful_median_latency_seconds": 359.37
+            }
+          ],
+          "recommended_profile": "antigravity-native-executor-read-only",
           "task_class": "feature"
         },
         {
@@ -856,72 +986,38 @@
           "mutation_mode": "read_only",
           "rankings": [
             {
-              "accepted_count": 0,
-              "accepted_rate_wilson_lower": 0.0,
-              "evidence_age_days": null,
+              "accepted_count": 5,
+              "accepted_rate_wilson_lower": 0.4365,
+              "evidence_age_days": 0.1,
+              "failure_median_latency_seconds": 320.68,
               "insufficiency_reasons": [
-                "insufficient_sample_size: 0 tasks (minimum 10)"
+                "insufficient_sample_size: 6 tasks (minimum 10)"
               ],
               "is_eligible": false,
-              "median_latency_seconds": null,
-              "newest_evidence_timestamp": null,
-              "oldest_evidence_timestamp": null,
+              "median_latency_seconds": 408.83,
+              "newest_evidence_timestamp": "2026-09-19T20:00:38.116336Z",
+              "oldest_evidence_timestamp": "2026-09-19T16:59:20.320768Z",
               "profile": "antigravity-native-executor-read-only",
               "rank": null,
-              "sample_size": 0
+              "sample_size": 6,
+              "successful_median_latency_seconds": 462.99
             },
             {
-              "accepted_count": 0,
-              "accepted_rate_wilson_lower": 0.0,
-              "evidence_age_days": null,
+              "accepted_count": 3,
+              "accepted_rate_wilson_lower": 0.1206,
+              "evidence_age_days": 0.0,
+              "failure_median_latency_seconds": 831.39,
               "insufficiency_reasons": [
-                "insufficient_sample_size: 0 tasks (minimum 10)"
+                "insufficient_sample_size: 9 tasks (minimum 10)"
               ],
               "is_eligible": false,
-              "median_latency_seconds": null,
-              "newest_evidence_timestamp": null,
-              "oldest_evidence_timestamp": null,
+              "median_latency_seconds": 902.79,
+              "newest_evidence_timestamp": "2026-09-19T21:27:12.398801Z",
+              "oldest_evidence_timestamp": "2026-09-19T17:14:03.297805Z",
               "profile": "codex-native-executor-read-only",
               "rank": null,
-              "sample_size": 0
-            }
-          ],
-          "recommended_profile": null,
-          "task_class": "feature"
-        },
-        {
-          "fallback_reason": "no_eligible_candidates: all candidates lack sufficient samples",
-          "mutation_mode": "read_only",
-          "rankings": [
-            {
-              "accepted_count": 0,
-              "accepted_rate_wilson_lower": 0.0,
-              "evidence_age_days": null,
-              "insufficiency_reasons": [
-                "insufficient_sample_size: 0 tasks (minimum 10)"
-              ],
-              "is_eligible": false,
-              "median_latency_seconds": null,
-              "newest_evidence_timestamp": null,
-              "oldest_evidence_timestamp": null,
-              "profile": "antigravity-native-executor-read-only",
-              "rank": null,
-              "sample_size": 0
-            },
-            {
-              "accepted_count": 0,
-              "accepted_rate_wilson_lower": 0.0,
-              "evidence_age_days": null,
-              "insufficiency_reasons": [
-                "insufficient_sample_size: 0 tasks (minimum 10)"
-              ],
-              "is_eligible": false,
-              "median_latency_seconds": null,
-              "newest_evidence_timestamp": null,
-              "oldest_evidence_timestamp": null,
-              "profile": "codex-native-executor-read-only",
-              "rank": null,
-              "sample_size": 0
+              "sample_size": 9,
+              "successful_median_latency_seconds": 1086.58
             }
           ],
           "recommended_profile": null,
@@ -929,8 +1025,8 @@
         }
       ],
       "window_days": 90,
-      "window_end_at": "2026-09-18T21:08:09Z",
-      "window_start_at": "2026-06-20T21:08:09Z"
+      "window_end_at": "2026-09-19T21:32:22.562107Z",
+      "window_start_at": "2026-06-21T21:32:22.562107Z"
     }
   ]
 }

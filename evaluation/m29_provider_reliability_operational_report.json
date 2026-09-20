@@ -14,6 +14,13 @@
       },
       "failure_count": 1,
       "failure_rate": 0.5,
+      "failure_task_latency": {
+        "max_seconds": 5.03,
+        "mean_seconds": 5.03,
+        "median_seconds": 5.03,
+        "min_seconds": 5.03,
+        "p90_seconds": 5.03
+      },
       "insufficiency_reasons": [
         "diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed"
       ],
@@ -44,6 +51,13 @@
         "review_pass_rate": null,
         "verification_pass_rate": 0.0
       },
+      "successful_task_latency": {
+        "max_seconds": 87.27,
+        "mean_seconds": 87.27,
+        "median_seconds": 87.27,
+        "min_seconds": 87.27,
+        "p90_seconds": 87.27
+      },
       "task_class": "bugfix",
       "terminal_latency": {
         "max_seconds": 87.27,
@@ -70,6 +84,13 @@
       },
       "failure_count": 1,
       "failure_rate": 0.2,
+      "failure_task_latency": {
+        "max_seconds": 350.99,
+        "mean_seconds": 350.99,
+        "median_seconds": 350.99,
+        "min_seconds": 350.99,
+        "p90_seconds": 350.99
+      },
       "insufficiency_reasons": [
         "diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed"
       ],
@@ -100,6 +121,13 @@
         "review_pass_rate": null,
         "verification_pass_rate": 0.0
       },
+      "successful_task_latency": {
+        "max_seconds": 752.42,
+        "mean_seconds": 435.59,
+        "median_seconds": 436.56,
+        "min_seconds": 116.81,
+        "p90_seconds": 752.42
+      },
       "task_class": "bugfix",
       "terminal_latency": {
         "max_seconds": 752.42,
@@ -126,6 +154,13 @@
       },
       "failure_count": 0,
       "failure_rate": 0.0,
+      "failure_task_latency": {
+        "max_seconds": null,
+        "mean_seconds": null,
+        "median_seconds": null,
+        "min_seconds": null,
+        "p90_seconds": null
+      },
       "insufficiency_reasons": [
         "diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed"
       ],
@@ -156,6 +191,13 @@
         "review_pass_rate": null,
         "verification_pass_rate": 0.0
       },
+      "successful_task_latency": {
+        "max_seconds": 78.58,
+        "mean_seconds": 70.37,
+        "median_seconds": 70.37,
+        "min_seconds": 62.16,
+        "p90_seconds": 78.58
+      },
       "task_class": "docs",
       "terminal_latency": {
         "max_seconds": 78.58,
@@ -180,6 +222,13 @@
       },
       "failure_count": 15,
       "failure_rate": 0.3947,
+      "failure_task_latency": {
+        "max_seconds": 484.17,
+        "mean_seconds": 85.05,
+        "median_seconds": 4.86,
+        "min_seconds": 4.68,
+        "p90_seconds": 326.24
+      },
       "insufficiency_reasons": [
         "diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed"
       ],
@@ -210,6 +259,13 @@
         "review_pass_rate": null,
         "verification_pass_rate": 0.0
       },
+      "successful_task_latency": {
+        "max_seconds": 854.87,
+        "mean_seconds": 155.29,
+        "median_seconds": 128.09,
+        "min_seconds": 19.5,
+        "p90_seconds": 193.59
+      },
       "task_class": "docs",
       "terminal_latency": {
         "max_seconds": 854.87,
@@ -238,6 +294,13 @@
       },
       "failure_count": 0,
       "failure_rate": 0.0,
+      "failure_task_latency": {
+        "max_seconds": null,
+        "mean_seconds": null,
+        "median_seconds": null,
+        "min_seconds": null,
+        "p90_seconds": null
+      },
       "insufficiency_reasons": [
         "diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed"
       ],
@@ -268,6 +331,13 @@
         "review_pass_rate": null,
         "verification_pass_rate": 0.0
       },
+      "successful_task_latency": {
+        "max_seconds": 296.22,
+        "mean_seconds": 274.55,
+        "median_seconds": 266.27,
+        "min_seconds": 261.17,
+        "p90_seconds": 296.22
+      },
       "task_class": "docs",
       "terminal_latency": {
         "max_seconds": 296.22,
@@ -292,6 +362,13 @@
       },
       "failure_count": 20,
       "failure_rate": 0.5263,
+      "failure_task_latency": {
+        "max_seconds": 330.38,
+        "mean_seconds": 47.25,
+        "median_seconds": 20.58,
+        "min_seconds": 4.73,
+        "p90_seconds": 72.46
+      },
       "insufficiency_reasons": [
         "diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed"
       ],
@@ -321,6 +398,13 @@
         "execution_success_rate": 0.4737,
         "review_pass_rate": null,
         "verification_pass_rate": 0.0
+      },
+      "successful_task_latency": {
+        "max_seconds": 633.6,
+        "mean_seconds": 266.55,
+        "median_seconds": 200.61,
+        "min_seconds": 91.98,
+        "p90_seconds": 616.72
       },
       "task_class": "docs",
       "terminal_latency": {
@@ -352,6 +436,13 @@
       },
       "failure_count": 16,
       "failure_rate": 0.2162,
+      "failure_task_latency": {
+        "max_seconds": 302.64,
+        "mean_seconds": 34.7,
+        "median_seconds": 3.1,
+        "min_seconds": 2.29,
+        "p90_seconds": 66.12
+      },
       "insufficiency_reasons": [
         "diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed"
       ],
@@ -382,6 +473,13 @@
         "review_pass_rate": 1.0,
         "verification_pass_rate": 0.0
       },
+      "successful_task_latency": {
+        "max_seconds": 496.51,
+        "mean_seconds": 69.29,
+        "median_seconds": 50.49,
+        "min_seconds": 10.07,
+        "p90_seconds": 131.17
+      },
       "task_class": "feature",
       "terminal_latency": {
         "max_seconds": 496.51,
@@ -396,19 +494,26 @@
       }
     },
     {
-      "accepted_count": 19,
-      "accepted_task_rate": 0.6333,
+      "accepted_count": 24,
+      "accepted_task_rate": 0.6,
       "accepted_task_rate_ci": {
-        "center": 0.6182,
-        "lower": 0.4551,
-        "upper": 0.7813
+        "center": 0.5912,
+        "lower": 0.446,
+        "upper": 0.7365
       },
       "budget_field_coverage": {
-        "budget_coverage_rate": 0.6667,
-        "budget_reported_count": 20
+        "budget_coverage_rate": 0.75,
+        "budget_reported_count": 30
       },
-      "failure_count": 11,
-      "failure_rate": 0.3667,
+      "failure_count": 16,
+      "failure_rate": 0.4,
+      "failure_task_latency": {
+        "max_seconds": 25.54,
+        "mean_seconds": 11.0,
+        "median_seconds": 5.0,
+        "min_seconds": 4.81,
+        "p90_seconds": 25.45
+      },
       "insufficiency_reasons": [
         "diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed"
       ],
@@ -419,37 +524,44 @@
         "intervention_rate": 0.0
       },
       "is_eligible": false,
-      "manual_override_rate": 0.9667,
-      "manual_overrides_count": 29,
+      "manual_override_rate": 0.975,
+      "manual_overrides_count": 39,
       "mutation_mode": "read_only",
-      "newest_evidence_timestamp": "2026-09-17T20:01:06.852894Z",
+      "newest_evidence_timestamp": "2026-09-19T21:32:22.559768Z",
       "oldest_evidence_timestamp": "2026-08-05T18:50:51.197540Z",
       "profile": "antigravity-native-executor-read-only",
       "repairs": {
-        "repair_rate": 0.0333,
+        "repair_rate": 0.15,
         "review_repairs_count": 0,
-        "total_repaired_tasks": 1,
-        "verifier_repairs_count": 1
+        "total_repaired_tasks": 6,
+        "verifier_repairs_count": 6
       },
-      "sample_size": 30,
+      "sample_size": 40,
       "stage_outcome_rates": {
         "delivery_pass_rate": null,
-        "dispatch_rate": 0.6667,
-        "execution_success_rate": 0.6333,
+        "dispatch_rate": 0.75,
+        "execution_success_rate": 0.6,
         "review_pass_rate": null,
         "verification_pass_rate": 0.0
+      },
+      "successful_task_latency": {
+        "max_seconds": 337.42,
+        "mean_seconds": 137.89,
+        "median_seconds": 160.67,
+        "min_seconds": 24.27,
+        "p90_seconds": 210.73
       },
       "task_class": "feature",
       "terminal_latency": {
         "max_seconds": 337.42,
-        "mean_seconds": 81.33,
+        "mean_seconds": 87.13,
         "median_seconds": 38.11,
         "min_seconds": 4.81,
-        "p90_seconds": 191.0
+        "p90_seconds": 203.37
       },
       "typed_failures": {
         "task_error": 10,
-        "worker_failure": 1
+        "worker_failure": 6
       }
     },
     {
@@ -466,6 +578,13 @@
       },
       "failure_count": 9,
       "failure_rate": 0.36,
+      "failure_task_latency": {
+        "max_seconds": 701.28,
+        "mean_seconds": 130.68,
+        "median_seconds": 12.67,
+        "min_seconds": 1.6,
+        "p90_seconds": 701.28
+      },
       "insufficiency_reasons": [
         "diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed"
       ],
@@ -496,6 +615,13 @@
         "review_pass_rate": null,
         "verification_pass_rate": 0.0
       },
+      "successful_task_latency": {
+        "max_seconds": 673.05,
+        "mean_seconds": 173.38,
+        "median_seconds": 116.51,
+        "min_seconds": 73.79,
+        "p90_seconds": 357.06
+      },
       "task_class": "feature",
       "terminal_latency": {
         "max_seconds": 701.28,
@@ -512,19 +638,26 @@
       }
     },
     {
-      "accepted_count": 24,
-      "accepted_task_rate": 0.7059,
+      "accepted_count": 29,
+      "accepted_task_rate": 0.6591,
       "accepted_task_rate_ci": {
-        "center": 0.685,
-        "lower": 0.5383,
-        "upper": 0.8317
+        "center": 0.6463,
+        "lower": 0.5114,
+        "upper": 0.7812
       },
       "budget_field_coverage": {
-        "budget_coverage_rate": 0.9706,
-        "budget_reported_count": 33
+        "budget_coverage_rate": 0.9773,
+        "budget_reported_count": 43
       },
-      "failure_count": 10,
-      "failure_rate": 0.2941,
+      "failure_count": 15,
+      "failure_rate": 0.3409,
+      "failure_task_latency": {
+        "max_seconds": 601.7,
+        "mean_seconds": 276.01,
+        "median_seconds": 281.56,
+        "min_seconds": 0.69,
+        "p90_seconds": 601.29
+      },
       "insufficiency_reasons": [
         "diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed"
       ],
@@ -536,34 +669,42 @@
       },
       "is_eligible": false,
       "manual_override_rate": 1.0,
-      "manual_overrides_count": 34,
+      "manual_overrides_count": 44,
       "mutation_mode": "read_only",
-      "newest_evidence_timestamp": "2026-09-05T15:05:38.461409Z",
+      "newest_evidence_timestamp": "2026-09-19T21:31:54.369846Z",
       "oldest_evidence_timestamp": "2026-08-01T22:58:59.627686Z",
       "profile": "codex-native-executor-read-only",
       "repairs": {
-        "repair_rate": 0.0294,
+        "repair_rate": 0.0227,
         "review_repairs_count": 0,
         "total_repaired_tasks": 1,
         "verifier_repairs_count": 1
       },
-      "sample_size": 34,
+      "sample_size": 44,
       "stage_outcome_rates": {
-        "delivery_pass_rate": null,
-        "dispatch_rate": 0.9706,
-        "execution_success_rate": 0.7059,
+        "delivery_pass_rate": 0.0,
+        "dispatch_rate": 0.9773,
+        "execution_success_rate": 0.6591,
         "review_pass_rate": null,
         "verification_pass_rate": 0.0
+      },
+      "successful_task_latency": {
+        "max_seconds": 431.08,
+        "mean_seconds": 207.9,
+        "median_seconds": 178.55,
+        "min_seconds": 60.71,
+        "p90_seconds": 415.51
       },
       "task_class": "feature",
       "terminal_latency": {
         "max_seconds": 601.7,
-        "mean_seconds": 189.87,
-        "median_seconds": 153.95,
+        "mean_seconds": 231.12,
+        "median_seconds": 199.64,
         "min_seconds": 0.69,
-        "p90_seconds": 336.3
+        "p90_seconds": 431.08
       },
       "typed_failures": {
+        "infra_verifier_unavailable": 5,
         "scope_mismatch": 2,
         "task_error": 1,
         "worker_failure": 7
@@ -583,6 +724,13 @@
       },
       "failure_count": 0,
       "failure_rate": 0.0,
+      "failure_task_latency": {
+        "max_seconds": null,
+        "mean_seconds": null,
+        "median_seconds": null,
+        "min_seconds": null,
+        "p90_seconds": null
+      },
       "insufficiency_reasons": [
         "diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed"
       ],
@@ -613,6 +761,13 @@
         "review_pass_rate": null,
         "verification_pass_rate": null
       },
+      "successful_task_latency": {
+        "max_seconds": null,
+        "mean_seconds": null,
+        "median_seconds": null,
+        "min_seconds": null,
+        "p90_seconds": null
+      },
       "task_class": "investigation",
       "terminal_latency": {
         "max_seconds": null,
@@ -624,19 +779,26 @@
       "typed_failures": {}
     },
     {
-      "accepted_count": 9,
-      "accepted_task_rate": 0.75,
+      "accepted_count": 14,
+      "accepted_task_rate": 0.6364,
       "accepted_task_rate_ci": {
-        "center": 0.6894,
-        "lower": 0.4677,
-        "upper": 0.9111
+        "center": 0.6161,
+        "lower": 0.4295,
+        "upper": 0.8027
       },
       "budget_field_coverage": {
-        "budget_coverage_rate": 0.8333,
-        "budget_reported_count": 10
+        "budget_coverage_rate": 0.9091,
+        "budget_reported_count": 20
       },
-      "failure_count": 3,
-      "failure_rate": 0.25,
+      "failure_count": 8,
+      "failure_rate": 0.3636,
+      "failure_task_latency": {
+        "max_seconds": 320.68,
+        "mean_seconds": 90.16,
+        "median_seconds": 35.11,
+        "min_seconds": 4.95,
+        "p90_seconds": 320.68
+      },
       "insufficiency_reasons": [
         "diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed"
       ],
@@ -648,36 +810,43 @@
       },
       "is_eligible": false,
       "manual_override_rate": 1.0,
-      "manual_overrides_count": 12,
+      "manual_overrides_count": 22,
       "mutation_mode": "read_only",
-      "newest_evidence_timestamp": "2026-09-17T19:29:10.942689Z",
+      "newest_evidence_timestamp": "2026-09-19T21:14:40.957347Z",
       "oldest_evidence_timestamp": "2026-08-14T21:51:38.160034Z",
       "profile": "antigravity-native-executor-read-only",
       "repairs": {
-        "repair_rate": 0.0,
+        "repair_rate": 0.2727,
         "review_repairs_count": 0,
-        "total_repaired_tasks": 0,
-        "verifier_repairs_count": 0
+        "total_repaired_tasks": 6,
+        "verifier_repairs_count": 6
       },
-      "sample_size": 12,
+      "sample_size": 22,
       "stage_outcome_rates": {
         "delivery_pass_rate": null,
-        "dispatch_rate": 0.8333,
-        "execution_success_rate": 0.75,
+        "dispatch_rate": 0.9091,
+        "execution_success_rate": 0.6364,
         "review_pass_rate": null,
         "verification_pass_rate": 0.0
       },
+      "successful_task_latency": {
+        "max_seconds": 533.73,
+        "mean_seconds": 217.6,
+        "median_seconds": 95.83,
+        "min_seconds": 36.74,
+        "p90_seconds": 504.25
+      },
       "task_class": "investigation",
       "terminal_latency": {
-        "max_seconds": 295.63,
-        "mean_seconds": 91.55,
-        "median_seconds": 78.75,
+        "max_seconds": 533.73,
+        "mean_seconds": 171.26,
+        "median_seconds": 81.39,
         "min_seconds": 4.95,
-        "p90_seconds": 245.53
+        "p90_seconds": 462.99
       },
       "typed_failures": {
         "task_error": 2,
-        "worker_failure": 1
+        "worker_failure": 6
       }
     },
     {
@@ -694,6 +863,13 @@
       },
       "failure_count": 1,
       "failure_rate": 0.25,
+      "failure_task_latency": {
+        "max_seconds": 534.42,
+        "mean_seconds": 534.42,
+        "median_seconds": 534.42,
+        "min_seconds": 534.42,
+        "p90_seconds": 534.42
+      },
       "insufficiency_reasons": [
         "diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed"
       ],
@@ -724,6 +900,13 @@
         "review_pass_rate": null,
         "verification_pass_rate": null
       },
+      "successful_task_latency": {
+        "max_seconds": 437.56,
+        "mean_seconds": 292.12,
+        "median_seconds": 244.05,
+        "min_seconds": 194.76,
+        "p90_seconds": 437.56
+      },
       "task_class": "investigation",
       "terminal_latency": {
         "max_seconds": 534.42,
@@ -737,19 +920,26 @@
       }
     },
     {
-      "accepted_count": 15,
-      "accepted_task_rate": 1.0,
+      "accepted_count": 18,
+      "accepted_task_rate": 0.72,
       "accepted_task_rate_ci": {
-        "center": 0.8981,
-        "lower": 0.7961,
-        "upper": 1.0
+        "center": 0.6907,
+        "lower": 0.5242,
+        "upper": 0.8572
       },
       "budget_field_coverage": {
         "budget_coverage_rate": 1.0,
-        "budget_reported_count": 15
+        "budget_reported_count": 25
       },
-      "failure_count": 0,
-      "failure_rate": 0.0,
+      "failure_count": 7,
+      "failure_rate": 0.28,
+      "failure_task_latency": {
+        "max_seconds": 1130.31,
+        "mean_seconds": 836.31,
+        "median_seconds": 759.99,
+        "min_seconds": 535.93,
+        "p90_seconds": 1130.31
+      },
       "insufficiency_reasons": [
         "diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed"
       ],
@@ -761,9 +951,9 @@
       },
       "is_eligible": false,
       "manual_override_rate": 1.0,
-      "manual_overrides_count": 15,
+      "manual_overrides_count": 25,
       "mutation_mode": "read_only",
-      "newest_evidence_timestamp": "2026-09-05T15:32:54.671949Z",
+      "newest_evidence_timestamp": "2026-09-19T21:27:12.398801Z",
       "oldest_evidence_timestamp": "2026-08-13T19:22:11.807940Z",
       "profile": "codex-native-executor-read-only",
       "repairs": {
@@ -772,23 +962,33 @@
         "total_repaired_tasks": 0,
         "verifier_repairs_count": 0
       },
-      "sample_size": 15,
+      "sample_size": 25,
       "stage_outcome_rates": {
-        "delivery_pass_rate": null,
+        "delivery_pass_rate": 0.0,
         "dispatch_rate": 1.0,
-        "execution_success_rate": 1.0,
+        "execution_success_rate": 0.72,
         "review_pass_rate": null,
         "verification_pass_rate": 0.0
       },
+      "successful_task_latency": {
+        "max_seconds": 1436.95,
+        "mean_seconds": 334.09,
+        "median_seconds": 170.89,
+        "min_seconds": 51.33,
+        "p90_seconds": 1086.58
+      },
       "task_class": "investigation",
       "terminal_latency": {
-        "max_seconds": 582.81,
-        "mean_seconds": 173.88,
-        "median_seconds": 136.86,
+        "max_seconds": 1436.95,
+        "mean_seconds": 474.71,
+        "median_seconds": 261.63,
         "min_seconds": 51.33,
-        "p90_seconds": 270.49
+        "p90_seconds": 1096.65
       },
-      "typed_failures": {}
+      "typed_failures": {
+        "infra_verifier_unavailable": 5,
+        "worker_failure": 2
+      }
     },
     {
       "accepted_count": 5,
@@ -804,6 +1004,13 @@
       },
       "failure_count": 0,
       "failure_rate": 0.0,
+      "failure_task_latency": {
+        "max_seconds": null,
+        "mean_seconds": null,
+        "median_seconds": null,
+        "min_seconds": null,
+        "p90_seconds": null
+      },
       "insufficiency_reasons": [
         "diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed"
       ],
@@ -834,6 +1041,13 @@
         "review_pass_rate": null,
         "verification_pass_rate": 0.0
       },
+      "successful_task_latency": {
+        "max_seconds": 147.33,
+        "mean_seconds": 84.59,
+        "median_seconds": 73.46,
+        "min_seconds": 52.13,
+        "p90_seconds": 147.33
+      },
       "task_class": "maintenance",
       "terminal_latency": {
         "max_seconds": 147.33,
@@ -858,6 +1072,13 @@
       },
       "failure_count": 0,
       "failure_rate": 0.0,
+      "failure_task_latency": {
+        "max_seconds": null,
+        "mean_seconds": null,
+        "median_seconds": null,
+        "min_seconds": null,
+        "p90_seconds": null
+      },
       "insufficiency_reasons": [
         "diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed"
       ],
@@ -888,6 +1109,13 @@
         "review_pass_rate": null,
         "verification_pass_rate": null
       },
+      "successful_task_latency": {
+        "max_seconds": null,
+        "mean_seconds": null,
+        "median_seconds": null,
+        "min_seconds": null,
+        "p90_seconds": null
+      },
       "task_class": "maintenance",
       "terminal_latency": {
         "max_seconds": null,
@@ -912,6 +1140,13 @@
       },
       "failure_count": 0,
       "failure_rate": 0.0,
+      "failure_task_latency": {
+        "max_seconds": null,
+        "mean_seconds": null,
+        "median_seconds": null,
+        "min_seconds": null,
+        "p90_seconds": null
+      },
       "insufficiency_reasons": [
         "diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed"
       ],
@@ -942,6 +1177,13 @@
         "review_pass_rate": null,
         "verification_pass_rate": null
       },
+      "successful_task_latency": {
+        "max_seconds": null,
+        "mean_seconds": null,
+        "median_seconds": null,
+        "min_seconds": null,
+        "p90_seconds": null
+      },
       "task_class": "refactor",
       "terminal_latency": {
         "max_seconds": null,
@@ -966,6 +1208,13 @@
       },
       "failure_count": 1,
       "failure_rate": 1.0,
+      "failure_task_latency": {
+        "max_seconds": 847.0,
+        "mean_seconds": 847.0,
+        "median_seconds": 847.0,
+        "min_seconds": 847.0,
+        "p90_seconds": 847.0
+      },
       "insufficiency_reasons": [
         "diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed"
       ],
@@ -996,6 +1245,13 @@
         "review_pass_rate": null,
         "verification_pass_rate": 0.0
       },
+      "successful_task_latency": {
+        "max_seconds": null,
+        "mean_seconds": null,
+        "median_seconds": null,
+        "min_seconds": null,
+        "p90_seconds": null
+      },
       "task_class": "refactor",
       "terminal_latency": {
         "max_seconds": 847.0,
@@ -1012,18 +1268,18 @@
   "exclusions": {
     "by_reason": {
       "cancelled": 9,
-      "evaluation_smoke": 2,
+      "evaluation_smoke": 4,
       "malformed_inconsistent_timeline": 10,
       "non_native_agent_mode": 2,
       "non_temporal_runtime": 81
     },
-    "excluded_tasks_count": 104,
-    "included_tasks_count": 288,
-    "total_tasks_scanned": 392
+    "excluded_tasks_count": 106,
+    "included_tasks_count": 328,
+    "total_tasks_scanned": 434
   },
-  "generated_at": "2026-09-18T21:38:53.381299Z",
+  "generated_at": "2026-09-19T23:37:38.850574Z",
   "policy": {
-    "as_of": "2026-09-18T21:08:09Z",
+    "as_of": "2026-09-19T21:32:22.562107Z",
     "confidence_level": 0.95,
     "enabled_profiles": [
       "codex-native-executor",
@@ -1075,8 +1331,8 @@
     "lookback_days": 90,
     "min_samples": 10,
     "schema_version": 2,
-    "window_end_at": "2026-09-18T21:08:09Z",
-    "window_start_at": "2026-06-20T21:08:09Z"
+    "window_end_at": "2026-09-19T21:32:22.562107Z",
+    "window_start_at": "2026-06-21T21:32:22.562107Z"
   },
   "profile_coverage": [
     {
@@ -1091,7 +1347,7 @@
       "is_eligible": false,
       "mutation_mode": "read_only",
       "profile": "codex-native-executor-read-only",
-      "sample_size": 87
+      "sample_size": 107
     },
     {
       "has_evidence": true,
@@ -1105,7 +1361,7 @@
       "is_eligible": false,
       "mutation_mode": "read_only",
       "profile": "antigravity-native-executor-read-only",
-      "sample_size": 80
+      "sample_size": 100
     }
   ],
   "recommendations": [
@@ -1116,7 +1372,8 @@
         {
           "accepted_count": 1,
           "accepted_rate_wilson_lower": 0.0945,
-          "evidence_age_days": 13.2,
+          "evidence_age_days": 14.2,
+          "failure_median_latency_seconds": 5.03,
           "insufficiency_reasons": [
             "diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed"
           ],
@@ -1126,12 +1383,14 @@
           "oldest_evidence_timestamp": "2026-08-05T21:42:12.242704Z",
           "profile": "antigravity-native-executor",
           "rank": null,
-          "sample_size": 2
+          "sample_size": 2,
+          "successful_median_latency_seconds": 87.27
         },
         {
           "accepted_count": 4,
           "accepted_rate_wilson_lower": 0.3755,
-          "evidence_age_days": 13.2,
+          "evidence_age_days": 14.2,
+          "failure_median_latency_seconds": 350.99,
           "insufficiency_reasons": [
             "diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed"
           ],
@@ -1141,7 +1400,8 @@
           "oldest_evidence_timestamp": "2026-09-05T13:10:07.423833Z",
           "profile": "codex-native-executor",
           "rank": null,
-          "sample_size": 5
+          "sample_size": 5,
+          "successful_median_latency_seconds": 436.56
         }
       ],
       "recommended_profile": null,
@@ -1154,7 +1414,8 @@
         {
           "accepted_count": 2,
           "accepted_rate_wilson_lower": 0.3424,
-          "evidence_age_days": 44.1,
+          "evidence_age_days": 45.1,
+          "failure_median_latency_seconds": null,
           "insufficiency_reasons": [
             "diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed"
           ],
@@ -1164,12 +1425,14 @@
           "oldest_evidence_timestamp": "2026-07-26T21:39:42.548252Z",
           "profile": "antigravity-native-executor",
           "rank": null,
-          "sample_size": 2
+          "sample_size": 2,
+          "successful_median_latency_seconds": 70.37
         },
         {
           "accepted_count": 3,
           "accepted_rate_wilson_lower": 0.4385,
-          "evidence_age_days": 44.1,
+          "evidence_age_days": 45.1,
+          "failure_median_latency_seconds": null,
           "insufficiency_reasons": [
             "diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed"
           ],
@@ -1179,7 +1442,8 @@
           "oldest_evidence_timestamp": "2026-08-05T18:59:06.942689Z",
           "profile": "codex-native-executor",
           "rank": null,
-          "sample_size": 3
+          "sample_size": 3,
+          "successful_median_latency_seconds": 266.27
         }
       ],
       "recommended_profile": null,
@@ -1192,7 +1456,8 @@
         {
           "accepted_count": 23,
           "accepted_rate_wilson_lower": 0.4472,
-          "evidence_age_days": 0.0,
+          "evidence_age_days": 1.0,
+          "failure_median_latency_seconds": 4.86,
           "insufficiency_reasons": [
             "diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed"
           ],
@@ -1202,12 +1467,14 @@
           "oldest_evidence_timestamp": "2026-07-21T19:49:54.708077Z",
           "profile": "antigravity-native-executor-read-only",
           "rank": null,
-          "sample_size": 38
+          "sample_size": 38,
+          "successful_median_latency_seconds": 128.09
         },
         {
           "accepted_count": 18,
           "accepted_rate_wilson_lower": 0.3248,
-          "evidence_age_days": 0.0,
+          "evidence_age_days": 1.0,
+          "failure_median_latency_seconds": 20.58,
           "insufficiency_reasons": [
             "diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed"
           ],
@@ -1217,7 +1484,8 @@
           "oldest_evidence_timestamp": "2026-07-21T22:12:59.347804Z",
           "profile": "codex-native-executor-read-only",
           "rank": null,
-          "sample_size": 38
+          "sample_size": 38,
+          "successful_median_latency_seconds": 200.61
         }
       ],
       "recommended_profile": null,
@@ -1230,7 +1498,8 @@
         {
           "accepted_count": 58,
           "accepted_rate_wilson_lower": 0.6773,
-          "evidence_age_days": 3.0,
+          "evidence_age_days": 4.0,
+          "failure_median_latency_seconds": 3.1,
           "insufficiency_reasons": [
             "diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed"
           ],
@@ -1240,12 +1509,14 @@
           "oldest_evidence_timestamp": "2026-07-13T17:49:32.338269Z",
           "profile": "antigravity-native-executor",
           "rank": null,
-          "sample_size": 74
+          "sample_size": 74,
+          "successful_median_latency_seconds": 50.49
         },
         {
           "accepted_count": 16,
           "accepted_rate_wilson_lower": 0.4452,
-          "evidence_age_days": 3.2,
+          "evidence_age_days": 4.2,
+          "failure_median_latency_seconds": 12.67,
           "insufficiency_reasons": [
             "diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed"
           ],
@@ -1255,7 +1526,8 @@
           "oldest_evidence_timestamp": "2026-07-13T18:34:11.422912Z",
           "profile": "codex-native-executor",
           "rank": null,
-          "sample_size": 25
+          "sample_size": 25,
+          "successful_median_latency_seconds": 116.51
         }
       ],
       "recommended_profile": null,
@@ -1266,34 +1538,38 @@
       "mutation_mode": "read_only",
       "rankings": [
         {
-          "accepted_count": 19,
-          "accepted_rate_wilson_lower": 0.4551,
-          "evidence_age_days": 1.0,
+          "accepted_count": 24,
+          "accepted_rate_wilson_lower": 0.446,
+          "evidence_age_days": 0.0,
+          "failure_median_latency_seconds": 5.0,
           "insufficiency_reasons": [
             "diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed"
           ],
           "is_eligible": false,
           "median_latency_seconds": 38.11,
-          "newest_evidence_timestamp": "2026-09-17T20:01:06.852894Z",
+          "newest_evidence_timestamp": "2026-09-19T21:32:22.559768Z",
           "oldest_evidence_timestamp": "2026-08-05T18:50:51.197540Z",
           "profile": "antigravity-native-executor-read-only",
           "rank": null,
-          "sample_size": 30
+          "sample_size": 40,
+          "successful_median_latency_seconds": 160.67
         },
         {
-          "accepted_count": 24,
-          "accepted_rate_wilson_lower": 0.5383,
-          "evidence_age_days": 13.3,
+          "accepted_count": 29,
+          "accepted_rate_wilson_lower": 0.5114,
+          "evidence_age_days": 0.0,
+          "failure_median_latency_seconds": 281.56,
           "insufficiency_reasons": [
             "diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed"
           ],
           "is_eligible": false,
-          "median_latency_seconds": 153.95,
-          "newest_evidence_timestamp": "2026-09-05T15:05:38.461409Z",
+          "median_latency_seconds": 199.64,
+          "newest_evidence_timestamp": "2026-09-19T21:31:54.369846Z",
           "oldest_evidence_timestamp": "2026-08-01T22:58:59.627686Z",
           "profile": "codex-native-executor-read-only",
           "rank": null,
-          "sample_size": 34
+          "sample_size": 44,
+          "successful_median_latency_seconds": 178.55
         }
       ],
       "recommended_profile": null,
@@ -1307,6 +1583,7 @@
           "accepted_count": 0,
           "accepted_rate_wilson_lower": 0.0,
           "evidence_age_days": null,
+          "failure_median_latency_seconds": null,
           "insufficiency_reasons": [
             "diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed"
           ],
@@ -1316,12 +1593,14 @@
           "oldest_evidence_timestamp": null,
           "profile": "antigravity-native-executor",
           "rank": null,
-          "sample_size": 0
+          "sample_size": 0,
+          "successful_median_latency_seconds": null
         },
         {
           "accepted_count": 3,
           "accepted_rate_wilson_lower": 0.3006,
-          "evidence_age_days": 13.3,
+          "evidence_age_days": 14.3,
+          "failure_median_latency_seconds": 534.42,
           "insufficiency_reasons": [
             "diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed"
           ],
@@ -1331,7 +1610,8 @@
           "oldest_evidence_timestamp": "2026-09-05T12:13:02.386308Z",
           "profile": "codex-native-executor",
           "rank": null,
-          "sample_size": 4
+          "sample_size": 4,
+          "successful_median_latency_seconds": 244.05
         }
       ],
       "recommended_profile": null,
@@ -1342,34 +1622,38 @@
       "mutation_mode": "read_only",
       "rankings": [
         {
-          "accepted_count": 9,
-          "accepted_rate_wilson_lower": 0.4677,
-          "evidence_age_days": 1.1,
+          "accepted_count": 14,
+          "accepted_rate_wilson_lower": 0.4295,
+          "evidence_age_days": 0.0,
+          "failure_median_latency_seconds": 35.11,
           "insufficiency_reasons": [
             "diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed"
           ],
           "is_eligible": false,
-          "median_latency_seconds": 78.75,
-          "newest_evidence_timestamp": "2026-09-17T19:29:10.942689Z",
+          "median_latency_seconds": 81.39,
+          "newest_evidence_timestamp": "2026-09-19T21:14:40.957347Z",
           "oldest_evidence_timestamp": "2026-08-14T21:51:38.160034Z",
           "profile": "antigravity-native-executor-read-only",
           "rank": null,
-          "sample_size": 12
+          "sample_size": 22,
+          "successful_median_latency_seconds": 95.83
         },
         {
-          "accepted_count": 15,
-          "accepted_rate_wilson_lower": 0.7961,
-          "evidence_age_days": 13.2,
+          "accepted_count": 18,
+          "accepted_rate_wilson_lower": 0.5242,
+          "evidence_age_days": 0.0,
+          "failure_median_latency_seconds": 759.99,
           "insufficiency_reasons": [
             "diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed"
           ],
           "is_eligible": false,
-          "median_latency_seconds": 136.86,
-          "newest_evidence_timestamp": "2026-09-05T15:32:54.671949Z",
+          "median_latency_seconds": 261.63,
+          "newest_evidence_timestamp": "2026-09-19T21:27:12.398801Z",
           "oldest_evidence_timestamp": "2026-08-13T19:22:11.807940Z",
           "profile": "codex-native-executor-read-only",
           "rank": null,
-          "sample_size": 15
+          "sample_size": 25,
+          "successful_median_latency_seconds": 170.89
         }
       ],
       "recommended_profile": null,
@@ -1382,7 +1666,8 @@
         {
           "accepted_count": 5,
           "accepted_rate_wilson_lower": 0.5655,
-          "evidence_age_days": 44.0,
+          "evidence_age_days": 45.0,
+          "failure_median_latency_seconds": null,
           "insufficiency_reasons": [
             "diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed"
           ],
@@ -1392,12 +1677,14 @@
           "oldest_evidence_timestamp": "2026-08-05T20:27:49.997709Z",
           "profile": "antigravity-native-executor",
           "rank": null,
-          "sample_size": 5
+          "sample_size": 5,
+          "successful_median_latency_seconds": 73.46
         },
         {
           "accepted_count": 0,
           "accepted_rate_wilson_lower": 0.0,
           "evidence_age_days": null,
+          "failure_median_latency_seconds": null,
           "insufficiency_reasons": [
             "diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed"
           ],
@@ -1407,7 +1694,8 @@
           "oldest_evidence_timestamp": null,
           "profile": "codex-native-executor",
           "rank": null,
-          "sample_size": 0
+          "sample_size": 0,
+          "successful_median_latency_seconds": null
         }
       ],
       "recommended_profile": null,
@@ -1421,6 +1709,7 @@
           "accepted_count": 0,
           "accepted_rate_wilson_lower": 0.0,
           "evidence_age_days": null,
+          "failure_median_latency_seconds": null,
           "insufficiency_reasons": [
             "diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed"
           ],
@@ -1430,12 +1719,14 @@
           "oldest_evidence_timestamp": null,
           "profile": "antigravity-native-executor",
           "rank": null,
-          "sample_size": 0
+          "sample_size": 0,
+          "successful_median_latency_seconds": null
         },
         {
           "accepted_count": 0,
           "accepted_rate_wilson_lower": 0.0,
-          "evidence_age_days": 13.2,
+          "evidence_age_days": 14.2,
+          "failure_median_latency_seconds": 847.0,
           "insufficiency_reasons": [
             "diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed"
           ],
@@ -1445,7 +1736,8 @@
           "oldest_evidence_timestamp": "2026-09-05T15:58:32.123268Z",
           "profile": "codex-native-executor",
           "rank": null,
-          "sample_size": 1
+          "sample_size": 1,
+          "successful_median_latency_seconds": null
         }
       ],
       "recommended_profile": null,

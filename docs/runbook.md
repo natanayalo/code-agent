@@ -683,8 +683,14 @@ export DATABASE_URL="postgresql+psycopg://..."
   valid empirical evidence but tracked and reported separately.
 - **Candidate ranking**: Eligible candidates are ranked by:
   1. Accepted task rate Wilson 95% confidence interval lower bound (descending).
-  2. Median time to terminal in seconds (ascending).
+  2. Median successful-task latency in seconds (ascending; failed-task latency is
+     reported separately and is not used as the reliability tie-breaker).
   3. Profile name (ascending) for deterministic tie-breaking.
+- **Latency interpretation**: The report retains median terminal latency as an
+  end-to-end operational metric and separately reports successful-task and
+  failure-task latency. Acceptance is terminal task completion; verification
+  pass rate is a strict independent stage metric, so a completed task may carry
+  a verification warning and still count as accepted.
 - **Actionable recommendation fallbacks**: A recommendation is emitted only when
   at least two eligible compatible profiles exist for a given `(task_class, mutation_mode)`.
   If fewer than two eligible candidates exist, `recommended_profile` remains `None`
@@ -725,9 +731,9 @@ export DATABASE_URL="postgresql+psycopg://..."
 
 - **Window variation**: Evaluates candidate recommendations across 30, 60, and 90-day lookback windows (`[as_of-30d, as_of]`, `[as_of-60d, as_of]`, `[as_of-90d, as_of]`) to detect sample-sparsity fallbacks and ranking changes over time.
 - **Temporal split-half cohorts**: Partitions tasks into non-overlapping historical `[as_of-90d, as_of-45d)` and recent `[as_of-45d, as_of]` cohorts to test for temporal drift in provider capability with zero overlap at the 45-day boundary. If the historical cohort has zero tasks, the report status is marked `partial`.
-- **Deterministic bootstrap resampling**: Runs 10,000 bootstrap iterations with seed 29. Whole task observations are resampled independently within each eligible candidate profile cell, preserving sample sizes and the empirical correlation between acceptance and latency.
+- **Deterministic bootstrap resampling**: Runs 10,000 bootstrap iterations with seed 29. Whole task observations are resampled independently within each eligible candidate profile cell; successful-task latency is the ranking tie-break and failed-task latency is not used to reward fast failures. The committed Wave 3 paired supplement additionally resamples complete topic pairs.
 - **Stable per-group seeding**: The base seed is combined with `(task_class, mutation_mode)` via SHA-256 digest to ensure deterministic reproducibility per candidate pool regardless of execution order.
-- **Ranking parity**: Candidate ranking strictly matches production: Wilson 95% confidence interval lower bound (descending), median latency in seconds (ascending, missing latency treated as infinite), and profile name (ascending).
+- **Ranking parity**: Candidate ranking uses the advisory contract: Wilson 95% confidence interval lower bound (descending), median successful-task latency in seconds (ascending, missing latency treated as infinite), and profile name (ascending). Median terminal latency remains an operational metric.
 - **Eligibility gating & descriptive reporting**: Bootstrap is executed only when at least two profiles meet the sample floor; otherwise an explicit `insufficient_data` result with fallback reason is emitted. Winner counts, probabilities, and rank distributions are reported descriptively without automated "safe to route" thresholds.
 - **Exclusion accounting**: Root exclusions describe the full 90-day observation snapshot scanned from the database.
 - **Public data boundary**: Generated JSON and Markdown artifacts are validated by `assert_sanitized_robustness_report()` to ensure zero leak of task IDs, user prompt text, repositories, branch names, logs, artifacts, or secrets.
@@ -761,11 +767,87 @@ The M29 live evidence wave harness (`scripts/e2e/run_m29_evidence_wave.py`) mana
   --branch master \
   --timeout-seconds 900 \
   --preflight-smoke
+
+# Wave 3: 40 read-only cases (20 investigation + 20 feature, 10 per provider/cell)
+.venv/bin/python scripts/e2e/run_m29_evidence_wave.py init \
+  --bundle-dir artifacts/m29_evidence_bundle_wave3 \
+  --suite-path evaluation/m29_live_provider_suite_wave3.json \
+  --build-sha "$(git rev-parse HEAD)" \
+  --target-repository-revision "$(git rev-parse origin/master)" \
+  --ack-live-read-only-evidence
+
+.venv/bin/python scripts/e2e/run_m29_evidence_wave.py status \
+  --bundle-dir artifacts/m29_evidence_bundle_wave3 \
+  --suite-path evaluation/m29_live_provider_suite_wave3.json
+
+.venv/bin/python scripts/e2e/run_m29_evidence_wave.py run-batch \
+  --bundle-dir artifacts/m29_evidence_bundle_wave3 \
+  --suite-path evaluation/m29_live_provider_suite_wave3.json \
+  --repo-key code-agent \
+  --branch master \
+  --timeout-seconds 900
+```
+
+After the final case reaches a terminal state, use the bundle's latest
+`terminal_at` value as one frozen `--as-of` timestamp for all three report
+commands. The repository `.env` may point `DATABASE_URL` at the local SQLite
+test database; report generation must instead use the live Compose PostgreSQL
+URL (with the values from `.env`):
+
+```bash
+# Load the Compose values explicitly; the repository .env may point DATABASE_URL at SQLite.
+set -a
+. ./.env
+set +a
+LIVE_DATABASE_URL="$(
+  .venv/bin/python -c 'import os; from urllib.parse import quote; print("postgresql+psycopg://" + quote(os.environ["POSTGRES_USER"], safe="") + ":" + quote(os.environ["POSTGRES_PASSWORD"], safe="") + "@127.0.0.1:5432/" + quote(os.environ["POSTGRES_DB"], safe=""))'
+)"
+# Validate the resolved URL before generating any report.
+DATABASE_URL="$LIVE_DATABASE_URL" .venv/bin/python -c 'import os; from sqlalchemy import create_engine, text; engine=create_engine(os.environ["DATABASE_URL"]); connection=engine.connect(); assert connection.execute(text("SELECT 1")).scalar_one() == 1; connection.close(); engine.dispose()'
+AS_OF="<last terminal_at from bundle.json>"
+
+DATABASE_URL="$LIVE_DATABASE_URL" .venv/bin/python scripts/e2e/run_provider_reliability_report.py \
+  --database-url-env DATABASE_URL --evidence-scope current_execution_cohort \
+  --lookback-days 90 --min-samples 10 --as-of "$AS_OF" \
+  --json-output evaluation/m29_provider_reliability_report.json \
+  --markdown-output evaluation/m29_provider_reliability_report.md
+
+DATABASE_URL="$LIVE_DATABASE_URL" .venv/bin/python scripts/e2e/run_provider_reliability_report.py \
+  --database-url-env DATABASE_URL --evidence-scope operational \
+  --lookback-days 90 --min-samples 10 --as-of "$AS_OF" \
+  --json-output evaluation/m29_provider_reliability_operational_report.json \
+  --markdown-output evaluation/m29_provider_reliability_operational_report.md
+
+DATABASE_URL="$LIVE_DATABASE_URL" .venv/bin/python scripts/e2e/run_provider_reliability_robustness.py \
+  --database-url-env DATABASE_URL \
+  --lookback-days 90 --min-samples 10 --as-of "$AS_OF" \
+  --bootstrap-iterations 10000 --bootstrap-seed 29 \
+  --json-output evaluation/m29_provider_reliability_robustness_report.json \
+  --markdown-output evaluation/m29_provider_reliability_robustness_report.md
+
+DATABASE_URL="$LIVE_DATABASE_URL" \
+  .venv/bin/python scripts/e2e/build_m29_wave3_manifest.py \
+  --bundle-dir artifacts/m29_evidence_bundle_wave3 \
+  --suite evaluation/m29_live_provider_suite_wave3.json \
+  --database-url-env DATABASE_URL \
+  --advisory-report evaluation/m29_provider_reliability_report.json \
+  --operational-report evaluation/m29_provider_reliability_operational_report.json \
+  --robustness-report evaluation/m29_provider_reliability_robustness_report.json \
+  --as-of "$AS_OF" \
+  --output evaluation/m29_provider_reliability_wave3_manifest.json
+
+.venv/bin/python scripts/e2e/run_m29_wave3_paired_analysis.py \
+  --manifest evaluation/m29_provider_reliability_wave3_manifest.json \
+  --iterations 10000 --seed 29 \
+  --json-output evaluation/m29_provider_reliability_wave3_paired_analysis.json \
+  --markdown-output evaluation/m29_provider_reliability_wave3_paired_analysis.md
 ```
 
 #### Bundles and Diagnostic Baselines
 - **Wave 1 Diagnostic Baseline**: `evaluation/m29_live_provider_suite.json` (28 tasks across investigation, feature, and docs), preserved immutably at `artifacts/m29_evidence_bundle_wave1_diagnostic/bundle.json`. Captures the historical `gpt-5.4-mini` retirement event.
 - **Wave 2 Live Evidence**: `evaluation/m29_live_provider_suite_wave2.json` (20 docs tasks across 10 balanced pairs), tracked at `artifacts/m29_evidence_bundle_wave2/bundle.json`. Powered to meet the canonical sample floor ($N=10$ vs $10$).
+- **Wave 3 Live Evidence**: `evaluation/m29_live_provider_suite_wave3.json` (40 read-only tasks across 20 balanced investigation/feature pairs), tracked privately at `artifacts/m29_evidence_bundle_wave3/bundle.json`. The ignored bundle pins the harness build and target repository revision, and preserves terminal outcomes without reruns.
+- **Wave 3 observed result**: all 40 cases reached immutable terminal outcomes (18 completed, 22 failed), with zero changed files and no interaction or runtime gate failures. The canonical report qualifies `feature/read_only` at 10 samples per provider using successful-task latency for ties; `investigation/read_only` remains below the sample floor after fail-closed authoritative identity filtering. The committed sanitized manifest and paired supplement bind case outcomes to the frozen suite, build, and report hashes without publishing task IDs or raw outputs.
 
 #### Invariants & failure semantics
 - **Strict Read-Only Delivery**: All evidence cases enforce `delivery_mode=summary`, low risk, read-only mode, and zero changed files.

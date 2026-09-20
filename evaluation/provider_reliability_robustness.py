@@ -82,7 +82,7 @@ def _run_bootstrap_iterations(
     confidence_level: float,
     rng: random.Random,
 ) -> tuple[dict[str, int], dict[str, dict[str, int]]]:
-    """Run bootstrap resampling iterations across eligible candidate profiles."""
+    """Run bootstrap iterations using successful-task latency as the tie-break metric."""
     win_counts = {p: 0 for p in eligible_profiles}
     rank_counts = {
         p: {str(r): 0 for r in range(1, len(eligible_profiles) + 1)} for p in eligible_profiles
@@ -138,7 +138,8 @@ def run_group_bootstrap(
     group_seed = _derive_group_seed(seed, task_class, mutation_mode)
     rng = random.Random(group_seed)
     profile_obs = {
-        p: [(t.accepted, t.duration_seconds) for t in profile_tasks[p]] for p in eligible_profiles
+        p: [(t.accepted, t.duration_seconds if t.accepted else None) for t in profile_tasks[p]]
+        for p in eligible_profiles
     }
 
     win_counts, rank_counts = _run_bootstrap_iterations(

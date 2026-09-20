@@ -111,6 +111,8 @@ def check_verification_stage(task: Task, runs: list[WorkerRun]) -> tuple[bool, b
             return True, True
         if p.get("status") in ("failed", "failure"):
             return True, False
+        if p.get("status") == "warning":
+            return True, False
 
     for r in reversed(runs):
         outcome = r.verifier_outcome or {}

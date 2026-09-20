@@ -38,6 +38,8 @@ def _build_candidate_ranking(
             is_eligible=False,
             accepted_rate_wilson_lower=cell.accepted_task_rate_ci.lower,
             median_latency_seconds=cell.terminal_latency.median_seconds,
+            successful_median_latency_seconds=cell.successful_task_latency.median_seconds,
+            failure_median_latency_seconds=cell.failure_task_latency.median_seconds,
             rank=None,
             insufficiency_reasons=reasons,
             sample_size=cell.sample_size,
@@ -51,6 +53,8 @@ def _build_candidate_ranking(
         is_eligible=cell.is_eligible,
         accepted_rate_wilson_lower=cell.accepted_task_rate_ci.lower,
         median_latency_seconds=cell.terminal_latency.median_seconds,
+        successful_median_latency_seconds=cell.successful_task_latency.median_seconds,
+        failure_median_latency_seconds=cell.failure_task_latency.median_seconds,
         rank=rank,
         insufficiency_reasons=list(cell.insufficiency_reasons) if not cell.is_eligible else [],
         sample_size=cell.sample_size,
@@ -64,6 +68,8 @@ def _build_candidate_ranking(
 def _resolve_recommendation(
     eligible: list[ProviderReliabilityEvidenceCell],
 ) -> tuple[str | None, str | None]:
+    if eligible and all(candidate.accepted_count == 0 for candidate in eligible):
+        return None, "no_successful_candidates: all eligible candidates have zero accepted tasks"
     if len(eligible) >= 2:
         return eligible[0].profile, None
     if len(eligible) == 1:
@@ -117,8 +123,8 @@ def generate_recommendations(
         eligible.sort(
             key=lambda item: (
                 -item.accepted_task_rate_ci.lower,
-                item.terminal_latency.median_seconds
-                if item.terminal_latency.median_seconds is not None
+                item.successful_task_latency.median_seconds
+                if item.successful_task_latency.median_seconds is not None
                 else float("inf"),
                 item.profile,
             )

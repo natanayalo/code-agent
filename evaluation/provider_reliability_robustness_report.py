@@ -99,6 +99,8 @@ ROBUSTNESS_ALLOWED_KEYS_BY_LEVEL: dict[str, frozenset[str]] = {
             "is_eligible",
             "accepted_rate_wilson_lower",
             "median_latency_seconds",
+            "successful_median_latency_seconds",
+            "failure_median_latency_seconds",
             "rank",
             "insufficiency_reasons",
             "sample_size",
@@ -411,7 +413,9 @@ def _render_bootstrap_section(report: ProviderReliabilityRobustnessReport) -> li
         (
             f"Evaluates {iter_str} deterministic bootstrap iterations "
             f"(seed {report.policy.bootstrap_seed}) resampling whole task observations "
-            "independently per profile cell to preserve acceptance and latency correlation. "
+            "independently per profile cell. Successful-task latency is the ranking tie-break "
+            "metric; failure latency remains an operational metric in the canonical report. "
+            "A separate Wave 3 paired supplement preserves topic-pair membership. "
             "Advisory-only descriptive results; no automated routing threshold is applied."
         ),
         "",

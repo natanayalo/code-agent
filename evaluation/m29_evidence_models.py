@@ -18,6 +18,10 @@ INVESTIGATION_CASES = 2
 FEATURE_CASES = 10
 DOCS_PAIRED_TOPICS = 8
 DOCS_CASES = DOCS_PAIRED_TOPICS * 2
+WAVE2_CASES = 20
+WAVE2_PAIRED_TOPICS = 10
+WAVE3_CASES = 40
+WAVE3_PAIRED_TOPICS = 10
 
 
 class StrictModel(BaseModel):
@@ -39,30 +43,44 @@ class M29EvidenceCase(StrictModel):
     pair_order: int | None = Field(default=None, ge=1, le=2)
 
 
-def _validate_paired_groups(docs_cases: list[M29EvidenceCase], expected_pairs: int) -> None:
-    """Validate paired docs groups contain alternating providers."""
+def _validate_paired_groups(
+    cases: list[M29EvidenceCase], expected_pairs: int, task_class: str
+) -> None:
+    """Validate paired cases contain matching prompts and alternating providers."""
     paired_groups: dict[str, list[M29EvidenceCase]] = {}
-    for c in docs_cases:
+    for c in cases:
         if not c.pair_group:
-            raise ValueError(f"docs case {c.case_id} is missing pair_group")
+            raise ValueError(f"{task_class} case {c.case_id} is missing pair_group")
         paired_groups.setdefault(c.pair_group, []).append(c)
 
     if len(paired_groups) != expected_pairs:
-        raise ValueError(f"expected {expected_pairs} docs pair groups, got {len(paired_groups)}")
+        raise ValueError(
+            f"expected {expected_pairs} {task_class} pair groups, got {len(paired_groups)}"
+        )
 
     last_first_provider: str | None = None
     for group_name, group_cases in paired_groups.items():
         if len(group_cases) != 2:
             raise ValueError(
-                f"pair group '{group_name}' must contain exactly 2 cases, got {len(group_cases)}"
+                f"{task_class} pair group '{group_name}' must contain exactly 2 cases, "
+                f"got {len(group_cases)}"
             )
+        pair_orders = {gc.pair_order for gc in group_cases}
+        if pair_orders != {1, 2}:
+            raise ValueError(f"pair group '{group_name}' must use pair_order values 1 and 2")
+        if (
+            len({gc.topic for gc in group_cases}) != 1
+            or len({gc.prompt for gc in group_cases}) != 1
+        ):
+            raise ValueError(f"pair group '{group_name}' must match topic and prompt")
         profiles = {gc.worker_profile for gc in group_cases}
         if profiles != {
             "antigravity-native-executor-read-only",
             "codex-native-executor-read-only",
         }:
             raise ValueError(
-                f"pair group '{group_name}' must have one antigravity and one codex case"
+                f"{task_class} pair group '{group_name}' must have one antigravity "
+                "and one codex case"
             )
         sorted_cases = sorted(group_cases, key=lambda c: c.pair_order or 0)
         first_provider = sorted_cases[0].worker_profile
@@ -75,9 +93,13 @@ def _validate_paired_groups(docs_cases: list[M29EvidenceCase], expected_pairs: i
 
 
 class M29EvidenceSuite(StrictModel):
-    """The frozen M29 live provider evidence suite (Wave 1: 28 cases; Wave 2: 20 cases)."""
+    """Frozen M29 live provider evidence suites for read-only waves."""
 
-    suite_name: Literal["m29-live-provider-evidence", "m29-live-provider-evidence-wave2"]
+    suite_name: Literal[
+        "m29-live-provider-evidence",
+        "m29-live-provider-evidence-wave2",
+        "m29-live-provider-evidence-wave3",
+    ]
     schema_version: Literal[1] = 1
     cases: list[M29EvidenceCase]
 
@@ -114,19 +136,39 @@ class M29EvidenceSuite(StrictModel):
             if len(docs_cases) != DOCS_CASES:
                 raise ValueError(f"expected {DOCS_CASES} docs cases, got {len(docs_cases)}")
 
-            _validate_paired_groups(docs_cases, DOCS_PAIRED_TOPICS)
+            _validate_paired_groups(docs_cases, DOCS_PAIRED_TOPICS, "docs")
 
         elif self.suite_name == "m29-live-provider-evidence-wave2":
-            if len(self.cases) != 20:
+            if len(self.cases) != WAVE2_CASES:
                 raise ValueError(
-                    f"Wave 2 suite must contain exactly 20 cases, got {len(self.cases)}"
+                    f"Wave 2 suite must contain exactly {WAVE2_CASES} cases, got {len(self.cases)}"
                 )
             docs_cases = [c for c in self.cases if c.task_class == "docs"]
-            if len(docs_cases) != 20:
+            if len(docs_cases) != WAVE2_CASES:
                 raise ValueError(
                     f"Wave 2 suite must contain only docs cases, got {len(docs_cases)}"
                 )
-            _validate_paired_groups(docs_cases, 10)
+            _validate_paired_groups(docs_cases, WAVE2_PAIRED_TOPICS, "docs")
+
+        elif self.suite_name == "m29-live-provider-evidence-wave3":
+            if len(self.cases) != WAVE3_CASES:
+                raise ValueError(
+                    f"Wave 3 suite must contain exactly {WAVE3_CASES} cases, got {len(self.cases)}"
+                )
+            investigation_cases = [c for c in self.cases if c.task_class == "investigation"]
+            feature_cases = [c for c in self.cases if c.task_class == "feature"]
+            if len(investigation_cases) != WAVE3_PAIRED_TOPICS * 2:
+                raise ValueError(
+                    "Wave 3 suite must contain exactly 20 investigation cases, "
+                    f"got {len(investigation_cases)}"
+                )
+            if len(feature_cases) != WAVE3_PAIRED_TOPICS * 2:
+                raise ValueError(
+                    "Wave 3 suite must contain exactly 20 feature cases, "
+                    f"got {len(feature_cases)}"
+                )
+            _validate_paired_groups(investigation_cases, WAVE3_PAIRED_TOPICS, "investigation")
+            _validate_paired_groups(feature_cases, WAVE3_PAIRED_TOPICS, "feature")
 
         return self
 
