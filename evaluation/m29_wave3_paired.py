@@ -6,11 +6,16 @@ import hashlib
 import json
 import random
 import statistics
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from evaluation.provider_reliability_models import (
+    DEFAULT_EXPECTED_EXECUTION_IDENTITIES,
+    ProviderReliabilityReport,
+    ReliabilityReportPolicy,
+)
 from evaluation.provider_reliability_report import UNSAFE_VALUE_SUBSTRINGS
 
 
@@ -324,8 +329,51 @@ def build_paired_report(
     )
 
 
-def assert_manifest_matches_report(manifest: Wave3Manifest, report: object) -> None:
-    """Reconcile Wave 3 case inclusion and acceptance with canonical report cells."""
+def _validate_manifest_report_policy(
+    manifest: Wave3Manifest, report: ProviderReliabilityReport
+) -> None:
+    """Require the canonical report to use the Wave 3 extraction policy."""
+    expected_policy = ReliabilityReportPolicy(
+        as_of=manifest.as_of,
+        window_start_at=manifest.as_of - timedelta(days=90),
+        window_end_at=manifest.as_of,
+        min_samples=10,
+        evidence_scope="current_execution_cohort",
+    )
+    policy = report.policy
+    if policy.as_of != expected_policy.as_of:
+        raise ValueError(
+            f"canonical report policy as_of {policy.as_of.isoformat()} does not match "
+            f"manifest as_of {manifest.as_of.isoformat()}"
+        )
+    if policy.evidence_scope != expected_policy.evidence_scope:
+        raise ValueError(
+            f"canonical report evidence scope {policy.evidence_scope!r} does not match "
+            f"{expected_policy.evidence_scope!r}"
+        )
+    if policy.min_samples != expected_policy.min_samples:
+        raise ValueError(
+            f"canonical report sample floor {policy.min_samples} does not match "
+            f"{expected_policy.min_samples}"
+        )
+    if policy.lookback_days != expected_policy.lookback_days:
+        raise ValueError(
+            f"canonical report lookback {policy.lookback_days} does not match "
+            f"{expected_policy.lookback_days}"
+        )
+    if policy.window_start_at != expected_policy.window_start_at:
+        raise ValueError("canonical report policy window start does not match manifest")
+    if policy.window_end_at != expected_policy.window_end_at:
+        raise ValueError("canonical report policy window end does not match manifest")
+    if policy.expected_execution_identities != DEFAULT_EXPECTED_EXECUTION_IDENTITIES:
+        raise ValueError("canonical report execution identities do not match the Wave 3 policy")
+
+
+def assert_manifest_matches_report(
+    manifest: Wave3Manifest, report: ProviderReliabilityReport
+) -> None:
+    """Reconcile Wave 3 inclusion and acceptance with canonical report cells."""
+    _validate_manifest_report_policy(manifest, report)
     cells = {
         (cell.task_class, cell.profile, cell.mutation_mode): cell for cell in report.evidence_cells
     }
@@ -340,19 +388,22 @@ def assert_manifest_matches_report(manifest: Wave3Manifest, report: object) -> N
             cell = cells.get((task_class, profile, "read_only"))
             if cell is None:
                 raise ValueError(f"canonical report is missing Wave 3 cell {task_class}/{profile}")
-            included = sum(case.identity_matches for case in group)
-            accepted = sum(case.identity_matches and case.accepted for case in group)
-            excluded = len(group) - included
+            included_cases = [case for case in group if case.exclusion_reason is None]
+            if any(
+                case.execution_identity_status != "verified" or not case.identity_matches
+                for case in included_cases
+            ):
+                raise ValueError(
+                    f"manifest includes a case without a verified matching identity in "
+                    f"{task_class}/{profile}"
+                )
+            included = len(included_cases)
+            accepted = sum(case.accepted for case in included_cases)
             if cell.sample_size != included or cell.accepted_count != accepted:
                 raise ValueError(
                     f"manifest/report mismatch for {task_class}/{profile}: "
                     f"manifest included={included}, accepted={accepted}; "
                     f"report sample={cell.sample_size}, accepted={cell.accepted_count}"
-                )
-            if excluded != len(group) - cell.sample_size:
-                raise ValueError(
-                    f"manifest/report exclusion mismatch for {task_class}/{profile}: "
-                    f"manifest excluded={excluded}, report excluded={len(group) - cell.sample_size}"
                 )
 
 

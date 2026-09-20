@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -17,6 +17,7 @@ from evaluation.m29_wave3_paired import (
     assert_manifest_matches_report,
     assert_sanitized_manifest,
 )
+from evaluation.provider_reliability_models import ReliabilityReportPolicy
 from scripts.e2e.build_m29_wave3_manifest import (
     _sha256,
     _validate_bundle_task_consistency,
@@ -102,7 +103,10 @@ def test_manifest_sanitization_rejects_private_keys() -> None:
 
 def test_manifest_reconciles_counts_and_exclusions_with_report_cells() -> None:
     """Keep the public manifest aligned with canonical read-only report cells."""
-    manifest = _manifest()
+    manifest = _manifest().model_copy(deep=True)
+    manifest.cases[30] = manifest.cases[30].model_copy(
+        update={"exclusion_reason": "malformed_inconsistent_timeline"}
+    )
     cells = []
     for task_class in ("investigation", "feature"):
         for provider in ("codex", "antigravity"):
@@ -116,15 +120,70 @@ def test_manifest_reconciles_counts_and_exclusions_with_report_cells() -> None:
                     task_class=task_class,
                     profile=f"{provider}-native-executor-read-only",
                     mutation_mode="read_only",
-                    sample_size=sum(case.identity_matches for case in group),
-                    accepted_count=sum(case.identity_matches and case.accepted for case in group),
+                    sample_size=sum(case.exclusion_reason is None for case in group),
+                    accepted_count=sum(
+                        case.exclusion_reason is None and case.accepted for case in group
+                    ),
                 )
             )
-    assert_manifest_matches_report(manifest, SimpleNamespace(evidence_cells=cells))
+    report = SimpleNamespace(
+        policy=ReliabilityReportPolicy(
+            as_of=manifest.as_of,
+            window_start_at=manifest.as_of - timedelta(days=90),
+            window_end_at=manifest.as_of,
+            min_samples=10,
+            evidence_scope="current_execution_cohort",
+        ),
+        evidence_cells=cells,
+    )
+    assert_manifest_matches_report(manifest, report)
 
     cells[0].sample_size += 1
     with pytest.raises(ValueError, match="manifest/report mismatch"):
-        assert_manifest_matches_report(manifest, SimpleNamespace(evidence_cells=cells))
+        assert_manifest_matches_report(manifest, report)
+
+    invalid = manifest.model_copy(deep=True)
+    invalid.cases[0] = invalid.cases[0].model_copy(
+        update={"execution_identity_status": "unknown_legacy", "identity_matches": False}
+    )
+    with pytest.raises(ValueError, match="verified matching identity"):
+        assert_manifest_matches_report(invalid, report)
+
+
+def test_manifest_rejects_report_policy_drift() -> None:
+    """Prevent a matching aggregate from being bound to a different report policy."""
+    manifest = _manifest()
+    cells = [
+        SimpleNamespace(
+            task_class=task_class,
+            profile=f"{provider}-native-executor-read-only",
+            mutation_mode="read_only",
+            sample_size=sum(
+                case.identity_matches
+                for case in manifest.cases
+                if case.task_class == task_class and case.provider == provider
+            ),
+            accepted_count=sum(
+                case.identity_matches and case.accepted
+                for case in manifest.cases
+                if case.task_class == task_class and case.provider == provider
+            ),
+        )
+        for task_class in ("investigation", "feature")
+        for provider in ("codex", "antigravity")
+    ]
+    report = SimpleNamespace(
+        policy=ReliabilityReportPolicy(
+            as_of=manifest.as_of + timedelta(seconds=1),
+            window_start_at=manifest.as_of - timedelta(days=90) + timedelta(seconds=1),
+            window_end_at=manifest.as_of + timedelta(seconds=1),
+            min_samples=10,
+            evidence_scope="current_execution_cohort",
+        ),
+        evidence_cells=cells,
+    )
+    with pytest.raises(ValueError, match="policy as_of"):
+        assert_manifest_matches_report(manifest, report)
 
 
 def test_manifest_rejects_modified_suite_with_unchanged_case_ids(tmp_path: Path) -> None:
