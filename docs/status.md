@@ -139,6 +139,12 @@ Temporal migration and rollback record is in the
   robustness is `partial` with no historical 45-day split, and M27 resumption
   remains deferred. Production routing is static and unchanged.
 
+- Wave 4 investigation/read-only collection is prepared on branch
+  `task/m29-investigation-read-only-wave4`, but the required preflight smoke
+  stopped before bundle initialization: the Antigravity independent verifier
+  reported an individual quota exhaustion (`infra_verifier_unavailable`). No
+  Wave 4 cases were submitted and no new evidence conclusion is claimed.
+
 ## Known limitations
 
 - bounded fan-out remains an explicit read-only pilot and is disabled by
