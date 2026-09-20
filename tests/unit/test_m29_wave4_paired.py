@@ -49,6 +49,7 @@ def _manifest(*, identity_complete: bool = True) -> Wave4Manifest:
         build_sha="b" * 40,
         target_repository_revision="c" * 40,
         as_of=datetime(2026, 9, 20, tzinfo=UTC),
+        baseline_report_sha256="9" * 64,
         advisory_report_sha256="d" * 64,
         operational_report_sha256="e" * 64,
         robustness_report_sha256="f" * 64,
@@ -110,15 +111,22 @@ def test_manifest_matches_cumulative_report_cells() -> None:
         min_samples=10,
         evidence_scope="current_execution_cohort",
     )
+    recommendation = SimpleNamespace(
+        task_class="investigation",
+        mutation_mode="read_only",
+        recommended_profile="codex-native-executor-read-only",
+    )
     assert_wave4_manifest_matches_report(
-        manifest, SimpleNamespace(policy=policy, evidence_cells=cells)
+        manifest,
+        SimpleNamespace(policy=policy, evidence_cells=cells, recommendations=[recommendation]),
     )
 
     smaller = cells[0]
     smaller.sample_size = 9
-    with pytest.raises(ValueError, match="smaller than Wave 4"):
+    with pytest.raises(ValueError, match="remains unqualified"):
         assert_wave4_manifest_matches_report(
-            manifest, SimpleNamespace(policy=policy, evidence_cells=cells)
+            manifest,
+            SimpleNamespace(policy=policy, evidence_cells=cells, recommendations=[recommendation]),
         )
 
 
@@ -126,3 +134,88 @@ def test_excluded_identity_cases_do_not_enter_paired_bootstrap() -> None:
     analysis = analyze_wave4_manifest(_manifest(identity_complete=False), iterations=100)
     assert analysis.identity_complete_pair_count == 5
     assert analysis.bootstrap.identity_complete_pairs == 5
+
+
+def test_out_of_window_case_is_excluded_from_cohort_pair_statistics() -> None:
+    manifest = _manifest().model_copy(deep=True)
+    manifest.cases[0] = manifest.cases[0].model_copy(update={"exclusion_reason": "outside_window"})
+
+    analysis = analyze_wave4_manifest(manifest, iterations=100)
+
+    assert analysis.identity_complete_pair_count == 9
+    assert analysis.bootstrap.identity_complete_pairs == 9
+    assert analysis.successful_latency_differences.sample_size == 4
+
+
+def test_underpowered_excluded_wave4_cases_remain_unqualified() -> None:
+    manifest = _manifest(identity_complete=False)
+    policy = ReliabilityReportPolicy(
+        as_of=manifest.as_of,
+        window_start_at=manifest.as_of - timedelta(days=90),
+        window_end_at=manifest.as_of,
+        min_samples=10,
+        evidence_scope="current_execution_cohort",
+    )
+    cells = [
+        SimpleNamespace(
+            task_class="investigation",
+            profile=f"{provider}-native-executor-read-only",
+            mutation_mode="read_only",
+            sample_size=9,
+            accepted_count=4,
+        )
+        for provider in ("codex", "antigravity")
+    ]
+    with pytest.raises(ValueError, match="remains unqualified"):
+        assert_wave4_manifest_matches_report(
+            manifest,
+            SimpleNamespace(policy=policy, evidence_cells=cells, recommendations=[]),
+        )
+
+
+def test_wave4_manifest_reconciles_against_frozen_baseline() -> None:
+    manifest = _manifest()
+    policy = ReliabilityReportPolicy(
+        as_of=manifest.as_of,
+        window_start_at=manifest.as_of - timedelta(days=90),
+        window_end_at=manifest.as_of,
+        min_samples=10,
+        evidence_scope="current_execution_cohort",
+    )
+    recommendation = SimpleNamespace(
+        task_class="investigation",
+        mutation_mode="read_only",
+        recommended_profile="codex-native-executor-read-only",
+    )
+    current_cells = [
+        SimpleNamespace(
+            task_class="investigation",
+            profile=f"{provider}-native-executor-read-only",
+            mutation_mode="read_only",
+            sample_size=15,
+            accepted_count=5,
+        )
+        for provider in ("codex", "antigravity")
+    ]
+    baseline_cells = [
+        SimpleNamespace(
+            task_class="investigation",
+            profile=f"{provider}-native-executor-read-only",
+            mutation_mode="read_only",
+            sample_size=5,
+            accepted_count=0,
+        )
+        for provider in ("codex", "antigravity")
+    ]
+    current = SimpleNamespace(
+        policy=policy, evidence_cells=current_cells, recommendations=[recommendation]
+    )
+    baseline = SimpleNamespace(
+        policy=policy.model_copy(update={"as_of": manifest.as_of - timedelta(days=1)}),
+        evidence_cells=baseline_cells,
+    )
+    assert_wave4_manifest_matches_report(manifest, current, baseline_report=baseline)
+
+    current_cells[0].sample_size += 1
+    with pytest.raises(ValueError, match="contribution mismatch"):
+        assert_wave4_manifest_matches_report(manifest, current, baseline_report=baseline)

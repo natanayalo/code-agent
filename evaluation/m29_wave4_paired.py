@@ -39,6 +39,7 @@ class Wave4Manifest(_StrictModel):
     build_sha: str = Field(pattern=r"^[0-9a-f]{7,64}$")
     target_repository_revision: str = Field(pattern=r"^[0-9a-f]{7,64}$")
     as_of: datetime
+    baseline_report_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     advisory_report_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     operational_report_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     robustness_report_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -122,7 +123,7 @@ def _paired_bootstrap(
     seed: int,
 ) -> PairedBootstrapSummary:
     """Resample complete identity-valid pairs."""
-    valid_pairs = [pair for pair in pairs if pair[0].identity_matches and pair[1].identity_matches]
+    valid_pairs = [pair for pair in pairs if _pair_is_eligible(pair)]
     if not valid_pairs:
         return PairedBootstrapSummary(
             iterations=iterations,
@@ -169,6 +170,18 @@ def _paired_bootstrap(
     )
 
 
+def _case_is_eligible(case: Wave4ManifestCase) -> bool:
+    """Return whether a case belongs to the canonical comparison cohort."""
+    return case.identity_matches and case.exclusion_reason is None
+
+
+def _pair_is_eligible(
+    pair: tuple[Wave4ManifestCase, Wave4ManifestCase],
+) -> bool:
+    """Require both members of a pair to be in the canonical comparison cohort."""
+    return all(_case_is_eligible(case) for case in pair)
+
+
 def analyze_wave4_manifest(
     manifest: Wave4Manifest, *, iterations: int = 10_000, seed: int = 29
 ) -> PairedTaskClassAnalysis:
@@ -178,14 +191,14 @@ def analyze_wave4_manifest(
     codex_only = sum(c.accepted and not a.accepted for c, a in pairs)
     ag_only = sum(a.accepted and not c.accepted for c, a in pairs)
     neither = sum(not c.accepted and not a.accepted for c, a in pairs)
-    identity_pairs = sum(c.identity_matches and a.identity_matches for c, a in pairs)
+    identity_pairs = sum(_pair_is_eligible((c, a)) for c, a in pairs)
     deltas = [
         a.time_to_terminal_seconds - c.time_to_terminal_seconds
         for c, a in pairs
         if c.accepted
         and a.accepted
-        and c.identity_matches
-        and a.identity_matches
+        and _case_is_eligible(c)
+        and _case_is_eligible(a)
         and c.time_to_terminal_seconds is not None
         and a.time_to_terminal_seconds is not None
     ]
@@ -233,13 +246,44 @@ def _validate_manifest_report_policy(
         raise ValueError("canonical report execution identities do not match Wave 4 policy")
 
 
+def _validate_baseline_report(
+    manifest: Wave4Manifest,
+    baseline_report: ProviderReliabilityReport,
+) -> None:
+    """Require a reproducible pre-Wave-4 cumulative report baseline."""
+    baseline_policy = baseline_report.policy
+    if baseline_policy.evidence_scope != "current_execution_cohort":
+        raise ValueError("Wave 4 baseline report must use the current execution cohort")
+    if baseline_policy.expected_execution_identities != DEFAULT_EXPECTED_EXECUTION_IDENTITIES:
+        raise ValueError("Wave 4 baseline report execution identities do not match Wave 4 policy")
+    if baseline_policy.as_of > manifest.as_of:
+        raise ValueError("Wave 4 baseline report must predate the Wave 4 report")
+
+
 def assert_wave4_manifest_matches_report(
-    manifest: Wave4Manifest, report: ProviderReliabilityReport
+    manifest: Wave4Manifest,
+    report: ProviderReliabilityReport,
+    *,
+    baseline_report: ProviderReliabilityReport | None = None,
 ) -> None:
     """Reconcile Wave 4 contributions with cumulative report cells."""
     _validate_manifest_report_policy(manifest, report)
+    if baseline_report is not None:
+        _validate_baseline_report(manifest, baseline_report)
     cells = {
         (cell.task_class, cell.profile, cell.mutation_mode): cell for cell in report.evidence_cells
+    }
+    baseline_cells = (
+        {
+            (cell.task_class, cell.profile, cell.mutation_mode): cell
+            for cell in baseline_report.evidence_cells
+        }
+        if baseline_report is not None
+        else {}
+    )
+    recommendations = {
+        (recommendation.task_class, recommendation.mutation_mode): recommendation
+        for recommendation in getattr(report, "recommendations", [])
     }
     for provider in ("codex", "antigravity"):
         profile = f"{provider}-native-executor-read-only"
@@ -247,13 +291,41 @@ def assert_wave4_manifest_matches_report(
         cell = cells.get(("investigation", profile, "read_only"))
         if cell is None:
             raise ValueError(f"canonical report is missing investigation/{profile}")
+        if cell.sample_size < report.policy.min_samples:
+            raise ValueError(
+                f"Wave 4 remains unqualified: investigation/{profile} has "
+                f"{cell.sample_size} samples, below the policy minimum "
+                f"of {report.policy.min_samples}"
+            )
+        if not any(
+            recommendation.recommended_profile
+            for key, recommendation in recommendations.items()
+            if key == ("investigation", "read_only")
+        ):
+            raise ValueError(
+                "Wave 4 remains unqualified: cumulative investigation/read_only report "
+                "has no advisory recommendation"
+            )
         included = [case for case in group if case.exclusion_reason is None]
         if any(not case.identity_matches for case in included):
             raise ValueError("Wave 4 includes a case without a verified matching identity")
         accepted = sum(case.accepted for case in included)
-        if cell.sample_size < len(included) or cell.accepted_count < accepted:
+        if baseline_report is None:
+            if cell.sample_size < len(included) or cell.accepted_count < accepted:
+                raise ValueError(
+                    f"cumulative report cell is smaller than Wave 4 contribution for {profile}"
+                )
+            continue
+        baseline_cell = baseline_cells.get(("investigation", profile, "read_only"))
+        if baseline_cell is None:
+            raise ValueError(f"Wave 4 baseline is missing investigation/{profile}")
+        sample_delta = cell.sample_size - baseline_cell.sample_size
+        accepted_delta = cell.accepted_count - baseline_cell.accepted_count
+        if sample_delta != len(included) or accepted_delta != accepted:
             raise ValueError(
-                f"cumulative report cell is smaller than Wave 4 contribution for {profile}"
+                f"Wave 4 contribution mismatch for {profile}: expected "
+                f"{len(included)} included/{accepted} accepted, observed "
+                f"{sample_delta} included/{accepted_delta} accepted against baseline"
             )
 
 
@@ -309,6 +381,7 @@ def assert_sanitized_wave4_manifest(payload: dict | str) -> None:
         "build_sha",
         "target_repository_revision",
         "as_of",
+        "baseline_report_sha256",
         "advisory_report_sha256",
         "operational_report_sha256",
         "robustness_report_sha256",

@@ -744,7 +744,10 @@ The M29 live evidence wave harness (`scripts/e2e/run_m29_evidence_wave.py`) mana
 
 ```bash
 # 0. Preflight smoke check (validates live container model resolution without evaluation contamination)
-.venv/bin/python scripts/e2e/run_m29_evidence_wave.py smoke
+#    Run this before initializing a bundle so a failed provider check does not freeze a build.
+.venv/bin/python scripts/e2e/run_m29_evidence_wave.py smoke \
+  --repo-key code-agent \
+  --branch master
 
 # 1. Initialize a new evidence bundle (Wave 2: 20 docs cases, 10 pairs)
 .venv/bin/python scripts/e2e/run_m29_evidence_wave.py init \
@@ -786,6 +789,15 @@ The M29 live evidence wave harness (`scripts/e2e/run_m29_evidence_wave.py`) mana
   --repo-key code-agent \
   --branch master \
   --timeout-seconds 900
+```
+
+Before refreshing the Wave 4 reports, preserve the prior cumulative canonical report as the
+reconciliation baseline. The Wave 4 manifest builder requires this baseline and verifies that
+the refreshed cumulative cells increase by exactly the eligible Wave 4 contribution counts:
+
+```bash
+cp evaluation/m29_provider_reliability_report.json \
+  artifacts/m29_provider_reliability_wave3_baseline_report.json
 ```
 
 After the final case reaches a terminal state, use the bundle's latest
@@ -847,6 +859,12 @@ Wave 4 adds 20 fresh, balanced investigation/read-only cases (10 paired
 topics). It uses the same report policy and keeps the raw bundle private:
 
 ```bash
+# Validate provider readiness before freezing the Wave 4 build and target revision.
+.venv/bin/python scripts/e2e/run_m29_evidence_wave.py smoke \
+  --repo-key code-agent \
+  --branch master
+
+# Only after both providers pass the smoke check, initialize the private bundle.
 .venv/bin/python scripts/e2e/run_m29_evidence_wave.py init \
   --bundle-dir artifacts/m29_evidence_bundle_wave4 \
   --suite-path evaluation/m29_live_provider_suite_wave4.json \
@@ -861,14 +879,14 @@ topics). It uses the same report policy and keeps the raw bundle private:
 .venv/bin/python scripts/e2e/run_m29_evidence_wave.py run-batch \
   --bundle-dir artifacts/m29_evidence_bundle_wave4 \
   --suite-path evaluation/m29_live_provider_suite_wave4.json \
-  --repo-key code-agent --branch master --timeout-seconds 900 \
-  --preflight-smoke
+  --repo-key code-agent --branch master --timeout-seconds 900
 
 # Use the bundle's latest terminal_at as AS_OF, then refresh the three reports.
 DATABASE_URL="$LIVE_DATABASE_URL" .venv/bin/python scripts/e2e/build_m29_wave4_manifest.py \
   --bundle-dir artifacts/m29_evidence_bundle_wave4 \
   --suite evaluation/m29_live_provider_suite_wave4.json \
   --database-url-env DATABASE_URL \
+  --baseline-report artifacts/m29_provider_reliability_wave3_baseline_report.json \
   --advisory-report evaluation/m29_provider_reliability_report.json \
   --operational-report evaluation/m29_provider_reliability_operational_report.json \
   --robustness-report evaluation/m29_provider_reliability_robustness_report.json \

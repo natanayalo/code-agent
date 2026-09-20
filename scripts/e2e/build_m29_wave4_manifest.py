@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from evaluation.m29_evidence_models import M29EvidenceBundle, M29EvidenceSuite
 from evaluation.m29_wave4_paired import (
     Wave4Manifest,
+    Wave4ManifestCase,
     assert_sanitized_wave4_manifest,
     assert_wave4_manifest_matches_report,
 )
@@ -67,12 +68,15 @@ def build_manifest(args: argparse.Namespace) -> Wave4Manifest:
             if len(task_ids) != len(set(task_ids)):
                 raise ValueError("bundle task IDs must be unique across cases")
             tasks = _load_tasks(session, task_ids)
+            suite_by_id = {case.case_id: case for case in suite.cases}
             cases = [
-                _manifest_case(
-                    next(case for case in suite.cases if case.case_id == case_id),
-                    outcome,
-                    tasks[outcome.task_id],
-                    policy,
+                Wave4ManifestCase.model_validate(
+                    _manifest_case(
+                        suite_by_id[case_id],
+                        outcome,
+                        tasks[outcome.task_id],
+                        policy,
+                    ).model_dump(mode="python")
                 )
                 for case_id, outcome in sorted(bundle.cases.items())
             ]
@@ -85,6 +89,7 @@ def build_manifest(args: argparse.Namespace) -> Wave4Manifest:
         build_sha=bundle.identity.build_sha,
         target_repository_revision=bundle.identity.target_repository_revision,
         as_of=as_of,
+        baseline_report_sha256=_sha256(args.baseline_report),
         advisory_report_sha256=_sha256(args.advisory_report),
         operational_report_sha256=_sha256(args.operational_report),
         robustness_report_sha256=_sha256(args.robustness_report),
@@ -94,7 +99,10 @@ def build_manifest(args: argparse.Namespace) -> Wave4Manifest:
     report = ProviderReliabilityReport.model_validate(
         json.loads(args.advisory_report.read_text(encoding="utf-8"))
     )
-    assert_wave4_manifest_matches_report(manifest, report)
+    baseline_report = ProviderReliabilityReport.model_validate(
+        json.loads(args.baseline_report.read_text(encoding="utf-8"))
+    )
+    assert_wave4_manifest_matches_report(manifest, report, baseline_report=baseline_report)
     return manifest
 
 
@@ -108,6 +116,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--operational-report", type=Path, required=True)
     parser.add_argument("--robustness-report", type=Path, required=True)
     parser.add_argument("--as-of", required=True)
+    parser.add_argument("--baseline-report", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     return parser
 
