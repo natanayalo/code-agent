@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: add M29 Wave 4 investigation evidence suite ([#409](https://github.com/natanayalo/code-agent/pull/409))
+
 - Feat: qualify M29 read-only Wave 3 evidence ([#408](https://github.com/natanayalo/code-agent/pull/408))
 
 - Feat: add provider-specific pre-dispatch diagnostics (M29 Item 1b) ([#407](https://github.com/natanayalo/code-agent/pull/407))
