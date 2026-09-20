@@ -89,6 +89,7 @@ class ExtractedTaskEvidence:
     delivery_passed: bool
     execution_identity: ExecutionIdentity | None = None
     execution_identity_status: ExecutionIdentityStatus = "unknown_legacy"
+    task_id: str | None = None
 
 
 def compute_wilson_interval(
@@ -228,6 +229,7 @@ def _extract_single_task(
             delivery_passed=stages[7],
             execution_identity=identity,
             execution_identity_status=identity_status,
+            task_id=str(task.id),
         ),
         None,
     )

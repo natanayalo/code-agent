@@ -20,7 +20,12 @@ from evaluation.m29_wave4_paired import (
     assert_sanitized_wave4_manifest,
     assert_wave4_manifest_matches_report,
 )
+from evaluation.provider_reliability_extractor import (
+    build_evidence_cells,
+    load_and_classify_tasks,
+)
 from evaluation.provider_reliability_models import (
+    ProviderReliabilityEvidenceCell,
     ProviderReliabilityReport,
     ReliabilityReportPolicy,
 )
@@ -34,6 +39,41 @@ from scripts.e2e.build_m29_wave3_manifest import (
 )
 
 LOGGER = logging.getLogger("build_m29_wave4_manifest")
+
+
+def _load_wave4_cases_and_snapshot(
+    session: Session,
+    bundle: M29EvidenceBundle,
+    suite: M29EvidenceSuite,
+    policy: ReliabilityReportPolicy,
+) -> tuple[list[Wave4ManifestCase], list[ProviderReliabilityEvidenceCell], set[str], set[str]]:
+    """Reconcile bundle cases and capture the extractor's private snapshot."""
+    task_ids = [outcome.task_id for outcome in bundle.cases.values()]
+    if len(task_ids) != len(set(task_ids)):
+        raise ValueError("bundle task IDs must be unique across cases")
+    tasks = _load_tasks(session, task_ids)
+    suite_by_id = {case.case_id: case for case in suite.cases}
+    cases = [
+        Wave4ManifestCase.model_validate(
+            _manifest_case(
+                suite_by_id[case_id],
+                outcome,
+                tasks[outcome.task_id],
+                policy,
+            ).model_dump(mode="python")
+        )
+        for case_id, outcome in sorted(bundle.cases.items())
+    ]
+    extracted_tasks, _ = load_and_classify_tasks(session, policy)
+    extractor_cells = build_evidence_cells(extracted_tasks, policy)
+    extractor_task_ids = {task.task_id for task in extracted_tasks if task.task_id is not None}
+    manifest_cases_by_id = {case.case_id: case for case in cases}
+    eligible_wave4_task_ids = {
+        outcome.task_id
+        for case_id, outcome in bundle.cases.items()
+        if manifest_cases_by_id[case_id].exclusion_reason is None
+    }
+    return cases, extractor_cells, eligible_wave4_task_ids, extractor_task_ids
 
 
 def build_manifest(args: argparse.Namespace) -> Wave4Manifest:
@@ -60,26 +100,16 @@ def build_manifest(args: argparse.Namespace) -> Wave4Manifest:
     if not database_url:
         raise ValueError(f"database URL environment variable is unset: {args.database_url_env}")
     engine = create_engine_from_url(database_url)
+    extractor_cells = None
+    extractor_task_ids: set[str] = set()
+    eligible_wave4_task_ids: set[str] = set()
     try:
         with Session(engine) as session:
             if engine.dialect.name == "postgresql":
                 session.execute(text("SET TRANSACTION READ ONLY"))
-            task_ids = [outcome.task_id for outcome in bundle.cases.values()]
-            if len(task_ids) != len(set(task_ids)):
-                raise ValueError("bundle task IDs must be unique across cases")
-            tasks = _load_tasks(session, task_ids)
-            suite_by_id = {case.case_id: case for case in suite.cases}
-            cases = [
-                Wave4ManifestCase.model_validate(
-                    _manifest_case(
-                        suite_by_id[case_id],
-                        outcome,
-                        tasks[outcome.task_id],
-                        policy,
-                    ).model_dump(mode="python")
-                )
-                for case_id, outcome in sorted(bundle.cases.items())
-            ]
+            cases, extractor_cells, eligible_wave4_task_ids, extractor_task_ids = (
+                _load_wave4_cases_and_snapshot(session, bundle, suite, policy)
+            )
     finally:
         engine.dispose()
 
@@ -102,7 +132,14 @@ def build_manifest(args: argparse.Namespace) -> Wave4Manifest:
     baseline_report = ProviderReliabilityReport.model_validate(
         json.loads(args.baseline_report.read_text(encoding="utf-8"))
     )
-    assert_wave4_manifest_matches_report(manifest, report, baseline_report=baseline_report)
+    assert_wave4_manifest_matches_report(
+        manifest,
+        report,
+        baseline_report=baseline_report,
+        extractor_cells=extractor_cells,
+        wave4_task_ids=eligible_wave4_task_ids,
+        extractor_task_ids=extractor_task_ids,
+    )
     return manifest
 
 

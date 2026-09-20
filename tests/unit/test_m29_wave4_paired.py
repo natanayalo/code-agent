@@ -136,6 +136,49 @@ def test_excluded_identity_cases_do_not_enter_paired_bootstrap() -> None:
     assert analysis.bootstrap.identity_complete_pairs == 5
 
 
+def test_all_failure_cohort_is_publishable_with_explicit_fallback() -> None:
+    manifest = _manifest()
+    failures = [
+        case.model_copy(
+            update={
+                "accepted": False,
+                "terminal_status": "failed",
+                "failure_kind": "worker_failure",
+            }
+        )
+        for case in manifest.cases
+    ]
+    manifest = manifest.model_copy(update={"cases": failures})
+    policy = ReliabilityReportPolicy(
+        as_of=manifest.as_of,
+        window_start_at=manifest.as_of - timedelta(days=90),
+        window_end_at=manifest.as_of,
+        min_samples=10,
+        evidence_scope="current_execution_cohort",
+    )
+    cells = [
+        SimpleNamespace(
+            task_class="investigation",
+            profile=f"{provider}-native-executor-read-only",
+            mutation_mode="read_only",
+            sample_size=10,
+            accepted_count=0,
+        )
+        for provider in ("codex", "antigravity")
+    ]
+    fallback = SimpleNamespace(
+        task_class="investigation",
+        mutation_mode="read_only",
+        recommended_profile=None,
+        fallback_reason="no_successful_candidates",
+    )
+
+    assert_wave4_manifest_matches_report(
+        manifest,
+        SimpleNamespace(policy=policy, evidence_cells=cells, recommendations=[fallback]),
+    )
+
+
 def test_out_of_window_case_is_excluded_from_cohort_pair_statistics() -> None:
     manifest = _manifest().model_copy(deep=True)
     manifest.cases[0] = manifest.cases[0].model_copy(update={"exclusion_reason": "outside_window"})
@@ -187,12 +230,22 @@ def test_wave4_manifest_reconciles_against_frozen_baseline() -> None:
         mutation_mode="read_only",
         recommended_profile="codex-native-executor-read-only",
     )
-    current_cells = [
+    report_cells = [
         SimpleNamespace(
             task_class="investigation",
             profile=f"{provider}-native-executor-read-only",
             mutation_mode="read_only",
-            sample_size=15,
+            sample_size=16,
+            accepted_count=5,
+        )
+        for provider in ("codex", "antigravity")
+    ]
+    extractor_cells = [
+        SimpleNamespace(
+            task_class="investigation",
+            profile=f"{provider}-native-executor-read-only",
+            mutation_mode="read_only",
+            sample_size=16,
             accepted_count=5,
         )
         for provider in ("codex", "antigravity")
@@ -208,14 +261,28 @@ def test_wave4_manifest_reconciles_against_frozen_baseline() -> None:
         for provider in ("codex", "antigravity")
     ]
     current = SimpleNamespace(
-        policy=policy, evidence_cells=current_cells, recommendations=[recommendation]
+        policy=policy, evidence_cells=report_cells, recommendations=[recommendation]
     )
     baseline = SimpleNamespace(
         policy=policy.model_copy(update={"as_of": manifest.as_of - timedelta(days=1)}),
         evidence_cells=baseline_cells,
     )
-    assert_wave4_manifest_matches_report(manifest, current, baseline_report=baseline)
+    assert_wave4_manifest_matches_report(
+        manifest,
+        current,
+        baseline_report=baseline,
+        extractor_cells=extractor_cells,
+        wave4_task_ids={f"wave4-task-{index}" for index in range(20)},
+        extractor_task_ids={f"wave4-task-{index}" for index in range(20)} | {"unrelated-task"},
+    )
 
-    current_cells[0].sample_size += 1
-    with pytest.raises(ValueError, match="contribution mismatch"):
-        assert_wave4_manifest_matches_report(manifest, current, baseline_report=baseline)
+    report_cells[0].sample_size += 1
+    with pytest.raises(ValueError, match="does not match extractor snapshot"):
+        assert_wave4_manifest_matches_report(
+            manifest,
+            current,
+            baseline_report=baseline,
+            extractor_cells=extractor_cells,
+            wave4_task_ids={f"wave4-task-{index}" for index in range(20)},
+            extractor_task_ids={f"wave4-task-{index}" for index in range(20)},
+        )

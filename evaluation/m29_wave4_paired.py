@@ -6,6 +6,7 @@ import hashlib
 import json
 import random
 import statistics
+from collections.abc import Collection, Sequence
 from datetime import datetime, timedelta
 from typing import Literal
 
@@ -21,6 +22,7 @@ from evaluation.m29_wave3_paired import (
 )
 from evaluation.provider_reliability_models import (
     DEFAULT_EXPECTED_EXECUTION_IDENTITIES,
+    ProviderReliabilityEvidenceCell,
     ProviderReliabilityReport,
     ReliabilityReportPolicy,
 )
@@ -265,22 +267,31 @@ def assert_wave4_manifest_matches_report(
     report: ProviderReliabilityReport,
     *,
     baseline_report: ProviderReliabilityReport | None = None,
+    extractor_cells: Sequence[ProviderReliabilityEvidenceCell] | None = None,
+    wave4_task_ids: Collection[str] | None = None,
+    extractor_task_ids: Collection[str] | None = None,
 ) -> None:
-    """Reconcile Wave 4 contributions with cumulative report cells."""
+    """Reconcile Wave 4 contributions with the canonical extractor snapshot."""
     _validate_manifest_report_policy(manifest, report)
     if baseline_report is not None:
         _validate_baseline_report(manifest, baseline_report)
+    if baseline_report is not None and extractor_cells is None:
+        raise ValueError("Wave 4 publication requires extractor-level report reconciliation")
     cells = {
         (cell.task_class, cell.profile, cell.mutation_mode): cell for cell in report.evidence_cells
     }
-    baseline_cells = (
-        {
-            (cell.task_class, cell.profile, cell.mutation_mode): cell
-            for cell in baseline_report.evidence_cells
-        }
-        if baseline_report is not None
+    extractor_cell_map = (
+        {(cell.task_class, cell.profile, cell.mutation_mode): cell for cell in extractor_cells}
+        if extractor_cells is not None
         else {}
     )
+    if wave4_task_ids is not None and extractor_task_ids is not None:
+        missing_wave4_ids = set(wave4_task_ids) - set(extractor_task_ids)
+        if missing_wave4_ids:
+            raise ValueError(
+                "canonical extractor omitted eligible Wave 4 task observations: "
+                f"{len(missing_wave4_ids)} task(s)"
+            )
     recommendations = {
         (recommendation.task_class, recommendation.mutation_mode): recommendation
         for recommendation in getattr(report, "recommendations", [])
@@ -297,35 +308,37 @@ def assert_wave4_manifest_matches_report(
                 f"{cell.sample_size} samples, below the policy minimum "
                 f"of {report.policy.min_samples}"
             )
-        if not any(
-            recommendation.recommended_profile
-            for key, recommendation in recommendations.items()
-            if key == ("investigation", "read_only")
-        ):
+        recommendation = recommendations.get(("investigation", "read_only"))
+        if recommendation is None:
             raise ValueError(
                 "Wave 4 remains unqualified: cumulative investigation/read_only report "
                 "has no advisory recommendation"
             )
+        if recommendation.recommended_profile is None and not recommendation.fallback_reason:
+            raise ValueError(
+                "Wave 4 remains unqualified: investigation/read_only recommendation "
+                "has neither a provider nor an explicit fallback reason"
+            )
         included = [case for case in group if case.exclusion_reason is None]
         if any(not case.identity_matches for case in included):
             raise ValueError("Wave 4 includes a case without a verified matching identity")
-        accepted = sum(case.accepted for case in included)
-        if baseline_report is None:
-            if cell.sample_size < len(included) or cell.accepted_count < accepted:
+        if extractor_cells is None:
+            if cell.sample_size < len(included):
                 raise ValueError(
-                    f"cumulative report cell is smaller than Wave 4 contribution for {profile}"
+                    f"canonical report cell is smaller than Wave 4 contribution for {profile}"
                 )
             continue
-        baseline_cell = baseline_cells.get(("investigation", profile, "read_only"))
-        if baseline_cell is None:
-            raise ValueError(f"Wave 4 baseline is missing investigation/{profile}")
-        sample_delta = cell.sample_size - baseline_cell.sample_size
-        accepted_delta = cell.accepted_count - baseline_cell.accepted_count
-        if sample_delta != len(included) or accepted_delta != accepted:
+        extractor_cell = extractor_cell_map.get(("investigation", profile, "read_only"))
+        if extractor_cell is None:
+            raise ValueError(f"canonical extractor is missing investigation/{profile}")
+        if (
+            cell.sample_size != extractor_cell.sample_size
+            or cell.accepted_count != extractor_cell.accepted_count
+        ):
             raise ValueError(
-                f"Wave 4 contribution mismatch for {profile}: expected "
-                f"{len(included)} included/{accepted} accepted, observed "
-                f"{sample_delta} included/{accepted_delta} accepted against baseline"
+                f"canonical report does not match extractor snapshot for {profile}: "
+                f"report={cell.sample_size}/{cell.accepted_count}, "
+                f"extractor={extractor_cell.sample_size}/{extractor_cell.accepted_count}"
             )
 
 

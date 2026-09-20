@@ -148,12 +148,15 @@ def test_build_manifest_promotes_wave3_cases_to_wave4_models(tmp_path: Path, mon
         def model_validate(payload):
             return SimpleNamespace()
 
+    captured: dict = {}
+
+    def capture_reconciliation(*args, **kwargs) -> None:
+        captured.update(kwargs)
+
     monkeypatch.setenv("TEST_DATABASE_URL", _seed_database(tmp_path, suite))
     monkeypatch.setattr(builder, "ProviderReliabilityReport", FakeReport)
     monkeypatch.setattr(builder, "assert_sanitized_wave4_manifest", lambda payload: None)
-    monkeypatch.setattr(
-        builder, "assert_wave4_manifest_matches_report", lambda *args, **kwargs: None
-    )
+    monkeypatch.setattr(builder, "assert_wave4_manifest_matches_report", capture_reconciliation)
     args = SimpleNamespace(
         suite=suite_path,
         bundle_dir=bundle_dir,
@@ -169,3 +172,6 @@ def test_build_manifest_promotes_wave3_cases_to_wave4_models(tmp_path: Path, mon
 
     assert len(manifest.cases) == 20
     assert all(isinstance(case, Wave4ManifestCase) for case in manifest.cases)
+    assert len(captured["extractor_cells"]) > 0
+    assert len(captured["wave4_task_ids"]) == 20
+    assert captured["wave4_task_ids"] == captured["extractor_task_ids"]

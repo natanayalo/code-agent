@@ -791,9 +791,11 @@ The M29 live evidence wave harness (`scripts/e2e/run_m29_evidence_wave.py`) mana
   --timeout-seconds 900
 ```
 
-Before refreshing the Wave 4 reports, preserve the prior cumulative canonical report as the
-reconciliation baseline. The Wave 4 manifest builder requires this baseline and verifies that
-the refreshed cumulative cells increase by exactly the eligible Wave 4 contribution counts:
+Before refreshing the Wave 4 reports, preserve the prior cumulative canonical report as a
+reconciliation baseline. Archive this sanitized file with the private bundle; its SHA-256 is
+bound into the published manifest. The builder also reruns the canonical extractor against the
+same PostgreSQL snapshot and verifies that eligible Wave 4 task IDs and cumulative cell counts
+are present, so unrelated tasks may enter the window without invalidating the evidence:
 
 ```bash
 cp evaluation/m29_provider_reliability_report.json \
