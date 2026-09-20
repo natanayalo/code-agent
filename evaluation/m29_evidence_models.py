@@ -22,6 +22,8 @@ WAVE2_CASES = 20
 WAVE2_PAIRED_TOPICS = 10
 WAVE3_CASES = 40
 WAVE3_PAIRED_TOPICS = 10
+WAVE4_CASES = 20
+WAVE4_PAIRED_TOPICS = 10
 
 
 class StrictModel(BaseModel):
@@ -92,6 +94,15 @@ def _validate_paired_groups(
         last_first_provider = first_provider
 
 
+def _validate_wave4_cases(cases: list[M29EvidenceCase]) -> None:
+    """Validate the balanced investigation-only Wave 4 distribution."""
+    if len(cases) != WAVE4_CASES:
+        raise ValueError(f"Wave 4 suite must contain exactly {WAVE4_CASES} cases, got {len(cases)}")
+    if any(case.task_class != "investigation" for case in cases):
+        raise ValueError("Wave 4 suite must contain only investigation cases")
+    _validate_paired_groups(cases, WAVE4_PAIRED_TOPICS, "investigation")
+
+
 class M29EvidenceSuite(StrictModel):
     """Frozen M29 live provider evidence suites for read-only waves."""
 
@@ -99,6 +110,7 @@ class M29EvidenceSuite(StrictModel):
         "m29-live-provider-evidence",
         "m29-live-provider-evidence-wave2",
         "m29-live-provider-evidence-wave3",
+        "m29-live-provider-evidence-wave4",
     ]
     schema_version: Literal[1] = 1
     cases: list[M29EvidenceCase]
@@ -169,6 +181,9 @@ class M29EvidenceSuite(StrictModel):
                 )
             _validate_paired_groups(investigation_cases, WAVE3_PAIRED_TOPICS, "investigation")
             _validate_paired_groups(feature_cases, WAVE3_PAIRED_TOPICS, "feature")
+
+        elif self.suite_name == "m29-live-provider-evidence-wave4":
+            _validate_wave4_cases(self.cases)
 
         return self
 
