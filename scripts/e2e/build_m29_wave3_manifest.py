@@ -14,11 +14,13 @@ from pathlib import Path
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session, selectinload
 
+from db.enums import OrchestrationRuntime, TaskStatus, WorkerRuntimeMode
 from db.models import Task
 from evaluation.m29_evidence_models import M29EvidenceBundle, M29EvidenceSuite
 from evaluation.m29_wave3_paired import (
     Wave3Manifest,
     Wave3ManifestCase,
+    assert_manifest_matches_report,
     assert_sanitized_manifest,
 )
 from evaluation.provider_reliability_extractor import _validate_task_candidate
@@ -26,7 +28,11 @@ from evaluation.provider_reliability_identity import (
     check_cohort_membership,
     resolve_task_execution_identity,
 )
-from evaluation.provider_reliability_models import VALID_FAILURE_KINDS, ReliabilityReportPolicy
+from evaluation.provider_reliability_models import (
+    VALID_FAILURE_KINDS,
+    ProviderReliabilityReport,
+    ReliabilityReportPolicy,
+)
 from repositories import create_engine_from_url
 
 LOGGER = logging.getLogger("build_m29_wave3_manifest")
@@ -35,6 +41,71 @@ LOGGER = logging.getLogger("build_m29_wave3_manifest")
 def _sha256(path: Path) -> str:
     """Hash a committed report or suite file."""
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _validate_suite_digest(bundle: M29EvidenceBundle, suite_path: Path) -> str:
+    """Require the private bundle to reference the exact frozen suite bytes."""
+    actual = _sha256(suite_path)
+    if bundle.suite_sha256 != actual:
+        raise ValueError(
+            f"bundle suite hash {bundle.suite_sha256} does not match suite file {actual}"
+        )
+    return actual
+
+
+def _validate_bundle_task_consistency(case, outcome, task: Task) -> None:
+    """Reject bundle/database disagreement before exposing a public outcome."""
+    if str(task.id) != outcome.task_id:
+        raise ValueError(f"case {case.case_id} task identity does not match database row")
+    if outcome.case_id != case.case_id:
+        raise ValueError(f"case {case.case_id} outcome case identity does not match bundle key")
+    if outcome.task_class != case.task_class:
+        raise ValueError(f"case {case.case_id} task class does not match frozen suite")
+    if outcome.worker_profile != case.worker_profile:
+        raise ValueError(f"case {case.case_id} worker profile does not match frozen suite")
+
+    expected_status = (
+        TaskStatus.COMPLETED if outcome.terminal_status == "completed" else TaskStatus.FAILED
+    )
+    if task.status != expected_status:
+        raise ValueError(
+            f"case {case.case_id} terminal status mismatch: bundle={outcome.terminal_status} "
+            f"database={task.status.value}"
+        )
+    if not task.task_spec or task.task_spec.get("task_type") != case.task_class:
+        raise ValueError(f"case {case.case_id} task spec does not match frozen task class")
+    if task.chosen_profile and task.chosen_profile != case.worker_profile:
+        raise ValueError(f"case {case.case_id} chosen profile does not match frozen suite")
+    if task.orchestration_runtime != OrchestrationRuntime.TEMPORAL:
+        raise ValueError(f"case {case.case_id} database task is not Temporal")
+    if task.runtime_mode != WorkerRuntimeMode.NATIVE_AGENT:
+        raise ValueError(f"case {case.case_id} database task is not native-agent")
+    if outcome.orchestration_runtime != OrchestrationRuntime.TEMPORAL.value:
+        raise ValueError(f"case {case.case_id} bundle runtime is not Temporal")
+    if outcome.runtime_mode != WorkerRuntimeMode.NATIVE_AGENT.value:
+        raise ValueError(f"case {case.case_id} bundle runtime is not native-agent")
+    if outcome.files_changed_count:
+        raise ValueError(f"case {case.case_id} bundle reports changed files")
+    if outcome.has_unresolved_interactions or outcome.gate_failures:
+        raise ValueError(f"case {case.case_id} bundle reports unresolved gates or interactions")
+
+    persisted_profiles = {run.worker_profile for run in task.worker_runs if run.worker_profile}
+    if persisted_profiles and persisted_profiles != {case.worker_profile}:
+        raise ValueError(f"case {case.case_id} worker-run profile does not match frozen suite")
+    if not persisted_profiles and task.chosen_profile != case.worker_profile:
+        raise ValueError(f"case {case.case_id} has no matching persisted worker profile")
+    for run in task.worker_runs:
+        if run.task_id and str(run.task_id) != outcome.task_id:
+            raise ValueError(f"case {case.case_id} worker-run task identity mismatch")
+        if run.runtime_mode is not None and run.runtime_mode != WorkerRuntimeMode.NATIVE_AGENT:
+            raise ValueError(f"case {case.case_id} worker-run is not native-agent")
+        if (
+            run.orchestration_runtime is not None
+            and run.orchestration_runtime != OrchestrationRuntime.TEMPORAL
+        ):
+            raise ValueError(f"case {case.case_id} worker-run is not Temporal")
+        if run.files_changed_count or run.files_changed:
+            raise ValueError(f"case {case.case_id} worker-run reports changed files")
 
 
 def _parse_as_of(raw: str) -> datetime:
@@ -67,6 +138,7 @@ def _load_tasks(session: Session, task_ids: list[str]) -> dict[str, Task]:
 
 def _manifest_case(case, outcome, task: Task, policy: ReliabilityReportPolicy) -> Wave3ManifestCase:
     """Reconcile one private outcome with persisted identity and exclusion state."""
+    _validate_bundle_task_consistency(case, outcome, task)
     reason, _, _, _ = _validate_task_candidate(task, policy)
     runs = sorted(
         task.worker_runs,
@@ -115,6 +187,7 @@ def build_manifest(args: argparse.Namespace) -> Wave3Manifest:
     bundle = M29EvidenceBundle.model_validate(
         json.loads((args.bundle_dir / "bundle.json").read_text(encoding="utf-8"))
     )
+    suite_sha256 = _validate_suite_digest(bundle, args.suite)
     if set(bundle.cases) != {case.case_id for case in suite.cases}:
         raise ValueError("bundle cases do not exactly match the frozen suite")
 
@@ -135,6 +208,8 @@ def build_manifest(args: argparse.Namespace) -> Wave3Manifest:
             if engine.dialect.name == "postgresql":
                 session.execute(text("SET TRANSACTION READ ONLY"))
             task_ids = [outcome.task_id for outcome in bundle.cases.values()]
+            if len(task_ids) != len(set(task_ids)):
+                raise ValueError("bundle task IDs must be unique across cases")
             tasks = _load_tasks(session, task_ids)
             cases = [
                 _manifest_case(
@@ -150,7 +225,7 @@ def build_manifest(args: argparse.Namespace) -> Wave3Manifest:
 
     manifest = Wave3Manifest(
         suite_name=suite.suite_name,
-        suite_sha256=_sha256(args.suite),
+        suite_sha256=suite_sha256,
         build_sha=bundle.identity.build_sha,
         target_repository_revision=bundle.identity.target_repository_revision,
         as_of=as_of,
@@ -160,6 +235,10 @@ def build_manifest(args: argparse.Namespace) -> Wave3Manifest:
         cases=cases,
     )
     assert_sanitized_manifest(manifest.model_dump(mode="json"))
+    report = ProviderReliabilityReport.model_validate(
+        json.loads(args.advisory_report.read_text(encoding="utf-8"))
+    )
+    assert_manifest_matches_report(manifest, report)
     return manifest
 
 

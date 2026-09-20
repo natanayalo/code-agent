@@ -68,6 +68,8 @@ def _build_candidate_ranking(
 def _resolve_recommendation(
     eligible: list[ProviderReliabilityEvidenceCell],
 ) -> tuple[str | None, str | None]:
+    if eligible and all(candidate.accepted_count == 0 for candidate in eligible):
+        return None, "no_successful_candidates: all eligible candidates have zero accepted tasks"
     if len(eligible) >= 2:
         return eligible[0].profile, None
     if len(eligible) == 1:

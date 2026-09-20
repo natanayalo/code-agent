@@ -2,15 +2,25 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from db.enums import OrchestrationRuntime, TaskStatus, WorkerRuntimeMode
 from evaluation.m29_wave3_paired import (
     Wave3Manifest,
     Wave3ManifestCase,
     analyze_paired_manifest,
+    assert_manifest_matches_report,
     assert_sanitized_manifest,
+)
+from scripts.e2e.build_m29_wave3_manifest import (
+    _sha256,
+    _validate_bundle_task_consistency,
+    _validate_suite_digest,
 )
 
 
@@ -88,3 +98,76 @@ def test_manifest_sanitization_rejects_private_keys() -> None:
     payload["cases"][0]["task_id"] = "private"
     with pytest.raises(ValueError):
         assert_sanitized_manifest(payload)
+
+
+def test_manifest_reconciles_counts_and_exclusions_with_report_cells() -> None:
+    """Keep the public manifest aligned with canonical read-only report cells."""
+    manifest = _manifest()
+    cells = []
+    for task_class in ("investigation", "feature"):
+        for provider in ("codex", "antigravity"):
+            group = [
+                case
+                for case in manifest.cases
+                if case.task_class == task_class and case.provider == provider
+            ]
+            cells.append(
+                SimpleNamespace(
+                    task_class=task_class,
+                    profile=f"{provider}-native-executor-read-only",
+                    mutation_mode="read_only",
+                    sample_size=sum(case.identity_matches for case in group),
+                    accepted_count=sum(case.identity_matches and case.accepted for case in group),
+                )
+            )
+    assert_manifest_matches_report(manifest, SimpleNamespace(evidence_cells=cells))
+
+    cells[0].sample_size += 1
+    with pytest.raises(ValueError, match="manifest/report mismatch"):
+        assert_manifest_matches_report(manifest, SimpleNamespace(evidence_cells=cells))
+
+
+def test_manifest_rejects_modified_suite_with_unchanged_case_ids(tmp_path: Path) -> None:
+    """A changed prompt cannot masquerade as the frozen suite by retaining IDs."""
+    suite_path = Path("evaluation/m29_live_provider_suite_wave3.json")
+    payload = json.loads(suite_path.read_text(encoding="utf-8"))
+    payload["cases"][0]["prompt"] += " modified"
+    modified_suite = tmp_path / "modified_suite.json"
+    modified_suite.write_text(json.dumps(payload), encoding="utf-8")
+    bundle = SimpleNamespace(suite_sha256=_sha256(suite_path))
+
+    with pytest.raises(ValueError, match="bundle suite hash"):
+        _validate_suite_digest(bundle, modified_suite)
+
+
+def test_manifest_rejects_bundle_database_terminal_status_mismatch() -> None:
+    """A private terminal outcome must agree with the persisted task status."""
+    case = SimpleNamespace(
+        case_id="wave3-case",
+        task_class="feature",
+        worker_profile="codex-native-executor-read-only",
+    )
+    outcome = SimpleNamespace(
+        case_id="wave3-case",
+        task_id="task-1",
+        task_class="feature",
+        worker_profile="codex-native-executor-read-only",
+        terminal_status="completed",
+        orchestration_runtime="temporal",
+        runtime_mode="native_agent",
+        files_changed_count=0,
+        has_unresolved_interactions=False,
+        gate_failures=[],
+    )
+    task = SimpleNamespace(
+        id="task-1",
+        status=TaskStatus.FAILED,
+        task_spec={"task_type": "feature"},
+        chosen_profile="codex-native-executor-read-only",
+        orchestration_runtime=OrchestrationRuntime.TEMPORAL,
+        runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+        worker_runs=[],
+    )
+
+    with pytest.raises(ValueError, match="terminal status mismatch"):
+        _validate_bundle_task_consistency(case, outcome, task)

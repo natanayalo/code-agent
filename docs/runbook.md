@@ -825,7 +825,8 @@ DATABASE_URL="$LIVE_DATABASE_URL" .venv/bin/python scripts/e2e/run_provider_reli
   --json-output evaluation/m29_provider_reliability_robustness_report.json \
   --markdown-output evaluation/m29_provider_reliability_robustness_report.md
 
-.venv/bin/python scripts/e2e/build_m29_wave3_manifest.py \
+DATABASE_URL="$LIVE_DATABASE_URL" \
+  .venv/bin/python scripts/e2e/build_m29_wave3_manifest.py \
   --bundle-dir artifacts/m29_evidence_bundle_wave3 \
   --suite evaluation/m29_live_provider_suite_wave3.json \
   --database-url-env DATABASE_URL \

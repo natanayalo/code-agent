@@ -324,6 +324,38 @@ def build_paired_report(
     )
 
 
+def assert_manifest_matches_report(manifest: Wave3Manifest, report: object) -> None:
+    """Reconcile Wave 3 case inclusion and acceptance with canonical report cells."""
+    cells = {
+        (cell.task_class, cell.profile, cell.mutation_mode): cell for cell in report.evidence_cells
+    }
+    for task_class in ("investigation", "feature"):
+        for provider in ("codex", "antigravity"):
+            profile = f"{provider}-native-executor-read-only"
+            group = [
+                case
+                for case in manifest.cases
+                if case.task_class == task_class and case.provider == provider
+            ]
+            cell = cells.get((task_class, profile, "read_only"))
+            if cell is None:
+                raise ValueError(f"canonical report is missing Wave 3 cell {task_class}/{profile}")
+            included = sum(case.identity_matches for case in group)
+            accepted = sum(case.identity_matches and case.accepted for case in group)
+            excluded = len(group) - included
+            if cell.sample_size != included or cell.accepted_count != accepted:
+                raise ValueError(
+                    f"manifest/report mismatch for {task_class}/{profile}: "
+                    f"manifest included={included}, accepted={accepted}; "
+                    f"report sample={cell.sample_size}, accepted={cell.accepted_count}"
+                )
+            if excluded != len(group) - cell.sample_size:
+                raise ValueError(
+                    f"manifest/report exclusion mismatch for {task_class}/{profile}: "
+                    f"manifest excluded={excluded}, report excluded={len(group) - cell.sample_size}"
+                )
+
+
 def assert_sanitized_manifest(payload: dict | str) -> None:
     """Reject private identifiers, paths, URLs, and undeclared manifest keys."""
     data = json.loads(payload) if isinstance(payload, str) else payload
@@ -394,6 +426,7 @@ __all__ = [
     "Wave3Manifest",
     "Wave3ManifestCase",
     "analyze_paired_manifest",
+    "assert_manifest_matches_report",
     "assert_sanitized_manifest",
     "assert_sanitized_paired_report",
     "build_paired_report",

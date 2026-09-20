@@ -260,6 +260,26 @@ def test_recommendation_fallback_when_insufficient_candidates() -> None:
     assert recs_0[0].recommended_profile is None
     assert "no_eligible_candidates" in str(recs_0[0].fallback_reason)
 
+    c_zero_codex = _make_dummy_cell(
+        "codex-native-executor",
+        wilson_lower=0.0,
+        median_latency=None,
+        sample_size=10,
+        accepted=0,
+    )
+    c_zero_antigravity = _make_dummy_cell(
+        "antigravity-native-executor",
+        wilson_lower=0.0,
+        median_latency=None,
+        sample_size=10,
+        accepted=0,
+    )
+    recs_zero_success = generate_recommendations([c_zero_codex, c_zero_antigravity])
+    assert recs_zero_success[0].recommended_profile is None
+    assert recs_zero_success[0].fallback_reason == (
+        "no_successful_candidates: all eligible candidates have zero accepted tasks"
+    )
+
 
 def test_sanitization_guardrail_rejects_private_fields() -> None:
     """Ensure assert_sanitized_report strictly forbids private fields."""
