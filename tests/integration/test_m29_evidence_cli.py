@@ -14,6 +14,7 @@ from scripts.e2e.run_m29_evidence_wave import main
 
 SUITE_PATH = Path("evaluation/m29_live_provider_suite.json")
 WAVE3_SUITE_PATH = Path("evaluation/m29_live_provider_suite_wave3.json")
+WAVE4_SUITE_PATH = Path("evaluation/m29_live_provider_suite_wave4.json")
 
 
 @pytest.fixture
@@ -142,6 +143,37 @@ def test_cli_status_wave3(temp_bundle_dir: Path, capsys: pytest.CaptureFixture[s
     assert code == 0
     captured = capsys.readouterr().out
     assert "0/40 completed" in captured
+    assert "Pending Cases:" in captured
+
+
+def test_cli_status_wave4(temp_bundle_dir: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    main(
+        [
+            "init",
+            "--bundle-dir",
+            str(temp_bundle_dir),
+            "--build-sha",
+            "1234567890abcdef1234567890abcdef12345678",
+            "--target-repository-revision",
+            "abcdef1234567890abcdef1234567890abcdef12",
+            "--ack-live-read-only-evidence",
+            "--suite-path",
+            str(WAVE4_SUITE_PATH),
+        ]
+    )
+
+    code = main(
+        [
+            "status",
+            "--bundle-dir",
+            str(temp_bundle_dir),
+            "--suite-path",
+            str(WAVE4_SUITE_PATH),
+        ]
+    )
+    assert code == 0
+    captured = capsys.readouterr().out
+    assert "0/20 completed" in captured
     assert "Pending Cases:" in captured
 
 

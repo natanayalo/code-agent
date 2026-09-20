@@ -28,6 +28,7 @@ from scripts.e2e.run_m29_evidence_wave import (
 
 SUITE_PATH = Path("evaluation/m29_live_provider_suite.json")
 WAVE3_SUITE_PATH = Path("evaluation/m29_live_provider_suite_wave3.json")
+WAVE4_SUITE_PATH = Path("evaluation/m29_live_provider_suite_wave4.json")
 
 
 def _load_canonical_suite() -> M29EvidenceSuite:
@@ -38,6 +39,12 @@ def _load_canonical_suite() -> M29EvidenceSuite:
 def _load_wave3_suite() -> M29EvidenceSuite:
     """Load the frozen Wave 3 read-only evidence suite."""
     raw = json.loads(WAVE3_SUITE_PATH.read_text(encoding="utf-8"))
+    return M29EvidenceSuite.model_validate(raw)
+
+
+def _load_wave4_suite() -> M29EvidenceSuite:
+    """Load the frozen Wave 4 investigation evidence suite."""
+    raw = json.loads(WAVE4_SUITE_PATH.read_text(encoding="utf-8"))
     return M29EvidenceSuite.model_validate(raw)
 
 
@@ -130,6 +137,50 @@ def test_wave3_prompts_classify_as_safe_declared_task_types() -> None:
         assert not spec.requires_permission
 
 
+def test_wave4_has_two_balanced_investigation_cells() -> None:
+    suite = _load_wave4_suite()
+    assert len(suite.cases) == 20
+    assert {case.task_class for case in suite.cases} == {"investigation"}
+    assert {case.mutation_mode for case in suite.cases} == {"read_only"}
+    for profile in (
+        "antigravity-native-executor-read-only",
+        "codex-native-executor-read-only",
+    ):
+        assert len([case for case in suite.cases if case.worker_profile == profile]) == 10
+
+    groups: dict[str, list[M29EvidenceCase]] = {}
+    for case in suite.cases:
+        groups.setdefault(case.pair_group or "", []).append(case)
+    assert len(groups) == 10
+    first_providers = []
+    for pair in groups.values():
+        ordered = sorted(pair, key=lambda case: case.pair_order or 0)
+        assert len(pair) == 2
+        assert ordered[0].topic == ordered[1].topic
+        assert ordered[0].prompt == ordered[1].prompt
+        first_providers.append(ordered[0].worker_profile)
+    assert all(
+        first_providers[i] != first_providers[i + 1] for i in range(len(first_providers) - 1)
+    )
+
+
+def test_wave4_prompts_classify_as_safe_investigations() -> None:
+    suite = _load_wave4_suite()
+    for case in suite.cases:
+        kind = _classify_task_kind(case.prompt)
+        spec = build_task_spec(
+            task_text=case.prompt,
+            repo_url=None,
+            target_branch=None,
+            task_kind=kind,
+            constraints={"read_only": True, "delivery_mode": "summary"},
+        )
+        assert spec.task_type == "investigation"
+        assert spec.risk_level == "low"
+        assert not spec.requires_clarification
+        assert not spec.requires_permission
+
+
 def test_all_28_prompts_classify_deterministically_without_gates() -> None:
     suite = _load_canonical_suite()
     for case in suite.cases:
@@ -174,6 +225,11 @@ def test_suite_validation_rejects_malformed_distributions() -> None:
     wave3_raw["cases"][1]["prompt"] = "A different paired prompt without modifying files."
     with pytest.raises(ValidationError, match="must match topic and prompt"):
         M29EvidenceSuite.model_validate(wave3_raw)
+
+    wave4_raw = json.loads(WAVE4_SUITE_PATH.read_text(encoding="utf-8"))
+    wave4_raw["cases"][1]["prompt"] = "A different paired prompt without modifying files."
+    with pytest.raises(ValidationError, match="must match topic and prompt"):
+        M29EvidenceSuite.model_validate(wave4_raw)
 
 
 def test_bundle_identity_and_outcomes() -> None:

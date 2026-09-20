@@ -1,0 +1,206 @@
+{
+  "suite_name": "m29-live-provider-evidence-wave4",
+  "schema_version": 1,
+  "cases": [
+    {
+      "case_id": "m29-w4-inv-01-state-rehydration-codex",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "state-rehydration",
+      "pair_group": "m29-w4-investigation-01-state-rehydration",
+      "pair_order": 1,
+      "prompt": "Investigate how Temporal task state is rehydrated from relational projections after worker restart. Trace snapshot exclusions, authoritative database reads, and terminal replay behavior, then summarize findings without modifying files."
+    },
+    {
+      "case_id": "m29-w4-inv-01-state-rehydration-antigravity",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "state-rehydration",
+      "pair_group": "m29-w4-investigation-01-state-rehydration",
+      "pair_order": 2,
+      "prompt": "Investigate how Temporal task state is rehydrated from relational projections after worker restart. Trace snapshot exclusions, authoritative database reads, and terminal replay behavior, then summarize findings without modifying files."
+    },
+    {
+      "case_id": "m29-w4-inv-02-repair-loop-antigravity",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "repair-completion-loop",
+      "pair_group": "m29-w4-investigation-02-repair-completion-loop",
+      "pair_order": 1,
+      "prompt": "Investigate verifier and independent-review repair loops for completed coding tasks. Trace bounded retries, retained workspaces, re-verification, cancellation, and manual handoff outcomes without modifying files."
+    },
+    {
+      "case_id": "m29-w4-inv-02-repair-loop-codex",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "repair-completion-loop",
+      "pair_group": "m29-w4-investigation-02-repair-completion-loop",
+      "pair_order": 2,
+      "prompt": "Investigate verifier and independent-review repair loops for completed coding tasks. Trace bounded retries, retained workspaces, re-verification, cancellation, and manual handoff outcomes without modifying files."
+    },
+    {
+      "case_id": "m29-w4-inv-03-delivery-gating-codex",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "delivery-gating",
+      "pair_group": "m29-w4-investigation-03-delivery-gating",
+      "pair_order": 1,
+      "prompt": "Investigate the acceptance gates that precede branch and draft-pull-request delivery. Trace how verification, review, delivery checks, and completion evidence prevent premature task completion without modifying files."
+    },
+    {
+      "case_id": "m29-w4-inv-03-delivery-gating-antigravity",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "delivery-gating",
+      "pair_group": "m29-w4-investigation-03-delivery-gating",
+      "pair_order": 2,
+      "prompt": "Investigate the acceptance gates that precede branch and draft-pull-request delivery. Trace how verification, review, delivery checks, and completion evidence prevent premature task completion without modifying files."
+    },
+    {
+      "case_id": "m29-w4-inv-04-sandbox-capabilities-antigravity",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "sandbox-capability-grants",
+      "pair_group": "m29-w4-investigation-04-sandbox-capability-grants",
+      "pair_order": 1,
+      "prompt": "Investigate sandbox capability grants and trust-boundary enforcement for native agents. Trace capability intersection, Docker isolation, proxy restrictions, and audit artifacts without modifying files."
+    },
+    {
+      "case_id": "m29-w4-inv-04-sandbox-capabilities-codex",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "sandbox-capability-grants",
+      "pair_group": "m29-w4-investigation-04-sandbox-capability-grants",
+      "pair_order": 2,
+      "prompt": "Investigate sandbox capability grants and trust-boundary enforcement for native agents. Trace capability intersection, Docker isolation, proxy restrictions, and audit artifacts without modifying files."
+    },
+    {
+      "case_id": "m29-w4-inv-05-private-git-codex",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "private-git-bootstrap",
+      "pair_group": "m29-w4-investigation-05-private-git-bootstrap",
+      "pair_order": 1,
+      "prompt": "Investigate broker-authenticated Git operations for private repository provisioning. Trace credential staging, proxy boundaries, cleanup, and failure handling without modifying files."
+    },
+    {
+      "case_id": "m29-w4-inv-05-private-git-antigravity",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "private-git-bootstrap",
+      "pair_group": "m29-w4-investigation-05-private-git-bootstrap",
+      "pair_order": 2,
+      "prompt": "Investigate broker-authenticated Git operations for private repository provisioning. Trace credential staging, proxy boundaries, cleanup, and failure handling without modifying files."
+    },
+    {
+      "case_id": "m29-w4-inv-06-skeptical-memory-antigravity",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "skeptical-memory-admission",
+      "pair_group": "m29-w4-investigation-06-skeptical-memory-admission",
+      "pair_order": 1,
+      "prompt": "Investigate skeptical personal and project memory admission and retrieval. Trace confidence, scope, verification timestamps, conflict suppression, and deletion boundaries without modifying files."
+    },
+    {
+      "case_id": "m29-w4-inv-06-skeptical-memory-codex",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "skeptical-memory-admission",
+      "pair_group": "m29-w4-investigation-06-skeptical-memory-admission",
+      "pair_order": 2,
+      "prompt": "Investigate skeptical personal and project memory admission and retrieval. Trace confidence, scope, verification timestamps, conflict suppression, and deletion boundaries without modifying files."
+    },
+    {
+      "case_id": "m29-w4-inv-07-dag-persistence-codex",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "dag-attempt-persistence",
+      "pair_group": "m29-w4-investigation-07-dag-attempt-persistence",
+      "pair_order": 1,
+      "prompt": "Investigate decomposed task DAG and node-attempt persistence. Trace plan reconstruction, attempt markers, wave merging, retry semantics, and aggregate result generation without modifying files."
+    },
+    {
+      "case_id": "m29-w4-inv-07-dag-persistence-antigravity",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "dag-attempt-persistence",
+      "pair_group": "m29-w4-investigation-07-dag-attempt-persistence",
+      "pair_order": 2,
+      "prompt": "Investigate decomposed task DAG and node-attempt persistence. Trace plan reconstruction, attempt markers, wave merging, retry semantics, and aggregate result generation without modifying files."
+    },
+    {
+      "case_id": "m29-w4-inv-08-review-comment-repair-antigravity",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "review-comment-repair",
+      "pair_group": "m29-w4-investigation-08-review-comment-repair",
+      "pair_order": 1,
+      "prompt": "Investigate automated GitHub review-comment polling and repair. Trace author filtering, deduplication, per-reply checkpoints, thread replies, and budget limits without modifying files."
+    },
+    {
+      "case_id": "m29-w4-inv-08-review-comment-repair-codex",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "review-comment-repair",
+      "pair_group": "m29-w4-investigation-08-review-comment-repair",
+      "pair_order": 2,
+      "prompt": "Investigate automated GitHub review-comment polling and repair. Trace author filtering, deduplication, per-reply checkpoints, thread replies, and budget limits without modifying files."
+    },
+    {
+      "case_id": "m29-w4-inv-09-agent-events-codex",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "agent-event-redaction",
+      "pair_group": "m29-w4-investigation-09-agent-event-redaction",
+      "pair_order": 1,
+      "prompt": "Investigate provider-neutral native agent event capture. Trace event normalization, reasoning suppression, sensitive-text redaction, stream caps, and JSONL artifact persistence without modifying files."
+    },
+    {
+      "case_id": "m29-w4-inv-09-agent-events-antigravity",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "agent-event-redaction",
+      "pair_group": "m29-w4-investigation-09-agent-event-redaction",
+      "pair_order": 2,
+      "prompt": "Investigate provider-neutral native agent event capture. Trace event normalization, reasoning suppression, sensitive-text redaction, stream caps, and JSONL artifact persistence without modifying files."
+    },
+    {
+      "case_id": "m29-w4-inv-10-artifact-retention-antigravity",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "antigravity-native-executor-read-only",
+      "topic": "artifact-retention",
+      "pair_group": "m29-w4-investigation-10-artifact-retention",
+      "pair_order": 1,
+      "prompt": "Investigate workspace and artifact retention after task completion, repair, cancellation, and failure. Trace cleanup timing, audit indexes, evidence availability, and safe deletion boundaries without modifying files."
+    },
+    {
+      "case_id": "m29-w4-inv-10-artifact-retention-codex",
+      "task_class": "investigation",
+      "mutation_mode": "read_only",
+      "worker_profile": "codex-native-executor-read-only",
+      "topic": "artifact-retention",
+      "pair_group": "m29-w4-investigation-10-artifact-retention",
+      "pair_order": 2,
+      "prompt": "Investigate workspace and artifact retention after task completion, repair, cancellation, and failure. Trace cleanup timing, audit indexes, evidence availability, and safe deletion boundaries without modifying files."
+    }
+  ]
+}

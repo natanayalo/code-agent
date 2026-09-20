@@ -744,7 +744,10 @@ The M29 live evidence wave harness (`scripts/e2e/run_m29_evidence_wave.py`) mana
 
 ```bash
 # 0. Preflight smoke check (validates live container model resolution without evaluation contamination)
-.venv/bin/python scripts/e2e/run_m29_evidence_wave.py smoke
+#    Run this before initializing a bundle so a failed provider check does not freeze a build.
+.venv/bin/python scripts/e2e/run_m29_evidence_wave.py smoke \
+  --repo-key code-agent \
+  --branch master
 
 # 1. Initialize a new evidence bundle (Wave 2: 20 docs cases, 10 pairs)
 .venv/bin/python scripts/e2e/run_m29_evidence_wave.py init \
@@ -786,6 +789,17 @@ The M29 live evidence wave harness (`scripts/e2e/run_m29_evidence_wave.py`) mana
   --repo-key code-agent \
   --branch master \
   --timeout-seconds 900
+```
+
+Before refreshing the Wave 4 reports, preserve the prior cumulative canonical report as a
+reconciliation baseline. Archive this sanitized file with the private bundle; its SHA-256 is
+bound into the published manifest. The builder also reruns the canonical extractor against the
+same PostgreSQL snapshot and verifies that eligible Wave 4 task IDs and cumulative cell counts
+are present, so unrelated tasks may enter the window without invalidating the evidence:
+
+```bash
+cp evaluation/m29_provider_reliability_report.json \
+  artifacts/m29_provider_reliability_wave3_baseline_report.json
 ```
 
 After the final case reaches a terminal state, use the bundle's latest
@@ -843,11 +857,57 @@ DATABASE_URL="$LIVE_DATABASE_URL" \
   --markdown-output evaluation/m29_provider_reliability_wave3_paired_analysis.md
 ```
 
+Wave 4 adds 20 fresh, balanced investigation/read-only cases (10 paired
+topics). It uses the same report policy and keeps the raw bundle private:
+
+```bash
+# Validate provider readiness before freezing the Wave 4 build and target revision.
+.venv/bin/python scripts/e2e/run_m29_evidence_wave.py smoke \
+  --repo-key code-agent \
+  --branch master
+
+# Only after both providers pass the smoke check, initialize the private bundle.
+.venv/bin/python scripts/e2e/run_m29_evidence_wave.py init \
+  --bundle-dir artifacts/m29_evidence_bundle_wave4 \
+  --suite-path evaluation/m29_live_provider_suite_wave4.json \
+  --build-sha "$(git rev-parse HEAD)" \
+  --target-repository-revision "$(git rev-parse origin/master)" \
+  --ack-live-read-only-evidence
+
+.venv/bin/python scripts/e2e/run_m29_evidence_wave.py status \
+  --bundle-dir artifacts/m29_evidence_bundle_wave4 \
+  --suite-path evaluation/m29_live_provider_suite_wave4.json
+
+.venv/bin/python scripts/e2e/run_m29_evidence_wave.py run-batch \
+  --bundle-dir artifacts/m29_evidence_bundle_wave4 \
+  --suite-path evaluation/m29_live_provider_suite_wave4.json \
+  --repo-key code-agent --branch master --timeout-seconds 900
+
+# Use the bundle's latest terminal_at as AS_OF, then refresh the three reports.
+DATABASE_URL="$LIVE_DATABASE_URL" .venv/bin/python scripts/e2e/build_m29_wave4_manifest.py \
+  --bundle-dir artifacts/m29_evidence_bundle_wave4 \
+  --suite evaluation/m29_live_provider_suite_wave4.json \
+  --database-url-env DATABASE_URL \
+  --baseline-report artifacts/m29_provider_reliability_wave3_baseline_report.json \
+  --advisory-report evaluation/m29_provider_reliability_report.json \
+  --operational-report evaluation/m29_provider_reliability_operational_report.json \
+  --robustness-report evaluation/m29_provider_reliability_robustness_report.json \
+  --as-of "$AS_OF" \
+  --output evaluation/m29_provider_reliability_wave4_manifest.json
+
+.venv/bin/python scripts/e2e/run_m29_wave4_paired_analysis.py \
+  --manifest evaluation/m29_provider_reliability_wave4_manifest.json \
+  --iterations 10000 --seed 29 \
+  --json-output evaluation/m29_provider_reliability_wave4_paired_analysis.json \
+  --markdown-output evaluation/m29_provider_reliability_wave4_paired_analysis.md
+```
+
 #### Bundles and Diagnostic Baselines
 - **Wave 1 Diagnostic Baseline**: `evaluation/m29_live_provider_suite.json` (28 tasks across investigation, feature, and docs), preserved immutably at `artifacts/m29_evidence_bundle_wave1_diagnostic/bundle.json`. Captures the historical `gpt-5.4-mini` retirement event.
 - **Wave 2 Live Evidence**: `evaluation/m29_live_provider_suite_wave2.json` (20 docs tasks across 10 balanced pairs), tracked at `artifacts/m29_evidence_bundle_wave2/bundle.json`. Powered to meet the canonical sample floor ($N=10$ vs $10$).
 - **Wave 3 Live Evidence**: `evaluation/m29_live_provider_suite_wave3.json` (40 read-only tasks across 20 balanced investigation/feature pairs), tracked privately at `artifacts/m29_evidence_bundle_wave3/bundle.json`. The ignored bundle pins the harness build and target repository revision, and preserves terminal outcomes without reruns.
 - **Wave 3 observed result**: all 40 cases reached immutable terminal outcomes (18 completed, 22 failed), with zero changed files and no interaction or runtime gate failures. The canonical report qualifies `feature/read_only` at 10 samples per provider using successful-task latency for ties; `investigation/read_only` remains below the sample floor after fail-closed authoritative identity filtering. The committed sanitized manifest and paired supplement bind case outcomes to the frozen suite, build, and report hashes without publishing task IDs or raw outputs.
+- **Wave 4 investigation evidence**: `evaluation/m29_live_provider_suite_wave4.json` is the frozen 20-case follow-up for the investigation/read-only gap. Publish its manifest and paired supplement only after all cases are terminal and the cumulative canonical report has authoritative samples for both providers.
 
 #### Invariants & failure semantics
 - **Strict Read-Only Delivery**: All evidence cases enforce `delivery_mode=summary`, low risk, read-only mode, and zero changed files.
