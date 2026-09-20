@@ -331,15 +331,8 @@ def assert_wave4_manifest_matches_report(
         extractor_cell = extractor_cell_map.get(("investigation", profile, "read_only"))
         if extractor_cell is None:
             raise ValueError(f"canonical extractor is missing investigation/{profile}")
-        if (
-            cell.sample_size != extractor_cell.sample_size
-            or cell.accepted_count != extractor_cell.accepted_count
-        ):
-            raise ValueError(
-                f"canonical report does not match extractor snapshot for {profile}: "
-                f"report={cell.sample_size}/{cell.accepted_count}, "
-                f"extractor={extractor_cell.sample_size}/{extractor_cell.accepted_count}"
-            )
+        if cell != extractor_cell:
+            raise ValueError(f"canonical report differs from extractor snapshot for {profile}")
 
 
 def render_wave4_markdown(report: Wave4PairedAnalysisReport) -> str:

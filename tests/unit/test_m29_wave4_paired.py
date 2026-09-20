@@ -14,7 +14,54 @@ from evaluation.m29_wave4_paired import (
     assert_sanitized_wave4_manifest,
     assert_wave4_manifest_matches_report,
 )
-from evaluation.provider_reliability_models import ReliabilityReportPolicy
+from evaluation.provider_reliability_models import (
+    BudgetCoverageMetrics,
+    InterventionMetrics,
+    LatencyMetrics,
+    ProviderReliabilityEvidenceCell,
+    ReliabilityReportPolicy,
+    RepairMetrics,
+    StageOutcomeRates,
+    WilsonConfidenceInterval,
+)
+
+
+def _evidence_cell(provider: str, *, sample_size: int = 16) -> ProviderReliabilityEvidenceCell:
+    accepted_count = 5
+    return ProviderReliabilityEvidenceCell(
+        task_class="investigation",
+        profile=f"{provider}-native-executor-read-only",
+        mutation_mode="read_only",
+        sample_size=sample_size,
+        accepted_count=accepted_count,
+        accepted_task_rate=round(accepted_count / sample_size, 4),
+        accepted_task_rate_ci=WilsonConfidenceInterval(lower=0.1, center=0.3, upper=0.5),
+        failure_count=sample_size - accepted_count,
+        failure_rate=round((sample_size - accepted_count) / sample_size, 4),
+        stage_outcome_rates=StageOutcomeRates(dispatch_rate=1.0, execution_success_rate=1.0),
+        repairs=RepairMetrics(
+            verifier_repairs_count=0,
+            review_repairs_count=0,
+            total_repaired_tasks=0,
+            repair_rate=0.0,
+        ),
+        interventions=InterventionMetrics(
+            human_interventions_count=0,
+            clarification_questions_count=0,
+            approvals_count=0,
+            intervention_rate=0.0,
+        ),
+        manual_overrides_count=0,
+        manual_override_rate=0.0,
+        terminal_latency=LatencyMetrics(median_seconds=100.0),
+        successful_task_latency=LatencyMetrics(median_seconds=100.0),
+        failure_task_latency=LatencyMetrics(median_seconds=100.0),
+        budget_field_coverage=BudgetCoverageMetrics(
+            budget_reported_count=sample_size,
+            budget_coverage_rate=1.0,
+        ),
+        is_eligible=True,
+    )
 
 
 def _manifest(*, identity_complete: bool = True) -> Wave4Manifest:
@@ -230,26 +277,8 @@ def test_wave4_manifest_reconciles_against_frozen_baseline() -> None:
         mutation_mode="read_only",
         recommended_profile="codex-native-executor-read-only",
     )
-    report_cells = [
-        SimpleNamespace(
-            task_class="investigation",
-            profile=f"{provider}-native-executor-read-only",
-            mutation_mode="read_only",
-            sample_size=16,
-            accepted_count=5,
-        )
-        for provider in ("codex", "antigravity")
-    ]
-    extractor_cells = [
-        SimpleNamespace(
-            task_class="investigation",
-            profile=f"{provider}-native-executor-read-only",
-            mutation_mode="read_only",
-            sample_size=16,
-            accepted_count=5,
-        )
-        for provider in ("codex", "antigravity")
-    ]
+    report_cells = [_evidence_cell(provider) for provider in ("codex", "antigravity")]
+    extractor_cells = [_evidence_cell(provider) for provider in ("codex", "antigravity")]
     baseline_cells = [
         SimpleNamespace(
             task_class="investigation",
@@ -276,8 +305,10 @@ def test_wave4_manifest_reconciles_against_frozen_baseline() -> None:
         extractor_task_ids={f"wave4-task-{index}" for index in range(20)} | {"unrelated-task"},
     )
 
-    report_cells[0].sample_size += 1
-    with pytest.raises(ValueError, match="does not match extractor snapshot"):
+    report_cells[0] = report_cells[0].model_copy(
+        update={"successful_task_latency": LatencyMetrics(median_seconds=999.0)}
+    )
+    with pytest.raises(ValueError, match="differs from extractor snapshot"):
         assert_wave4_manifest_matches_report(
             manifest,
             current,
