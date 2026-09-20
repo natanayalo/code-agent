@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: qualify M29 read-only Wave 3 evidence ([#408](https://github.com/natanayalo/code-agent/pull/408))
+
 - Feat: add provider-specific pre-dispatch diagnostics (M29 Item 1b) ([#407](https://github.com/natanayalo/code-agent/pull/407))
 
 - Feat: remove legacy raw-secret ingress and enforce registered secret references (M29 Item 1a) ([#406](https://github.com/natanayalo/code-agent/pull/406))
