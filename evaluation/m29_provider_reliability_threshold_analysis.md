@@ -1,12 +1,13 @@
 # M29 Provider Reliability Threshold Analysis
 
-This is the refreshed, offline advisory analysis for M29 Wave 3. It uses the
-canonical current-execution-cohort report, operational diagnostic report, and
-robustness report generated at the one frozen terminal timestamp
-`2026-09-19T21:32:22.562107Z`. Production routing and
+This analysis preserves the Wave 3 decision record and appends the refreshed
+Wave 4 investigation/read-only result. The current canonical
+current-execution-cohort report, operational diagnostic report, and robustness
+report use the frozen Wave 4 terminal timestamp
+`2026-09-27T22:02:06.727893Z`. Production routing and
 `evaluation/routing_metrics.json` are unchanged.
 
-## 1. Evidence provenance and integrity
+## 1. Wave 3 evidence provenance and integrity (historical snapshot)
 
 Wave 3 is pinned to:
 
@@ -32,7 +33,7 @@ The failure taxonomy in the bundle is 10 `infra_verifier_unavailable`, 5
 `tool_runtime`, 2 `unknown`, and 5 `worker_failure`. These failures remain
 evidence and are not silently converted to passes.
 
-## 2. Report accounting
+## 2. Wave 3 report accounting
 
 The canonical extractor is deliberately fail-closed: it accepts only tasks with
 authoritative `budget_usage["native_agent"]["model_execution"]` identity
@@ -61,7 +62,7 @@ cases. The public manifest records those terminal failures and their
 why investigation/read-only remains insufficient-data rather than a provider
 quality claim.
 
-## 3. Canonical cell results
+## 3. Wave 3 canonical cell results
 
 The canonical policy uses a 90-day lookback, a 10-sample floor per compatible
 candidate, and 95% Wilson lower bounds.
@@ -90,7 +91,7 @@ pass rate of `0.0` is a strict stage metric and not an independently verified
 quality rate. The recommendation is a terminal-completion/latency advisory,
 not a claim of independently verified feature quality.
 
-## 4. Paired analysis and robustness interpretation
+## 4. Wave 3 paired analysis and robustness interpretation
 
 The committed paired supplement (`evaluation/m29_provider_reliability_wave3_paired_analysis.{json,md}`)
 resamples complete topic pairs with seed 29 and 10,000 iterations. It is a
@@ -112,7 +113,7 @@ the historical 45-day split, so longitudinal consistency and temporal window
 sensitivity are not established. `feature/mutation` and
 `investigation/read_only` remain `insufficient_data` in the robustness report.
 
-## 5. Decision record and remaining work
+## 5. Wave 3 decision record (historical)
 
 1. Qualify `docs/read_only` with the existing Codex advisory recommendation.
 2. Qualify `feature/read_only` with the Antigravity terminal-completion/latency
@@ -129,3 +130,76 @@ sensitivity are not established. `feature/mutation` and
 7. Keep M27 deferred and production routing static. Any future routing change
    requires a separate reviewed, reversible policy change with held-out
    validation.
+
+## 6. Wave 4 investigation/read-only result (current snapshot)
+
+Wave 4 used the frozen 20-case suite at build and target revision
+`5f0cfdc0ed650dcfdfaff88aa1a23dc2abb8959f` with suite SHA-256
+`516ae550a441d5f9eb75d7022c6698f8248d9f0f1ec99ef2d80ef02fce63e3c3`.
+The private, ignored retry bundle is
+`artifacts/m29_evidence_bundle_wave4_from_first_quota/bundle.json`; the earlier
+Wave 4 bundle is preserved separately. Collection resumed at the first
+quota-limited case, retaining earlier terminal outcomes and never replacing a
+terminal result. All 20 cases reached immutable terminal outcomes: 16 completed
+and 4 failed (3 timeouts and 1 unknown failure). All used Temporal/native
+investigation/read-only execution; changed-file count, unresolved interactions,
+and gate failures were zero.
+
+Persisted execution identity is complete and matches the frozen identity for all
+10 Antigravity cases (`gemini-3.8-flash/medium`) and 7 Codex cases
+(`gpt-5.6-luna/high`). Three Codex outcomes have unknown legacy execution
+identity and are excluded fail-closed; no identity is inferred from the profile
+or prompt. The sanitized manifest reconciles all eligible Wave 4 tasks against
+the canonical PostgreSQL extractor. Its SHA-256 is
+`5791b0506675416e1e1cbd760f0dbef46b8544e6b71b1c63ad7b5a72835d0438`; the
+paired-analysis JSON SHA-256 is
+`115a155901741ea1fb2523b1bde7550d1d95838203375ad022294f79d6e75c83`.
+
+At the frozen `as_of`, the cumulative 90-day current-execution cohort qualifies
+both providers at the 10-sample floor for `investigation/read_only`:
+
+| Profile | N | Accepted | Wilson lower bound | Successful-task median | Terminal median |
+|---|---:|---:|---:|---:|---:|
+| `antigravity-native-executor-read-only` | 16 | 15 | 0.7167 | 504.25s | 487.41s |
+| `codex-native-executor-read-only` | 17 | 9 | 0.3096 | 1012.65s | 902.79s |
+
+The advisory recommends `antigravity-native-executor-read-only`, ranked first on
+the canonical successful-task latency tie-break after acceptance eligibility.
+This is a cumulative cohort result, not a Wave 4-only sample: the Wave 4 bundle
+contributes 10 completed Antigravity cases and 6 completed Codex cases among 7
+identity-verified Codex cases. Failure and terminal latency remain reported
+operationally and are not used to reward fast failures.
+
+The Wave 4 paired supplement has 10 topic pairs but only 7 identity-complete
+pairs: 6 pairs both completed and 4 had only Antigravity complete (0 Codex-only,
+0 neither). Across 10,000 paired bootstrap iterations with seed 29, Antigravity
+has a 66% higher-acceptance probability, 34% tied probability, and is faster in
+successful latency in all bootstrap resamples; the median paired successful
+latency delta (Antigravity minus Codex) is -480.76s across 6 successful pairs.
+These clustered paired estimates are descriptive and do not replace the
+canonical independent-cell report.
+
+Robustness ranks Antigravity first for this cell in all 30/60/90-day windows;
+the 10,000-resample unpaired first-rank probability is 99.86% (seed 29). The
+robustness report remains `partial`: the historical 45-day cohort contains 0
+included tasks, so longitudinal stability is untested. `feature/mutation`
+remains at N=0 and has no recommendation. The provider recommendation is
+advisory only; M27 remains deferred and neither live routing nor
+`evaluation/routing_metrics.json` was changed.
+
+## 7. Updated decision record and remaining M29 work
+
+1. Retain the existing advisory recommendations for `docs/read_only` and
+   `feature/read_only`; add Antigravity as the `investigation/read_only`
+   advisory recommendation based on the reconciled cumulative cohort above.
+2. Keep exact identity persistence fail-closed. The three Wave 4 Codex
+   `unknown_execution_identity` exclusions remain evidence gaps; improving
+   pre-dispatch identity persistence is a separate worker/runtime follow-up and
+   was not included here.
+3. Keep `feature/mutation` pending at N=0 until its separate mutable-evaluation
+   contract, delivery safeguards, and cleanup plan are reviewed.
+4. Gather evidence in a historical 45-day cohort before claiming longitudinal
+   robustness; the current historical split has zero included tasks.
+5. Evaluate hierarchical budget controls separately. Keep M27 deferred and
+   production routing static pending separate review, reversible policy work,
+   and held-out validation.

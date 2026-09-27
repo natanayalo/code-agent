@@ -857,8 +857,13 @@ DATABASE_URL="$LIVE_DATABASE_URL" \
   --markdown-output evaluation/m29_provider_reliability_wave3_paired_analysis.md
 ```
 
-Wave 4 adds 20 fresh, balanced investigation/read-only cases (10 paired
-topics). It uses the same report policy and keeps the raw bundle private:
+Wave 4 adds 20 balanced investigation/read-only cases (10 paired topics). The
+completed run below resumed from its first quota-limited case in a separate
+private bundle; its earlier terminal prefix and the original Wave 4 bundle were
+preserved. Before creating any evidence bundle, run both smoke tasks and verify
+their persisted identities are exactly `gpt-5.6-luna/high` for Codex and
+`gemini-3.8-flash/medium` for Antigravity. If either provider is not ready or
+the verifier is quota-limited, stop before bundle initialization.
 
 ```bash
 # Validate provider readiness before freezing the Wave 4 build and target revision.
@@ -866,26 +871,56 @@ topics). It uses the same report policy and keeps the raw bundle private:
   --repo-key code-agent \
   --branch master
 
-# Only after both providers pass the smoke check, initialize the private bundle.
+# Only after both providers pass the smoke check, initialize a new private bundle.
+# Never rerun init against an existing bundle or replace a terminal outcome.
 .venv/bin/python scripts/e2e/run_m29_evidence_wave.py init \
-  --bundle-dir artifacts/m29_evidence_bundle_wave4 \
+  --bundle-dir artifacts/m29_evidence_bundle_wave4_from_first_quota \
   --suite-path evaluation/m29_live_provider_suite_wave4.json \
   --build-sha "$(git rev-parse HEAD)" \
   --target-repository-revision "$(git rev-parse origin/master)" \
   --ack-live-read-only-evidence
 
 .venv/bin/python scripts/e2e/run_m29_evidence_wave.py status \
-  --bundle-dir artifacts/m29_evidence_bundle_wave4 \
+  --bundle-dir artifacts/m29_evidence_bundle_wave4_from_first_quota \
   --suite-path evaluation/m29_live_provider_suite_wave4.json
 
 .venv/bin/python scripts/e2e/run_m29_evidence_wave.py run-batch \
-  --bundle-dir artifacts/m29_evidence_bundle_wave4 \
+  --bundle-dir artifacts/m29_evidence_bundle_wave4_from_first_quota \
   --suite-path evaluation/m29_live_provider_suite_wave4.json \
-  --repo-key code-agent --branch master --timeout-seconds 900
+  --repo-key code-agent --branch master --timeout-seconds 1800
 
-# Use the bundle's latest terminal_at as AS_OF, then refresh the three reports.
+# Freeze AS_OF at the last terminal timestamp; use this same value for all reports.
+AS_OF="$(jq -r '[.cases[] | .terminal_at] | sort | last' \
+  artifacts/m29_evidence_bundle_wave4_from_first_quota/bundle.json)"
+
+# The repository .env may point DATABASE_URL at local SQLite. Resolve the live
+# Compose PostgreSQL URL from the same .env values, then validate read access.
+set -a
+. ./.env
+set +a
+LIVE_DATABASE_URL="$(.venv/bin/python -c 'import os; from urllib.parse import quote; print("postgresql+psycopg://" + quote(os.environ["POSTGRES_USER"], safe="") + ":" + quote(os.environ["POSTGRES_PASSWORD"], safe="") + "@127.0.0.1:5432/" + quote(os.environ["POSTGRES_DB"], safe=""))')"
+DATABASE_URL="$LIVE_DATABASE_URL" .venv/bin/python -c 'import os; from sqlalchemy import create_engine, text; engine=create_engine(os.environ["DATABASE_URL"]); connection=engine.connect(); assert connection.execute(text("SELECT 1")).scalar_one() == 1; connection.close(); engine.dispose()'
+
+DATABASE_URL="$LIVE_DATABASE_URL" .venv/bin/python scripts/e2e/run_provider_reliability_report.py \
+  --database-url-env DATABASE_URL --evidence-scope current_execution_cohort \
+  --lookback-days 90 --min-samples 10 --as-of "$AS_OF" \
+  --json-output evaluation/m29_provider_reliability_report.json \
+  --markdown-output evaluation/m29_provider_reliability_report.md
+
+DATABASE_URL="$LIVE_DATABASE_URL" .venv/bin/python scripts/e2e/run_provider_reliability_report.py \
+  --database-url-env DATABASE_URL --evidence-scope operational \
+  --lookback-days 90 --min-samples 10 --as-of "$AS_OF" \
+  --json-output evaluation/m29_provider_reliability_operational_report.json \
+  --markdown-output evaluation/m29_provider_reliability_operational_report.md
+
+DATABASE_URL="$LIVE_DATABASE_URL" .venv/bin/python scripts/e2e/run_provider_reliability_robustness.py \
+  --database-url-env DATABASE_URL --lookback-days 90 --min-samples 10 \
+  --as-of "$AS_OF" --bootstrap-iterations 10000 --bootstrap-seed 29 \
+  --json-output evaluation/m29_provider_reliability_robustness_report.json \
+  --markdown-output evaluation/m29_provider_reliability_robustness_report.md
+
 DATABASE_URL="$LIVE_DATABASE_URL" .venv/bin/python scripts/e2e/build_m29_wave4_manifest.py \
-  --bundle-dir artifacts/m29_evidence_bundle_wave4 \
+  --bundle-dir artifacts/m29_evidence_bundle_wave4_from_first_quota \
   --suite evaluation/m29_live_provider_suite_wave4.json \
   --database-url-env DATABASE_URL \
   --baseline-report artifacts/m29_provider_reliability_wave3_baseline_report.json \
@@ -902,12 +937,22 @@ DATABASE_URL="$LIVE_DATABASE_URL" .venv/bin/python scripts/e2e/build_m29_wave4_m
   --markdown-output evaluation/m29_provider_reliability_wave4_paired_analysis.md
 ```
 
+The completed Wave 4 bundle has 20 terminal outcomes (16 completed, 4 failed),
+zero changed files, interactions, and gate failures. Exact persisted identity
+matches 10/10 Antigravity cases and 7/10 Codex cases; the other 3 Codex cases
+remain excluded as `unknown_execution_identity`. The refreshed cumulative
+canonical investigation cell is Antigravity N=16/15 accepted versus Codex
+N=17/9 accepted and recommends Antigravity on successful-task latency. The
+paired supplement has 7 identity-complete pairs. Robustness remains `partial`
+because the historical 45-day cohort has no included tasks; no routing or
+`evaluation/routing_metrics.json` changes follow from this advisory.
+
 #### Bundles and Diagnostic Baselines
 - **Wave 1 Diagnostic Baseline**: `evaluation/m29_live_provider_suite.json` (28 tasks across investigation, feature, and docs), preserved immutably at `artifacts/m29_evidence_bundle_wave1_diagnostic/bundle.json`. Captures the historical `gpt-5.4-mini` retirement event.
 - **Wave 2 Live Evidence**: `evaluation/m29_live_provider_suite_wave2.json` (20 docs tasks across 10 balanced pairs), tracked at `artifacts/m29_evidence_bundle_wave2/bundle.json`. Powered to meet the canonical sample floor ($N=10$ vs $10$).
 - **Wave 3 Live Evidence**: `evaluation/m29_live_provider_suite_wave3.json` (40 read-only tasks across 20 balanced investigation/feature pairs), tracked privately at `artifacts/m29_evidence_bundle_wave3/bundle.json`. The ignored bundle pins the harness build and target repository revision, and preserves terminal outcomes without reruns.
 - **Wave 3 observed result**: all 40 cases reached immutable terminal outcomes (18 completed, 22 failed), with zero changed files and no interaction or runtime gate failures. The canonical report qualifies `feature/read_only` at 10 samples per provider using successful-task latency for ties; `investigation/read_only` remains below the sample floor after fail-closed authoritative identity filtering. The committed sanitized manifest and paired supplement bind case outcomes to the frozen suite, build, and report hashes without publishing task IDs or raw outputs.
-- **Wave 4 investigation evidence**: `evaluation/m29_live_provider_suite_wave4.json` is the frozen 20-case follow-up for the investigation/read-only gap. Publish its manifest and paired supplement only after all cases are terminal and the cumulative canonical report has authoritative samples for both providers.
+- **Wave 4 investigation evidence**: `evaluation/m29_live_provider_suite_wave4.json` is the frozen 20-case follow-up. The completed private retry bundle records 16 completed and 4 failed terminal outcomes; 10/10 Antigravity identities and 7/10 Codex identities are verified, with 3 fail-closed Codex exclusions. The sanitized manifest reconciles eligible cases against PostgreSQL; the paired supplement has 7 identity-complete pairs. The cumulative investigation/read-only report recommends Antigravity at N=16 (15 accepted) versus Codex N=17 (9 accepted). Robustness remains partial because the historical 45-day cohort contains no included tasks.
 
 #### Invariants & failure semantics
 - **Strict Read-Only Delivery**: All evidence cases enforce `delivery_mode=summary`, low risk, read-only mode, and zero changed files.

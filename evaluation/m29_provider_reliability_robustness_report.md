@@ -2,9 +2,9 @@
 
 - **Status**: `partial`
 - **Evidence Scope**: `current_execution_cohort`
-- **Generated At**: `2026-09-19T23:37:50.307178+00:00`
-- **Observation Reference (`as_of`)**: `2026-09-19T21:32:22.562107+00:00`
-- **Lookback Window**: 90 days (`2026-06-21T21:32:22.562107+00:00` to `2026-09-19T21:32:22.562107+00:00`)
+- **Generated At**: `2026-09-27T22:05:04.591081+00:00`
+- **Observation Reference (`as_of`)**: `2026-09-27T22:02:06.727893+00:00`
+- **Lookback Window**: 90 days (`2026-06-29T22:02:06.727893+00:00` to `2026-09-27T22:02:06.727893+00:00`)
 - **Minimum Samples Per Cell**: 10
 - **Bootstrap Resampling**: 10,000 iterations, seed 29
 
@@ -15,45 +15,42 @@
 | `docs` | `read_only` | `codex-native-executor-read-only` | `codex-native-executor-read-only` | `codex-native-executor-read-only` | `None` | `codex-native-executor-read-only` | `codex-native-executor-read-only` | 66% |
 | `feature` | `mutation` | `None` | `None` | `None` | `None` | `None` | `None` | N/A |
 | `feature` | `read_only` | `antigravity-native-executor-read-only` | `antigravity-native-executor-read-only` | `antigravity-native-executor-read-only` | `None` | `antigravity-native-executor-read-only` | `antigravity-native-executor-read-only` | 59% |
-| `investigation` | `read_only` | `None` | `None` | `None` | `None` | `None` | `None` | N/A |
+| `investigation` | `read_only` | `antigravity-native-executor-read-only` | `antigravity-native-executor-read-only` | `antigravity-native-executor-read-only` | `None` | `antigravity-native-executor-read-only` | `antigravity-native-executor-read-only` | 100% |
 
 ## 2. Window Variation Analysis
 
-### 30-Day Lookback Window (`2026-08-20T21:32:22.562107+00:00` to `2026-09-19T21:32:22.562107+00:00`)
-- **Included Tasks**: 55
+### 30-Day Lookback Window (`2026-08-28T22:02:06.727893+00:00` to `2026-09-27T22:02:06.727893+00:00`)
+- **Included Tasks**: 73
 
 - **`docs` (read_only)**: Recommended: `codex-native-executor-read-only`
 - **`feature` (mutation)**: Recommended: _None_
   - Fallback: no_eligible_candidates: all candidates lack sufficient samples
 - **`feature` (read_only)**: Recommended: `antigravity-native-executor-read-only`
-- **`investigation` (read_only)**: Recommended: _None_
-  - Fallback: no_eligible_candidates: all candidates lack sufficient samples
+- **`investigation` (read_only)**: Recommended: `antigravity-native-executor-read-only`
 
-### 60-Day Lookback Window (`2026-07-21T21:32:22.562107+00:00` to `2026-09-19T21:32:22.562107+00:00`)
-- **Included Tasks**: 55
-
-- **`docs` (read_only)**: Recommended: `codex-native-executor-read-only`
-- **`feature` (mutation)**: Recommended: _None_
-  - Fallback: no_eligible_candidates: all candidates lack sufficient samples
-- **`feature` (read_only)**: Recommended: `antigravity-native-executor-read-only`
-- **`investigation` (read_only)**: Recommended: _None_
-  - Fallback: no_eligible_candidates: all candidates lack sufficient samples
-
-### 90-Day Lookback Window (`2026-06-21T21:32:22.562107+00:00` to `2026-09-19T21:32:22.562107+00:00`)
-- **Included Tasks**: 55
+### 60-Day Lookback Window (`2026-07-29T22:02:06.727893+00:00` to `2026-09-27T22:02:06.727893+00:00`)
+- **Included Tasks**: 73
 
 - **`docs` (read_only)**: Recommended: `codex-native-executor-read-only`
 - **`feature` (mutation)**: Recommended: _None_
   - Fallback: no_eligible_candidates: all candidates lack sufficient samples
 - **`feature` (read_only)**: Recommended: `antigravity-native-executor-read-only`
-- **`investigation` (read_only)**: Recommended: _None_
+- **`investigation` (read_only)**: Recommended: `antigravity-native-executor-read-only`
+
+### 90-Day Lookback Window (`2026-06-29T22:02:06.727893+00:00` to `2026-09-27T22:02:06.727893+00:00`)
+- **Included Tasks**: 73
+
+- **`docs` (read_only)**: Recommended: `codex-native-executor-read-only`
+- **`feature` (mutation)**: Recommended: _None_
   - Fallback: no_eligible_candidates: all candidates lack sufficient samples
+- **`feature` (read_only)**: Recommended: `antigravity-native-executor-read-only`
+- **`investigation` (read_only)**: Recommended: `antigravity-native-executor-read-only`
 
 ## 3. Temporal Split-Half Cohorts
 
 Evaluates temporal stability across non-overlapping partitions of the 90-day window: historical `[as_of-90d, as_of-45d)` and recent `[as_of-45d, as_of]`.
 
-### Cohort: `historical` (`2026-06-21T21:32:22.562107+00:00` to `2026-08-05T21:32:22.562107+00:00`)
+### Cohort: `historical` (`2026-06-29T22:02:06.727893+00:00` to `2026-08-13T22:02:06.727893+00:00`)
 - **Included Tasks**: 0
 
 - **`docs` (read_only)**: Recommended: _None_
@@ -65,15 +62,14 @@ Evaluates temporal stability across non-overlapping partitions of the 90-day win
 - **`investigation` (read_only)**: Recommended: _None_
   - Fallback: no_eligible_candidates: all candidates lack sufficient samples
 
-### Cohort: `recent` (`2026-08-05T21:32:22.562107+00:00` to `2026-09-19T21:32:22.562107+00:00`)
-- **Included Tasks**: 55
+### Cohort: `recent` (`2026-08-13T22:02:06.727893+00:00` to `2026-09-27T22:02:06.727893+00:00`)
+- **Included Tasks**: 73
 
 - **`docs` (read_only)**: Recommended: `codex-native-executor-read-only`
 - **`feature` (mutation)**: Recommended: _None_
   - Fallback: no_eligible_candidates: all candidates lack sufficient samples
 - **`feature` (read_only)**: Recommended: `antigravity-native-executor-read-only`
-- **`investigation` (read_only)**: Recommended: _None_
-  - Fallback: no_eligible_candidates: all candidates lack sufficient samples
+- **`investigation` (read_only)**: Recommended: `antigravity-native-executor-read-only`
 
 ## 4. Bootstrap Resampling Sensitivity
 
@@ -100,22 +96,27 @@ Evaluates 10,000 deterministic bootstrap iterations (seed 29) resampling whole t
 | `codex-native-executor-read-only` | 10 | 4139 | 0.4139 | R1:4139, R2:5861 | R1:0.4139, R2:0.5861 |
 
 ### Group: `investigation` (read_only)
-- **Status**: `insufficient_data`
-- **Fallback Reason**: insufficient_eligible_candidates: 0 eligible profile(s) meet the sample floor (10); at least 2 required
+- **Status**: `complete`
+
+| Profile | Sample Size | Win Count | Win Prob | Rank Counts (1..M) | Rank Probs (1..M) |
+|---|---|---|---|---|---|
+| `antigravity-native-executor-read-only` | 16 | 9986 | 0.9986 | R1:9986, R2:14 | R1:0.9986, R2:0.0014 |
+| `codex-native-executor-read-only` | 17 | 14 | 0.0014 | R1:14, R2:9986 | R1:0.0014, R2:0.9986 |
 
 ## 5. Evidence Accounting & 90-Day Snapshot Exclusions
 
 Accounting metrics reflect the full 90-day observation snapshot scanned from the database.
 
-- **Total Tasks Scanned**: 434
-- **Included In 90-Day Evidence**: 55
-- **Excluded Tasks**: 379
+- **Total Tasks Scanned**: 466
+- **Included In 90-Day Evidence**: 73
+- **Excluded Tasks**: 393
 
 | Exclusion Reason | Count |
 |---|---|
 | `cancelled` | 9 |
-| `evaluation_smoke` | 4 |
+| `evaluation_smoke` | 10 |
 | `malformed_inconsistent_timeline` | 10 |
 | `non_native_agent_mode` | 2 |
-| `non_temporal_runtime` | 81 |
-| `unknown_execution_identity` | 273 |
+| `non_temporal_runtime` | 79 |
+| `outside_window` | 2 |
+| `unknown_execution_identity` | 281 |

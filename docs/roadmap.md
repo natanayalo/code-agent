@@ -395,23 +395,26 @@ route decision
 ### Current Evidence State and Post-Wave Decision
 
 - **Evidence Base**: M29 Wave 3 (`artifacts/m29_evidence_bundle_wave3/bundle.json`, ignored/private) completed 40 frozen read-only cases: 20 investigation and 20 feature cases, with 10 cases per provider/cell. The bundle pins build `a32719d114fab93c8e63e81153229ac900748a5c`, target `origin/master` revision `f0b4cb8139d1497857d1b67e106a6170cbbed05c`, and terminal timestamp `2026-09-19T21:32:22.562107Z`. All cases reached immutable terminal outcomes (18 completed, 22 failed); all were Temporal/native executions, had zero changed files, and had no unresolved interactions or gate failures.
-- **Advisory Recommendations**: The refreshed canonical current-cohort report (`evaluation/m29_provider_reliability_report.{json,md}`) retains the Wave 2 `docs/read_only` recommendation for `codex-native-executor-read-only` (10/10 accepted versus 9/10). Wave 3 qualifies `feature/read_only` at $N=10$ vs $10$ (5/10 accepted for each provider) and recommends `antigravity-native-executor-read-only` on lower successful-task latency ($202.93\text{s}$ versus $359.37\text{s}$); terminal latency remains operational, the tied Wilson lower bound is $0.2366$, and the robustness bootstrap gives Antigravity a $58.61\%$ first-rank probability.
+- **Wave 3 Advisory Snapshot**: The Wave 3 snapshot retains the Wave 2 `docs/read_only` recommendation for `codex-native-executor-read-only` (10/10 accepted versus 9/10). Wave 3 qualifies `feature/read_only` at $N=10$ vs $10$ (5/10 accepted for each provider) and recommends `antigravity-native-executor-read-only` on lower successful-task latency ($202.93\text{s}$ versus $359.37\text{s}$); terminal latency remains operational, the tied Wilson lower bound is $0.2366$, and the robustness bootstrap gives Antigravity a $58.61\%$ first-rank probability.
 - **Verification Semantics**: Feature/read-only acceptance is terminal completion. Persisted verification warnings remain applicable-but-not-passed, so the strict verification-pass metric is $0\%$ in these cells; the recommendation is not an independently verified quality claim.
-- **Investigation Evidence Gap**: `investigation/read_only` is not qualified. The fail-closed identity filter finds only $N=9$ Codex and $N=6$ Antigravity cases with authoritative `model_execution` metadata (accepted counts 3 and 5), while the five excluded Wave 3 investigation outcomes are all failures (one intended Codex and four intended Antigravity). The extractor does not infer or backfill missing identities; pre-dispatch identity persistence is a follow-up. A balanced Wave 4 suite is now frozen, but collection is paused before initialization because the Antigravity independent verifier hit its individual quota. `feature/mutation` remains pending at $N=0$.
-- **Robustness Status**: Reported truthfully as `partial` (`evaluation/m29_provider_reliability_robustness_report.{json,md}`). The current cohort has no historical 45-day split ($0$ tasks), so longitudinal consistency cannot yet be proven; the feature/read-only bootstrap uses 10,000 iterations with seed 29. The committed sanitized manifest and paired supplement preserve case-level and topic-pair accounting without publishing raw task identifiers or outputs.
-- **Operational Diagnostic View**: Preserves 90-day accounting across all model vintages without active recommendations (`evaluation/m29_provider_reliability_operational_report.{json,md}`).
+- **Wave 3 Investigation Gap (historical)**: The Wave 3 report had only $N=9$ Codex and $N=6$ Antigravity cases with authoritative `model_execution` metadata (accepted counts 3 and 5); its five identity-incomplete investigation outcomes were failures. Wave 4 results below close the cumulative sample-floor gap while retaining three new Codex outcomes as explicit identity exclusions.
+- **Wave 4 Evidence**: The private ignored bundle `artifacts/m29_evidence_bundle_wave4_from_first_quota/bundle.json` completed all 20 frozen investigation/read-only cases (16 completed, 4 failed: 3 timeouts and 1 unknown). All cases were Temporal/native with zero changed files, unresolved interactions, or gate failures. Persisted identity matches all 10 Antigravity cases (`gemini-3.8-flash/medium`) and 7 Codex cases (`gpt-5.6-luna/high`); 3 Codex cases remain fail-closed exclusions as `unknown_execution_identity`. The sanitized manifest and paired supplement publish no task IDs, prompts, or raw outputs.
+- **Current Investigation Advisory**: At `2026-09-27T22:02:06.727893Z`, the cumulative canonical `investigation/read_only` cell has Antigravity $N=16$, 15 accepted (Wilson lower bound $0.7167$, successful-task median $504.25\text{s}$), and Codex $N=17$, 9 accepted (lower bound $0.3096$, median $1012.65\text{s}$). It recommends Antigravity on the canonical successful-task latency tie-break. Wave 4 contributes 10 completed Antigravity tasks and 6 completed Codex tasks among 7 identity-verified Codex outcomes. The paired supplement has 10 topic pairs, 7 identity-complete, 6 both-completed and 4 Antigravity-only outcomes; the 10,000-iteration seed-29 paired bootstrap is descriptive (66% Antigravity-higher acceptance, 34% tied, and a -480.76s median successful-latency delta across 6 pairs).
+- **Robustness Status**: Reported truthfully as `partial` (`evaluation/m29_provider_reliability_robustness_report.{json,md}`). Antigravity ranks first for investigation in 30/60/90-day windows and has a 99.86% first-rank unpaired bootstrap probability (10,000 iterations, seed 29). The current cohort has no historical 45-day split ($0$ tasks), so longitudinal consistency remains untested. The sanitized manifest and paired supplement preserve case/pair accounting without publishing raw task identifiers or outputs.
+- **Operational Diagnostic View**: Preserves 90-day accounting across all model vintages without active recommendations (`evaluation/m29_provider_reliability_operational_report.{json,md}`), refreshed at the Wave 4 timestamp.
 - **Static Production Routing**: Production routing remains strictly unchanged (static heuristic/checked-in metrics intact). No automated or manual runtime routing changes are made from this evidence.
-- **Deferred Autonomy**: M27 autonomy policy remains deferred; a single clustered wave and partial robustness do not satisfy M27 entry gates.
+- **Deferred Autonomy**: M27 autonomy policy remains deferred; Wave 4 closes the investigation sample-floor gap but the historical cohort is empty, mutation evidence is absent, and overall robustness remains partial.
 
 ### Exit criteria
 
 - every enabled profile has current evidence or is explicitly labeled
-  insufficient-data (partially satisfied: `docs/read_only` and `feature/read_only`
-  have current evidence; `feature/mutation` and `investigation/read_only` are
-  explicitly labeled `insufficient-data`; identity-complete investigation and
-  mutation evidence remain in progress)
+  insufficient-data (partially satisfied: `docs/read_only`, `feature/read_only`,
+  and `investigation/read_only` have advisory evidence; `feature/mutation` is
+  explicitly `insufficient-data` at N=0)
 - unavailable provider capabilities fail before or during dispatch with a
-  typed reason and actionable operator guidance (unresolved: provider-specific pre-dispatch diagnostics and fail-closed registered secret reference gating remain pending)
+  typed reason and actionable operator guidance (M29 Items 1a/1b implement
+  registered-reference gating and provider pre-dispatch diagnostics; live
+  capability edge cases still require ongoing validation)
 - the operator can explain and reproduce every recommended profile choice from
   persisted evidence (partially satisfied: reproducible via offline canonical report CLI and verified artifacts)
 - any routing-policy change is reviewed, versioned, reversible, and validated
@@ -419,9 +422,9 @@ route decision
 
 ### Remaining M29 Work
 
-1. Remove legacy raw-secret ingress and enforce opaque registered references (`RegisteredSecretDefinition` fail-closed gating).
-2. Add provider-specific pre-dispatch diagnostics (validating credentials, CLI binaries, and container runtime readiness prior to dispatch).
-3. Gather identity-complete `investigation/read_only` evidence and `feature/mutation` evidence, then repeat comparable waves for longitudinal current-cohort consistency.
+1. Define and review a separate `feature/mutation` evaluation contract, delivery safeguards, and cleanup plan before collecting evidence (currently N=0).
+2. Persist authoritative configured/actual execution identity before dispatch so early failures do not create new `unknown_execution_identity` gaps; do not infer the three excluded Wave 4 Codex identities.
+3. Gather enough evidence in a historical 45-day cohort to assess longitudinal consistency; the current historical split contains zero included tasks.
 4. Evaluate hierarchical budget controls separately (task, node, repair, wall time, and concurrency limits).
 
 ## M30 — GitHub-Native Task and Delivery Control

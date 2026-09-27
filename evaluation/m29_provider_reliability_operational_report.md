@@ -2,8 +2,8 @@
 
 - **Status**: `diagnostic_only`
 - **Evidence Scope**: `operational`
-- **Generated At**: `2026-09-19T23:37:38.850574+00:00`
-- **Evidence Window**: `2026-06-21T21:32:22.562107+00:00` to `2026-09-19T21:32:22.562107+00:00` (90 days)
+- **Generated At**: `2026-09-27T22:05:02.118157+00:00`
+- **Evidence Window**: `2026-06-29T22:02:06.727893+00:00` to `2026-09-27T22:02:06.727893+00:00` (90 days)
 - **Minimum Samples Per Cell**: `10`
 - **Confidence Level**: `95%` (Wilson score interval)
 
@@ -14,23 +14,24 @@ Acceptance is terminal task completion. Verification pass rate is a separate str
 | Profile | Mode | Evidence Present | Total Samples | Eligible |
 |---|---|---|---|---|
 | `codex-native-executor` | `mutation` | yes | 38 | no |
-| `codex-native-executor-read-only` | `read_only` | yes | 107 | no |
+| `codex-native-executor-read-only` | `read_only` | yes | 120 | no |
 | `antigravity-native-executor` | `mutation` | yes | 83 | no |
-| `antigravity-native-executor-read-only` | `read_only` | yes | 100 | no |
+| `antigravity-native-executor-read-only` | `read_only` | yes | 113 | no |
 
 ## 1. Evidence Accounting & Exclusions
 
-- **Total Tasks Scanned**: 434
-- **Included In Evidence**: 328
-- **Excluded Tasks**: 106
+- **Total Tasks Scanned**: 466
+- **Included In Evidence**: 354
+- **Excluded Tasks**: 112
 
 | Exclusion Reason | Count |
 |---|---|
 | `cancelled` | 9 |
-| `evaluation_smoke` | 4 |
+| `evaluation_smoke` | 10 |
 | `malformed_inconsistent_timeline` | 10 |
 | `non_native_agent_mode` | 2 |
-| `non_temporal_runtime` | 81 |
+| `non_temporal_runtime` | 79 |
+| `outside_window` | 2 |
 
 ## 2. Historical Aggregates by Task Class and Mode (Diagnostic-Only)
 
@@ -44,8 +45,8 @@ Acceptance is terminal task completion. Verification pass rate is a separate str
 
 | Rank | Profile | Eligible | N (Acc) | Wilson 95% Lower | Terminal Med | Success Med | Failure Med | Recency | Notes |
 |---|---|---|---|---|---|---|---|---|---|
-| - | `antigravity-native-executor` | no | 2 (1) | 0.0945 | 46.1s | 87.3s | 5.0s | 14.2d ago | diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed |
-| - | `codex-native-executor` | no | 5 (4) | 0.3755 | 395.4s | 436.6s | 351.0s | 14.2d ago | diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed |
+| - | `antigravity-native-executor` | no | 2 (1) | 0.0945 | 46.1s | 87.3s | 5.0s | 22.2d ago | diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed |
+| - | `codex-native-executor` | no | 5 (4) | 0.3755 | 395.4s | 436.6s | 351.0s | 22.2d ago | diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed |
 
 ### Task Class: `docs` (mutation)
 
@@ -54,8 +55,8 @@ Acceptance is terminal task completion. Verification pass rate is a separate str
 
 | Rank | Profile | Eligible | N (Acc) | Wilson 95% Lower | Terminal Med | Success Med | Failure Med | Recency | Notes |
 |---|---|---|---|---|---|---|---|---|---|
-| - | `antigravity-native-executor` | no | 2 (2) | 0.3424 | 70.4s | 70.4s | N/A | 45.1d ago | diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed |
-| - | `codex-native-executor` | no | 3 (3) | 0.4385 | 266.3s | 266.3s | N/A | 45.1d ago | diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed |
+| - | `antigravity-native-executor` | no | 2 (2) | 0.3424 | 70.4s | 70.4s | N/A | 53.1d ago | diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed |
+| - | `codex-native-executor` | no | 3 (3) | 0.4385 | 266.3s | 266.3s | N/A | 53.1d ago | diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed |
 
 ### Task Class: `docs` (read_only)
 
@@ -64,8 +65,8 @@ Acceptance is terminal task completion. Verification pass rate is a separate str
 
 | Rank | Profile | Eligible | N (Acc) | Wilson 95% Lower | Terminal Med | Success Med | Failure Med | Recency | Notes |
 |---|---|---|---|---|---|---|---|---|---|
-| - | `antigravity-native-executor-read-only` | no | 38 (23) | 0.4472 | 96.2s | 128.1s | 4.9s | 1.0d ago | diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed |
-| - | `codex-native-executor-read-only` | no | 38 (18) | 0.3248 | 100.1s | 200.6s | 20.6s | 1.0d ago | diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed |
+| - | `antigravity-native-executor-read-only` | no | 38 (23) | 0.4472 | 96.2s | 128.1s | 4.9s | 9.0d ago | diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed |
+| - | `codex-native-executor-read-only` | no | 38 (18) | 0.3248 | 100.1s | 200.6s | 20.6s | 9.0d ago | diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed |
 
 ### Task Class: `feature` (mutation)
 
@@ -74,8 +75,8 @@ Acceptance is terminal task completion. Verification pass rate is a separate str
 
 | Rank | Profile | Eligible | N (Acc) | Wilson 95% Lower | Terminal Med | Success Med | Failure Med | Recency | Notes |
 |---|---|---|---|---|---|---|---|---|---|
-| - | `antigravity-native-executor` | no | 74 (58) | 0.6773 | 43.9s | 50.5s | 3.1s | 4.0d ago | diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed |
-| - | `codex-native-executor` | no | 25 (16) | 0.4452 | 102.8s | 116.5s | 12.7s | 4.2d ago | diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed |
+| - | `antigravity-native-executor` | no | 74 (58) | 0.6773 | 43.9s | 50.5s | 3.1s | 12.0d ago | diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed |
+| - | `codex-native-executor` | no | 25 (16) | 0.4452 | 102.8s | 116.5s | 12.7s | 12.2d ago | diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed |
 
 ### Task Class: `feature` (read_only)
 
@@ -84,8 +85,8 @@ Acceptance is terminal task completion. Verification pass rate is a separate str
 
 | Rank | Profile | Eligible | N (Acc) | Wilson 95% Lower | Terminal Med | Success Med | Failure Med | Recency | Notes |
 |---|---|---|---|---|---|---|---|---|---|
-| - | `antigravity-native-executor-read-only` | no | 40 (24) | 0.4460 | 38.1s | 160.7s | 5.0s | 0.0d ago | diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed |
-| - | `codex-native-executor-read-only` | no | 44 (29) | 0.5114 | 199.6s | 178.6s | 281.6s | 0.0d ago | diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed |
+| - | `antigravity-native-executor-read-only` | no | 40 (24) | 0.4460 | 38.1s | 160.7s | 5.0s | 8.0d ago | diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed |
+| - | `codex-native-executor-read-only` | no | 44 (29) | 0.5114 | 199.6s | 178.6s | 281.6s | 8.0d ago | diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed |
 
 ### Task Class: `investigation` (mutation)
 
@@ -95,7 +96,7 @@ Acceptance is terminal task completion. Verification pass rate is a separate str
 | Rank | Profile | Eligible | N (Acc) | Wilson 95% Lower | Terminal Med | Success Med | Failure Med | Recency | Notes |
 |---|---|---|---|---|---|---|---|---|---|
 | - | `antigravity-native-executor` | no | 0 (0) | 0.0000 | N/A | N/A | N/A | N/A | diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed |
-| - | `codex-native-executor` | no | 4 (3) | 0.3006 | 340.8s | 244.1s | 534.4s | 14.3d ago | diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed |
+| - | `codex-native-executor` | no | 4 (3) | 0.3006 | 340.8s | 244.1s | 534.4s | 22.4d ago | diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed |
 
 ### Task Class: `investigation` (read_only)
 
@@ -104,8 +105,8 @@ Acceptance is terminal task completion. Verification pass rate is a separate str
 
 | Rank | Profile | Eligible | N (Acc) | Wilson 95% Lower | Terminal Med | Success Med | Failure Med | Recency | Notes |
 |---|---|---|---|---|---|---|---|---|---|
-| - | `antigravity-native-executor-read-only` | no | 22 (14) | 0.4295 | 81.4s | 95.8s | 35.1s | 0.0d ago | diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed |
-| - | `codex-native-executor-read-only` | no | 25 (18) | 0.5242 | 261.6s | 170.9s | 760.0s | 0.0d ago | diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed |
+| - | `antigravity-native-executor-read-only` | no | 35 (24) | 0.5202 | 245.5s | 408.8s | 35.4s | 0.0d ago | diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed |
+| - | `codex-native-executor-read-only` | no | 38 (24) | 0.4728 | 687.1s | 231.0s | 840.2s | 0.0d ago | diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed |
 
 ### Task Class: `maintenance` (mutation)
 
@@ -114,7 +115,7 @@ Acceptance is terminal task completion. Verification pass rate is a separate str
 
 | Rank | Profile | Eligible | N (Acc) | Wilson 95% Lower | Terminal Med | Success Med | Failure Med | Recency | Notes |
 |---|---|---|---|---|---|---|---|---|---|
-| - | `antigravity-native-executor` | no | 5 (5) | 0.5655 | 73.5s | 73.5s | N/A | 45.0d ago | diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed |
+| - | `antigravity-native-executor` | no | 5 (5) | 0.5655 | 73.5s | 73.5s | N/A | 53.1d ago | diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed |
 | - | `codex-native-executor` | no | 0 (0) | 0.0000 | N/A | N/A | N/A | N/A | diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed |
 
 ### Task Class: `refactor` (mutation)
@@ -125,7 +126,7 @@ Acceptance is terminal task completion. Verification pass rate is a separate str
 | Rank | Profile | Eligible | N (Acc) | Wilson 95% Lower | Terminal Med | Success Med | Failure Med | Recency | Notes |
 |---|---|---|---|---|---|---|---|---|---|
 | - | `antigravity-native-executor` | no | 0 (0) | 0.0000 | N/A | N/A | N/A | N/A | diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed |
-| - | `codex-native-executor` | no | 1 (0) | 0.0000 | 847.0s | N/A | 847.0s | 14.2d ago | diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed |
+| - | `codex-native-executor` | no | 1 (0) | 0.0000 | 847.0s | N/A | 847.0s | 22.3d ago | diagnostic_scope_non_comparable: operational scope aggregates heterogeneous model vintages; recommendations suppressed |
 
 ## 3. Evidence Cells Summary
 
@@ -142,9 +143,9 @@ Acceptance is terminal task completion. Verification pass rate is a separate str
 | `feature` | `codex-native-executor` | `mutation` | 25 | 0.64 [0.45, 0.80] | infra_verifier_unavailable:1, test_regression:1, unknown:1, worker_failure:6 | 4 (0.16) | 2 (0.08) | 25 | 102.8s | 116.5s | 12.7s | 0.96 |
 | `feature` | `codex-native-executor-read-only` | `read_only` | 44 | 0.66 [0.51, 0.78] | infra_verifier_unavailable:5, scope_mismatch:2, task_error:1, worker_failure:7 | 1 (0.02) | 0 (0.00) | 44 | 199.6s | 178.6s | 281.6s | 0.98 |
 | `investigation` | `antigravity-native-executor` | `mutation` | 0 | 0.00 [0.00, 0.00] | none | 0 (0.00) | 0 (0.00) | 0 | N/A | N/A | N/A | 0.00 |
-| `investigation` | `antigravity-native-executor-read-only` | `read_only` | 22 | 0.64 [0.43, 0.80] | task_error:2, worker_failure:6 | 6 (0.27) | 0 (0.00) | 22 | 81.4s | 95.8s | 35.1s | 0.91 |
+| `investigation` | `antigravity-native-executor-read-only` | `read_only` | 35 | 0.69 [0.52, 0.81] | task_error:2, worker_failure:9 | 8 (0.23) | 0 (0.00) | 35 | 245.5s | 408.8s | 35.4s | 0.94 |
 | `investigation` | `codex-native-executor` | `mutation` | 4 | 0.75 [0.30, 0.95] | unknown:1 | 0 (0.00) | 0 (0.00) | 4 | 340.8s | 244.1s | 534.4s | 0.75 |
-| `investigation` | `codex-native-executor-read-only` | `read_only` | 25 | 0.72 [0.52, 0.86] | infra_verifier_unavailable:5, worker_failure:2 | 0 (0.00) | 0 (0.00) | 25 | 261.6s | 170.9s | 760.0s | 1.00 |
+| `investigation` | `codex-native-executor-read-only` | `read_only` | 38 | 0.63 [0.47, 0.77] | infra_verifier_unavailable:6, worker_failure:8 | 0 (0.00) | 0 (0.00) | 38 | 687.1s | 231.0s | 840.2s | 1.00 |
 | `maintenance` | `antigravity-native-executor` | `mutation` | 5 | 1.00 [0.57, 1.00] | none | 0 (0.00) | 0 (0.00) | 5 | 73.5s | 73.5s | N/A | 1.00 |
 | `maintenance` | `codex-native-executor` | `mutation` | 0 | 0.00 [0.00, 0.00] | none | 0 (0.00) | 0 (0.00) | 0 | N/A | N/A | N/A | 0.00 |
 | `refactor` | `antigravity-native-executor` | `mutation` | 0 | 0.00 [0.00, 0.00] | none | 0 (0.00) | 0 (0.00) | 0 | N/A | N/A | N/A | 0.00 |
