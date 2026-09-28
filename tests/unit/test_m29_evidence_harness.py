@@ -394,4 +394,4 @@ def test_submit_case_constructs_deterministic_payload() -> None:
     assert payload["worker_override"] == "antigravity"
     assert payload["worker_profile_override"] == "antigravity-native-executor-read-only"
     assert payload["constraints"] == {"read_only": True, "delivery_mode": "summary"}
-    assert payload["budget"]["worker_timeout_seconds"] == 600
+    assert payload["budget"]["worker_timeout_seconds"] == 900

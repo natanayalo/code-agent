@@ -33,6 +33,7 @@ from evaluation.m29_evidence_models import (
 
 LOGGER = logging.getLogger("run_m29_evidence_wave")
 TERMINAL_STATUSES = {"completed", "failed"}
+M29_NATIVE_AGENT_TIMEOUT_SECONDS = 900
 
 
 def _calculate_sha256(path: Path) -> str:
@@ -145,7 +146,7 @@ def _submit_case(
             "read_only": True,
             "delivery_mode": "summary",
         },
-        "budget": {"worker_timeout_seconds": 600},
+        "budget": {"worker_timeout_seconds": M29_NATIVE_AGENT_TIMEOUT_SECONDS},
     }
     resp = client.post("/webhook", json=payload, timeout=10.0)
     resp.raise_for_status()

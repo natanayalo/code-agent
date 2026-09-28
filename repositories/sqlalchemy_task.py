@@ -187,21 +187,15 @@ class TaskRepository:
         results = self.session.execute(statement).all()
 
         tasks = []
-        for (
-            task,
-            latest_run_id,
-            latest_run_status,
-            latest_run_worker,
-            latest_run_requested_permission,
-            pending_interaction_count,
-        ) in results:
+        for row in results:
+            task = cast(Task, row[0])
             self._attach_task_listing_metadata(
                 task=task,
-                latest_run_id=latest_run_id,
-                latest_run_status=latest_run_status,
-                latest_run_worker=latest_run_worker,
-                latest_run_requested_permission=latest_run_requested_permission,
-                pending_interaction_count=pending_interaction_count,
+                latest_run_id=row._mapping["latest_run_id"],
+                latest_run_status=row._mapping["latest_run_status"],
+                latest_run_worker=row._mapping["latest_run_worker"],
+                latest_run_requested_permission=row._mapping["latest_run_requested_permission"],
+                pending_interaction_count=row._mapping["pending_interaction_count"],
             )
             tasks.append(task)
         return tasks

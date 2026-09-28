@@ -865,6 +865,12 @@ their persisted identities are exactly `gpt-5.6-luna/high` for Codex and
 `gemini-3.8-flash/medium` for Antigravity. If either provider is not ready or
 the verifier is quota-limited, stop before bundle initialization.
 
+The completed batch used a 600-second native worker budget. The M29 evidence
+harness now assigns future cases a 900-second (15-minute) native worker budget,
+the existing global cap. `run-batch --timeout-seconds` is only the outer poll
+deadline. Terminal outcomes from the completed bundle remain immutable and are
+not rerun under the new timeout.
+
 ```bash
 # Validate provider readiness before freezing the Wave 4 build and target revision.
 .venv/bin/python scripts/e2e/run_m29_evidence_wave.py smoke \
