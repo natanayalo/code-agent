@@ -40,6 +40,7 @@ def test_parse_antigravity_model_slug() -> None:
 def test_resolve_codex_model_config_provider_defaults() -> None:
     config = resolve_codex_model_config()
     assert config.provider == "codex"
+    assert config.model == "gpt-6-luna"
     assert config.model == DEFAULT_CODEX_MODEL
     assert config.reasoning_effort == DEFAULT_CODEX_REASONING_EFFORT
     assert config.model_source == "provider_default"

@@ -655,7 +655,7 @@ export DATABASE_URL="postgresql+psycopg://..."
 - `--evidence-scope`: Evidence filtering scope:
   - `current_execution_cohort` (default): Strictly filters tasks to those whose worker runs
     persisted authoritative `model_execution` budget metadata matching the current expected
-    cohorts (`codex: gpt-5.6-luna/high`, `antigravity: gemini-3.8-flash/medium`). Zero heuristic
+    cohorts (`codex: gpt-6-luna/high`, `antigravity: gemini-3.8-flash/medium`). Zero heuristic
     inference.
   - `operational`: Admits all terminal tasks regardless of model vintage for complete 90-day
     system accounting, diagnostic failure decomposition, and historical tracking.
@@ -737,6 +737,21 @@ export DATABASE_URL="postgresql+psycopg://..."
 - **Eligibility gating & descriptive reporting**: Bootstrap is executed only when at least two profiles meet the sample floor; otherwise an explicit `insufficient_data` result with fallback reason is emitted. Winner counts, probabilities, and rank distributions are reported descriptively without automated "safe to route" thresholds.
 - **Exclusion accounting**: Root exclusions describe the full 90-day observation snapshot scanned from the database.
 - **Public data boundary**: Generated JSON and Markdown artifacts are validated by `assert_sanitized_robustness_report()` to ensure zero leak of task IDs, user prompt text, repositories, branch names, logs, artifacts, or secrets.
+
+### M29 `feature/mutation` evaluation contract
+
+Before building a mutable-evaluation runner or collecting live
+`feature/mutation` evidence, review the
+[`feature/mutation` contract](../evaluation/m29_feature_mutation_contract.md).
+It defines the ten matched feature pairs, pinned disposable fixture revision,
+post-profile persisted TaskSpec delivery gate, full memory isolation, and
+post-terminal quality evaluation that cannot alter task outcomes. It also
+requires frozen pre-run IDs for both provider cells, exact baseline-plus-suite
+reconciliation after the frozen `as_of` cutoff and before report publication,
+and extractor-stage applicability smokes. The suite must pin one neutral
+evaluator identity with no fallback and guarantee WorkspaceManager cleanup
+within 72 hours. No mutable runner or live mutation cases are implemented by
+the contract slice. Production routing stays static.
 
 ### M29 live evidence wave harness
 

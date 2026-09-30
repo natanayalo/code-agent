@@ -241,7 +241,7 @@ def test_codex_cli_worker_runs_native_agent_mode_when_requested(tmp_path: Path) 
     assert result.summary == "Native run complete."
     assert result.model_execution is not None
     assert result.model_execution.provider == "codex"
-    assert result.model_execution.model == "gpt-5.6-luna"
+    assert result.model_execution.model == "gpt-6-luna"
     assert result.model_execution.reasoning_effort == "high"
     assert result.model_execution.model_source == "provider_default"
     assert result.model_execution.reasoning_effort_source == "provider_default"
@@ -250,7 +250,7 @@ def test_codex_cli_worker_runs_native_agent_mode_when_requested(tmp_path: Path) 
     assert result.diff_text == "diff --git a/note.txt b/note.txt"
     assert result.budget_usage is not None
     assert result.budget_usage["runtime_mode"] == "native_agent"
-    _assert_native_agent_budget_json_safe(result.budget_usage, "gpt-5.6-luna", "provider_default")
+    _assert_native_agent_budget_json_safe(result.budget_usage, "gpt-6-luna", "provider_default")
     assert result.commands_run[0].command.startswith("codex exec")
     assert container_manager.start_requests == []
     assert container_manager.stop_requests == []

@@ -338,7 +338,7 @@ def run_preflight_smoke(client: httpx.Client, args: argparse.Namespace) -> None:
             "codex-native-executor-read-only",
             "codex",
             "codex",
-            "gpt-5.6-luna",
+            "gpt-6-luna",
             "high",
         ),
         (
