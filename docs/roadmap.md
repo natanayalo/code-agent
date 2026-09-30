@@ -425,8 +425,9 @@ route decision
 1. Review the [separate `feature/mutation` evaluation contract](../evaluation/m29_feature_mutation_contract.md),
    including post-terminal quality evaluation, frozen evaluator identity,
    delivery safeguards, full memory isolation, pending-interaction handling, and
-   bounded cleanup, before runner implementation or evidence collection
-   (currently N=0).
+   bounded cleanup, exact baseline-plus-suite cohort reconciliation, and
+   extractor-stage applicability smokes, before runner implementation or
+   evidence collection (currently N=0).
 2. Persist authoritative configured/actual execution identity before dispatch so early failures do not create new `unknown_execution_identity` gaps; do not infer the three excluded Wave 4 Codex identities.
 3. Gather enough evidence in a historical 45-day cohort to assess longitudinal consistency; the current historical split contains zero included tasks.
 4. Evaluate hierarchical budget controls separately (task, node, repair, wall time, and concurrency limits).

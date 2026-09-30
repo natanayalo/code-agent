@@ -53,6 +53,53 @@ unknown, identity-mismatched, or otherwise excluded task does not count toward
 the floor. Do not replay or replace a recorded case to fill a shortfall; report
 the cell as insufficient data or prepare a separately versioned suite.
 
+## Canonical cohort provenance
+
+The canonical provider-reliability and robustness extractors consume every
+eligible `feature/mutation` observation in the selected 90-day database window;
+they do not limit the cells to this suite's cases. Therefore, before case 01,
+freeze the exact eligible task-ID set for each canonical profile cell:
+`codex-native-executor` and `antigravity-native-executor`. Run the canonical
+extractor with `evidence_scope == "current_execution_cohort"`,
+`task_class == "feature"`, `mutation_mode == "mutation"`, the frozen expected
+execution identities, and the same 90-day window and report policy that will be
+used for publication. Freeze `as_of` and both window boundaries in the private
+suite manifest, choosing an end time that includes the planned suite completion,
+so baseline tasks cannot age out between baseline and report generation. If
+collection cannot finish inside that window, stop and prepare a new reviewed
+manifest; do not move the cutoff silently.
+
+Store each baseline as a sorted exact ID set in the access-controlled private
+bundle, together with the extractor/build and policy hashes, profile, window
+boundaries, count, and SHA-256 of the sorted IDs using a frozen canonical
+encoding. Keep the raw IDs private. For each provider, classify every scheduled
+case task with that same extractor and policy as either eligible or excluded
+with its exact exclusion reason. Missing, duplicated, or unclassified suite
+tasks block report publication. Define `eligible_suite_ids[profile]` as the IDs
+of this suite's eligible case tasks.
+
+Before publishing either the canonical reliability report or robustness
+analysis, rerun the same extractor on the report-source database and require,
+for each profile, exact set equality:
+
+```text
+current_cell_ids[profile] == frozen_baseline_ids[profile] ∪ eligible_suite_ids[profile]
+```
+
+The baseline and suite ID sets must be disjoint. Any additional or missing ID,
+including an unrelated eligible task, a baseline task that disappeared, or an
+eligible suite task omitted by extraction, fails closed and blocks publication
+of cell counts, accepted counts, Wilson bounds, latency statistics,
+recommendations, and robustness results. Do not silently rebaseline, drop an
+observation, or add it to the suite. Publication may resume only after every
+difference is recorded by private task ID with its profile, disposition,
+reason, and supporting evidence in a separately reviewed, versioned
+reconciliation, and a rerun of the exact-set assertion passes. If that requires
+changing the expected cohort, review and version that change before report
+generation; never silently adopt the observed IDs. The sanitized/public artifact
+may expose baseline, suite, and current counts; hashes of the sorted ID sets;
+and reconciliation status, but never raw task IDs.
+
 ## Frozen case pack
 
 The execution suite contains ten task topics, each run once per provider: 20
@@ -305,9 +352,22 @@ Do not launch the suite until all of these checks pass:
   verification or worker-reported test results from requesting a quality repair
   or changing terminal status. A preflight smoke must prove that pass, fail, and
   unavailable post-terminal evaluations leave the task status and terminal
-  event unchanged. If the current execution path cannot guarantee that
-  behavior, do not dispatch cases until the execution slice implements and
-  verifies it.
+  event unchanged. For each pass, fail, and unavailable smoke variant, and for
+  each candidate profile, also run the actual canonical provider-reliability
+  extractor against representative persisted records in a separate disposable
+  smoke database/schema that is never used for the frozen baseline or suite
+  report. Use the same extraction policy and eligible task shape as the planned
+  suite; exercise the worker-reported-failed-tests short-circuit path as well as
+  the ordinary no-verification-command path. Inspect the extractor's per-task
+  evidence and assert `verification_applicable == false` and
+  `review_applicable == false` for every smoke record, and assert the canonical
+  report's verification and review stage rates are both `None` (not applicable).
+  Confirm there is no
+  `ArtifactType.INDEPENDENT_REVIEW_RESULT` in any smoke task's worker-run
+  artifact index. Also confirm status and terminal event remain unchanged for
+  all three external-evaluation outcomes. If any assertion fails or any smoke
+  record is not classified by the extractor as expected, do not dispatch cases
+  until the execution slice implements and verifies the mode.
   Confirm the task has the expected provider profile and the fixture revision.
   Stop before provider dispatch if any field differs. Do not repair the
   persisted TaskSpec in place and continue.
@@ -429,7 +489,9 @@ persisted TaskSpec must retain the feature task type and include
 `modify_workspace_files` in `allowed_actions`. The exact-profile, actual-model,
 and identity checks remain fail-closed. The report's 90-day window and minimum
 of ten eligible tasks per provider cell still apply; the 20 scheduled attempts
-do not guarantee eligibility if cases are excluded.
+do not guarantee eligibility if cases are excluded. Before publication, apply
+the exact baseline-plus-suite task-ID reconciliation above to both provider
+cells and to the observation snapshot consumed by the robustness analysis.
 
 ## Stop conditions
 
