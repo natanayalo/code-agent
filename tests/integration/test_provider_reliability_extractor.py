@@ -616,7 +616,7 @@ def test_unordered_multiple_worker_runs_deterministic_failure(tmp_path: Path) ->
                 "native_agent": {
                     "model_execution": {
                         "provider": "codex",
-                        "model": "gpt-5.6-luna",
+                        "model": "gpt-6-luna",
                         "reasoning_effort": "high",
                     }
                 }

@@ -18,6 +18,7 @@ from evaluation.m29_wave4_paired import (
 )
 from evaluation.m29_wave4_reconciliation import assert_wave4_manifest_matches_report
 from evaluation.provider_reliability_models import (
+    M29_WAVE3_WAVE4_FROZEN_EXPECTED_EXECUTION_IDENTITIES,
     BudgetCoverageMetrics,
     InterventionMetrics,
     LatencyMetrics,
@@ -161,6 +162,7 @@ def test_manifest_matches_cumulative_report_cells() -> None:
         window_end_at=manifest.as_of,
         min_samples=10,
         evidence_scope="current_execution_cohort",
+        expected_execution_identities=dict(M29_WAVE3_WAVE4_FROZEN_EXPECTED_EXECUTION_IDENTITIES),
     )
     recommendation = SimpleNamespace(
         task_class="investigation",
@@ -222,6 +224,7 @@ def _reconciliation_reports(manifest: Wave4Manifest, add_extra: bool):
         window_end_at=manifest.as_of,
         min_samples=10,
         evidence_scope="current_execution_cohort",
+        expected_execution_identities=dict(M29_WAVE3_WAVE4_FROZEN_EXPECTED_EXECUTION_IDENTITIES),
     )
     baseline_policy = ReliabilityReportPolicy(
         as_of=manifest.as_of - timedelta(days=1),
@@ -229,6 +232,7 @@ def _reconciliation_reports(manifest: Wave4Manifest, add_extra: bool):
         window_end_at=manifest.as_of - timedelta(days=1),
         min_samples=10,
         evidence_scope="current_execution_cohort",
+        expected_execution_identities=dict(M29_WAVE3_WAVE4_FROZEN_EXPECTED_EXECUTION_IDENTITIES),
     )
     baseline_cells = [
         _reconciliation_cell(
@@ -430,6 +434,7 @@ def test_all_failure_cohort_is_publishable_with_explicit_fallback() -> None:
         window_end_at=manifest.as_of,
         min_samples=10,
         evidence_scope="current_execution_cohort",
+        expected_execution_identities=dict(M29_WAVE3_WAVE4_FROZEN_EXPECTED_EXECUTION_IDENTITIES),
     )
     cells = [
         SimpleNamespace(
@@ -473,6 +478,7 @@ def test_underpowered_excluded_wave4_cases_remain_unqualified() -> None:
         window_end_at=manifest.as_of,
         min_samples=10,
         evidence_scope="current_execution_cohort",
+        expected_execution_identities=dict(M29_WAVE3_WAVE4_FROZEN_EXPECTED_EXECUTION_IDENTITIES),
     )
     cells = [
         SimpleNamespace(

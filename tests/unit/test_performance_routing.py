@@ -18,7 +18,7 @@ def temp_metrics_path(tmp_path: Path) -> Path:
         "source": "tests/temp_metrics.json",
         "profiles": {
             "codex-native-executor": {
-                "model": "gpt-5.6-luna",
+                "model": "gpt-6-luna",
                 "reasoning_effort": "high",
                 "task_classes": {
                     "bugfix": {
@@ -327,7 +327,7 @@ def test_routing_policy_loads_via_symlink(tmp_path: Path) -> None:
         "version": "1.0",
         "profiles": {
             "codex-native-executor": {
-                "model": "gpt-5.6-luna",
+                "model": "gpt-6-luna",
                 "reasoning_effort": "high",
                 "task_classes": {
                     "bugfix": {
@@ -383,7 +383,7 @@ def test_routing_policy_handles_native_to_read_only_executor_mapping(tmp_path: P
         "version": "1.0",
         "profiles": {
             "codex-native-executor": {
-                "model": "gpt-5.6-luna",
+                "model": "gpt-6-luna",
                 "reasoning_effort": "high",
                 "task_classes": {
                     "bugfix": {
@@ -431,7 +431,7 @@ def test_routing_policy_rejects_candidates_with_mismatched_model(tmp_path: Path)
         json.dump(metrics, f)
 
     policy = PerformanceRoutingPolicy(path)
-    # Profile expects default gpt-5.6-luna / high
+    # Profile expects default gpt-6-luna / high
     codex_profile = WorkerProfile(
         name="codex-native-executor",
         worker_type="codex",
@@ -447,7 +447,7 @@ def test_routing_policy_detects_mismatch_from_environment(tmp_path: Path) -> Non
         "version": "1.0",
         "profiles": {
             "codex-native-executor": {
-                "model": "gpt-5.6-luna",
+                "model": "gpt-6-luna",
                 "reasoning_effort": "high",
                 "task_classes": {
                     "bugfix": {

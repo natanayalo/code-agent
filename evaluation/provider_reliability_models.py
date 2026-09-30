@@ -80,6 +80,22 @@ class ExecutionIdentity(StrictModel):
 
 DEFAULT_EXPECTED_EXECUTION_IDENTITIES: dict[str, ExecutionIdentity] = {
     "codex-native-executor": ExecutionIdentity(
+        provider="codex", model="gpt-6-luna", reasoning_effort="high"
+    ),
+    "codex-native-executor-read-only": ExecutionIdentity(
+        provider="codex", model="gpt-6-luna", reasoning_effort="high"
+    ),
+    "antigravity-native-executor": ExecutionIdentity(
+        provider="antigravity", model="gemini-3.8-flash", reasoning_effort="medium"
+    ),
+    "antigravity-native-executor-read-only": ExecutionIdentity(
+        provider="antigravity", model="gemini-3.8-flash", reasoning_effort="medium"
+    ),
+}
+
+# Wave 3/4 artifacts are immutable evidence collected under this older policy.
+M29_WAVE3_WAVE4_FROZEN_EXPECTED_EXECUTION_IDENTITIES: dict[str, ExecutionIdentity] = {
+    "codex-native-executor": ExecutionIdentity(
         provider="codex", model="gpt-5.6-luna", reasoning_effort="high"
     ),
     "codex-native-executor-read-only": ExecutionIdentity(

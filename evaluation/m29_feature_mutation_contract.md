@@ -139,7 +139,7 @@ in pair order. The first provider alternates by pair to counterbalance ordering:
 
 Use the mutable profiles `codex-native-executor` and
 `antigravity-native-executor`. At contract review time, the expected execution
-identities in the canonical report policy are Codex `gpt-5.6-luna/high` and
+identities in the canonical report policy are Codex `gpt-6-luna/high` and
 Antigravity `gemini-3.8-flash/medium`. Freeze the expected provider, model, and
 reasoning effort in the run manifest before case 01. If the supported identity
 has changed before collection, revise and review the manifest before any case;

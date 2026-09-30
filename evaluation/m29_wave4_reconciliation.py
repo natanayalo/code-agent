@@ -11,7 +11,7 @@ from evaluation.m29_wave4_paired import (
     Wave4SupplementalObservation,
 )
 from evaluation.provider_reliability_models import (
-    DEFAULT_EXPECTED_EXECUTION_IDENTITIES,
+    M29_WAVE3_WAVE4_FROZEN_EXPECTED_EXECUTION_IDENTITIES,
     ProviderReliabilityEvidenceCell,
     ProviderReliabilityReport,
     ReliabilityReportPolicy,
@@ -28,10 +28,14 @@ def _report_policy(manifest: Wave4Manifest, report: ProviderReliabilityReport) -
         window_end_at=manifest.as_of,
         min_samples=10,
         evidence_scope="current_execution_cohort",
+        expected_execution_identities=dict(M29_WAVE3_WAVE4_FROZEN_EXPECTED_EXECUTION_IDENTITIES),
     )
     if report.policy != expected:
         raise ValueError("canonical report policy does not match Wave 4 manifest")
-    if report.policy.expected_execution_identities != DEFAULT_EXPECTED_EXECUTION_IDENTITIES:
+    if (
+        report.policy.expected_execution_identities
+        != M29_WAVE3_WAVE4_FROZEN_EXPECTED_EXECUTION_IDENTITIES
+    ):
         raise ValueError("canonical report execution identities do not match Wave 4 policy")
 
 
@@ -39,7 +43,7 @@ def _baseline_policy(manifest: Wave4Manifest, report: ProviderReliabilityReport)
     policy = report.policy
     if policy.evidence_scope != "current_execution_cohort":
         raise ValueError("Wave 4 baseline report must use the current execution cohort")
-    if policy.expected_execution_identities != DEFAULT_EXPECTED_EXECUTION_IDENTITIES:
+    if policy.expected_execution_identities != M29_WAVE3_WAVE4_FROZEN_EXPECTED_EXECUTION_IDENTITIES:
         raise ValueError("Wave 4 baseline report execution identities do not match Wave 4 policy")
     if policy.as_of > manifest.as_of:
         raise ValueError("Wave 4 baseline report must predate the Wave 4 report")

@@ -12,7 +12,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from evaluation.provider_reliability_models import (
-    DEFAULT_EXPECTED_EXECUTION_IDENTITIES,
+    M29_WAVE3_WAVE4_FROZEN_EXPECTED_EXECUTION_IDENTITIES,
     ProviderReliabilityReport,
     ReliabilityReportPolicy,
 )
@@ -339,6 +339,7 @@ def _validate_manifest_report_policy(
         window_end_at=manifest.as_of,
         min_samples=10,
         evidence_scope="current_execution_cohort",
+        expected_execution_identities=dict(M29_WAVE3_WAVE4_FROZEN_EXPECTED_EXECUTION_IDENTITIES),
     )
     policy = report.policy
     if policy.as_of != expected_policy.as_of:
@@ -365,7 +366,7 @@ def _validate_manifest_report_policy(
         raise ValueError("canonical report policy window start does not match manifest")
     if policy.window_end_at != expected_policy.window_end_at:
         raise ValueError("canonical report policy window end does not match manifest")
-    if policy.expected_execution_identities != DEFAULT_EXPECTED_EXECUTION_IDENTITIES:
+    if policy.expected_execution_identities != M29_WAVE3_WAVE4_FROZEN_EXPECTED_EXECUTION_IDENTITIES:
         raise ValueError("canonical report execution identities do not match the Wave 3 policy")
 
 

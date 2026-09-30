@@ -655,7 +655,7 @@ export DATABASE_URL="postgresql+psycopg://..."
 - `--evidence-scope`: Evidence filtering scope:
   - `current_execution_cohort` (default): Strictly filters tasks to those whose worker runs
     persisted authoritative `model_execution` budget metadata matching the current expected
-    cohorts (`codex: gpt-5.6-luna/high`, `antigravity: gemini-3.8-flash/medium`). Zero heuristic
+    cohorts (`codex: gpt-6-luna/high`, `antigravity: gemini-3.8-flash/medium`). Zero heuristic
     inference.
   - `operational`: Admits all terminal tasks regardless of model vintage for complete 90-day
     system accounting, diagnostic failure decomposition, and historical tracking.

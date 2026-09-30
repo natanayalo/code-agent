@@ -9,7 +9,7 @@ from typing import Any, Final
 
 from workers.base import ConfigSource, ModelExecutionMetadata
 
-DEFAULT_CODEX_MODEL: Final[str] = "gpt-5.6-luna"
+DEFAULT_CODEX_MODEL: Final[str] = "gpt-6-luna"
 DEFAULT_CODEX_REASONING_EFFORT: Final[str] = "high"
 
 DEFAULT_ANTIGRAVITY_MODEL: Final[str] = "gemini-3.8-flash"

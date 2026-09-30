@@ -17,7 +17,10 @@ from evaluation.m29_wave3_paired import (
     assert_manifest_matches_report,
     assert_sanitized_manifest,
 )
-from evaluation.provider_reliability_models import ReliabilityReportPolicy
+from evaluation.provider_reliability_models import (
+    M29_WAVE3_WAVE4_FROZEN_EXPECTED_EXECUTION_IDENTITIES,
+    ReliabilityReportPolicy,
+)
 from scripts.e2e.build_m29_wave3_manifest import (
     _sha256,
     _validate_bundle_task_consistency,
@@ -133,6 +136,9 @@ def test_manifest_reconciles_counts_and_exclusions_with_report_cells() -> None:
             window_end_at=manifest.as_of,
             min_samples=10,
             evidence_scope="current_execution_cohort",
+            expected_execution_identities=dict(
+                M29_WAVE3_WAVE4_FROZEN_EXPECTED_EXECUTION_IDENTITIES
+            ),
         ),
         evidence_cells=cells,
     )
@@ -179,6 +185,9 @@ def test_manifest_rejects_report_policy_drift() -> None:
             window_end_at=manifest.as_of + timedelta(seconds=1),
             min_samples=10,
             evidence_scope="current_execution_cohort",
+            expected_execution_identities=dict(
+                M29_WAVE3_WAVE4_FROZEN_EXPECTED_EXECUTION_IDENTITIES
+            ),
         ),
         evidence_cells=cells,
     )

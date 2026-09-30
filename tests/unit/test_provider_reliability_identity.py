@@ -259,12 +259,12 @@ def test_cohort_filtering_prevents_two_models_under_same_profile() -> None:
     assert evidence is None
     assert reason == "unknown_execution_identity"
 
-    # Task executed with current gpt-5.6-luna
+    # Task executed with current gpt-6-luna
     current_budget = {
         "native_agent": {
             "model_execution": {
                 "provider": "codex",
-                "model": "gpt-5.6-luna",
+                "model": "gpt-6-luna",
                 "reasoning_effort": "high",
             }
         }
