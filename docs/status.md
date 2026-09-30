@@ -166,6 +166,12 @@ Temporal migration and rollback record is in the
   probability, but remains `partial`: the historical 45-day cohort has zero
   included tasks. `feature/mutation` remains N=0; routing and
   `evaluation/routing_metrics.json` are unchanged.
+- The [`feature/mutation` evaluation contract](../evaluation/m29_feature_mutation_contract.md)
+  is drafted and checked against the current extractor, repo-profile delivery
+  overlay, workspace cleanup behavior, memory isolation, and unresolved
+  interactions. Operator review is pending; runner implementation and live
+  cases remain gated, `feature/mutation` is N=0, and production routing remains
+  static.
 
 ## Known limitations
 
@@ -201,8 +207,10 @@ Temporal migration and rollback record is in the
    b. [Completed] add provider-specific pre-dispatch diagnostics (M29 Item 1b);
    c. [Completed] qualify the cumulative `investigation/read_only` sample floor,
       retaining the three Wave 4 Codex identity exclusions;
-   d. define and review a separate mutable-evaluation contract, safeguards, and
-      cleanup plan before collecting `feature/mutation` evidence;
+   d. [Contract drafted; operator review pending] review the linked `feature/mutation`
+      evaluation contract, including memory isolation, pending-interaction
+      handling, delivery safeguards, and cleanup, before runner implementation
+      or live evidence collection;
    e. gather evidence in a historical 45-day cohort before claiming
       longitudinal robustness;
    f. evaluate hierarchical budget controls separately.

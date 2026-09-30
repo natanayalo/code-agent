@@ -738,6 +738,16 @@ export DATABASE_URL="postgresql+psycopg://..."
 - **Exclusion accounting**: Root exclusions describe the full 90-day observation snapshot scanned from the database.
 - **Public data boundary**: Generated JSON and Markdown artifacts are validated by `assert_sanitized_robustness_report()` to ensure zero leak of task IDs, user prompt text, repositories, branch names, logs, artifacts, or secrets.
 
+### M29 `feature/mutation` evaluation contract
+
+Before building a mutable-evaluation runner or collecting live
+`feature/mutation` evidence, review the
+[`feature/mutation` contract](../evaluation/m29_feature_mutation_contract.md).
+It defines the ten matched feature pairs, pinned disposable fixture revision,
+post-profile persisted TaskSpec delivery gate, evidence semantics, stop
+conditions, and workspace-only cleanup. No mutable runner or live mutation
+cases are implemented by the contract slice. Production routing stays static.
+
 ### M29 live evidence wave harness
 
 The M29 live evidence wave harness (`scripts/e2e/run_m29_evidence_wave.py`) manages reproducible, resumable execution of frozen evidence suites against real provider runtimes:
