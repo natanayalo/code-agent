@@ -14,6 +14,32 @@ credentials. Each provider receives the same ten prompts from the same clean
 fixture commit, in an isolated workspace. Changes are delivered as workspace
 artifacts and are never pushed or opened as pull requests.
 
+## Terminal outcome and external quality boundary
+
+The ordinary Temporal path runs verification and review before finalizing the
+task. Verification can request bounded repairs, unresolved review findings can
+set `manual_follow_up`, and Temporal returns that outcome as failed. That path
+cannot support a claim that canonical completion is independent of those
+quality checks.
+
+Before the first case, the execution-preparation slice must provide and smoke
+verify an evaluation mode that records the canonical task terminal state before
+any runner-owned acceptance test, regression test, or model-based quality
+evaluation runs. Those external checks run read-only against a frozen terminal
+snapshot and write only to the evaluation bundle. They must not add task
+timeline events or worker-run verification/review artifacts, request repairs or
+manual follow-up, signal or replay a task, or change its persisted status,
+terminal event, or diff. Preserve operational and sandbox safety controls.
+If the current execution path cannot guarantee this separation, do not dispatch
+cases until the execution slice implements and verifies the required mode.
+
+After every case reaches terminal state, first archive a checksum-bound
+snapshot of its task status, terminal event, and final diff. Then run the fixed
+acceptance oracle, fixture regression suite, and independent review in an
+isolated read-only evaluator. Verify after evaluation that the task status,
+terminal event, and archived diff are unchanged. Any attempted post-terminal
+mutation is a suite-stopping safety failure.
+
 The fixture repository and its exact 40-character commit SHA are deliberately
 left for the execution-preparation slice. Before any case starts, that slice
 must freeze both in the suite manifest; a moving branch or tag is not a valid
@@ -64,8 +90,9 @@ pass at the pinned baseline; each case adds one bounded behavior covered by the
 external acceptance oracle. Keep the fixture standard-library-only and free of
 network, file system, database, and secret dependencies. Put fixed acceptance
 tests in a runner-owned, read-only verifier package outside the writable
-workspace. The provider cannot edit, skip, or replace that verifier.
-Acceptance checks must be run against the resulting workspace after every case.
+workspace. The provider cannot edit, skip, or replace that verifier. Run its
+checks against a read-only snapshot after the task reaches terminal state, not
+as a task completion gate.
 The module named for a pair is its only allowed source path. Test files,
 verifier files, baseline metadata, dependency files, and repository profile are
 protected. If a shared helper path is needed, add it to the reviewed suite
@@ -74,8 +101,8 @@ allowlist before any case starts.
 For every prompt, append this same instruction verbatim:
 
 > Make the smallest implementation for this request in the task workspace. Do
-> not change unrelated files or add dependencies. Run the repository's
-> verification command and report the files changed and the results.
+> not change unrelated files or add dependencies. Report the files changed and
+> any blockers. Do not modify or invoke runner-owned evaluation checks.
 
 ### Pair 01 — label normalization
 
@@ -225,21 +252,41 @@ Do not launch the suite until all of these checks pass:
 
 - The repository is dedicated and disposable, its remote contains no valuable
   data, and the pinned commit is readable and clean. The verifier and suite
-  hashes, repository revision, build SHA, expected identities, case order, and
-  budgets are frozen in a new private evidence bundle.
+  hashes, repository revision, build SHA, candidate and evaluator identities,
+  evaluator prompt/tool hashes and no-fallback policy, memory baseline hash,
+  case order, budgets, evaluation mode, and retention configuration are frozen
+  in a new private evidence bundle.
 - The disposable Postgres, Temporal, and sandbox stack is isolated from
   production. Provider egress is limited to the approved provider endpoints and
   read-only fixture fetch. No GitHub write token, repository write credential,
   production secret, or unrelated secret reference is available to a case.
-- Freeze one memory baseline for the suite: empty personal memory for the
-  evaluation user, empty project memory for the fixture repository URL, and a
-  fresh session/thread with no carried decisions, risks, or touched files.
-  Before each case, verify the effective personal/project memory snapshot hash
-  matches that baseline and create the fresh session. After each case, isolate
-  or discard any memory writes before the next case so repository-scoped memory
-  cannot flow between cases. A per-case database or memory namespace using the
-  same baseline is acceptable. Record snapshot hashes, not memory contents, in
-  the evidence bundle. Stop before dispatch if this isolation cannot be proved.
+- Freeze the exact candidate and evaluator identities in the suite manifest.
+  The model-based verifier and independent reviewer use the same neutral
+  third-party provider, model, and reasoning effort for all 20 cases; this
+  evaluator must differ from both candidate providers. Pin its system-prompt
+  hashes, read-only tool set, runtime, and equal per-case budgets. Set
+  `fallback_policy` to `none`; never use the normal verifier/reviewer fallback
+  chains or fall back to either candidate or another model. The deterministic
+  acceptance and regression checks have no model identity; pin their verifier
+  source hash, interpreter, and environment.
+  If the evaluator is unavailable or its actual identity differs, stop the
+  suite without switching evaluators. Freeze candidate identity as specified
+  above and verify actual identities from trusted execution metadata.
+- Freeze the complete worker-visible memory baseline. Personal memory is
+  operator-global: require the global `PersonalMemory` store to be empty, or
+  run against a dedicated disposable database/schema with no access to the
+  operator store. The current `_fetch_memory_context` path does not scope its
+  `PersonalMemoryRepository` query by `user_id`. Also freeze project memory for
+  the fixture repository URL,
+  a fresh empty session/thread, observations, repository profile, and any other
+  field in `MemoryContext`. Before every dispatch, hash the canonical serialized
+  `MemoryContext` after loading, read-side gates, profile shaping, and context
+  assembly; compare it with the frozen baseline hash. Include the session,
+  observations, repository profile, and final worker-visible memory payload in
+  the hash. After each case, isolate or discard memory writes before the next
+  case. Per-case databases/namespaces are acceptable only if they reproduce the
+  same frozen baseline. Record hashes, not memory contents. Stop if isolation
+  or equality cannot be proved.
 - Each case uses a new isolated workspace cloned from the pinned revision. The
   fixture has no profile delivery default other than `workspace`; that setting
   does not replace the persisted-state check below.
@@ -249,19 +296,43 @@ Do not launch the suite until all of these checks pass:
   "workspace"`, no `delivery_branch`, no branch/draft-PR delivery actions,
   `requires_clarification == false`, empty `clarification_questions`, and
   `requires_permission == false`.
+  Require empty `verification_commands` after repo-profile processing; the
+  fixture repo profile's `quick` and `full` validation lists must be empty for
+  the task workflow. The runner-owned acceptance and regression commands are
+  frozen separately and run only after terminalization. The evaluation mode
+  must require `enable_independent_verifier == false` and the in-task
+  `skip_independent_review` constraint. It must also prevent deterministic
+  verification or worker-reported test results from requesting a quality repair
+  or changing terminal status. A preflight smoke must prove that pass, fail, and
+  unavailable post-terminal evaluations leave the task status and terminal
+  event unchanged. If the current execution path cannot guarantee that
+  behavior, do not dispatch cases until the execution slice implements and
+  verifies it.
   Confirm the task has the expected provider profile and the fixture revision.
   Stop before provider dispatch if any field differs. Do not repair the
   persisted TaskSpec in place and continue.
 - For each matched pair, require identical prompt and acceptance-oracle hashes
-  and compare the persisted post-overlay TaskSpecs, constraints, and budget
-  fields. Goal, acceptance criteria, non-goals, actions, setup and verification
-  commands, workspace mode, delivery mode, and budgets must match. Only task or
-  case IDs and the selected provider profile may differ in task records. Stop
-  before either member is dispatched if they do not.
+  and compare the evaluation-controlled semantic fields: persisted post-overlay
+  TaskSpec, constraints, budget, fixture revision, repository profile, task
+  prompt, acceptance-oracle hash, and evaluator manifest. Goal, acceptance
+  criteria, non-goals, actions, setup commands, empty task-workflow verification
+  commands, workspace mode, delivery mode, and budgets must match. Provider
+  profile and actual candidate identity are the treatment. Operational values
+  may differ and must not be compared for equality: task/case/session/thread and
+  workspace IDs or paths; run, attempt, and artifact IDs; timestamps; and
+  trace/span IDs. Stop before either member is dispatched if any controlled
+  semantic field differs.
 - Freeze equal per-case limits for both members of every pair: a 900-second
-  execution timeout, the same task budget fields, and one verifier plus one
-  independent-review repair pass. Record configured limits and reported usage
-  separately. Do not retry a terminal task on another provider.
+  candidate execution timeout, identical task budget fields, and identical
+  evaluator time/token/cost budgets. External verifier and review repair counts
+  are always zero; record task execution attempts separately. Do not retry a
+  terminal task on another provider.
+- Before case 01, verify the evaluation service's retention and cleanup sweep
+  enforce the 72-hour maximum below, including when the case runner stops. Any
+  automatic cleanup must use the recorded workspace ownership and
+  `WorkspaceManager` root boundary; otherwise configure the independent manager
+  watchdog and prevent another retention path from deleting evaluation
+  workspaces before evidence archival.
 - Run the baseline fixture checks and read-only verifier integrity check before
   the first case. Confirm no evaluation workspace or output path overlaps the
   primary checkout or another task workspace.
@@ -276,68 +347,82 @@ work and stop the suite before another case is dispatched.
 
 ## Per-case evidence and outcome semantics
 
-Keep an access-controlled private bundle with one immutable record per case.
-Capture at least:
+Keep an access-controlled private bundle with an immutable terminal record and
+a separate post-terminal quality record for every case. Capture at least:
 
 - suite, pair, and case IDs; build SHA; pinned fixture revision; persisted final
   TaskSpec fields relevant to classification and delivery; selected profile;
-- actual provider, model, and reasoning effort from persisted
-  `budget_usage.native_agent.model_execution` for every worker run. Do not infer
-  identity from the profile name or environment. All runs in a case must agree;
-- terminal task status, terminal timeline event and timestamp, execution/runtime
-  mode, and the extractor's eligibility or exclusion reason;
-- final workspace diff, changed relative paths, and a clean/dirty status check;
-- deterministic acceptance results, repository verification command, exit
-  code, and independent review artifact/outcome/findings;
-- verifier and review repair counts, clarification/approval/other interaction
-  counts, typed failure kind, and configured/reported wall-time, token, and cost
-  budget fields;
+- actual candidate provider, model, and reasoning effort from trusted
+  `budget_usage.native_agent.model_execution` metadata for every task worker run.
+  Do not infer identity from the profile name or environment. All candidate runs
+  in a case must agree;
+- the actual post-terminal evaluator provider, model, and reasoning effort for
+  every model-based verifier and reviewer call. Compare each with the frozen
+  neutral evaluator identity; do not infer identity from a configured profile;
+- immutable task status, terminal timeline event and timestamp captured before
+  quality evaluation, execution/runtime mode, and extractor eligibility or
+  exclusion reason;
+- checksum of the terminal snapshot, final workspace diff, changed relative
+  paths, and a clean/dirty status check;
+- external deterministic acceptance and regression results, verifier source
+  hash, commands, exit codes, runtime/toolchain, and independent reviewer
+  outcome/findings from the separate evaluation record;
+- in-task execution attempts and repair counts, clarification/approval/other
+  interaction counts, typed task failure kind, zero external evaluator repairs,
+  and configured/reported wall-time, token, and cost budgets;
 - workspace ID, task ID, workspace path, trusted Git directory, cleanup-policy
-  state, and cleanup result for exact ownership accounting.
+  state, retention deadline, and cleanup result for exact ownership accounting.
 
-Record the final diff after any bounded repair. Preserve the original
-verification and review outcomes as well as the final outcomes, so repairs are
-visible rather than hidden by a final pass. Persist verification in the normal
-verification stage (a non-empty verification command plus a
-`VERIFICATION_COMPLETED` event with `passed` or `failed`) and persist independent
-review as an `ArtifactType.INDEPENDENT_REVIEW_RESULT`
-(`independent_review_result`) artifact in the worker-run artifact index. This
-lets the existing extractor report verification and review stages. A missing
-typed failure remains `unknown`; do not guess one. Keep task IDs, raw provider
-logs, and artifact URIs in the access-controlled raw bundle. Also write a
-separate sanitized review archive with the case ID, actual identity, terminal
-and quality outcomes, sanitized final diff, fixture-relative changed paths,
-verification and review results, repairs, interactions, failure kind, and
-budget. Scan the diff and captured fields for credentials before archiving; do
-not put task IDs, workspace IDs, repository URLs, raw logs, or artifact URIs in
-the sanitized archive. Verify its checksum and case coverage before cleanup.
+Run the fixed acceptance oracle and fixture regression suite on a read-only
+snapshot after task terminalization. Run every model-based evaluation role
+(including any independent verifier and reviewer) through the same neutral
+third-party provider/model/reasoning-effort identity frozen in the manifest,
+with the frozen prompt hashes and read-only tools. The reviewer receives the
+same acceptance criteria but not candidate provider identity or case order.
+Model-based evaluation is read-only and has no repair pass. Store all external
+quality records in the evaluation bundle, not the task timeline or worker-run
+artifact index. Do not emit `VERIFICATION_COMPLETED` events or
+`ArtifactType.INDEPENDENT_REVIEW_RESULT` artifacts for these external results.
+The canonical extractor's in-task verification/review stage rates therefore
+remain not applicable; publish external quality measures separately instead of
+backfilling those extractor stages.
+
+After the terminal snapshot is archived, no quality outcome may signal, replay,
+repair, cancel, or otherwise mutate the task. Re-read task status and terminal
+timeline after external evaluation and compare them with the snapshot. A
+quality-failing completed task remains `COMPLETED`; a failed task retains its
+terminal failure even when its partial diff passes external checks. A nonzero
+external repair count or a changed task status, terminal event, or archived diff
+is a suite-stopping contract violation. A missing typed task failure remains
+`unknown`; do not guess one. Keep task IDs, raw provider logs, and artifact URIs
+in the access-controlled raw bundle. Also write a separate sanitized review
+archive with case ID, actual candidate and evaluator identities, terminal and
+quality outcomes, sanitized final diff, fixture-relative changed paths,
+external verification and review results, repairs, interactions, failure kind,
+and budgets. Scan the diff and captured fields for credentials before archiving;
+do not put task IDs, workspace IDs, repository URLs, raw logs, or artifact URIs
+in the sanitized archive. Verify its checksum and case coverage before cleanup.
 Public M29 reports remain more restrictive: follow the existing allowlist and
 omit task text, raw diffs, raw logs, repository URLs, credentials, and private
 artifacts.
 
-Complete verifier and review repair passes before the task becomes terminal,
-within the frozen per-case limits. Once a task is terminal, do not signal,
-replay, or otherwise mutate it to repair the result. Any later independent
-inspection can change the separate quality assessment, not the frozen terminal
-outcome or diff for that case.
-
 Report two distinct results:
 
-1. **Terminal completion:** the canonical extractor's accepted outcome is a
-   persisted `COMPLETED` task with a consistent terminal timeline. `FAILED`
-   is a non-accepted terminal outcome and retains its typed failure. `CANCELLED`
-   and nonterminal/interrupted tasks are excluded under current extractor
-   semantics. This rate measures task completion, not feature quality.
+1. **Pre-evaluation task completion:** use the canonical extractor's accepted
+   outcome from the immutable terminal snapshot: persisted `COMPLETED` plus a
+   consistent terminal timeline. `FAILED` is non-accepted and retains its typed
+   failure. `CANCELLED` and nonterminal/interrupted tasks remain excluded under
+   current extractor semantics. This measures whether the task/orchestration
+   path terminalized before external quality evaluation; it does not measure
+   feature correctness. External quality outcomes cannot change it, though task
+   completion may still correlate with implementation quality.
 2. **Independent feature quality:** pass only when the fixed external
-   acceptance checks pass, the fixture regression suite passes, and a blinded
-   independent reviewer records no blocking finding on the final diff. The
-   reviewer receives the same acceptance criteria but not provider identity or
-   case order. Record `fail` or `not assessable` otherwise, with the reason. A
-   completed task may fail this quality check; a failed or interrupted task may
-   still have a reviewable partial diff. Never fold this result into terminal
-   completion. Preserve the extractor's separate strict review-stage result
-   (`no_findings`/approved versus findings/rejected) as reported by its artifact
-   parser.
+   acceptance checks pass, the fixture regression suite passes, and the blinded
+   neutral reviewer records no blocking finding on the terminal diff. Record
+   `fail` or `not assessable` otherwise, with the reason. A completed task may
+   fail this quality check; a failed task may still have a reviewable partial
+   diff. Never fold this result into canonical task status or the extractor's
+   in-task verification/review stages.
 
 Use the current extractor to classify each task as `feature/mutation`: the
 persisted TaskSpec must retain the feature task type and include
@@ -351,12 +436,19 @@ do not guarantee eligibility if cases are excluded.
 Stop dispatching new cases immediately if any of these occurs:
 
 - the pre-dispatch persisted TaskSpec or pinned fixture revision check fails;
-- the effective personal/project memory snapshot differs from the frozen
-  baseline or a prior case's memory is visible to the current case;
-- actual model identity is missing, mixed across runs, or differs from the
-  frozen provider/model/reasoning-effort identity; freeze that case's terminal
-  outcome if present, then stop before dispatching its pair partner or any later
-  case;
+- the full worker-visible `MemoryContext` or memory payload hash differs from
+  the frozen baseline, or prior-case memory is visible to the current case;
+- actual candidate or evaluator identity is missing, mixed across runs, or
+  differs from the frozen provider/model/reasoning-effort identity; preserve any
+  terminal task outcome, mark external quality not assessable when applicable,
+  and stop before dispatching later cases;
+- the evaluator is unavailable or attempts a fallback. Do not switch models;
+  preserve existing terminal outcomes, mark pending quality assessments not
+  assessable, and stop further case dispatch;
+- a verification/review repair or manual-follow-up transition occurs before
+  terminalization, showing that evaluation quality gates were not isolated;
+- any post-terminal evaluator changes task status, the terminal event, or the
+  archived diff;
 - a case pauses for clarification, approval, or permission, or creates a pending
   human interaction. Stop dispatching immediately; preserve the pending task,
   interaction, and timeline state. Do not answer, approve, reject, cancel, or
@@ -380,6 +472,11 @@ Unexpected remote effects require operator investigation under the applicable
 repository procedure; do not try to delete remote refs or PRs as evaluation
 cleanup.
 
+A deterministic acceptance failure, regression failure, or review finding is a
+quality result, not by itself a reason to stop dispatch or repair the task. It
+must leave the already-frozen task outcome unchanged. Evaluator identity or
+availability failures stop the suite as described above.
+
 ## Retention and cleanup
 
 The worker cleanup policy retains successful native workspaces and failed
@@ -387,8 +484,18 @@ workspaces by default. Preserve every evaluation workspace until its sanitized
 evidence record has been archived and verified. Retain failed, interrupted, and
 quality-failing workspaces for at most 72 hours for bounded inspection; successful
 quality-passing cases may be cleaned up as soon as their evidence is archived.
-Do not extend retention automatically. If evidence archival fails, stop cleanup
-and report the archive failure for operator handling.
+Do not extend retention automatically. The current `TaskExecutionService`
+default retention is seven days and does not satisfy this contract. Before case
+01, set the evaluation stack's `retention_seconds` to no more than 259,200
+seconds and verify that expired runs are swept on schedule. If that service
+cannot guarantee cleanup when the runner stops, install an independent watchdog
+that calls `WorkspaceManager` for the exact recorded evaluation workspace IDs
+by the 72-hour deadline. The expiry path must use the recorded-ID and
+`WorkspaceManager` boundaries; if the built-in sweep deletes evaluation
+workspaces outside those boundaries, disable that deletion for evaluation
+handles and use the watchdog. A TTL without a guaranteed manager cleanup sweep
+is insufficient. If evidence archival fails, report the archive failure; the
+watchdog must still enforce the 72-hour maximum rather than extending retention.
 
 After archival and any inspection window, remove only workspaces whose exact IDs
 and resolved paths were recorded in the evaluation bundle. Set a one-time
@@ -407,9 +514,10 @@ The preflight and closeout checklist applies to every outcome:
 
 | Case outcome | Before cleanup |
 | --- | --- |
-| Completed, quality pass | Freeze terminal record and final diff; archive sanitized evidence; then clean the recorded workspace. |
-| Completed, quality fail | Freeze terminal record and failed checks/review; archive sanitized evidence; retain for up to 72 hours for inspection; then clean the recorded workspace. |
-| Failed terminal task | Preserve terminal failure and typed failure kind; archive sanitized evidence; retain for up to 72 hours for inspection; then clean the recorded workspace. |
+| Completed, quality pass | Freeze terminal record and final diff before evaluation; archive external quality evidence; then clean the recorded workspace. |
+| Completed, quality fail | Keep the terminal record unchanged; archive failed checks/review; retain for up to 72 hours for inspection; then clean the recorded workspace. |
+| Quality not assessable | Keep the terminal record unchanged; archive the evaluator/infra failure; retain for up to 72 hours for inspection; then clean the recorded workspace. |
+| Failed terminal task | Preserve terminal failure and typed failure kind; archive any assessable partial-diff quality result; retain for up to 72 hours for inspection; then clean the recorded workspace. |
 | Interrupted or cancelled | Record interruption/cancellation without converting it to failure; archive partial evidence; retain for up to 72 hours for inspection; then clean the recorded workspace. |
 | Interaction pending | Preserve the pending task and interaction without resolving it; archive sanitized evidence; retain the workspace for up to 72 hours for inspection; then clean it through the manager. |
 | Preflight stopped before dispatch | Record the stop and whether a workspace was provisioned; archive the sanitized stop evidence; clean only a workspace recorded to that case. |

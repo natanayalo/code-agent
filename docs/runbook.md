@@ -744,8 +744,10 @@ Before building a mutable-evaluation runner or collecting live
 `feature/mutation` evidence, review the
 [`feature/mutation` contract](../evaluation/m29_feature_mutation_contract.md).
 It defines the ten matched feature pairs, pinned disposable fixture revision,
-post-profile persisted TaskSpec delivery gate, evidence semantics, stop
-conditions, and workspace-only cleanup. No mutable runner or live mutation
+post-profile persisted TaskSpec delivery gate, full memory isolation, and
+post-terminal quality evaluation that cannot alter task outcomes. The suite
+must pin one neutral evaluator identity with no fallback and guarantee
+WorkspaceManager cleanup within 72 hours. No mutable runner or live mutation
 cases are implemented by the contract slice. Production routing stays static.
 
 ### M29 live evidence wave harness
