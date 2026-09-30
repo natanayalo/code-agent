@@ -44,6 +44,78 @@ def test_create_task_outcome_returns_existing_task_for_duplicate_delivery() -> N
         assert len(tasks) == 1
 
 
+def test_post_terminal_quality_evaluation_is_disabled_by_default() -> None:
+    """Ordinary task services reject requests to bypass in-task quality gates."""
+    service, _session_factory = _make_task_service()
+
+    with pytest.raises(execution_module.TaskSubmissionValidationError, match="mode is disabled"):
+        service.create_task(
+            execution_module.TaskSubmission(
+                task_text="Implement the taskboard feature",
+                constraints={"skip_independent_review": True},
+                post_terminal_quality_evaluation=True,
+            )
+        )
+
+
+def test_post_terminal_quality_evaluation_persists_only_from_explicit_request() -> None:
+    """The enabled internal mode is persisted while spoofed constraint keys are stripped."""
+    service, session_factory = _make_task_service()
+    service.enable_post_terminal_quality_evaluation = True
+
+    snapshot, _ = service.create_task(
+        execution_module.TaskSubmission(
+            task_text="Implement the taskboard feature",
+            constraints={
+                "delivery_mode": "workspace",
+                "skip_independent_review": True,
+                "verification_commands": [],
+            },
+            post_terminal_quality_evaluation=True,
+        )
+    )
+    spoofed_snapshot, _ = service.create_task(
+        execution_module.TaskSubmission(
+            task_text="Ordinary task",
+            constraints={"post_terminal_quality_evaluation": True},
+        )
+    )
+
+    assert snapshot.constraints["post_terminal_quality_evaluation"] is True
+    assert snapshot.task_spec is not None
+    assert snapshot.task_spec.verification_commands == []
+    assert "post_terminal_quality_evaluation" not in spoofed_snapshot.constraints
+    with session_scope(session_factory) as session:
+        persisted = TaskRepository(session).get(snapshot.task_id)
+        assert persisted is not None
+        assert persisted.constraints["post_terminal_quality_evaluation"] is True
+
+
+def test_post_terminal_quality_evaluation_requires_review_skip_and_no_verifier() -> None:
+    """The gated mode requires both review suppression and a disabled independent verifier."""
+    service, _session_factory = _make_task_service()
+    service.enable_post_terminal_quality_evaluation = True
+    submission = execution_module.TaskSubmission(
+        task_text="Implement the taskboard feature",
+        post_terminal_quality_evaluation=True,
+    )
+
+    with pytest.raises(
+        execution_module.TaskSubmissionValidationError,
+        match="skip_independent_review=true",
+    ):
+        service.create_task(submission)
+
+    service.enable_independent_verifier = True
+    with pytest.raises(
+        execution_module.TaskSubmissionValidationError,
+        match="verifier to be disabled",
+    ):
+        service.create_task(
+            submission.model_copy(update={"constraints": {"skip_independent_review": True}})
+        )
+
+
 def test_create_task_outcome_logs_warning_on_duplicate_delivery(caplog) -> None:
     """Duplicate delivery should emit a structured warning log with delivery context."""
     import logging

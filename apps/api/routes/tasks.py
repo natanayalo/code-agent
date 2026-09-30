@@ -75,6 +75,7 @@ def submit_task(
             worker_profile_override=ingress.request.worker_profile_override,
             constraints=ingress.request.constraints,
             budget=ingress.request.budget,
+            post_terminal_quality_evaluation=ingress.request.post_terminal_quality_evaluation,
             secret_refs=ingress.request.secret_refs,
             tools=ingress.request.tools,
             callback_url=ingress.request.callback_url,

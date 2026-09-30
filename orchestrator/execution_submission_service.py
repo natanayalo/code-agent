@@ -23,12 +23,7 @@ from orchestrator.execution_policy import (
 )
 from orchestrator.execution_resume_service import restore_decomposed_execution_state
 from orchestrator.execution_types import (
-    REPLAYABLE_STATUSES as _REPLAYABLE_STATUSES,
-)
-from orchestrator.execution_types import (
-    RESERVED_INTERNAL_CONSTRAINT_KEYS as _RESERVED_INTERNAL_CONSTRAINT_KEYS,
-)
-from orchestrator.execution_types import (
+    POST_TERMINAL_QUALITY_EVALUATION_CONSTRAINT,
     DeliveryKey,
     SubmissionSession,
     TaskReplayRequest,
@@ -36,6 +31,12 @@ from orchestrator.execution_types import (
     TaskSubmission,
     TaskSubmissionValidationError,
     _PersistedTaskContext,
+)
+from orchestrator.execution_types import (
+    REPLAYABLE_STATUSES as _REPLAYABLE_STATUSES,
+)
+from orchestrator.execution_types import (
+    RESERVED_INTERNAL_CONSTRAINT_KEYS as _RESERVED_INTERNAL_CONSTRAINT_KEYS,
 )
 from orchestrator.task_spec import build_task_spec
 from privacy.redaction import redact_private_tags, redact_private_tags_recursive
@@ -62,6 +63,20 @@ logger = logging.getLogger("orchestrator.execution")
 
 def _normalize_and_validate_submission(self: Any, submission: TaskSubmission) -> TaskSubmission:
     """Normalize execution overrides and validate profile selections before persistence."""
+    if submission.post_terminal_quality_evaluation:
+        if not getattr(self, "enable_post_terminal_quality_evaluation", False):
+            raise TaskSubmissionValidationError(
+                "Post-terminal quality evaluation mode is disabled for this task service."
+            )
+        if getattr(self, "enable_independent_verifier", False):
+            raise TaskSubmissionValidationError(
+                "Post-terminal evaluation requires the in-task verifier to be disabled."
+            )
+        if submission.constraints.get("skip_independent_review") is not True:
+            raise TaskSubmissionValidationError(
+                "Post-terminal quality evaluation mode requires skip_independent_review=true."
+            )
+
     if submission.secrets:
         raise DeprecatedLegacySecretsError(
             "Legacy raw secrets are no longer accepted. Use secret_refs instead."
@@ -254,6 +269,8 @@ def _persist_submission(
             persisted_constraints["worker_profile_override"] = submission.worker_profile_override
         if submission.tools is not None:
             persisted_constraints["tools"] = submission.tools
+        if submission.post_terminal_quality_evaluation:
+            persisted_constraints[POST_TERMINAL_QUALITY_EVALUATION_CONSTRAINT] = True
         task_spec = build_task_spec(
             task_text=persisted_task_text,
             repo_url=submission.repo_url,

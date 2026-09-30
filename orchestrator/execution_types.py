@@ -80,6 +80,7 @@ class TaskSubmission(ExecutionModel):
     callback_url: str | None = Field(default=None, max_length=2048)
     session: SubmissionSession = Field(default_factory=SubmissionSession)
     repair_for_task_id: str | None = None
+    post_terminal_quality_evaluation: bool = False
 
     @field_validator("callback_url")
     @classmethod
@@ -653,8 +654,9 @@ class ApprovalDecisionResult:
 REPLAYABLE_STATUSES: frozenset[str] = frozenset(
     {TaskStatus.COMPLETED.value, TaskStatus.FAILED.value, TaskStatus.CANCELLED.value}
 )
+POST_TERMINAL_QUALITY_EVALUATION_CONSTRAINT = "post_terminal_quality_evaluation"
 RESERVED_INTERNAL_CONSTRAINT_KEYS: frozenset[str] = frozenset(
-    {"approval", "worker_profile_override"}
+    {"approval", "worker_profile_override", POST_TERMINAL_QUALITY_EVALUATION_CONSTRAINT}
 )
 
 

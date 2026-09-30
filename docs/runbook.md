@@ -740,18 +740,22 @@ export DATABASE_URL="postgresql+psycopg://..."
 
 ### M29 `feature/mutation` evaluation contract
 
-Before building a mutable-evaluation runner or collecting live
-`feature/mutation` evidence, review the
-[`feature/mutation` contract](../evaluation/m29_feature_mutation_contract.md).
-It defines the ten matched feature pairs, pinned disposable fixture revision,
-post-profile persisted TaskSpec delivery gate, full memory isolation, and
-post-terminal quality evaluation that cannot alter task outcomes. It also
-requires frozen pre-run IDs for both provider cells, exact baseline-plus-suite
-reconciliation after the frozen `as_of` cutoff and before report publication,
-and extractor-stage applicability smokes. The suite must pin one neutral
-evaluator identity with no fallback and guarantee WorkspaceManager cleanup
-within 72 hours. No mutable runner or live mutation cases are implemented by
-the contract slice. Production routing stays static.
+The [`feature/mutation` contract](../evaluation/m29_feature_mutation_contract.md)
+has operator approval. The execution service has an opt-in
+`CODE_AGENT_ENABLE_POST_TERMINAL_QUALITY_EVALUATION_MODE` switch for the
+isolated evaluation stack. It accepts only explicit mode submissions, requires
+the in-task verifier to be disabled and independent review skipped, validates
+the persisted post-profile TaskSpec before provider dispatch, and bypasses the
+in-task verification/review/repair loop so worker-reported test failures remain
+quality evidence. The default remains off; do not enable it on an ordinary
+service stack.
+
+This is an execution-preparation slice, not a ready-to-run suite. Before any
+live cases, implement and verify the frozen fixture/run manifest, complete
+worker-visible memory isolation, terminal snapshot and external evaluator
+runner, pass/fail/unavailable extractor-stage smokes for both profiles, exact
+baseline-plus-suite reconciliation after the `as_of` cutoff, and guaranteed
+WorkspaceManager cleanup within 72 hours. Production routing stays static.
 
 ### M29 live evidence wave harness
 

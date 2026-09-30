@@ -122,6 +122,7 @@ class TaskExecutionService:
         worker_profiles: Mapping[str, WorkerProfile] | None = None,
         enable_worker_profiles: bool = False,
         enable_independent_verifier: bool = False,
+        enable_post_terminal_quality_evaluation: bool = False,
         orchestrator_brain: OrchestratorBrain | None = None,
         improvement_scorer: ImprovementSuggestionScorer | None = None,
         enable_improvement_llm_scoring: bool = False,
@@ -140,6 +141,7 @@ class TaskExecutionService:
         self.worker_profiles = dict(worker_profiles or {})
         self.enable_worker_profiles = enable_worker_profiles
         self.enable_independent_verifier = enable_independent_verifier
+        self.enable_post_terminal_quality_evaluation = enable_post_terminal_quality_evaluation
         self.orchestrator_brain = orchestrator_brain
         self.improvement_scorer = improvement_scorer
         self.enable_improvement_llm_scoring = enable_improvement_llm_scoring

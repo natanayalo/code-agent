@@ -41,7 +41,11 @@ from orchestrator.execution_resume_service import (
     restore_task_plan_from_events,
     validate_decomposed_plan_projection,
 )
-from orchestrator.execution_types import ProgressEvent, ProgressPhase
+from orchestrator.execution_types import (
+    POST_TERMINAL_QUALITY_EVALUATION_CONSTRAINT,
+    ProgressEvent,
+    ProgressPhase,
+)
 from orchestrator.graph import (
     _aggregate_decomposed_results,
     _build_worker_request,
@@ -84,6 +88,7 @@ from orchestrator.nodes.provisioning import (
 )
 from orchestrator.nodes.utils import _available_workers
 from orchestrator.nodes.verification import build_verify_result_node
+from orchestrator.post_terminal_quality import post_terminal_quality_evaluation_spec_errors
 from orchestrator.provider_diagnostics import ProviderDiagnosticsService
 from orchestrator.state import (
     DecomposedTaskPlan,
@@ -748,6 +753,54 @@ def _environment_initialization_failed(state: OrchestratorState) -> bool:
     return True
 
 
+def _post_terminal_quality_evaluation_preflight_errors(
+    service: Any,
+    state: OrchestratorState,
+    *,
+    require_monolithic: bool = False,
+) -> list[str]:
+    """Validate the persisted task and service boundary before evaluation-mode dispatch."""
+    constraints = state.task.constraints if isinstance(state.task.constraints, dict) else {}
+    if constraints.get(POST_TERMINAL_QUALITY_EVALUATION_CONSTRAINT) is not True:
+        return []
+
+    errors = post_terminal_quality_evaluation_spec_errors(state.task_spec, constraints)
+    if not getattr(service, "enable_post_terminal_quality_evaluation", False):
+        errors.insert(0, "evaluation_mode_disabled_on_worker")
+    if getattr(service, "enable_independent_verifier", False):
+        errors.append("in_task_verifier_must_be_disabled")
+    if require_monolithic and state.decomposed_plan is not None:
+        errors.append("decomposed_execution_not_supported")
+    return errors
+
+
+def _raise_post_terminal_quality_evaluation_preflight_error(
+    task_id: str,
+    errors: list[str],
+) -> None:
+    """Fail the Temporal activity so the workflow records a failed task before dispatch."""
+    logger.error(
+        "Post-terminal quality evaluation preflight blocked provider dispatch",
+        extra={"task_id": task_id, "preflight_errors": errors},
+    )
+    raise ApplicationError(
+        "Post-terminal quality evaluation preflight failed: " + ", ".join(errors),
+        type="post_terminal_quality_evaluation_preflight",
+        non_retryable=True,
+    )
+
+
+def _enforce_post_terminal_quality_evaluation_preflight(
+    service: Any,
+    state: OrchestratorState,
+    task_id: str,
+) -> None:
+    """Reject invalid evaluation-mode tasks at the final provider boundary."""
+    errors = _post_terminal_quality_evaluation_preflight_errors(service, state)
+    if errors:
+        _raise_post_terminal_quality_evaluation_preflight_error(task_id, errors)
+
+
 class TaskExecutionActivities:
     def __init__(self, service: Any) -> None:
         self.service = service
@@ -1095,6 +1148,27 @@ class TaskExecutionActivities:
     @_restore_task_trace_context
     async def decompose_task(self, task_id: str) -> dict[str, Any]:
         state = await self.service._run_blocking(self._get_current_state, task_id)
+        task_constraints = (
+            state.task.constraints if isinstance(state.task.constraints, dict) else {}
+        )
+        if task_constraints.get(POST_TERMINAL_QUALITY_EVALUATION_CONSTRAINT) is True:
+            preflight_errors = _post_terminal_quality_evaluation_preflight_errors(
+                self.service,
+                state,
+                require_monolithic=True,
+            )
+            if preflight_errors:
+                failure = "Post-terminal quality evaluation preflight failed: " + ", ".join(
+                    preflight_errors
+                )
+                logger.error(
+                    "Post-terminal quality evaluation preflight blocked provider dispatch",
+                    extra={"task_id": task_id, "preflight_errors": preflight_errors},
+                )
+                return {"execution_shape": "preflight_failed", "preflight_failure": failure}
+            # Keep this evaluation slice on the ordinary single-worker path. A persisted
+            # decomposed plan is rejected above before any node can launch a provider.
+            return self._decompose_result(state).model_dump(mode="json")
         if state.decomposed_plan is not None:
             logger.info("decompose_task already executed for task %s, skipping", task_id)
             return self._decompose_result(state).model_dump(mode="json")
@@ -1199,9 +1273,9 @@ class TaskExecutionActivities:
     @_restore_task_trace_context
     async def run_worker(self, task_id: str) -> dict[str, bool]:
         state = await self.service._run_blocking(self._get_current_state, task_id)
-        task_constraints = (
-            state.task.constraints if isinstance(state.task.constraints, dict) else {}
-        )
+        constraints = state.task.constraints
+        task_constraints = constraints if isinstance(constraints, dict) else {}
+        _enforce_post_terminal_quality_evaluation_preflight(self.service, state, task_id)
         retrying_permission_escalation = bool(task_constraints.get("permission_escalation_retry"))
         repair_execution = state.completion_loop.phase == "repair_requested"
         requires_permission = bool(
@@ -2307,6 +2381,20 @@ class TaskExecutionActivities:
     @_restore_task_trace_context
     async def verify_result(self, task_id: str) -> dict[str, Any]:
         state = await self.service._run_blocking(self._get_current_state, task_id)
+        task_constraints = (
+            state.task.constraints if isinstance(state.task.constraints, dict) else {}
+        )
+        if task_constraints.get(POST_TERMINAL_QUALITY_EVALUATION_CONSTRAINT) is True and getattr(
+            self.service, "enable_post_terminal_quality_evaluation", False
+        ):
+            logger.info(
+                "Skipping in-task verification and review for post-terminal quality evaluation",
+                extra={"task_id": task_id},
+            )
+            return CompletionLoopDecision(
+                continuation="complete",
+                summary="In-task quality gates skipped for post-terminal evaluation.",
+            ).model_dump(mode="json")
         has_prior_event = self._has_event(
             state,
             TimelineEventType.VERIFICATION_COMPLETED,

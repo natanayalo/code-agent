@@ -60,6 +60,7 @@ class CreateTaskRequest(BaseModel):
     worker_profile_override: str | None = Field(default=None, min_length=1, max_length=255)
     constraints: dict[str, Any] = Field(default_factory=dict)
     budget: dict[str, Any] = Field(default_factory=dict)
+    post_terminal_quality_evaluation: bool = False
     secrets: dict[str, str] = Field(default_factory=dict, deprecated=True)
     secret_refs: tuple[SecretRef, ...] = Field(default_factory=tuple)
     tools: list[str] | None = None

@@ -625,12 +625,17 @@ def build_task_service_from_env(
         shell_worker=shell_worker,
     )
 
+    post_terminal_quality_evaluation_enabled = _is_enabled(
+        resolved_env.get("CODE_AGENT_ENABLE_POST_TERMINAL_QUALITY_EVALUATION_MODE")
+    )
+
     return TaskExecutionService(
         session_factory=session_factory,
         worker=facade,
         worker_profiles=worker_profiles,
         enable_worker_profiles=enable_worker_profiles,
-        enable_independent_verifier=True,
+        enable_independent_verifier=not post_terminal_quality_evaluation_enabled,
+        enable_post_terminal_quality_evaluation=post_terminal_quality_evaluation_enabled,
         orchestrator_brain=brain_provider,
         improvement_scorer=brain_provider,
         enable_improvement_llm_scoring=True,

@@ -76,6 +76,8 @@ class TaskExecutionWorkflow:
             task_id,
             **activity_options("decompose_task"),
         )
+        if (decomposition or {}).get("execution_shape") == "preflight_failed":
+            return await self._record_post_terminal_preflight_failure(task_id, decomposition)
 
         # Step 5: Load memory
         await workflow.execute_activity(
@@ -125,6 +127,22 @@ class TaskExecutionWorkflow:
             )
 
         return await self._persist_and_deliver(task_id, completion_decision)
+
+    async def _record_post_terminal_preflight_failure(
+        self,
+        task_id: str,
+        decomposition: dict[str, Any],
+    ) -> dict[str, str]:
+        """Persist the typed preflight reason without loading memory or starting execution."""
+        failure = decomposition.get("preflight_failure") or (
+            "Post-terminal quality evaluation preflight failed."
+        )
+        await workflow.execute_activity(
+            "record_workflow_failure",
+            args=[task_id, failure],
+            **activity_options("record_workflow_failure"),
+        )
+        return {"status": "failed", "summary": failure}
 
     async def _await_initial_approval(self, task_id: str) -> bool:
         """Wait for approval and retain typed state when the operator rejects it."""

@@ -1,9 +1,9 @@
 # M29 `feature/mutation` Evaluation Contract
 
-**Status:** contract drafted and implementation-reviewed; operator review is
-required before runner implementation or live collection. This document defines
-the evaluation only. It does not add a runner, start live cases, or change
-production routing.
+**Status:** operator-approved. The post-terminal execution-preparation mode is
+implemented and smoke-verified; the runner and live collection remain gated on
+the remaining preflight requirements below. This document defines the
+evaluation only. It does not start live cases or change production routing.
 
 ## Purpose and evidence boundary
 

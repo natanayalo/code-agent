@@ -205,6 +205,25 @@ def test_submit_task_returns_created_snapshot() -> None:
     assert str(uuid.UUID(anonymous_thread_id)) == anonymous_thread_id
 
 
+def test_submit_task_maps_post_terminal_quality_evaluation_mode() -> None:
+    """The dedicated API field reaches the internal submission without using constraints."""
+    service = _FakeTaskService()
+
+    with _task_client(service) as client:
+        response = client.post(
+            "/tasks",
+            json={
+                "task_text": "Implement the taskboard feature",
+                "post_terminal_quality_evaluation": True,
+                "constraints": {"skip_independent_review": True},
+            },
+        )
+
+    assert response.status_code == 202
+    assert service.create_calls[0].post_terminal_quality_evaluation is True
+    assert service.create_calls[0].constraints["skip_independent_review"] is True
+
+
 def test_submit_task_returns_422_for_validation_errors() -> None:
     """Semantic task-submission validation failures should map to HTTP 422."""
     service = _FakeTaskService()
