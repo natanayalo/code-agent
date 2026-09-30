@@ -5,6 +5,7 @@ import json
 import subprocess
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import select
@@ -561,7 +562,57 @@ async def test_post_terminal_quality_mode_rejects_invalid_persisted_spec_before_
         task = session.get(Task, task_id)
         assert task is not None
         assert task.status.value == "failed"
+        assert task.task_spec["delivery_mode"] == "branch"
         assert "delivery_mode_must_be_workspace" in (task.last_error or "")
+
+
+@pytest.mark.anyio
+async def test_post_terminal_quality_mode_rechecks_spec_before_delivery(
+    session_factory,
+):
+    """A post-worker TaskSpec mutation must fail closed before delivery runs."""
+    worker = _PostTerminalEvaluationWorker()
+    service = TaskExecutionService(
+        session_factory=session_factory,
+        worker=worker,
+        enable_post_terminal_quality_evaluation=True,
+    )
+    delivery_node = AsyncMock(side_effect=AssertionError("delivery must not run"))
+    persisted_delivery_modes: list[str] = []
+
+    def configure(activities: TaskExecutionActivities) -> None:
+        async def mutate_delivery_spec_after_worker(state_input):
+            assert worker.execution_requests
+            task_spec = dict(state_input["task_spec"])
+            task_spec["delivery_mode"] = "branch"
+            persisted_delivery_modes.append(task_spec["delivery_mode"])
+            return {"task_spec": task_spec}
+
+        activities.persist_memory_node = mutate_delivery_spec_after_worker
+        activities.deliver_result_node = delivery_node
+
+    task_id, workflow_result = await _run_completion_loop_workflow(
+        session_factory=session_factory,
+        service=service,
+        submission=TaskSubmission(
+            task_text="Implement a labels.py feature",
+            constraints={
+                "delivery_mode": "workspace",
+                "skip_independent_review": True,
+                "verification_commands": [],
+            },
+            post_terminal_quality_evaluation=True,
+        ),
+        configure_activities=configure,
+    )
+
+    assert workflow_result["status"] == "failed"
+    assert persisted_delivery_modes == ["branch"]
+    delivery_node.assert_not_awaited()
+    with session_scope(session_factory) as session:
+        task = session.get(Task, task_id)
+        assert task is not None
+        assert task.status.value == "failed"
 
 
 @pytest.mark.anyio

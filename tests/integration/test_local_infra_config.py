@@ -198,6 +198,18 @@ def test_api_and_worker_expose_context_envelope_rollout_flag(
     assert worker_env["CODE_AGENT_CONTEXT_ENVELOPE_ENABLED"] == expected
 
 
+def test_api_and_worker_expose_post_terminal_quality_evaluation_flag(
+    compose_config: dict[str, Any],
+) -> None:
+    """The local stack must pass the evaluation-mode switch to API and worker."""
+    api_env = compose_config["services"]["api"]["environment"]
+    worker_env = compose_config["services"]["worker"]["environment"]
+    expected = "${CODE_AGENT_ENABLE_POST_TERMINAL_QUALITY_EVALUATION_MODE:-0}"
+
+    assert api_env["CODE_AGENT_ENABLE_POST_TERMINAL_QUALITY_EVALUATION_MODE"] == expected
+    assert worker_env["CODE_AGENT_ENABLE_POST_TERMINAL_QUALITY_EVALUATION_MODE"] == expected
+
+
 def test_api_and_worker_share_antigravity_profile_configuration(
     compose_config: dict[str, Any],
 ) -> None:

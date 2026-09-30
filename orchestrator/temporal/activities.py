@@ -778,13 +778,13 @@ def _raise_post_terminal_quality_evaluation_preflight_error(
     task_id: str,
     errors: list[str],
 ) -> None:
-    """Fail the Temporal activity so the workflow records a failed task before dispatch."""
+    """Fail the Temporal activity so the workflow records a failed task at the boundary."""
     logger.error(
-        "Post-terminal quality evaluation preflight blocked provider dispatch",
+        "Post-terminal quality evaluation preflight blocked an execution boundary",
         extra={"task_id": task_id, "preflight_errors": errors},
     )
     raise ApplicationError(
-        "Post-terminal quality evaluation preflight failed: " + ", ".join(errors),
+        "Post-terminal quality evaluation execution boundary failed: " + ", ".join(errors),
         type="post_terminal_quality_evaluation_preflight",
         non_retryable=True,
     )
@@ -795,7 +795,7 @@ def _enforce_post_terminal_quality_evaluation_preflight(
     state: OrchestratorState,
     task_id: str,
 ) -> None:
-    """Reject invalid evaluation-mode tasks at the final provider boundary."""
+    """Reject invalid evaluation-mode tasks at the final execution boundary."""
     errors = _post_terminal_quality_evaluation_preflight_errors(service, state)
     if errors:
         _raise_post_terminal_quality_evaluation_preflight_error(task_id, errors)
@@ -2477,6 +2477,7 @@ class TaskExecutionActivities:
 
         started_at = utc_now()
         state_dict = state.model_dump()
+        _enforce_post_terminal_quality_evaluation_preflight(self.service, state, task_id)
         updates = await self._run_node(self.deliver_result_node, state_dict)
         self._merge_updates(state_dict, updates)
 
