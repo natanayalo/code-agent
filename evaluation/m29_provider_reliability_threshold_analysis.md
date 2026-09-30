@@ -151,9 +151,9 @@ Persisted execution identity is complete and matches the frozen identity for all
 identity and are excluded fail-closed; no identity is inferred from the profile
 or prompt. The sanitized manifest reconciles all eligible Wave 4 tasks against
 the canonical PostgreSQL extractor. Its SHA-256 is
-`5791b0506675416e1e1cbd760f0dbef46b8544e6b71b1c63ad7b5a72835d0438`; the
+`5a8fb26a26c30e837f76b674966f2e3f27ac204a5e6b3e531fb77c1e05612bfb`; the
 paired-analysis JSON SHA-256 is
-`115a155901741ea1fb2523b1bde7550d1d95838203375ad022294f79d6e75c83`.
+`8bb6e5fa8686c4427a298709d323988bfdc0047f6ffae2b8e21bc4b58c30fe7d`.
 
 At the frozen `as_of`, the cumulative 90-day current-execution cohort qualifies
 both providers at the 10-sample floor for `investigation/read_only`:
@@ -163,18 +163,27 @@ both providers at the 10-sample floor for `investigation/read_only`:
 | `antigravity-native-executor-read-only` | 16 | 15 | 0.7167 | 504.25s | 487.41s |
 | `codex-native-executor-read-only` | 17 | 9 | 0.3096 | 1012.65s | 902.79s |
 
-The advisory recommends `antigravity-native-executor-read-only`, ranked first on
-the canonical successful-task latency tie-break after acceptance eligibility.
-This is a cumulative cohort result, not a Wave 4-only sample: the Wave 4 bundle
-contributes 10 completed Antigravity cases and 6 completed Codex cases among 7
-identity-verified Codex cases. Failure and terminal latency remain reported
-operationally and are not used to reward fast failures.
+The advisory recommends `antigravity-native-executor-read-only` on the primary
+reliability criterion: its Wilson lower bound (`0.7167`) exceeds Codex
+(`0.3096`). Successful-task latency (504.25s versus 1012.65s) is supporting
+evidence, not a tie-break. This is a cumulative cohort result, not a Wave 4-only
+sample. The 20-case final Wave 4 bundle contributes 10 eligible Antigravity and
+7 eligible Codex cases; the cumulative Codex cell also includes one earlier,
+identity-verified `infra_verifier_unavailable` attempt for
+`m29-w4-inv-02-repair-loop-codex`. The sanitized manifest records that attempt
+as supplemental cumulative evidence and excludes it from the paired analysis.
+Thus the exact cell accounting is Wave 3 baseline + final Wave 4 cases + the
+documented prior attempt: Antigravity `6 + 10 = 16`; Codex `9 + 7 + 1 = 17`.
+Failure and terminal latency remain reported operationally and are not used to
+reward fast failures.
 
-The Wave 4 paired supplement has 10 topic pairs but only 7 identity-complete
-pairs: 6 pairs both completed and 4 had only Antigravity complete (0 Codex-only,
-0 neither). Across 10,000 paired bootstrap iterations with seed 29, Antigravity
-has a 66% higher-acceptance probability, 34% tied probability, and is faster in
-successful latency in all bootstrap resamples; the median paired successful
+The Wave 4 paired supplement reports outcomes across all 10 final-bundle topic
+pairs: 6 pairs both completed and 4 had only Antigravity complete. Of the 7
+identity-complete pairs used by the paired bootstrap, 6 had both providers
+complete and 1 was Antigravity-only (0 Codex-only, 0 neither). The supplemental
+earlier Codex attempt is not part of these case-pair counts. Across 10,000
+paired bootstrap iterations with seed 29, Antigravity has a 66% higher-
+acceptance probability and 34% tied probability; the median paired successful
 latency delta (Antigravity minus Codex) is -480.76s across 6 successful pairs.
 These clustered paired estimates are descriptive and do not replace the
 canonical independent-cell report.

@@ -28,7 +28,7 @@
   ],
   "as_of": "2026-09-27T22:02:06.727893Z",
   "build_sha": "5f0cfdc0ed650dcfdfaff88aa1a23dc2abb8959f",
-  "manifest_sha256": "d83b858c9e1b61ce98ab5bc3b6a16a53899e60acd5a75ffc6310e6ed15a8239d",
+  "manifest_sha256": "5a8fb26a26c30e837f76b674966f2e3f27ac204a5e6b3e531fb77c1e05612bfb",
   "schema_version": 1,
   "suite_name": "m29-live-provider-evidence-wave4",
   "suite_sha256": "516ae550a441d5f9eb75d7022c6698f8248d9f0f1ec99ef2d80ef02fce63e3c3"

@@ -6,8 +6,7 @@ import hashlib
 import json
 import random
 import statistics
-from collections.abc import Collection, Sequence
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Literal
 
 from pydantic import Field, model_validator
@@ -20,22 +19,50 @@ from evaluation.m29_wave3_paired import (
     _scan_public_values,
     _StrictModel,
 )
-from evaluation.provider_reliability_models import (
-    DEFAULT_EXPECTED_EXECUTION_IDENTITIES,
-    ProviderReliabilityEvidenceCell,
-    ProviderReliabilityReport,
-    ReliabilityReportPolicy,
-)
 
 
 class Wave4ManifestCase(Wave3ManifestCase):
     """Public, task-id-free outcome for one Wave 4 case."""
 
+    report_failure_kind: str | None = Field(default=None, pattern=r"^[a-z0-9_]+$")
+
+
+class Wave4SupplementalObservation(_StrictModel):
+    """Earlier eligible attempt included in the cumulative report, outside paired analysis."""
+
+    case_id: str = Field(pattern=r"^[a-z0-9-]+$")
+    task_class: Literal["investigation"]
+    pair_group: str = Field(pattern=r"^[a-z0-9-]+$")
+    provider: Literal["codex", "antigravity"]
+    worker_profile: str = Field(pattern=r"^[a-z0-9-]+$")
+    terminal_status: Literal["completed", "failed"]
+    accepted: bool
+    failure_kind: str | None = Field(default=None, pattern=r"^[a-z0-9_]+$")
+    report_failure_kind: str | None = Field(default=None, pattern=r"^[a-z0-9_]+$")
+    time_to_terminal_seconds: float | None = Field(default=None, ge=0.0)
+    execution_identity_status: Literal["verified", "unknown_legacy", "mixed_execution_identity"]
+    identity_matches: bool
+    source: Literal["earlier_wave4_attempt"] = "earlier_wave4_attempt"
+    included_in_cumulative_report: Literal[True] = True
+    included_in_paired_analysis: Literal[False] = False
+
+    @model_validator(mode="after")
+    def validate_included_identity(self) -> Wave4SupplementalObservation:
+        if not self.identity_matches or self.execution_identity_status != "verified":
+            raise ValueError("supplemental cumulative observations require a verified identity")
+        if self.accepted != (self.terminal_status == "completed"):
+            raise ValueError("supplemental observation acceptance must match terminal status")
+        if not self.accepted and self.report_failure_kind is None:
+            raise ValueError("supplemental failed observations require a report failure kind")
+        if self.accepted and self.report_failure_kind is not None:
+            raise ValueError("supplemental completed observations cannot have a failure kind")
+        return self
+
 
 class Wave4Manifest(_StrictModel):
     """Sanitized case-level manifest bound to cumulative reports."""
 
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     suite_name: Literal["m29-live-provider-evidence-wave4"]
     suite_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     build_sha: str = Field(pattern=r"^[0-9a-f]{7,64}$")
@@ -46,6 +73,7 @@ class Wave4Manifest(_StrictModel):
     operational_report_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     robustness_report_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     cases: list[Wave4ManifestCase]
+    supplemental_observations: list[Wave4SupplementalObservation] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_cases(self) -> Wave4Manifest:
@@ -75,6 +103,19 @@ class Wave4Manifest(_StrictModel):
             if last_first_provider == ordered[0].provider:
                 raise ValueError(f"pair group {pair_group} does not alternate provider order")
             last_first_provider = ordered[0].provider
+        cases_by_id = {case.case_id: case for case in self.cases}
+        for observation in self.supplemental_observations:
+            case = cases_by_id.get(observation.case_id)
+            if case is None:
+                raise ValueError("supplemental observation must reference a frozen Wave 4 case")
+            if (
+                observation.provider != case.provider
+                or observation.worker_profile != case.worker_profile
+                or observation.pair_group != case.pair_group
+            ):
+                raise ValueError(
+                    "supplemental observation provider/profile/pair must match its Wave 4 case"
+                )
         return self
 
 
@@ -231,116 +272,25 @@ def build_wave4_paired_report(
     )
 
 
-def _validate_manifest_report_policy(
-    manifest: Wave4Manifest, report: ProviderReliabilityReport
-) -> None:
-    """Require the canonical cumulative report policy to match Wave 4."""
-    expected_policy = ReliabilityReportPolicy(
-        as_of=manifest.as_of,
-        window_start_at=manifest.as_of - timedelta(days=90),
-        window_end_at=manifest.as_of,
-        min_samples=10,
-        evidence_scope="current_execution_cohort",
-    )
-    if report.policy != expected_policy:
-        raise ValueError("canonical report policy does not match Wave 4 manifest")
-    if report.policy.expected_execution_identities != DEFAULT_EXPECTED_EXECUTION_IDENTITIES:
-        raise ValueError("canonical report execution identities do not match Wave 4 policy")
-
-
-def _validate_baseline_report(
-    manifest: Wave4Manifest,
-    baseline_report: ProviderReliabilityReport,
-) -> None:
-    """Require a reproducible pre-Wave-4 cumulative report baseline."""
-    baseline_policy = baseline_report.policy
-    if baseline_policy.evidence_scope != "current_execution_cohort":
-        raise ValueError("Wave 4 baseline report must use the current execution cohort")
-    if baseline_policy.expected_execution_identities != DEFAULT_EXPECTED_EXECUTION_IDENTITIES:
-        raise ValueError("Wave 4 baseline report execution identities do not match Wave 4 policy")
-    if baseline_policy.as_of > manifest.as_of:
-        raise ValueError("Wave 4 baseline report must predate the Wave 4 report")
-
-
-def assert_wave4_manifest_matches_report(
-    manifest: Wave4Manifest,
-    report: ProviderReliabilityReport,
-    *,
-    baseline_report: ProviderReliabilityReport | None = None,
-    extractor_cells: Sequence[ProviderReliabilityEvidenceCell] | None = None,
-    wave4_task_ids: Collection[str] | None = None,
-    extractor_task_ids: Collection[str] | None = None,
-) -> None:
-    """Reconcile Wave 4 contributions with the canonical extractor snapshot."""
-    _validate_manifest_report_policy(manifest, report)
-    if baseline_report is not None:
-        _validate_baseline_report(manifest, baseline_report)
-    if baseline_report is not None and extractor_cells is None:
-        raise ValueError("Wave 4 publication requires extractor-level report reconciliation")
-    cells = {
-        (cell.task_class, cell.profile, cell.mutation_mode): cell for cell in report.evidence_cells
-    }
-    extractor_cell_map = (
-        {(cell.task_class, cell.profile, cell.mutation_mode): cell for cell in extractor_cells}
-        if extractor_cells is not None
-        else {}
-    )
-    if wave4_task_ids is not None and extractor_task_ids is not None:
-        missing_wave4_ids = set(wave4_task_ids) - set(extractor_task_ids)
-        if missing_wave4_ids:
-            raise ValueError(
-                "canonical extractor omitted eligible Wave 4 task observations: "
-                f"{len(missing_wave4_ids)} task(s)"
-            )
-    recommendations = {
-        (recommendation.task_class, recommendation.mutation_mode): recommendation
-        for recommendation in getattr(report, "recommendations", [])
-    }
-    for provider in ("codex", "antigravity"):
-        profile = f"{provider}-native-executor-read-only"
-        group = [case for case in manifest.cases if case.provider == provider]
-        cell = cells.get(("investigation", profile, "read_only"))
-        if cell is None:
-            raise ValueError(f"canonical report is missing investigation/{profile}")
-        if cell.sample_size < report.policy.min_samples:
-            raise ValueError(
-                f"Wave 4 remains unqualified: investigation/{profile} has "
-                f"{cell.sample_size} samples, below the policy minimum "
-                f"of {report.policy.min_samples}"
-            )
-        recommendation = recommendations.get(("investigation", "read_only"))
-        if recommendation is None:
-            raise ValueError(
-                "Wave 4 remains unqualified: cumulative investigation/read_only report "
-                "has no advisory recommendation"
-            )
-        if recommendation.recommended_profile is None and not recommendation.fallback_reason:
-            raise ValueError(
-                "Wave 4 remains unqualified: investigation/read_only recommendation "
-                "has neither a provider nor an explicit fallback reason"
-            )
-        included = [case for case in group if case.exclusion_reason is None]
-        if any(not case.identity_matches for case in included):
-            raise ValueError("Wave 4 includes a case without a verified matching identity")
-        if extractor_cells is None:
-            if cell.sample_size < len(included):
-                raise ValueError(
-                    f"canonical report cell is smaller than Wave 4 contribution for {profile}"
-                )
-            continue
-        extractor_cell = extractor_cell_map.get(("investigation", profile, "read_only"))
-        if extractor_cell is None:
-            raise ValueError(f"canonical extractor is missing investigation/{profile}")
-        if cell != extractor_cell:
-            raise ValueError(f"canonical report differs from extractor snapshot for {profile}")
-
-
-def render_wave4_markdown(report: Wave4PairedAnalysisReport) -> str:
+def render_wave4_markdown(report: Wave4PairedAnalysisReport, manifest: Wave4Manifest) -> str:
     """Render a concise sanitized Markdown supplement."""
     analysis = report.analyses[0]
     latency = analysis.successful_latency_differences
     bootstrap = analysis.bootstrap
     faster_latency = bootstrap.antigravity_faster_success_latency_probability
+    eligible_pairs = [pair for pair in _paired_groups(manifest) if _pair_is_eligible(pair)]
+    eligible_both = sum(c.accepted and a.accepted for c, a in eligible_pairs)
+    eligible_codex_only = sum(c.accepted and not a.accepted for c, a in eligible_pairs)
+    eligible_antigravity_only = sum(a.accepted and not c.accepted for c, a in eligible_pairs)
+    eligible_neither = sum(not c.accepted and not a.accepted for c, a in eligible_pairs)
+    supplemental_count = len(manifest.supplemental_observations)
+    supplemental_sentence = (
+        f"The manifest also records {supplemental_count} earlier identity-verified "
+        f"attempt{'s' if supplemental_count != 1 else ''} included in the cumulative report "
+        "but not in this paired analysis."
+        if supplemental_count
+        else ""
+    )
     return "\n".join(
         [
             "# M29 Wave 4 Paired Investigation Analysis",
@@ -361,6 +311,13 @@ def render_wave4_markdown(report: Wave4PairedAnalysisReport) -> str:
             f"{analysis.neither_completed_count} | {analysis.identity_complete_pair_count} | "
             f"{latency.sample_size} | "
             f"{latency.median_seconds if latency.median_seconds is not None else 'N/A'} |",
+            "",
+            f"Across the {analysis.pair_count} frozen pairs, the table reports all case outcomes. "
+            f"Among the {analysis.identity_complete_pair_count} identity-complete pairs, "
+            f"{eligible_both} had both providers complete, {eligible_antigravity_only} "
+            f"{'was' if eligible_antigravity_only == 1 else 'were'} "
+            f"Antigravity-only, {eligible_codex_only} Codex-only, and {eligible_neither} neither.",
+            supplemental_sentence,
             "",
             "## Paired Bootstrap",
             "",
@@ -392,13 +349,21 @@ def assert_sanitized_wave4_manifest(payload: dict | str) -> None:
         "operational_report_sha256",
         "robustness_report_sha256",
         "cases",
+        "supplemental_observations",
     }
     case_allowed = set(Wave4ManifestCase.model_fields)
+    supplemental_allowed = set(Wave4SupplementalObservation.model_fields)
     if set(data) != allowed:
         raise ValueError(f"unexpected Wave 4 manifest keys: {sorted(set(data) - allowed)}")
     for case in data["cases"]:
         if set(case) != case_allowed:
             raise ValueError(f"unexpected Wave 4 case keys: {sorted(set(case) - case_allowed)}")
+    for observation in data["supplemental_observations"]:
+        if set(observation) != supplemental_allowed:
+            raise ValueError(
+                "unexpected Wave 4 supplemental observation keys: "
+                f"{sorted(set(observation) - supplemental_allowed)}"
+            )
     _scan_public_values(data)
 
 
@@ -418,11 +383,11 @@ def wave4_manifest_sha256(manifest: Wave4Manifest) -> str:
 __all__ = [
     "Wave4Manifest",
     "Wave4ManifestCase",
+    "Wave4SupplementalObservation",
     "Wave4PairedAnalysisReport",
     "analyze_wave4_manifest",
     "assert_sanitized_wave4_manifest",
     "assert_sanitized_wave4_paired_report",
-    "assert_wave4_manifest_matches_report",
     "build_wave4_paired_report",
     "render_wave4_markdown",
     "wave4_manifest_sha256",

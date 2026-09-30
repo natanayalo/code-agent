@@ -927,9 +927,12 @@ DATABASE_URL="$LIVE_DATABASE_URL" .venv/bin/python scripts/e2e/run_provider_reli
 
 DATABASE_URL="$LIVE_DATABASE_URL" .venv/bin/python scripts/e2e/build_m29_wave4_manifest.py \
   --bundle-dir artifacts/m29_evidence_bundle_wave4_from_first_quota \
+  --prior-bundle-dir artifacts/m29_evidence_bundle_wave4 \
   --suite evaluation/m29_live_provider_suite_wave4.json \
   --database-url-env DATABASE_URL \
   --baseline-report artifacts/m29_provider_reliability_wave3_baseline_report.json \
+  --baseline-manifest evaluation/m29_provider_reliability_wave3_manifest.json \
+  --baseline-bundle-dir artifacts/m29_evidence_bundle_wave3 \
   --advisory-report evaluation/m29_provider_reliability_report.json \
   --operational-report evaluation/m29_provider_reliability_operational_report.json \
   --robustness-report evaluation/m29_provider_reliability_robustness_report.json \
@@ -948,8 +951,16 @@ zero changed files, interactions, and gate failures. Exact persisted identity
 matches 10/10 Antigravity cases and 7/10 Codex cases; the other 3 Codex cases
 remain excluded as `unknown_execution_identity`. The refreshed cumulative
 canonical investigation cell is Antigravity N=16/15 accepted versus Codex
-N=17/9 accepted and recommends Antigravity on successful-task latency. The
-paired supplement has 7 identity-complete pairs. Robustness remains `partial`
+N=17/9 accepted. The Wave 3 baseline plus eligible final-bundle observations
+accounts for 6+10=16 Antigravity and 9+7=16 Codex observations; one earlier,
+identity-verified Codex `infra_verifier_unavailable` attempt is explicitly
+recorded as supplemental cumulative evidence, yielding Codex N=17. Exact
+reconciliation rejects any unexplained task in either current provider cell.
+Antigravity is recommended on its higher Wilson lower bound (0.7167 versus
+0.3096); successful-task latency is supporting evidence, not a tie-break.
+Across all 10 final-bundle pairs, 6 had both complete and 4 Antigravity-only;
+among the 7 identity-complete pairs, 6 had both complete and 1 Antigravity-only.
+Robustness remains `partial`
 because the historical 45-day cohort has no included tasks; no routing or
 `evaluation/routing_metrics.json` changes follow from this advisory.
 
@@ -958,7 +969,7 @@ because the historical 45-day cohort has no included tasks; no routing or
 - **Wave 2 Live Evidence**: `evaluation/m29_live_provider_suite_wave2.json` (20 docs tasks across 10 balanced pairs), tracked at `artifacts/m29_evidence_bundle_wave2/bundle.json`. Powered to meet the canonical sample floor ($N=10$ vs $10$).
 - **Wave 3 Live Evidence**: `evaluation/m29_live_provider_suite_wave3.json` (40 read-only tasks across 20 balanced investigation/feature pairs), tracked privately at `artifacts/m29_evidence_bundle_wave3/bundle.json`. The ignored bundle pins the harness build and target repository revision, and preserves terminal outcomes without reruns.
 - **Wave 3 observed result**: all 40 cases reached immutable terminal outcomes (18 completed, 22 failed), with zero changed files and no interaction or runtime gate failures. The canonical report qualifies `feature/read_only` at 10 samples per provider using successful-task latency for ties; `investigation/read_only` remains below the sample floor after fail-closed authoritative identity filtering. The committed sanitized manifest and paired supplement bind case outcomes to the frozen suite, build, and report hashes without publishing task IDs or raw outputs.
-- **Wave 4 investigation evidence**: `evaluation/m29_live_provider_suite_wave4.json` is the frozen 20-case follow-up. The completed private retry bundle records 16 completed and 4 failed terminal outcomes; 10/10 Antigravity identities and 7/10 Codex identities are verified, with 3 fail-closed Codex exclusions. The sanitized manifest reconciles eligible cases against PostgreSQL; the paired supplement has 7 identity-complete pairs. The cumulative investigation/read-only report recommends Antigravity at N=16 (15 accepted) versus Codex N=17 (9 accepted). Robustness remains partial because the historical 45-day cohort contains no included tasks.
+- **Wave 4 investigation evidence**: `evaluation/m29_live_provider_suite_wave4.json` is the frozen 20-case follow-up. The completed private retry bundle records 16 completed and 4 failed terminal outcomes; 10/10 Antigravity identities and 7/10 Codex identities are verified, with 3 fail-closed Codex exclusions. The sanitized manifest binds the exact cumulative cohort to the Wave 3 baseline, eligible final Wave 4 cases, and one earlier verified Codex failure (included cumulatively, excluded from paired analysis); any other current-cell task fails reconciliation. The cumulative investigation/read-only report recommends Antigravity at N=16 (15 accepted) versus Codex N=17 (9 accepted) because its Wilson lower bound is higher (0.7167 vs 0.3096); latency is supporting evidence. Across all 10 final-bundle pairs, 6 had both complete and 4 Antigravity-only; among the 7 identity-complete pairs, 6 had both complete and 1 Antigravity-only. Robustness remains partial because the historical 45-day cohort contains no included tasks.
 
 #### Invariants & failure semantics
 - **Strict Read-Only Delivery**: All evidence cases enforce `delivery_mode=summary`, low risk, read-only mode, and zero changed files.

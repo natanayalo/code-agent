@@ -24,6 +24,7 @@ from evaluation.m29_evidence_models import (
     M29EvidenceBundle,
     M29EvidenceSuite,
 )
+from evaluation.m29_wave3_paired import Wave3Manifest, Wave3ManifestCase
 from evaluation.m29_wave4_paired import Wave4ManifestCase
 from repositories import create_engine_from_url
 from scripts.e2e import build_m29_wave4_manifest as builder
@@ -58,6 +59,72 @@ def _write_bundle(path: Path, suite_path: Path, suite: M29EvidenceSuite) -> None
         cases=outcomes,
     )
     (path / "bundle.json").write_text(json.dumps(bundle.model_dump(mode="json")), encoding="utf-8")
+
+
+def _write_baseline(bundle_dir: Path, manifest_path: Path, report_path: Path) -> tuple[Path, Path]:
+    report_path.write_text("{}\n", encoding="utf-8")
+    cases: list[Wave3ManifestCase] = []
+    for task_class in ("investigation", "feature"):
+        for index in range(10):
+            pair_group = f"m29-w3-{task_class}-{index:02d}"
+            first_provider = "codex" if index % 2 == 0 else "antigravity"
+            ordered = (first_provider, "antigravity" if first_provider == "codex" else "codex")
+            for pair_order, provider in enumerate(ordered, start=1):
+                profile = f"{provider}-native-executor-read-only"
+                cases.append(
+                    Wave3ManifestCase(
+                        case_id=f"{pair_group}-{provider}",
+                        pair_group=pair_group,
+                        pair_order=pair_order,
+                        task_class=task_class,
+                        worker_profile=profile,
+                        provider=provider,
+                        terminal_status="completed",
+                        accepted=True,
+                        time_to_terminal_seconds=60.0,
+                        execution_identity_status="verified",
+                        identity_matches=True,
+                    )
+                )
+    manifest = Wave3Manifest(
+        suite_name="m29-live-provider-evidence-wave3",
+        suite_sha256="a" * 64,
+        build_sha="b" * 40,
+        target_repository_revision="c" * 40,
+        as_of=builder._parse_as_of("2026-09-19T00:00:00+00:00"),
+        advisory_report_sha256=builder._sha256(report_path),
+        operational_report_sha256="d" * 64,
+        robustness_report_sha256="e" * 64,
+        cases=cases,
+    )
+    manifest_path.write_text(json.dumps(manifest.model_dump(mode="json")), encoding="utf-8")
+    outcomes = {
+        case.case_id: M29CaseOutcome(
+            case_id=case.case_id,
+            task_id=f"baseline-{case.case_id}",
+            task_class=case.task_class,
+            worker_profile=case.worker_profile,
+            terminal_status="completed",
+            created_at="2026-09-19T00:00:00+00:00",
+            terminal_at="2026-09-19T00:01:00+00:00",
+        )
+        for case in cases
+    }
+    bundle = M29EvidenceBundle(
+        identity=M29BundleIdentity(
+            build_sha="b" * 40,
+            target_repository_revision="c" * 40,
+            environment="test",
+            operator="pytest",
+        ),
+        suite_sha256=manifest.suite_sha256,
+        cases=outcomes,
+    )
+    bundle_dir.mkdir()
+    (bundle_dir / "bundle.json").write_text(
+        json.dumps(bundle.model_dump(mode="json")), encoding="utf-8"
+    )
+    return manifest_path, bundle_dir
 
 
 def _worker_run(provider: str, profile: str, started_at, finished_at) -> WorkerRun:
@@ -142,6 +209,11 @@ def test_build_manifest_promotes_wave3_cases_to_wave4_models(tmp_path: Path, mon
     }
     for path in reports.values():
         path.write_text("{}", encoding="utf-8")
+    baseline_manifest_path, baseline_bundle_dir = _write_baseline(
+        tmp_path / "baseline_bundle",
+        tmp_path / "baseline_manifest.json",
+        reports["baseline"],
+    )
 
     class FakeReport:
         @staticmethod
@@ -163,6 +235,9 @@ def test_build_manifest_promotes_wave3_cases_to_wave4_models(tmp_path: Path, mon
         as_of="2026-09-20T00:01:00+00:00",
         database_url_env="TEST_DATABASE_URL",
         baseline_report=reports["baseline"],
+        baseline_manifest=baseline_manifest_path,
+        baseline_bundle_dir=baseline_bundle_dir,
+        prior_bundle_dirs=[],
         advisory_report=reports["advisory"],
         operational_report=reports["operational"],
         robustness_report=reports["robustness"],
@@ -173,5 +248,8 @@ def test_build_manifest_promotes_wave3_cases_to_wave4_models(tmp_path: Path, mon
     assert len(manifest.cases) == 20
     assert all(isinstance(case, Wave4ManifestCase) for case in manifest.cases)
     assert len(captured["extractor_cells"]) > 0
-    assert len(captured["wave4_task_ids"]) == 20
-    assert captured["wave4_task_ids"] == captured["extractor_task_ids"]
+    assert sum(map(len, captured["wave4_task_ids_by_provider"].values())) == 20
+    assert (
+        set().union(*captured["wave4_task_ids_by_provider"].values())
+        == captured["extractor_task_ids"]
+    )
