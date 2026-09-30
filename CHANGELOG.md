@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: add post-terminal M29 evaluation mode ([#412](https://github.com/natanayalo/code-agent/pull/412))
+
 - Feat: add M29 Wave 4 investigation evidence suite ([#409](https://github.com/natanayalo/code-agent/pull/409))
 
 - Feat: qualify M29 read-only Wave 3 evidence ([#408](https://github.com/natanayalo/code-agent/pull/408))
