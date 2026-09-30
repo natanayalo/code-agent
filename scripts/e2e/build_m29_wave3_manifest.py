@@ -29,6 +29,7 @@ from evaluation.provider_reliability_identity import (
     resolve_task_execution_identity,
 )
 from evaluation.provider_reliability_models import (
+    M29_WAVE3_WAVE4_FROZEN_EXPECTED_EXECUTION_IDENTITIES,
     VALID_FAILURE_KINDS,
     ProviderReliabilityReport,
     ReliabilityReportPolicy,
@@ -198,6 +199,7 @@ def build_manifest(args: argparse.Namespace) -> Wave3Manifest:
         window_end_at=as_of,
         min_samples=10,
         evidence_scope="current_execution_cohort",
+        expected_execution_identities=dict(M29_WAVE3_WAVE4_FROZEN_EXPECTED_EXECUTION_IDENTITIES),
     )
     database_url = os.getenv(args.database_url_env)
     if not database_url:
