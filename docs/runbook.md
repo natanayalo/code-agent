@@ -747,11 +747,11 @@ It defines the ten matched feature pairs, pinned disposable fixture revision,
 post-profile persisted TaskSpec delivery gate, full memory isolation, and
 post-terminal quality evaluation that cannot alter task outcomes. It also
 requires frozen pre-run IDs for both provider cells, exact baseline-plus-suite
-reconciliation before report publication, and extractor-stage applicability
-smokes. The suite must pin one neutral evaluator identity with no fallback and
-guarantee WorkspaceManager cleanup within 72 hours. No mutable runner or live
-mutation cases are implemented by the contract slice. Production routing
-stays static.
+reconciliation after the frozen `as_of` cutoff and before report publication,
+and extractor-stage applicability smokes. The suite must pin one neutral
+evaluator identity with no fallback and guarantee WorkspaceManager cleanup
+within 72 hours. No mutable runner or live mutation cases are implemented by
+the contract slice. Production routing stays static.
 
 ### M29 live evidence wave harness
 

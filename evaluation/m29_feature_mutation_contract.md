@@ -63,11 +63,12 @@ freeze the exact eligible task-ID set for each canonical profile cell:
 extractor with `evidence_scope == "current_execution_cohort"`,
 `task_class == "feature"`, `mutation_mode == "mutation"`, the frozen expected
 execution identities, and the same 90-day window and report policy that will be
-used for publication. Freeze `as_of` and both window boundaries in the private
-suite manifest, choosing an end time that includes the planned suite completion,
-so baseline tasks cannot age out between baseline and report generation. If
-collection cannot finish inside that window, stop and prepare a new reviewed
-manifest; do not move the cutoff silently.
+used for publication. Require `window_end_at == as_of` and freeze
+`window_start_at == as_of - 90 days`. Freeze `as_of` and both window boundaries
+in the private suite manifest, choosing an end time that includes the planned
+suite completion, so baseline tasks cannot age out between baseline and report
+generation. If collection cannot finish inside that window, stop and prepare a
+new reviewed manifest; do not move the cutoff silently.
 
 Store each baseline as a sorted exact ID set in the access-controlled private
 bundle, together with the extractor/build and policy hashes, profile, window
@@ -78,13 +79,29 @@ with its exact exclusion reason. Missing, duplicated, or unclassified suite
 tasks block report publication. Define `eligible_suite_ids[profile]` as the IDs
 of this suite's eligible case tasks.
 
-Before publishing either the canonical reliability report or robustness
-analysis, rerun the same extractor on the report-source database and require,
-for each profile, exact set equality:
+The frozen `as_of` is the cohort's upper timestamp boundary, not permission to
+reconcile or publish early. The run plan must reserve worst-case task execution
+and terminalization time for every planned case. Do not dispatch a case unless
+the remaining schedule ensures every suite task can reach terminal state at or
+before `as_of`; stop starting cases early enough to preserve that bound. If any
+suite task terminalizes after `as_of`, or the suite misses the cutoff, do not
+perform final reconciliation or publish reports. Preserve terminal outcomes
+and prepare a newly reviewed, versioned manifest; do not move the existing
+cutoff.
+
+Wait until the frozen `as_of`/`window_end_at` has elapsed (current UTC time is
+at or after it) before final extraction, exact-set reconciliation, or report
+generation. After that point, rerun the canonical extractor against the
+report-source database and require, for each profile, exact set equality:
 
 ```text
 current_cell_ids[profile] == frozen_baseline_ids[profile] ∪ eligible_suite_ids[profile]
 ```
+
+Generate the reliability and robustness reports from that same post-cutoff
+database snapshot, or verify exact equality against each report's own extractor
+snapshot before publishing it. Never publish from a pre-cutoff extraction or
+reconciliation.
 
 The baseline and suite ID sets must be disjoint. Any additional or missing ID,
 including an unrelated eligible task, a baseline task that disappeared, or an
