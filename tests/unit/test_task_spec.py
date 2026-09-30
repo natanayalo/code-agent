@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from orchestrator.brain import RuleBasedOrchestratorBrain, TaskSpecBrainSuggestion
+from orchestrator.post_terminal_quality import post_terminal_quality_evaluation_spec_errors
 from orchestrator.state import TaskRequest
 from orchestrator.task_spec import (
     _max_risk,
@@ -31,6 +32,84 @@ def test_build_task_spec_for_simple_feature_task() -> None:
     assert spec.requires_permission is False
     assert spec.requires_clarification is False
     assert validate_task_spec_policy(spec) == []
+
+
+def test_post_terminal_quality_evaluation_accepts_only_frozen_workspace_spec() -> None:
+    """The post-terminal mode accepts only a feature TaskSpec with local delivery and no gates."""
+    spec = build_task_spec(
+        task_text="Implement the requested taskboard feature",
+        repo_url="file:///tmp/taskboard-fixture",
+        target_branch=None,
+        constraints={"delivery_mode": "workspace", "verification_commands": []},
+    )
+
+    assert (
+        post_terminal_quality_evaluation_spec_errors(spec, {"skip_independent_review": True}) == []
+    )
+
+
+@pytest.mark.parametrize(
+    ("updates", "constraints", "expected_error"),
+    [
+        (
+            {"task_type": "bugfix"},
+            {"skip_independent_review": True},
+            "task_type_must_be_feature",
+        ),
+        (
+            {"allowed_actions": ["read_repo_files"]},
+            {"skip_independent_review": True},
+            "workspace_mutation_action_required",
+        ),
+        (
+            {"delivery_mode": "branch"},
+            {"skip_independent_review": True},
+            "delivery_mode_must_be_workspace",
+        ),
+        (
+            {"delivery_branch": "codex/task"},
+            {"skip_independent_review": True},
+            "delivery_branch_must_be_empty",
+        ),
+        (
+            {"allowed_actions": ["modify_workspace_files", "prepare_draft_pr_delivery"]},
+            {"skip_independent_review": True},
+            "remote_delivery_actions_forbidden",
+        ),
+        (
+            {"verification_commands": ["pytest"]},
+            {"skip_independent_review": True},
+            "task_verification_commands_must_be_empty",
+        ),
+        (
+            {"requires_clarification": True},
+            {"skip_independent_review": True},
+            "clarification_must_not_be_required",
+        ),
+        (
+            {"requires_permission": True},
+            {"skip_independent_review": True},
+            "permission_must_not_be_required",
+        ),
+        ({}, {}, "skip_independent_review_constraint_required"),
+    ],
+)
+def test_post_terminal_quality_evaluation_rejects_unfrozen_task_spec(
+    updates: dict[str, object],
+    constraints: dict[str, object],
+    expected_error: str,
+) -> None:
+    """Every persisted TaskSpec and review-skip mismatch blocks provider dispatch."""
+    spec = build_task_spec(
+        task_text="Implement the requested taskboard feature",
+        repo_url="file:///tmp/taskboard-fixture",
+        target_branch=None,
+        constraints={"delivery_mode": "workspace", "verification_commands": []},
+    ).model_copy(update=updates)
+
+    errors = post_terminal_quality_evaluation_spec_errors(spec, constraints)
+
+    assert expected_error in errors
 
 
 def test_build_task_spec_marks_pwd_home_smoke_as_no_modification_summary() -> None:

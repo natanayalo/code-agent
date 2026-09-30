@@ -26,6 +26,7 @@ from db.models import (
 )
 from evaluation.provider_reliability_extractor import (
     extract_provider_reliability_report,
+    load_task_evidence_snapshot,
 )
 from evaluation.provider_reliability_models import ReliabilityReportPolicy
 from evaluation.provider_reliability_report import (
@@ -45,6 +46,16 @@ from tests.integration.provider_reliability_support import (
 )
 
 
+def _assert_post_terminal_stages_not_applicable(task_evidence) -> None:
+    mutation_evidence = [item for item in task_evidence if item.mutation_mode == "mutation"]
+    assert {item.profile for item in mutation_evidence} == {
+        "codex-native-executor",
+        "antigravity-native-executor",
+    }
+    assert all(not item.verification_applicable for item in mutation_evidence)
+    assert all(not item.review_applicable for item in mutation_evidence)
+
+
 def test_extractor_synthetic_database(tmp_path: Path) -> None:
     """Test full database extraction, stage rates, exclusions, and recommendation."""
     db_url = _seed_test_database(tmp_path)
@@ -59,6 +70,7 @@ def test_extractor_synthetic_database(tmp_path: Path) -> None:
         expected_groups=(("feature", "mutation"), ("scout", "read_only")),
     )
 
+    task_evidence, _ = load_task_evidence_snapshot(db_url, policy)
     report = extract_provider_reliability_report(db_url, policy)
     assert report.status == "partial"
     assert report.exclusions.total_tasks_scanned == 28
@@ -88,6 +100,7 @@ def test_extractor_synthetic_database(tmp_path: Path) -> None:
     assert codex_cell.interventions.clarification_questions_count == 1
     assert codex_cell.stage_outcome_rates.verification_pass_rate is None
     assert codex_cell.stage_outcome_rates.review_pass_rate is None
+    _assert_post_terminal_stages_not_applicable(task_evidence)
 
     ag_cell = cells["antigravity-native-executor"]
     assert ag_cell.sample_size == 10

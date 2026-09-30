@@ -49,6 +49,9 @@ allowlist redaction).
   versioned contract evaluating 30/60/90-day window variation, non-overlapping
   historical/recent temporal cohorts, and deterministic bootstrap resampling with
   public allowlist redaction
+- an opt-in M29 post-terminal quality mode for isolated `feature/mutation`
+  preparation, with persisted TaskSpec preflight and in-task verification/review
+  bypass; the evaluation runner and live collection remain gated
 
 Completed work remains in [`CHANGELOG.md`](../CHANGELOG.md). The historical
 Temporal migration and rollback record is in the
@@ -170,8 +173,14 @@ Temporal migration and rollback record is in the
   is drafted and checked against the current extractor, repo-profile delivery
   overlay, verification/review completion flow, evaluator identity policy,
   workspace retention, full memory isolation, and unresolved interactions.
-  Operator review is pending; runner implementation and live cases remain
-  gated, `feature/mutation` is N=0, and production routing remains static.
+  Operator review is approved. The opt-in post-terminal execution mode now
+  rejects unsafe persisted TaskSpecs before dispatch and keeps failed
+  worker-reported tests from changing canonical completion; its Temporal smoke
+  confirms verification/review stages are inapplicable. The full runner still
+  needs frozen fixture/evaluator manifests, memory isolation, pass/fail/unavailable
+  extractor smokes for both profiles, cohort reconciliation, and guaranteed
+  cleanup. Live cases remain gated, `feature/mutation` is N=0, and production
+  routing remains static.
 
 ## Known limitations
 
@@ -207,11 +216,11 @@ Temporal migration and rollback record is in the
    b. [Completed] add provider-specific pre-dispatch diagnostics (M29 Item 1b);
    c. [Completed] qualify the cumulative `investigation/read_only` sample floor,
       retaining the three Wave 4 Codex identity exclusions;
-   d. [Contract drafted; operator review pending] review the linked `feature/mutation`
-      evaluation contract, including terminal/quality separation, frozen
-      evaluator identity, full memory isolation, pending-interaction handling,
-      delivery safeguards, and 72-hour cleanup, before runner implementation or
-      live evidence collection;
+   d. [Contract approved; execution preparation in progress] complete the
+      post-terminal evaluation runner and its frozen fixture/evaluator
+      manifests, full memory isolation, pending-interaction handling, delivery
+      safeguards, extractor-stage smokes, cohort reconciliation, and 72-hour
+      cleanup before live evidence collection;
    e. gather evidence in a historical 45-day cohort before claiming
       longitudinal robustness;
    f. evaluate hierarchical budget controls separately.

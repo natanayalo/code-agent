@@ -5,6 +5,7 @@ import json
 import subprocess
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import select
@@ -29,6 +30,7 @@ from db.models import (
     TemporalTaskState,
     WorkerRun,
 )
+from evaluation.provider_reliability_stages import check_task_stages
 from orchestrator.execution import TaskExecutionService, TaskSubmission
 from orchestrator.execution_types import InteractionResponse
 from orchestrator.nodes.verification_result import verify_result as evaluate_verification
@@ -50,7 +52,7 @@ from repositories import (
 )
 from sandbox import DockerShellCommandResult, DockerShellSession
 from tests.native_agent_test_doubles import LocalNativeAgentRunner
-from workers import CodexCliWorker, WorkerResult
+from workers import CodexCliWorker, WorkerResult, WorkerTestResult
 from workers.cli_runtime import CliRuntimeAdapter, CliRuntimeStep
 
 
@@ -198,6 +200,28 @@ class _VerifierBoundaryWorker:
             summary="initial worker completed",
             files_changed=["main.py"],
             workspace_id=request.workspace_id or "retained-workspace",
+        )
+
+
+class _PostTerminalEvaluationWorker(_CompletionLoopWorker):
+    """Return a worker-reported test failure that external evaluation must not gate."""
+
+    async def run(self, request, *, system_prompt=None) -> WorkerResult:
+        self.execution_requests.append(request)
+        return WorkerResult(
+            status="success",
+            summary="Implemented the requested taskboard feature.",
+            files_changed=["taskboard/labels.py"],
+            test_results=[WorkerTestResult(name="worker-tests", status="failed")],
+            budget_usage={
+                "native_agent": {
+                    "model_execution": {
+                        "provider": "codex",
+                        "model": "gpt-6-luna",
+                        "reasoning_effort": "high",
+                    }
+                }
+            },
         )
 
 
@@ -436,6 +460,159 @@ async def test_temporal_independent_verifier_request_is_read_only(session_factor
     verifier_request = worker.verifier_requests[0]
     assert verifier_request.read_only is True
     assert verifier_request.constraints["read_only"] is True
+
+
+@pytest.mark.anyio
+async def test_post_terminal_quality_mode_freezes_completion_before_quality_gates(
+    session_factory,
+    monkeypatch,
+):
+    """A failed worker test is quality evidence and cannot trigger in-task repair or review."""
+    # This Temporal test uses a local worker double without a provider runtime.
+    monkeypatch.setenv("CODE_AGENT_PRE_DISPATCH_DIAGNOSTICS_ENABLED", "0")
+    worker = _PostTerminalEvaluationWorker()
+    service = TaskExecutionService(
+        session_factory=session_factory,
+        worker=worker,
+        enable_post_terminal_quality_evaluation=True,
+    )
+
+    task_id, workflow_result = await _run_completion_loop_workflow(
+        session_factory=session_factory,
+        service=service,
+        submission=TaskSubmission(
+            task_text="Implement a labels.py feature",
+            constraints={
+                "delivery_mode": "workspace",
+                "skip_independent_review": True,
+                "verification_commands": [],
+            },
+            post_terminal_quality_evaluation=True,
+        ),
+        configure_activities=lambda _activities: None,
+    )
+
+    assert workflow_result["status"] == "completed"
+    assert len(worker.execution_requests) == 1
+    assert worker.review_requests == []
+    with session_scope(session_factory) as session:
+        task = session.get(Task, task_id)
+        assert task is not None
+        assert task.status.value == "completed"
+        runs = (
+            session.execute(select(WorkerRun).where(WorkerRun.task_id == task_id)).scalars().all()
+        )
+        events = (
+            session.execute(select(TaskTimelineEvent).where(TaskTimelineEvent.task_id == task_id))
+            .scalars()
+            .all()
+        )
+        stage_outcomes = check_task_stages(task, runs)
+
+    assert not any("verification" in event.event_type.value for event in events)
+    assert all(
+        entry.get("artifact_type") != "independent_review_result"
+        for run in runs
+        for entry in (run.artifact_index or [])
+    )
+    assert stage_outcomes[2:6] == (False, False, False, False)
+
+
+@pytest.mark.anyio
+async def test_post_terminal_quality_mode_rejects_invalid_persisted_spec_before_dispatch(
+    session_factory,
+):
+    """An unsafe persisted delivery overlay fails the task without launching a worker."""
+    worker = _PostTerminalEvaluationWorker()
+    service = TaskExecutionService(
+        session_factory=session_factory,
+        worker=worker,
+        enable_post_terminal_quality_evaluation=True,
+    )
+
+    def configure(activities: TaskExecutionActivities) -> None:
+        generate_spec = activities.generate_task_spec_and_route_node
+
+        async def invalid_delivery_spec(state_input):
+            updates = await generate_spec(state_input)
+            task_spec = dict(updates["task_spec"])
+            task_spec["delivery_mode"] = "branch"
+            return {**updates, "task_spec": task_spec}
+
+        activities.generate_task_spec_and_route_node = invalid_delivery_spec
+
+    task_id, workflow_result = await _run_completion_loop_workflow(
+        session_factory=session_factory,
+        service=service,
+        submission=TaskSubmission(
+            task_text="Implement a labels.py feature",
+            constraints={
+                "delivery_mode": "workspace",
+                "skip_independent_review": True,
+                "verification_commands": [],
+            },
+            post_terminal_quality_evaluation=True,
+        ),
+        configure_activities=configure,
+    )
+
+    assert workflow_result["status"] == "failed"
+    assert worker.execution_requests == []
+    with session_scope(session_factory) as session:
+        task = session.get(Task, task_id)
+        assert task is not None
+        assert task.status.value == "failed"
+        assert task.task_spec["delivery_mode"] == "branch"
+        assert "delivery_mode_must_be_workspace" in (task.last_error or "")
+
+
+@pytest.mark.anyio
+async def test_post_terminal_quality_mode_rechecks_spec_before_delivery(
+    session_factory,
+):
+    """A post-worker TaskSpec mutation must fail closed before delivery runs."""
+    worker = _PostTerminalEvaluationWorker()
+    service = TaskExecutionService(
+        session_factory=session_factory,
+        worker=worker,
+        enable_post_terminal_quality_evaluation=True,
+    )
+    delivery_node = AsyncMock(side_effect=AssertionError("delivery must not run"))
+    persisted_delivery_modes: list[str] = []
+
+    def configure(activities: TaskExecutionActivities) -> None:
+        async def mutate_delivery_spec_after_worker(state_input):
+            assert worker.execution_requests
+            task_spec = dict(state_input["task_spec"])
+            task_spec["delivery_mode"] = "branch"
+            persisted_delivery_modes.append(task_spec["delivery_mode"])
+            return {"task_spec": task_spec}
+
+        activities.persist_memory_node = mutate_delivery_spec_after_worker
+        activities.deliver_result_node = delivery_node
+
+    task_id, workflow_result = await _run_completion_loop_workflow(
+        session_factory=session_factory,
+        service=service,
+        submission=TaskSubmission(
+            task_text="Implement a labels.py feature",
+            constraints={
+                "delivery_mode": "workspace",
+                "skip_independent_review": True,
+                "verification_commands": [],
+            },
+            post_terminal_quality_evaluation=True,
+        ),
+        configure_activities=configure,
+    )
+
+    assert workflow_result["status"] == "failed"
+    assert persisted_delivery_modes == ["branch"]
+    delivery_node.assert_not_awaited()
+    with session_scope(session_factory) as session:
+        task = session.get(Task, task_id)
+        assert task is not None
+        assert task.status.value == "failed"
 
 
 @pytest.mark.anyio

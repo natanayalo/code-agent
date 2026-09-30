@@ -422,12 +422,14 @@ route decision
 
 ### Remaining M29 Work
 
-1. Review the [separate `feature/mutation` evaluation contract](../evaluation/m29_feature_mutation_contract.md),
-   including post-terminal quality evaluation, frozen evaluator identity,
-   delivery safeguards, full memory isolation, pending-interaction handling, and
-   bounded cleanup, exact baseline-plus-suite cohort reconciliation, and
-   post-cutoff report gating and extractor-stage applicability smokes, before
-   runner implementation or evidence collection (currently N=0).
+1. Complete the operator-approved [separate `feature/mutation` evaluation
+   contract](../evaluation/m29_feature_mutation_contract.md). The opt-in
+   post-terminal execution mode and persisted TaskSpec gate are in place; the
+   runner still needs frozen fixture/evaluator manifests, full memory isolation,
+   delivery and pending-interaction safeguards, pass/fail/unavailable
+   extractor-stage smokes for both profiles, exact baseline-plus-suite cohort
+   reconciliation, post-cutoff report gating, and bounded cleanup before live
+   evidence collection (currently N=0).
 2. Persist authoritative configured/actual execution identity before dispatch so early failures do not create new `unknown_execution_identity` gaps; do not infer the three excluded Wave 4 Codex identities.
 3. Gather enough evidence in a historical 45-day cohort to assess longitudinal consistency; the current historical split contains zero included tasks.
 4. Evaluate hierarchical budget controls separately (task, node, repair, wall time, and concurrency limits).
