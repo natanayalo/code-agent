@@ -1,0 +1,35 @@
+{
+  "analyses": [
+    {
+      "antigravity_only_completed_count": 4,
+      "bootstrap": {
+        "antigravity_faster_success_latency_probability": 1.0,
+        "antigravity_higher_acceptance_probability": 0.66,
+        "codex_higher_acceptance_probability": 0.0,
+        "identity_complete_pairs": 7,
+        "iterations": 10000,
+        "seed": 29,
+        "tied_acceptance_probability": 0.34
+      },
+      "both_completed_count": 6,
+      "codex_only_completed_count": 0,
+      "identity_complete_pair_count": 7,
+      "neither_completed_count": 0,
+      "pair_count": 10,
+      "successful_latency_differences": {
+        "max_seconds": -227.45,
+        "mean_seconds": -425.82,
+        "median_seconds": -480.76,
+        "min_seconds": -504.98,
+        "sample_size": 6
+      },
+      "task_class": "investigation"
+    }
+  ],
+  "as_of": "2026-09-27T22:02:06.727893Z",
+  "build_sha": "5f0cfdc0ed650dcfdfaff88aa1a23dc2abb8959f",
+  "manifest_sha256": "5a8fb26a26c30e837f76b674966f2e3f27ac204a5e6b3e531fb77c1e05612bfb",
+  "schema_version": 1,
+  "suite_name": "m29-live-provider-evidence-wave4",
+  "suite_sha256": "516ae550a441d5f9eb75d7022c6698f8248d9f0f1ec99ef2d80ef02fce63e3c3"
+}

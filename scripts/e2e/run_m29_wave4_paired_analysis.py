@@ -50,7 +50,7 @@ def main(argv: list[str] | None = None) -> int:
     json_payload = report.model_dump(mode="json")
     assert_sanitized_wave4_paired_report(json_payload)
     _write_report(args.json_output, json.dumps(json_payload, indent=2, sort_keys=True) + "\n")
-    _write_report(args.markdown_output, render_wave4_markdown(report) + "\n")
+    _write_report(args.markdown_output, render_wave4_markdown(report, manifest) + "\n")
     print(f"Wrote paired analysis JSON to {args.json_output}")
     print(f"Wrote paired analysis Markdown to {args.markdown_output}")
     print(f"Manifest SHA-256: {manifest_hash}")

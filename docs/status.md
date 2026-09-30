@@ -123,8 +123,8 @@ Temporal migration and rollback record is in the
   execution throughout. The fixed Wave 3 terminal timestamp is
   `2026-09-19T21:32:22.562107Z`.
 
-  Refreshed canonical, operational, and robustness reports use that timestamp
-  and a 10,000-iteration bootstrap with seed 29. The canonical report qualifies
+  The Wave 3 canonical, operational, and robustness snapshot used that timestamp
+  and a 10,000-iteration bootstrap with seed 29. That historical canonical report qualifies
   `feature/read_only` at $N=10$ vs $10$ (5/10 accepted for each provider) and
   recommends `antigravity-native-executor-read-only` on lower successful-task
   latency (202.93s versus 359.37s; terminal latency remains operational);
@@ -139,11 +139,33 @@ Temporal migration and rollback record is in the
   robustness is `partial` with no historical 45-day split, and M27 resumption
   remains deferred. Production routing is static and unchanged.
 
-- Wave 4 investigation/read-only collection is prepared on branch
-  `task/m29-investigation-read-only-wave4`, but the required preflight smoke
-  stopped before bundle initialization: the Antigravity independent verifier
-  reported an individual quota exhaustion (`infra_verifier_unavailable`). No
-  Wave 4 cases were submitted and no new evidence conclusion is claimed.
+- Wave 4 closes the cumulative investigation/read-only sample-floor gap. The
+  final ignored/private bundle
+  `artifacts/m29_evidence_bundle_wave4_from_first_quota/bundle.json` contains 20
+  terminal outcomes (16 completed, 4 failed: 3 timeouts, 1 unknown), all
+  Temporal/native investigation cases with zero changed files, interactions,
+  or gate failures. Persisted identity verifies all 10 Antigravity cases
+  (`gemini-3.8-flash/medium`) and 7 Codex cases (`gpt-5.6-luna/high`); 3 Codex
+  cases are excluded as `unknown_execution_identity`, with no inferred identity.
+  The sanitized manifest also records one earlier verified Codex
+  `infra_verifier_unavailable` attempt for
+  `m29-w4-inv-02-repair-loop-codex`; it is included in the cumulative cohort,
+  not the final-bundle paired analysis.
+- At `2026-09-27T22:02:06.727893Z`, the refreshed cumulative canonical cohort
+  qualifies `investigation/read_only` at N=16 Antigravity (15 accepted) and N=17
+  Codex (9 accepted). Antigravity is recommended on the primary Wilson lower
+  bound ($0.7167$ vs $0.3096$); successful-task medians (504.25s vs 1012.65s)
+  are supporting evidence, not a tie-break. Exact accounting is Wave 3 baseline
+  + eligible final Wave 4 cases + the documented prior attempt: `6+10=16`
+  Antigravity and `9+7+1=17` Codex.
+- Across all 10 final-bundle pairs, 6 both completed and 4 were Antigravity-only.
+  Among 7 identity-complete pairs, 6 both completed and 1 was Antigravity-only
+  (0 Codex-only, 0 neither). The paired bootstrap is 10,000 iterations/seed 29.
+  Robustness ranks Antigravity
+  first in 30/60/90-day windows and has a 99.86% unpaired first-rank
+  probability, but remains `partial`: the historical 45-day cohort has zero
+  included tasks. `feature/mutation` remains N=0; routing and
+  `evaluation/routing_metrics.json` are unchanged.
 
 ## Known limitations
 
@@ -172,24 +194,27 @@ Temporal migration and rollback record is in the
 
 ## Next slices only
 
-1. Execute remaining M29 work following the reviewed Wave 3 conclusion (advisory
-   Codex recommendation for `docs/read_only`, Antigravity recommendation for
-   `feature/read_only`, partial robustness, and static production routing
-   unchanged):
+1. Continue remaining M29 evidence work following the Wave 4 conclusion
+   (advisory recommendations for `docs/read_only`, `feature/read_only`, and
+   `investigation/read_only`; partial robustness; static production routing):
    a. [Completed] remove legacy raw-secret ingress and enforce opaque registered references (M29 Item 1a);
    b. [Completed] add provider-specific pre-dispatch diagnostics (M29 Item 1b);
-   c. gather identity-complete `investigation/read_only` evidence, plus
-      `feature/mutation` and longitudinal current-cohort evidence;
-   d. evaluate hierarchical budget controls separately.
+   c. [Completed] qualify the cumulative `investigation/read_only` sample floor,
+      retaining the three Wave 4 Codex identity exclusions;
+   d. define and review a separate mutable-evaluation contract, safeguards, and
+      cleanup plan before collecting `feature/mutation` evidence;
+   e. gather evidence in a historical 45-day cohort before claiming
+      longitudinal robustness;
+   f. evaluate hierarchical budget controls separately.
 2. Use the M28 report as a scoped safety/effectiveness signal only; do not
    change routing or add semantic retrieval without further evidence.
 
 ## Deferred
 
 - M27 reliability-based autonomy remains reserved until real-task metrics can
-  support reversible policy thresholds, and additionally requires M29's
-  expanded evidence (Wave 2's 66.06% bootstrap win probability and lack of a
-  historical cohort are insufficient).
+  support reversible policy thresholds. Wave 4 now qualifies the cumulative
+  investigation/read-only cohort, but M29 robustness is still partial, the
+  historical 45-day cohort is empty, and `feature/mutation` remains unmeasured.
 - durable child workflows, broad mutable fan-out, isolated worktree/patch
   reconciliation, an operator-visible agent tree, and evidence-backed
   procedural skills remain future/conditional ideas rather than current work.

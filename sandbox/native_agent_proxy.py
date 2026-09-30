@@ -34,12 +34,17 @@ def _audit(*, host: str, addresses: list[str], method: str, outcome: str) -> Non
 def _resolved_public_addresses(host: str) -> list[str]:
     try:
         records = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
-        return sorted({item[4][0] for item in records})
+        addresses: set[str] = set()
+        for item in records:
+            address = item[4][0]
+            if isinstance(address, str):
+                addresses.add(address)
+        return sorted(addresses)
     except OSError:
         return []
 
 
-def _extract_sni(data: bytes) -> str | None | bool:
+def _extract_sni(data: bytes | bytearray) -> str | None | bool:
     if len(data) < 5:
         return None
     if data[0] != 0x16:

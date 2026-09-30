@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import socket
 import subprocess
 from pathlib import Path
 
@@ -67,6 +68,20 @@ def test_executor_command_is_hardened_and_mounts_only_task_paths(tmp_path: Path)
     assert "/var/run/docker.sock" not in joined
     assert "seccomp=unconfined" not in joined
     assert "--network none" in joined
+
+
+def test_proxy_address_resolution_keeps_only_string_hosts(monkeypatch: pytest.MonkeyPatch) -> None:
+    records = [
+        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 443)),
+        (socket.AF_INET, socket.SOCK_STREAM, 6, "", (443, 443)),
+    ]
+    monkeypatch.setattr(native_agent_proxy.socket, "getaddrinfo", lambda *_args, **_kwargs: records)
+
+    assert native_agent_proxy._resolved_public_addresses("example.test") == ["8.8.8.8"]
+
+
+def test_proxy_sni_parser_accepts_mutable_client_hello_buffer() -> None:
+    assert native_agent_proxy._extract_sni(bytearray(b"\x16")) is None
 
 
 def test_executor_command_mounts_file_secrets_at_the_declared_container_path(

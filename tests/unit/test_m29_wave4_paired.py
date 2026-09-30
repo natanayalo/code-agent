@@ -10,10 +10,13 @@ import pytest
 from evaluation.m29_wave4_paired import (
     Wave4Manifest,
     Wave4ManifestCase,
+    Wave4SupplementalObservation,
     analyze_wave4_manifest,
     assert_sanitized_wave4_manifest,
-    assert_wave4_manifest_matches_report,
+    build_wave4_paired_report,
+    render_wave4_markdown,
 )
+from evaluation.m29_wave4_reconciliation import assert_wave4_manifest_matches_report
 from evaluation.provider_reliability_models import (
     BudgetCoverageMetrics,
     InterventionMetrics,
@@ -84,6 +87,7 @@ def _manifest(*, identity_complete: bool = True) -> Wave4Manifest:
                     terminal_status="completed" if accepted else "failed",
                     accepted=accepted,
                     failure_kind=None if accepted else "worker_failure",
+                    report_failure_kind=None if accepted else "worker_failure",
                     time_to_terminal_seconds=100.0 if provider == "codex" else 50.0,
                     execution_identity_status="verified" if complete else "unknown_legacy",
                     identity_matches=complete,
@@ -177,6 +181,230 @@ def test_manifest_matches_cumulative_report_cells() -> None:
         )
 
 
+def _reconciliation_cell(
+    as_of: datetime, provider: str, sample_size: int, accepted_count: int, failures: dict[str, int]
+):
+    return SimpleNamespace(
+        task_class="investigation",
+        profile=f"{provider}-native-executor-read-only",
+        mutation_mode="read_only",
+        sample_size=sample_size,
+        accepted_count=accepted_count,
+        failure_count=sample_size - accepted_count,
+        typed_failures=failures,
+        oldest_evidence_timestamp=as_of - timedelta(days=10),
+    )
+
+
+def _reconciliation_manifest() -> Wave4Manifest:
+    manifest = _manifest()
+    supplemental = Wave4SupplementalObservation(
+        case_id="m29-w4-investigation-00-codex",
+        task_class="investigation",
+        pair_group="m29-w4-investigation-00",
+        provider="codex",
+        worker_profile="codex-native-executor-read-only",
+        terminal_status="failed",
+        accepted=False,
+        failure_kind="infra_verifier_unavailable",
+        report_failure_kind="infra_verifier_unavailable",
+        time_to_terminal_seconds=887.2,
+        execution_identity_status="verified",
+        identity_matches=True,
+    )
+    return manifest.model_copy(update={"supplemental_observations": [supplemental]})
+
+
+def _reconciliation_reports(manifest: Wave4Manifest, add_extra: bool):
+    current_policy = ReliabilityReportPolicy(
+        as_of=manifest.as_of,
+        window_start_at=manifest.as_of - timedelta(days=90),
+        window_end_at=manifest.as_of,
+        min_samples=10,
+        evidence_scope="current_execution_cohort",
+    )
+    baseline_policy = ReliabilityReportPolicy(
+        as_of=manifest.as_of - timedelta(days=1),
+        window_start_at=manifest.as_of - timedelta(days=91),
+        window_end_at=manifest.as_of - timedelta(days=1),
+        min_samples=10,
+        evidence_scope="current_execution_cohort",
+    )
+    baseline_cells = [
+        _reconciliation_cell(
+            manifest.as_of, "codex", 6, 3, {"infra_verifier_unavailable": 2, "worker_failure": 1}
+        ),
+        _reconciliation_cell(
+            manifest.as_of,
+            "antigravity",
+            6,
+            3,
+            {"infra_verifier_unavailable": 2, "worker_failure": 1},
+        ),
+    ]
+    codex_failures = 7 if add_extra else 6
+    report_cells = [
+        _reconciliation_cell(
+            manifest.as_of,
+            "codex",
+            18 if add_extra else 17,
+            8,
+            {"infra_verifier_unavailable": 3, "worker_failure": codex_failures},
+        ),
+        _reconciliation_cell(
+            manifest.as_of,
+            "antigravity",
+            16,
+            8,
+            {"infra_verifier_unavailable": 2, "worker_failure": 6},
+        ),
+    ]
+    recommendation = SimpleNamespace(
+        task_class="investigation",
+        mutation_mode="read_only",
+        recommended_profile="antigravity-native-executor-read-only",
+        fallback_reason=None,
+    )
+    report = SimpleNamespace(
+        policy=current_policy,
+        evidence_cells=report_cells,
+        recommendations=[recommendation],
+    )
+    baseline_report = SimpleNamespace(policy=baseline_policy, evidence_cells=baseline_cells)
+    return report, baseline_report
+
+
+def _reconciliation_task_sets(add_extra: bool):
+    baseline_ids = {
+        provider: {f"{provider}-base-{i}" for i in range(6)}
+        for provider in ("codex", "antigravity")
+    }
+    wave4_ids = {
+        provider: {f"{provider}-wave4-{i}" for i in range(10)}
+        for provider in ("codex", "antigravity")
+    }
+    supplemental_ids = {"codex": {"codex-prior-wave4"}, "antigravity": set()}
+    cell_ids = {
+        provider: baseline_ids[provider] | wave4_ids[provider] | supplemental_ids[provider]
+        for provider in ("codex", "antigravity")
+    }
+    if add_extra:
+        cell_ids["codex"].add("unmanifested-observation")
+    return baseline_ids, wave4_ids, supplemental_ids, cell_ids, set().union(*cell_ids.values())
+
+
+def _exact_reconciliation_inputs(*, add_unmanifested_task: bool = False):
+    manifest = _reconciliation_manifest()
+    report, baseline_report = _reconciliation_reports(manifest, add_unmanifested_task)
+    task_sets = _reconciliation_task_sets(add_unmanifested_task)
+    return (manifest, report, baseline_report, *task_sets)
+
+
+def test_manifest_reconciles_exact_baseline_wave4_and_supplemental_delta() -> None:
+    (
+        manifest,
+        report,
+        baseline_report,
+        baseline_ids,
+        wave4_ids,
+        supplemental_ids,
+        cell_ids,
+        all_task_ids,
+    ) = _exact_reconciliation_inputs()
+    assert_wave4_manifest_matches_report(
+        manifest,
+        report,
+        baseline_report=baseline_report,
+        extractor_cells=report.evidence_cells,
+        baseline_task_ids_by_provider=baseline_ids,
+        cell_extractor_task_ids_by_provider=cell_ids,
+        supplemental_task_ids_by_provider=supplemental_ids,
+        wave4_task_ids_by_provider=wave4_ids,
+        extractor_task_ids=all_task_ids,
+    )
+
+
+def test_manifest_rejects_an_unmanifested_current_cohort_observation() -> None:
+    (
+        manifest,
+        report,
+        baseline_report,
+        baseline_ids,
+        wave4_ids,
+        supplemental_ids,
+        cell_ids,
+        all_task_ids,
+    ) = _exact_reconciliation_inputs(add_unmanifested_task=True)
+    with pytest.raises(ValueError, match="task set does not equal"):
+        assert_wave4_manifest_matches_report(
+            manifest,
+            report,
+            baseline_report=baseline_report,
+            extractor_cells=report.evidence_cells,
+            baseline_task_ids_by_provider=baseline_ids,
+            cell_extractor_task_ids_by_provider=cell_ids,
+            supplemental_task_ids_by_provider=supplemental_ids,
+            wave4_task_ids_by_provider=wave4_ids,
+            extractor_task_ids=all_task_ids,
+        )
+
+
+def test_paired_markdown_distinguishes_all_pairs_from_identity_complete_pairs() -> None:
+    original = _manifest()
+    cases = []
+    for case in original.cases:
+        index = int(case.pair_group.rsplit("-", maxsplit=1)[1])
+        accepted = case.provider == "antigravity" or index < 6
+        identity_complete = index < 7
+        cases.append(
+            case.model_copy(
+                update={
+                    "accepted": accepted,
+                    "terminal_status": "completed" if accepted else "failed",
+                    "failure_kind": None if accepted else "worker_failure",
+                    "report_failure_kind": None if accepted else "worker_failure",
+                    "execution_identity_status": "verified"
+                    if identity_complete
+                    else "unknown_legacy",
+                    "identity_matches": identity_complete,
+                    "exclusion_reason": None if identity_complete else "unknown_execution_identity",
+                }
+            )
+        )
+    codex_case = next(case for case in cases if case.provider == "codex")
+    supplemental = Wave4SupplementalObservation(
+        case_id=codex_case.case_id,
+        task_class="investigation",
+        pair_group=codex_case.pair_group,
+        provider="codex",
+        worker_profile=codex_case.worker_profile,
+        terminal_status="failed",
+        accepted=False,
+        failure_kind="infra_verifier_unavailable",
+        report_failure_kind="infra_verifier_unavailable",
+        time_to_terminal_seconds=887.2,
+        execution_identity_status="verified",
+        identity_matches=True,
+    )
+    manifest = Wave4Manifest.model_validate(
+        {
+            **original.model_dump(mode="python"),
+            "cases": cases,
+            "supplemental_observations": [supplemental],
+        }
+    )
+    report = build_wave4_paired_report(manifest, manifest_sha256="0" * 64, iterations=20)
+
+    markdown = render_wave4_markdown(report, manifest)
+
+    assert "Across the 10 frozen pairs" in markdown
+    assert (
+        "Among the 7 identity-complete pairs, 6 had both providers complete, 1 was Antigravity-only"
+        in markdown
+    )
+    assert "1 earlier identity-verified attempt included in the cumulative report" in markdown
+
+
 def test_excluded_identity_cases_do_not_enter_paired_bootstrap() -> None:
     analysis = analyze_wave4_manifest(_manifest(identity_complete=False), iterations=100)
     assert analysis.identity_complete_pair_count == 5
@@ -264,56 +492,28 @@ def test_underpowered_excluded_wave4_cases_remain_unqualified() -> None:
 
 
 def test_wave4_manifest_reconciles_against_frozen_baseline() -> None:
-    manifest = _manifest()
-    policy = ReliabilityReportPolicy(
-        as_of=manifest.as_of,
-        window_start_at=manifest.as_of - timedelta(days=90),
-        window_end_at=manifest.as_of,
-        min_samples=10,
-        evidence_scope="current_execution_cohort",
-    )
-    recommendation = SimpleNamespace(
-        task_class="investigation",
-        mutation_mode="read_only",
-        recommended_profile="codex-native-executor-read-only",
-    )
-    report_cells = [_evidence_cell(provider) for provider in ("codex", "antigravity")]
-    extractor_cells = [_evidence_cell(provider) for provider in ("codex", "antigravity")]
-    baseline_cells = [
-        SimpleNamespace(
-            task_class="investigation",
-            profile=f"{provider}-native-executor-read-only",
-            mutation_mode="read_only",
-            sample_size=5,
-            accepted_count=0,
-        )
-        for provider in ("codex", "antigravity")
-    ]
-    current = SimpleNamespace(
-        policy=policy, evidence_cells=report_cells, recommendations=[recommendation]
-    )
-    baseline = SimpleNamespace(
-        policy=policy.model_copy(update={"as_of": manifest.as_of - timedelta(days=1)}),
-        evidence_cells=baseline_cells,
-    )
-    assert_wave4_manifest_matches_report(
+    (
         manifest,
-        current,
-        baseline_report=baseline,
-        extractor_cells=extractor_cells,
-        wave4_task_ids={f"wave4-task-{index}" for index in range(20)},
-        extractor_task_ids={f"wave4-task-{index}" for index in range(20)} | {"unrelated-task"},
-    )
-
-    report_cells[0] = report_cells[0].model_copy(
-        update={"successful_task_latency": LatencyMetrics(median_seconds=999.0)}
-    )
+        report,
+        baseline,
+        baseline_ids,
+        wave4_ids,
+        supplemental_ids,
+        cell_ids,
+        all_task_ids,
+    ) = _exact_reconciliation_inputs()
+    extractor_cells = list(report.evidence_cells)
+    extractor_cells[0] = SimpleNamespace(**vars(report.evidence_cells[0]))
+    extractor_cells[0].sample_size -= 1
     with pytest.raises(ValueError, match="differs from extractor snapshot"):
         assert_wave4_manifest_matches_report(
             manifest,
-            current,
+            report,
             baseline_report=baseline,
             extractor_cells=extractor_cells,
-            wave4_task_ids={f"wave4-task-{index}" for index in range(20)},
-            extractor_task_ids={f"wave4-task-{index}" for index in range(20)},
+            baseline_task_ids_by_provider=baseline_ids,
+            cell_extractor_task_ids_by_provider=cell_ids,
+            supplemental_task_ids_by_provider=supplemental_ids,
+            wave4_task_ids_by_provider=wave4_ids,
+            extractor_task_ids=all_task_ids,
         )

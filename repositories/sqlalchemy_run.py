@@ -213,7 +213,11 @@ class WorkerRunRepository:
                 (w.value if hasattr(w, "value") else str(w)): count for w, count in worker_usage
             },
             "runtime_mode_usage": {
-                (m.value if hasattr(m, "value") else ("unknown" if m is None else str(m))): count
+                (
+                    m.value
+                    if isinstance(m, WorkerRuntimeMode)
+                    else ("unknown" if m is None else str(m))
+                ): count
                 for m, count in runtime_mode_usage
             },
             "legacy_tool_loop_usage": {
