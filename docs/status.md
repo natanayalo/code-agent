@@ -220,7 +220,9 @@ Temporal migration and rollback record is in the
       post-terminal evaluation runner and its frozen fixture/evaluator
       manifests, full memory isolation, pending-interaction handling, delivery
       safeguards, extractor-stage smokes, cohort reconciliation, and 72-hour
-      cleanup before live evidence collection;
+      cleanup before live evidence collection. The exact baseline-plus-eligible-
+      suite reconciliation gate is implemented as a public-safe, fail-closed
+      helper; manifest and report-runner integration remains outstanding;
    e. gather evidence in a historical 45-day cohort before claiming
       longitudinal robustness;
    f. evaluate hierarchical budget controls separately.
