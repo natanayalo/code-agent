@@ -179,12 +179,15 @@ Temporal migration and rollback record is in the
   confirms verification/review stages are inapplicable. The frozen
   `feature/mutation` suite and neutral evaluator manifest contract
   (`evaluation/m29_mutation_suite.py`), fail-closed cohort reconciliation
-  helper (`evaluation/m29_mutation_cohort.py`), and sanitized manifest &
+  helper (`evaluation/m29_mutation_cohort.py`), sanitized manifest &
   report-publication reconciliation layer (`evaluation/m29_mutation_manifest.py`,
-  `evaluation/m29_mutation_reconciliation.py`) are implemented and validated.
-  The full runner still needs memory isolation, pass/fail/unavailable
-  extractor smokes for both profiles, and guaranteed cleanup. Live cases remain
-  gated, `feature/mutation` is N=0, and production routing remains static.
+  `evaluation/m29_mutation_reconciliation.py`), and pre-dispatch isolation gates,
+  stop-condition validators, 72-hour cleanup helpers, and canonical extractor
+  smokes (`evaluation/m29_mutation_isolation.py`,
+  `evaluation/m29_mutation_smokes.py`) are implemented and validated. The full
+  runner still needs execution loop wiring and disposable stack launch before
+  live collection. Live cases remain gated, `feature/mutation` is N=0, and
+  production routing remains static.
 
 ## Known limitations
 
@@ -226,10 +229,14 @@ Temporal migration and rollback record is in the
       cleanup before live evidence collection. The frozen `feature/mutation`
       suite & neutral evaluator manifest contract
       (`evaluation/m29_mutation_suite.py`), the exact baseline-plus-eligible-suite
-      reconciliation gate (`evaluation/m29_mutation_cohort.py`), and the
+      reconciliation gate (`evaluation/m29_mutation_cohort.py`), the
       sanitized manifest & report-publication reconciliation layer
       (`evaluation/m29_mutation_manifest.py`,
-      `evaluation/m29_mutation_reconciliation.py`) are implemented and validated;
+      `evaluation/m29_mutation_reconciliation.py`), and the pre-dispatch
+      memory isolation gate, stop-condition validators, 72-hour cleanup helpers,
+      and canonical extractor-stage smokes
+      (`evaluation/m29_mutation_isolation.py`,
+      `evaluation/m29_mutation_smokes.py`) are implemented and validated;
    e. gather evidence in a historical 45-day cohort before claiming
       longitudinal robustness;
    f. evaluate hierarchical budget controls separately.

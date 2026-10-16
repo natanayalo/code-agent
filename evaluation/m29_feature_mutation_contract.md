@@ -3,12 +3,15 @@
 **Status:** operator-approved. The post-terminal execution-preparation mode,
 fail-closed cohort reconciliation helper (`evaluation/m29_mutation_cohort.py`),
 frozen `feature/mutation` suite & neutral evaluator manifest contract
-(`evaluation/m29_mutation_suite.py`), and sanitized case manifest & report
+(`evaluation/m29_mutation_suite.py`), sanitized case manifest & report
 reconciliation publication gates (`evaluation/m29_mutation_manifest.py`,
-`evaluation/m29_mutation_reconciliation.py`) are implemented and verified; the
-runner and live collection remain gated on the remaining preflight requirements
-below. This document defines the evaluation only. It does not start live cases
-or change production routing.
+`evaluation/m29_mutation_reconciliation.py`), and pre-dispatch isolation gates,
+stop-condition validators, 72-hour cleanup helpers, and canonical extractor-stage
+smokes (`evaluation/m29_mutation_isolation.py`,
+`evaluation/m29_mutation_smokes.py`) are implemented and verified; the
+runner execution loop and live collection remain gated on disposable stack launch
+and final runner wiring. This document defines the evaluation only. It does not start
+live cases or change production routing.
 
 ## Purpose and evidence boundary
 
