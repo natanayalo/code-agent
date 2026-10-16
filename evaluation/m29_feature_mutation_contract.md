@@ -1,9 +1,12 @@
 # M29 `feature/mutation` Evaluation Contract
 
-**Status:** operator-approved. The post-terminal execution-preparation mode is
-implemented and smoke-verified; the runner and live collection remain gated on
-the remaining preflight requirements below. This document defines the
-evaluation only. It does not start live cases or change production routing.
+**Status:** operator-approved. The post-terminal execution-preparation mode,
+fail-closed cohort reconciliation helper (`evaluation/m29_mutation_cohort.py`),
+and frozen `feature/mutation` suite & neutral evaluator manifest contract
+(`evaluation/m29_mutation_suite.py`) are implemented and smoke-verified; the
+runner and live collection remain gated on the remaining preflight requirements
+below. This document defines the evaluation only. It does not start live cases
+or change production routing.
 
 ## Purpose and evidence boundary
 
@@ -153,7 +156,9 @@ identities in the canonical report policy are Codex `gpt-6-luna/high` and
 Antigravity `gemini-3.8-flash/medium`. Freeze the expected provider, model, and
 reasoning effort in the run manifest before case 01. If the supported identity
 has changed before collection, revise and review the manifest before any case;
-never mix model vintages within one run.
+never mix model vintages within one run. The suite definition and validation
+are implemented in `evaluation.m29_mutation_suite.M29MutationSuite` and frozen
+in `evaluation/m29_live_provider_suite_mutation.json`.
 
 The fixture baseline must provide a small Python 3.12+ `taskboard` package with
 the named modules, function signatures, and data types below. `Task` has `id`,
