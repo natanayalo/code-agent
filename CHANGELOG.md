@@ -75,6 +75,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Changed
 
+- [M29] Add mutation cohort reconciliation gate ([#416](https://github.com/natanayalo/code-agent/pull/416))
+
 - M29: publish Wave 4 investigation evidence ([#410](https://github.com/natanayalo/code-agent/pull/410))
 
 - Docs: record M29 post-wave reliability decision ([#404](https://github.com/natanayalo/code-agent/pull/404))
