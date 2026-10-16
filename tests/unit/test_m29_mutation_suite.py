@@ -47,6 +47,7 @@ def test_frozen_suite_loads_and_passes_validation() -> None:
     digest = suite.compute_digest()
     assert len(digest) == 64
     assert all(c in "0123456789abcdef" for c in digest)
+    assert suite == build_m29_mutation_suite()
 
 
 def test_suite_counterbalancing_alternation() -> None:
@@ -177,12 +178,14 @@ def test_rejection_evaluator_runtime_not_read_only() -> None:
         )
 
 
-def test_rejection_wrong_number_of_pair_groups() -> None:
+def test_rejection_duplicate_pair_group() -> None:
     def mutate(data: dict[str, Any]) -> None:
         data["cases"][2]["pair_group"] = data["cases"][0]["pair_group"]
         data["cases"][3]["pair_group"] = data["cases"][0]["pair_group"]
 
-    with pytest.raises(ValueError, match="expected exactly 10 pair groups"):
+    with pytest.raises(
+        ValueError, match="duplicate pair group 'm29-mut-pair-01-label-norm' in suite"
+    ):
         _mutate_suite(mutate)
 
 
@@ -190,7 +193,9 @@ def test_rejection_wrong_cases_per_pair() -> None:
     def mutate(data: dict[str, Any]) -> None:
         data["cases"][0]["pair_group"] = data["cases"][2]["pair_group"]
 
-    with pytest.raises(ValueError, match="must contain exactly 2 cases"):
+    with pytest.raises(
+        ValueError, match="consecutive cases at indices 0 and 1 must share the same pair group"
+    ):
         _mutate_suite(mutate)
 
 
@@ -198,7 +203,35 @@ def test_rejection_wrong_pair_orders() -> None:
     def mutate(data: dict[str, Any]) -> None:
         data["cases"][1]["pair_order"] = 1
 
-    with pytest.raises(ValueError, match="must use pair_order values 1 and 2"):
+    with pytest.raises(ValueError, match=r"cases must be ordered with pair_order \(1, 2\)"):
+        _mutate_suite(mutate)
+
+
+def test_rejection_inverted_pair_order() -> None:
+    def mutate(data: dict[str, Any]) -> None:
+        data["cases"][0]["pair_order"] = 2
+        data["cases"][1]["pair_order"] = 1
+
+    with pytest.raises(ValueError, match=r"cases must be ordered with pair_order \(1, 2\)"):
+        _mutate_suite(mutate)
+
+
+def test_rejection_non_sequential_pair_cases() -> None:
+    def mutate(data: dict[str, Any]) -> None:
+        data["cases"][1], data["cases"][2] = data["cases"][2], data["cases"][1]
+
+    with pytest.raises(
+        ValueError, match="consecutive cases at indices 0 and 1 must share the same pair group"
+    ):
+        _mutate_suite(mutate)
+
+
+def test_rejection_pair_01_starts_with_antigravity() -> None:
+    def mutate(data: dict[str, Any]) -> None:
+        data["cases"][0]["worker_profile"] = "antigravity-native-executor"
+        data["cases"][1]["worker_profile"] = "codex-native-executor"
+
+    with pytest.raises(ValueError, match="Pair 01 .* must start with codex-native-executor"):
         _mutate_suite(mutate)
 
 
@@ -337,7 +370,9 @@ def test_rejection_mismatched_target_revision() -> None:
     def mutate(data: dict[str, Any]) -> None:
         data["cases"][0]["target_repository_revision"] = "f" * 40
 
-    with pytest.raises(ValueError, match="has mismatched target repository revisions"):
+    with pytest.raises(
+        ValueError, match="target_repository_revision does not match suite revision"
+    ):
         _mutate_suite(mutate)
 
 
@@ -362,7 +397,24 @@ def test_rejection_mismatched_task_budget() -> None:
     def mutate(data: dict[str, Any]) -> None:
         data["cases"][0]["task_budget"] = {"timeout_seconds": 900, "max_cost_usd": 10.0}
 
-    with pytest.raises(ValueError, match="has mismatched task budgets"):
+    with pytest.raises(ValueError, match="task_budget does not match suite task_budget"):
+        _mutate_suite(mutate)
+
+
+def test_rejection_cross_pair_task_budget_mismatch() -> None:
+    def mutate(data: dict[str, Any]) -> None:
+        data["cases"][2]["task_budget"] = {"timeout_seconds": 900, "max_cost_usd": 15.0}
+        data["cases"][3]["task_budget"] = {"timeout_seconds": 900, "max_cost_usd": 15.0}
+
+    with pytest.raises(ValueError, match="task_budget does not match suite task_budget"):
+        _mutate_suite(mutate)
+
+
+def test_rejection_task_budget_timeout_not_900s() -> None:
+    def mutate(data: dict[str, Any]) -> None:
+        data["cases"][0]["task_budget"]["timeout_seconds"] = 600
+
+    with pytest.raises(ValueError, match=r"task_budget timeout must be 900s, got 600s"):
         _mutate_suite(mutate)
 
 
@@ -370,8 +422,25 @@ def test_rejection_mismatched_neutral_evaluator() -> None:
     def mutate(data: dict[str, Any]) -> None:
         data["cases"][0]["neutral_evaluator"]["model"] = "other-eval-model"
 
-    with pytest.raises(ValueError, match="has mismatched neutral evaluator manifests"):
+    with pytest.raises(
+        ValueError, match="neutral_evaluator does not match suite neutral_evaluator"
+    ):
         _mutate_suite(mutate)
+
+
+def test_rejection_non_empty_clarification_questions() -> None:
+    def mutate(data: dict[str, Any]) -> None:
+        data["cases"][0]["clarification_questions"] = ["Which format?"]
+
+    with pytest.raises(ValueError, match="cannot have clarification questions"):
+        _mutate_suite(mutate)
+
+
+def test_validate_pair_grouping_edge_cases() -> None:
+    from evaluation.m29_mutation_suite import _validate_pair_grouping_and_counterbalancing
+
+    with pytest.raises(ValueError, match="expected exactly 20 cases"):
+        _validate_pair_grouping_and_counterbalancing([])
 
 
 def test_rejection_delivery_mode_not_workspace() -> None:

@@ -40,6 +40,7 @@ M29_FROZEN_MUTATION_CANDIDATE_IDENTITIES: dict[str, ExecutionIdentity] = {
 }
 
 M29_MUTATION_PROVIDERS = ("codex", "antigravity")
+M29MutationProfile = Literal["codex-native-executor", "antigravity-native-executor"]
 
 
 class StrictModel(BaseModel):
@@ -107,7 +108,7 @@ class M29MutationCase(StrictModel):
     case_id: str = Field(pattern=r"^[a-z0-9-]+$")
     task_class: Literal["feature"] = "feature"
     mutation_mode: Literal["mutation"] = "mutation"
-    worker_profile: Literal["codex-native-executor", "antigravity-native-executor"]
+    worker_profile: M29MutationProfile
     topic: str = Field(pattern=r"^[a-z0-9_]+$")
     pair_group: str = Field(pattern=r"^[a-z0-9-]+$")
     pair_order: int = Field(ge=1, le=2)
@@ -180,45 +181,78 @@ def _validate_evaluator_manifest(evaluator: NeutralEvaluatorManifest) -> None:
         raise ValueError("neutral evaluator runtime must be 'read_only'")
 
 
+def _validate_case_suite_bindings(suite: M29MutationSuite) -> None:
+    expected_budget = suite.cases[0].task_budget if suite.cases else None
+    for c in suite.cases:
+        if c.target_repository_revision != suite.target_repository_revision:
+            raise ValueError(
+                f"case '{c.case_id}' target_repository_revision does not match suite revision: "
+                f"{c.target_repository_revision} != {suite.target_repository_revision}"
+            )
+        if c.neutral_evaluator != suite.neutral_evaluator:
+            raise ValueError(
+                f"case '{c.case_id}' neutral_evaluator does not match suite neutral_evaluator"
+            )
+        if c.task_budget != expected_budget:
+            raise ValueError(f"case '{c.case_id}' task_budget does not match suite task_budget")
+        if c.task_budget.timeout_seconds != CANDIDATE_TIMEOUT_SECONDS:
+            raise ValueError(
+                f"case '{c.case_id}' task_budget timeout must be {CANDIDATE_TIMEOUT_SECONDS}s, "
+                f"got {c.task_budget.timeout_seconds}s"
+            )
+        if c.candidate_timeout_seconds != CANDIDATE_TIMEOUT_SECONDS:
+            raise ValueError(
+                f"case '{c.case_id}' timeout must be {CANDIDATE_TIMEOUT_SECONDS}s, "
+                f"got {c.candidate_timeout_seconds}s"
+            )
+        if c.clarification_questions != ():
+            raise ValueError(f"case '{c.case_id}' cannot have clarification questions")
+
+
 def _validate_pair_grouping_and_counterbalancing(
     cases: Sequence[M29MutationCase],
-) -> dict[str, list[M29MutationCase]]:
-    pairs: dict[str, list[M29MutationCase]] = {}
-    for c in cases:
-        pairs.setdefault(c.pair_group, []).append(c)
+) -> dict[str, tuple[M29MutationCase, M29MutationCase]]:
+    if len(cases) != 20:
+        raise ValueError(f"expected exactly 20 cases, got {len(cases)}")
 
-    if len(pairs) != 10:
-        raise ValueError(f"expected exactly 10 pair groups, got {len(pairs)}")
-
-    last_first_profile: str | None = None
-    for group_name, group_cases in pairs.items():
-        if len(group_cases) != 2:
+    pairs: dict[str, tuple[M29MutationCase, M29MutationCase]] = {}
+    for i in range(10):
+        c1, c2 = cases[2 * i], cases[2 * i + 1]
+        if c1.pair_group != c2.pair_group:
             raise ValueError(
-                f"pair group '{group_name}' must contain exactly 2 cases, got {len(group_cases)}"
+                f"consecutive cases at indices {2 * i} and {2 * i + 1} "
+                "must share the same pair group"
             )
-        pair_orders = {gc.pair_order for gc in group_cases}
-        if pair_orders != {1, 2}:
-            raise ValueError(f"pair group '{group_name}' must use pair_order values 1 and 2")
-        profiles = {gc.worker_profile for gc in group_cases}
-        if profiles != set(M29_MUTATION_PROFILES):
+        if c1.pair_group in pairs:
+            raise ValueError(f"duplicate pair group '{c1.pair_group}' in suite")
+        if (c1.pair_order, c2.pair_order) != (1, 2):
             raise ValueError(
-                f"pair group '{group_name}' must contain one Codex and one Antigravity case"
+                f"pair group '{c1.pair_group}' cases must be ordered with pair_order (1, 2)"
             )
-        sorted_cases = sorted(group_cases, key=lambda c: c.pair_order)
-        first_profile = sorted_cases[0].worker_profile
-        if last_first_profile is not None and first_profile == last_first_profile:
+        if {c1.worker_profile, c2.worker_profile} != set(M29_MUTATION_PROFILES):
             raise ValueError(
-                f"pair group '{group_name}' does not alternate provider order "
+                f"pair group '{c1.pair_group}' must contain one Codex and one Antigravity case"
+            )
+        if i == 0 and c1.worker_profile != "codex-native-executor":
+            raise ValueError(
+                f"Pair 01 '{c1.pair_group}' must start with codex-native-executor, "
+                f"got {c1.worker_profile}"
+            )
+        if i > 0 and c1.worker_profile == cases[2 * (i - 1)].worker_profile:
+            raise ValueError(
+                f"pair group '{c1.pair_group}' does not alternate provider order "
                 "to counterbalance ordering bias"
             )
-        last_first_profile = first_profile
+        pairs[c1.pair_group] = (c1, c2)
 
     return pairs
 
 
-def _validate_pair_semantic_fields(pair_group: str, pair_cases: list[M29MutationCase]) -> None:
-    sorted_cases = sorted(pair_cases, key=lambda c: c.pair_order)
-    c1, c2 = sorted_cases[0], sorted_cases[1]
+def _validate_pair_semantic_fields(
+    pair_group: str,
+    pair_cases: tuple[M29MutationCase, M29MutationCase],
+) -> None:
+    c1, c2 = pair_cases[0], pair_cases[1]
 
     if c1.prompt != c2.prompt:
         raise ValueError(f"pair group '{pair_group}' has mismatched prompts")
@@ -236,19 +270,6 @@ def _validate_pair_semantic_fields(pair_group: str, pair_cases: list[M29Mutation
         raise ValueError(f"pair group '{pair_group}' has mismatched entrypoints")
     if c1.topic != c2.topic:
         raise ValueError(f"pair group '{pair_group}' has mismatched topics")
-    if c1.target_repository_revision != c2.target_repository_revision:
-        raise ValueError(f"pair group '{pair_group}' has mismatched target repository revisions")
-    if c1.candidate_timeout_seconds != CANDIDATE_TIMEOUT_SECONDS:
-        raise ValueError(
-            f"case '{c1.case_id}' timeout must be {CANDIDATE_TIMEOUT_SECONDS}s, "
-            f"got {c1.candidate_timeout_seconds}s"
-        )
-    if c1.candidate_timeout_seconds != c2.candidate_timeout_seconds:
-        raise ValueError(f"pair group '{pair_group}' has mismatched candidate timeouts")
-    if c1.task_budget != c2.task_budget:
-        raise ValueError(f"pair group '{pair_group}' has mismatched task budgets")
-    if c1.neutral_evaluator != c2.neutral_evaluator:
-        raise ValueError(f"pair group '{pair_group}' has mismatched neutral evaluator manifests")
     if c1.delivery_mode != "workspace" or c2.delivery_mode != "workspace":
         raise ValueError(f"pair group '{pair_group}' delivery_mode must be 'workspace'")
     if "modify_workspace_files" not in c1.allowed_actions:
@@ -271,6 +292,7 @@ def validate_m29_mutation_suite(suite: M29MutationSuite) -> None:
     """Validate all frozen contract rules for the M29 feature/mutation suite."""
     _validate_suite_counts_and_ids(suite)
     _validate_evaluator_manifest(suite.neutral_evaluator)
+    _validate_case_suite_bindings(suite)
     pairs = _validate_pair_grouping_and_counterbalancing(suite.cases)
     for pair_group, pair_cases in pairs.items():
         _validate_pair_semantic_fields(pair_group, pair_cases)
@@ -305,30 +327,18 @@ class M29MutationSuite(StrictModel):
 
     def case_ids_by_profile(self) -> dict[str, list[str]]:
         """Return scheduled case IDs mapped by candidate profile."""
-        result: dict[str, list[str]] = {p: [] for p in M29_MUTATION_PROFILES}
-        for c in self.cases:
-            result[c.worker_profile].append(c.case_id)
-        return result
+        return {
+            p: [c.case_id for c in self.cases if c.worker_profile == p]
+            for p in M29_MUTATION_PROFILES
+        }
 
     def cases_by_profile(self) -> dict[str, list[M29MutationCase]]:
         """Return cases mapped by candidate profile."""
-        result: dict[str, list[M29MutationCase]] = {p: [] for p in M29_MUTATION_PROFILES}
-        for c in self.cases:
-            result[c.worker_profile].append(c)
-        return result
+        return {p: [c for c in self.cases if c.worker_profile == p] for p in M29_MUTATION_PROFILES}
 
     def pair_cases(self) -> list[tuple[M29MutationCase, M29MutationCase]]:
         """Return sorted pairs of cases in order of scheduled execution."""
-        pairs_dict: dict[str, list[M29MutationCase]] = {}
-        for c in self.cases:
-            pairs_dict.setdefault(c.pair_group, []).append(c)
-        return [
-            (
-                sorted(group, key=lambda c: c.pair_order)[0],
-                sorted(group, key=lambda c: c.pair_order)[1],
-            )
-            for group in pairs_dict.values()
-        ]
+        return [(self.cases[2 * i], self.cases[2 * i + 1]) for i in range(10)]
 
 
 RAW_PAIR_DEFINITIONS: tuple[tuple[str, str, str, str, str, str], ...] = (
@@ -396,7 +406,8 @@ RAW_PAIR_DEFINITIONS: tuple[tuple[str, str, str, str, str, str], ...] = (
             "Cover first, middle, final, empty, and single-page requests over IDs [a, b, c, d]: "
             "limit 2 returns [a, b] with cursor b, then after b returns [c, d] with no cursor; "
             "limit 4 returns all items with no cursor; after d returns an empty page. "
-            "A non-positive limit or unknown cursor raises ValueError; cursor item is not repeated."
+            "A non-positive limit or unknown cursor raises ValueError; "
+            "the cursor item is not repeated."
         ),
         "cursor-page",
     ),
@@ -511,54 +522,38 @@ def _build_cases_for_pair(
     oracle_hash = _hash_text(oracle)
     pair_group = f"m29-mut-pair-{pair_index:02d}-{slug}"
 
+    profiles: tuple[tuple[M29MutationProfile, str], ...]
     if pair_index % 2 == 1:
-        first_profile: Literal["codex-native-executor", "antigravity-native-executor"] = (
-            "codex-native-executor"
+        profiles = (
+            ("codex-native-executor", "codex"),
+            ("antigravity-native-executor", "antigravity"),
         )
-        first_slug = "codex"
-        second_profile: Literal["codex-native-executor", "antigravity-native-executor"] = (
-            "antigravity-native-executor"
-        )
-        second_slug = "antigravity"
     else:
-        first_profile = "antigravity-native-executor"
-        first_slug = "antigravity"
-        second_profile = "codex-native-executor"
-        second_slug = "codex"
+        profiles = (
+            ("antigravity-native-executor", "antigravity"),
+            ("codex-native-executor", "codex"),
+        )
 
-    case1 = M29MutationCase(
-        case_id=f"m29-mut-{pair_index:02d}-{slug}-{first_slug}",
-        worker_profile=first_profile,
-        topic=topic,
-        pair_group=pair_group,
-        pair_order=1,
-        prompt=prompt,
-        allowed_source_path=path,
-        entrypoint=entrypoint,
-        acceptance_oracle=oracle,
-        acceptance_oracle_sha256=oracle_hash,
-        target_repository_revision=target_repository_revision,
-        candidate_timeout_seconds=CANDIDATE_TIMEOUT_SECONDS,
-        task_budget=task_budget,
-        neutral_evaluator=neutral_evaluator,
-    )
-    case2 = M29MutationCase(
-        case_id=f"m29-mut-{pair_index:02d}-{slug}-{second_slug}",
-        worker_profile=second_profile,
-        topic=topic,
-        pair_group=pair_group,
-        pair_order=2,
-        prompt=prompt,
-        allowed_source_path=path,
-        entrypoint=entrypoint,
-        acceptance_oracle=oracle,
-        acceptance_oracle_sha256=oracle_hash,
-        target_repository_revision=target_repository_revision,
-        candidate_timeout_seconds=CANDIDATE_TIMEOUT_SECONDS,
-        task_budget=task_budget,
-        neutral_evaluator=neutral_evaluator,
-    )
-    return case1, case2
+    cases = [
+        M29MutationCase(
+            case_id=f"m29-mut-{pair_index:02d}-{slug}-{p_slug}",
+            worker_profile=profile,
+            topic=topic,
+            pair_group=pair_group,
+            pair_order=order,
+            prompt=prompt,
+            allowed_source_path=path,
+            entrypoint=entrypoint,
+            acceptance_oracle=oracle,
+            acceptance_oracle_sha256=oracle_hash,
+            target_repository_revision=target_repository_revision,
+            candidate_timeout_seconds=CANDIDATE_TIMEOUT_SECONDS,
+            task_budget=task_budget,
+            neutral_evaluator=neutral_evaluator,
+        )
+        for order, (profile, p_slug) in enumerate(profiles, start=1)
+    ]
+    return cases[0], cases[1]
 
 
 def build_m29_mutation_suite(
