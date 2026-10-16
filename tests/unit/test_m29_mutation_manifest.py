@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -198,10 +199,10 @@ def test_case_accepted_invariants_rejected() -> None:
     with pytest.raises(ValidationError, match="accepted case .* cannot have exclusion_reason"):
         M29MutationManifestCase(**{**base, "exclusion_reason": "excluded_test"})
 
-    with pytest.raises(ValidationError, match="requires verified matching identity"):
+    with pytest.raises(ValidationError, match="requires verified matching"):
         M29MutationManifestCase(**{**base, "identity_matches": False})
 
-    with pytest.raises(ValidationError, match="requires verified matching identity"):
+    with pytest.raises(ValidationError, match="identity_matches cannot be True"):
         M29MutationManifestCase(
             **{**base, "execution_identity_status": "unknown_execution_identity"}
         )
@@ -243,6 +244,37 @@ def test_case_failed_invariants() -> None:
         M29MutationManifestCase(
             **{**base, "terminal_status": "completed", "report_failure_kind": None}
         )
+
+    # Eligible failed case requires verified matching identity
+    with pytest.raises(ValidationError, match="requires verified matching"):
+        M29MutationManifestCase(**{**base, "identity_matches": False})
+
+    with pytest.raises(ValidationError, match="requires verified matching"):
+        M29MutationManifestCase(
+            **{**base, "identity_matches": False, "execution_identity_status": "unknown_legacy"}
+        )
+
+    # identity_matches cannot be True when execution_identity_status is not verified
+    with pytest.raises(ValidationError, match="identity_matches cannot be True"):
+        M29MutationManifestCase(
+            **{
+                **base,
+                "execution_identity_status": "unknown_legacy",
+                "identity_matches": True,
+                "exclusion_reason": "unverified_legacy",
+            }
+        )
+
+    # Excluded failed case with unverified identity and identity_matches=False is valid
+    excluded_case = M29MutationManifestCase(
+        **{
+            **base,
+            "execution_identity_status": "unknown_legacy",
+            "identity_matches": False,
+            "exclusion_reason": "unverified_legacy",
+        }
+    )
+    assert excluded_case.exclusion_reason == "unverified_legacy"
 
 
 def test_case_quality_invariants_rejected() -> None:
@@ -325,6 +357,22 @@ def test_paired_analysis_summary_and_report() -> None:
     assert report.manifest_sha256 == "f" * 64
     assert report.paired_summary == summary
     assert_sanitized_mutation_paired_report(report.model_dump(mode="json"))
+
+    # Excluded case does not count toward identity_complete_pair_count
+    excluded_cases = list(manifest.cases)
+    excluded_cases[0] = excluded_cases[0].model_copy(
+        update={
+            "accepted": False,
+            "exclusion_reason": "test_exclusion",
+            "report_failure_kind": "timeout",
+            "identity_matches": False,
+            "execution_identity_status": "unknown_legacy",
+        }
+    )
+    summary_with_exclusion = analyze_mutation_paired_manifest(
+        manifest.model_copy(update={"cases": excluded_cases})
+    )
+    assert summary_with_exclusion.identity_complete_pair_count == 9
 
 
 def test_manifest_validation_invariants() -> None:
@@ -544,7 +592,7 @@ def test_manifest_validation_pairing_edge_cases() -> None:
         M29MutationManifest.model_validate({**data, "cases": swapped_pair_start})
 
 
-def test_manifest_validation_reconciliation_edge_cases() -> None:
+def test_manifest_validation_reconciliation_profile_and_counts_edge_cases() -> None:
     manifest = _make_valid_manifest()
     data = manifest.model_dump()
 
@@ -552,46 +600,91 @@ def test_manifest_validation_reconciliation_edge_cases() -> None:
     recon_missing = _make_recon(manifest.as_of)
     bad_profiles = dict(recon_missing.profiles)
     del bad_profiles["codex-native-executor"]
-    recon_bad = M29MutationCohortReconciliation(
-        as_of=recon_missing.as_of,
-        window_start_at=recon_missing.window_start_at,
-        window_end_at=recon_missing.window_end_at,
-        report_snapshot_verified=True,
-        profiles=bad_profiles,
-    )
-    with pytest.raises(ValidationError, match="cohort reconciliation is missing profile"):
+    recon_bad = replace(recon_missing, profiles=bad_profiles)
+    with pytest.raises(ValidationError, match="do not match expected profiles"):
         M29MutationManifest.model_validate({**data, "cohort_reconciliation": recon_bad})
 
     # Scheduled suite count != 10
     recon_bad_sched = _make_recon(manifest.as_of)
     bad_profiles_sched = dict(recon_bad_sched.profiles)
-    p = bad_profiles_sched["codex-native-executor"]
-    bad_profiles_sched["codex-native-executor"] = MutationProfileReconciliation(
-        baseline_count=p.baseline_count,
-        scheduled_suite_count=9,
-        eligible_suite_count=p.eligible_suite_count,
-        excluded_suite_count=p.excluded_suite_count,
-        current_count=p.current_count,
-        baseline_ids_sha256=p.baseline_ids_sha256,
-        scheduled_suite_ids_sha256=p.scheduled_suite_ids_sha256,
-        eligible_suite_ids_sha256=p.eligible_suite_ids_sha256,
-        excluded_suite_ids_sha256=p.excluded_suite_ids_sha256,
-        current_ids_sha256=p.current_ids_sha256,
-    )
-    recon_bad_sched = M29MutationCohortReconciliation(
-        as_of=recon_missing.as_of,
-        window_start_at=recon_missing.window_start_at,
-        window_end_at=recon_missing.window_end_at,
-        report_snapshot_verified=True,
-        profiles=bad_profiles_sched,
+    bad_profiles_sched["codex-native-executor"] = replace(
+        bad_profiles_sched["codex-native-executor"], scheduled_suite_count=9
     )
     with pytest.raises(ValidationError, match="scheduled_suite_count must be 10"):
-        M29MutationManifest.model_validate({**data, "cohort_reconciliation": recon_bad_sched})
+        M29MutationManifest.model_validate(
+            {
+                **data,
+                "cohort_reconciliation": replace(recon_bad_sched, profiles=bad_profiles_sched),
+            }
+        )
 
     # Excluded suite count mismatch
     recon_bad_ex = _make_recon(manifest.as_of, codex_excluded=1)
     with pytest.raises(ValidationError, match="excluded_suite_count mismatch"):
         M29MutationManifest.model_validate({**data, "cohort_reconciliation": recon_bad_ex})
+
+    # Reconciliation status not passed
+    bad_p_status = dict(recon_missing.profiles)
+    bad_p_status["codex-native-executor"] = replace(
+        bad_p_status["codex-native-executor"], reconciliation_status="failed"
+    )
+    with pytest.raises(ValidationError, match="reconciliation_status must be 'passed'"):
+        M29MutationManifest.model_validate(
+            {**data, "cohort_reconciliation": replace(recon_missing, profiles=bad_p_status)}
+        )
+
+    # Baseline count < 0
+    bad_p_base = dict(recon_missing.profiles)
+    bad_p_base["codex-native-executor"] = replace(
+        bad_p_base["codex-native-executor"], baseline_count=-1
+    )
+    with pytest.raises(ValidationError, match="baseline_count must be non-negative"):
+        M29MutationManifest.model_validate(
+            {**data, "cohort_reconciliation": replace(recon_missing, profiles=bad_p_base)}
+        )
+
+    # Current count mismatch
+    bad_p_curr = dict(recon_missing.profiles)
+    bad_p_curr["codex-native-executor"] = replace(
+        bad_p_curr["codex-native-executor"], current_count=99
+    )
+    with pytest.raises(ValidationError, match="current_count mismatch"):
+        M29MutationManifest.model_validate(
+            {**data, "cohort_reconciliation": replace(recon_missing, profiles=bad_p_curr)}
+        )
+
+
+def test_manifest_validation_reconciliation_window_and_digest_edge_cases() -> None:
+    manifest = _make_valid_manifest()
+    data = manifest.model_dump()
+    recon = _make_recon(manifest.as_of)
+
+    # Window end not matching as_of
+    recon_bad_end = replace(recon, window_end_at=manifest.as_of + timedelta(seconds=1))
+    with pytest.raises(ValidationError, match="window_end_at .* must match as_of"):
+        M29MutationManifest.model_validate({**data, "cohort_reconciliation": recon_bad_end})
+
+    # Window start not exactly 90 days before as_of
+    recon_bad_start = replace(recon, window_start_at=manifest.as_of - timedelta(days=60))
+    with pytest.raises(ValidationError, match="window_start_at .* must be exactly 90 days"):
+        M29MutationManifest.model_validate({**data, "cohort_reconciliation": recon_bad_start})
+
+    # Malformed SHA-256 digest in profile reconciliation
+    for field_name in (
+        "baseline_ids_sha256",
+        "scheduled_suite_ids_sha256",
+        "eligible_suite_ids_sha256",
+        "excluded_suite_ids_sha256",
+        "current_ids_sha256",
+    ):
+        bad_p_sha = dict(recon.profiles)
+        bad_p_sha["codex-native-executor"] = replace(
+            bad_p_sha["codex-native-executor"], **{field_name: "not-a-sha"}
+        )
+        with pytest.raises(ValidationError, match="must be a 64-character lowercase hex SHA-256"):
+            M29MutationManifest.model_validate(
+                {**data, "cohort_reconciliation": replace(recon, profiles=bad_p_sha)}
+            )
 
 
 def test_sanitized_mutation_manifest_missing_or_extra_nested_keys() -> None:

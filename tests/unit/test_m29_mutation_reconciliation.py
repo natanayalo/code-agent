@@ -725,6 +725,24 @@ def test_manifest_matches_canonical_report_no_baseline_report_with_baseline_coun
     recon = replace(manifest.cohort_reconciliation, profiles=profiles)
     manifest_with_baseline_recon = manifest.model_copy(update={"cohort_reconciliation": recon})
     report = _canonical_report(as_of, codex_sample=15)
-    assert_manifest_matches_canonical_report(
-        manifest_with_baseline_recon, report, baseline_report=None
+    with pytest.raises(ValueError, match="baseline report is required for codex-native-executor"):
+        assert_manifest_matches_canonical_report(
+            manifest_with_baseline_recon, report, baseline_report=None
+        )
+
+
+def test_manifest_matches_canonical_report_baseline_sample_size_mismatch() -> None:
+    as_of = datetime(2026, 10, 16, 12, 0, 0, tzinfo=UTC)
+    manifest = _make_manifest(as_of)
+    profiles = dict(manifest.cohort_reconciliation.profiles)
+    profiles["codex-native-executor"] = replace(
+        profiles["codex-native-executor"], baseline_count=5, current_count=15
     )
+    recon = replace(manifest.cohort_reconciliation, profiles=profiles)
+    manifest_with_baseline_recon = manifest.model_copy(update={"cohort_reconciliation": recon})
+    report = _canonical_report(as_of, codex_sample=15)
+    baseline_rep = _canonical_report(as_of - timedelta(days=1), codex_sample=4, codex_accepted=4)
+    with pytest.raises(ValueError, match="baseline cell sample size"):
+        assert_manifest_matches_canonical_report(
+            manifest_with_baseline_recon, report, baseline_report=baseline_rep
+        )

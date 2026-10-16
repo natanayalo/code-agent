@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime
+import re
+from datetime import datetime, timedelta
 from typing import Any, Literal
 
 from pydantic import Field, model_validator
@@ -34,7 +35,10 @@ class M29MutationManifestCase(StrictModel):
     report_failure_kind: str | None = Field(default=None, pattern=r"^[a-z0-9_]+$")
     time_to_terminal_seconds: float | None = Field(default=None, ge=0.0)
     execution_identity_status: Literal[
-        "verified", "unknown_execution_identity", "mixed_execution_identity"
+        "verified",
+        "unknown_legacy",
+        "unknown_execution_identity",
+        "mixed_execution_identity",
     ]
     identity_matches: bool
     exclusion_reason: str | None = None
@@ -66,6 +70,19 @@ def _validate_provider_profile(case: M29MutationManifestCase) -> None:
 
 
 def _validate_pre_evaluation_completion(case: M29MutationManifestCase) -> None:
+    if case.identity_matches and case.execution_identity_status != "verified":
+        raise ValueError(
+            f"case '{case.case_id}' identity_matches cannot be True when "
+            f"execution_identity_status is '{case.execution_identity_status}'"
+        )
+
+    if case.exclusion_reason is None:
+        if not case.identity_matches or case.execution_identity_status != "verified":
+            raise ValueError(
+                f"eligible cohort case '{case.case_id}' requires verified matching "
+                "execution identity"
+            )
+
     if case.accepted:
         if case.terminal_status != "completed":
             raise ValueError(
@@ -82,8 +99,6 @@ def _validate_pre_evaluation_completion(case: M29MutationManifestCase) -> None:
                 f"accepted case '{case.case_id}' cannot have exclusion_reason "
                 f"'{case.exclusion_reason}'"
             )
-        if not case.identity_matches or case.execution_identity_status != "verified":
-            raise ValueError(f"accepted case '{case.case_id}' requires verified matching identity")
     else:
         if case.exclusion_reason is None and case.terminal_status == "completed":
             raise ValueError(f"non-excluded completed case '{case.case_id}' must be accepted")
@@ -182,7 +197,12 @@ def analyze_mutation_paired_manifest(
         else:
             neither_quality += 1
 
-        if c_codex.identity_matches and c_ag.identity_matches:
+        if (
+            c_codex.exclusion_reason is None
+            and c_ag.exclusion_reason is None
+            and c_codex.identity_matches
+            and c_ag.identity_matches
+        ):
             identity_pairs += 1
 
     return M29MutationPairedTaskSummary(
@@ -286,6 +306,16 @@ def _validate_pairs_and_alternation(cases: list[M29MutationManifestCase]) -> Non
             )
 
 
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_RECON_SHA_FIELDS = (
+    "baseline_ids_sha256",
+    "scheduled_suite_ids_sha256",
+    "eligible_suite_ids_sha256",
+    "excluded_suite_ids_sha256",
+    "current_ids_sha256",
+)
+
+
 def _validate_cohort_reconciliation_binding(manifest: M29MutationManifest) -> None:
     recon = manifest.cohort_reconciliation
     if manifest.as_of != recon.as_of:
@@ -293,14 +323,39 @@ def _validate_cohort_reconciliation_binding(manifest: M29MutationManifest) -> No
             f"manifest as_of ({manifest.as_of.isoformat()}) does not match cohort "
             f"reconciliation as_of ({recon.as_of.isoformat()})"
         )
+    if recon.window_end_at != recon.as_of:
+        raise ValueError(
+            f"cohort reconciliation window_end_at ({recon.window_end_at.isoformat()}) "
+            f"must match as_of ({recon.as_of.isoformat()})"
+        )
+    expected_start = recon.as_of - timedelta(days=90)
+    if recon.window_start_at != expected_start:
+        raise ValueError(
+            f"cohort reconciliation window_start_at ({recon.window_start_at.isoformat()}) "
+            f"must be exactly 90 days before as_of ({expected_start.isoformat()})"
+        )
     if not recon.report_snapshot_verified:
         raise ValueError("manifest cohort reconciliation report_snapshot_verified must be True")
 
+    if set(recon.profiles.keys()) != set(M29_MUTATION_PROFILES):
+        raise ValueError(
+            f"cohort reconciliation profiles {set(recon.profiles.keys())} do not match "
+            f"expected profiles {set(M29_MUTATION_PROFILES)}"
+        )
+
     for profile in M29_MUTATION_PROFILES:
         p_cases = [c for c in manifest.cases if c.worker_profile == profile]
-        p_recon = recon.profiles.get(profile)
-        if p_recon is None:
-            raise ValueError(f"cohort reconciliation is missing profile '{profile}'")
+        p_recon = recon.profiles[profile]
+        if p_recon.reconciliation_status != "passed":
+            raise ValueError(
+                f"profile '{profile}' reconciliation_status must be 'passed', "
+                f"got '{p_recon.reconciliation_status}'"
+            )
+        if p_recon.baseline_count < 0:
+            raise ValueError(
+                f"profile '{profile}' baseline_count must be non-negative, "
+                f"got {p_recon.baseline_count}"
+            )
         if p_recon.scheduled_suite_count != 10:
             raise ValueError(
                 f"profile '{profile}' scheduled_suite_count must be 10, "
@@ -318,6 +373,18 @@ def _validate_cohort_reconciliation_binding(manifest: M29MutationManifest) -> No
                 f"profile '{profile}' excluded_suite_count mismatch: "
                 f"reconciliation has {p_recon.excluded_suite_count}, manifest has {excluded_count}"
             )
+        if p_recon.current_count != p_recon.baseline_count + eligible_count:
+            raise ValueError(
+                f"profile '{profile}' current_count mismatch: expected "
+                f"{p_recon.baseline_count + eligible_count}, got {p_recon.current_count}"
+            )
+        for field_name in _RECON_SHA_FIELDS:
+            sha_val = getattr(p_recon, field_name)
+            if not _SHA256_RE.match(sha_val):
+                raise ValueError(
+                    f"profile '{profile}' {field_name} must be a 64-character lowercase hex "
+                    f"SHA-256, got '{sha_val}'"
+                )
 
 
 MUTATION_MANIFEST_ALLOWED_KEYS: frozenset[str] = frozenset(

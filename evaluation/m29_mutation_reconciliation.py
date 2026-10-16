@@ -215,6 +215,11 @@ def _validate_cell_counts_and_failures(
     suite_failed = sum(not c.accepted for c in p_included)
 
     if baseline_cell is not None:
+        if baseline_cell.sample_size != recon_profile.baseline_count:
+            raise ValueError(
+                f"baseline cell sample size ({baseline_cell.sample_size}) does not match cohort "
+                f"reconciliation baseline_count ({recon_profile.baseline_count}) for {profile}"
+            )
         expected_accepted = baseline_cell.accepted_count + suite_accepted
         expected_failed = baseline_cell.failure_count + suite_failed
         expected_typed = dict(baseline_cell.typed_failures)
@@ -223,7 +228,10 @@ def _validate_cell_counts_and_failures(
         expected_failed = suite_failed
         expected_typed = {}
     else:
-        return
+        raise ValueError(
+            f"baseline report is required for {profile} when baseline_count > 0 "
+            f"({recon_profile.baseline_count})"
+        )
 
     if cell.accepted_count != expected_accepted:
         raise ValueError(
