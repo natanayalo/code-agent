@@ -178,12 +178,13 @@ Temporal migration and rollback record is in the
   worker-reported tests from changing canonical completion; its Temporal smoke
   confirms verification/review stages are inapplicable. The frozen
   `feature/mutation` suite and neutral evaluator manifest contract
-  (`evaluation/m29_mutation_suite.py`) and fail-closed cohort reconciliation
-  helper (`evaluation/m29_mutation_cohort.py`) are implemented and validated.
-  The full runner still needs report-runner integration, memory isolation,
-  pass/fail/unavailable extractor smokes for both profiles, and guaranteed
-  cleanup. Live cases remain gated, `feature/mutation` is N=0, and production
-  routing remains static.
+  (`evaluation/m29_mutation_suite.py`), fail-closed cohort reconciliation
+  helper (`evaluation/m29_mutation_cohort.py`), and sanitized manifest &
+  report-publication reconciliation layer (`evaluation/m29_mutation_manifest.py`,
+  `evaluation/m29_mutation_reconciliation.py`) are implemented and validated.
+  The full runner still needs memory isolation, pass/fail/unavailable
+  extractor smokes for both profiles, and guaranteed cleanup. Live cases remain
+  gated, `feature/mutation` is N=0, and production routing remains static.
 
 ## Known limitations
 
@@ -220,13 +221,15 @@ Temporal migration and rollback record is in the
    c. [Completed] qualify the cumulative `investigation/read_only` sample floor,
       retaining the three Wave 4 Codex identity exclusions;
    d. [Contract approved; execution preparation in progress] complete the
-      post-terminal evaluation runner, report-runner manifest integration,
-      full memory isolation, pending-interaction handling, delivery
-      safeguards, extractor-stage smokes, and 72-hour cleanup before live
-      evidence collection. The frozen `feature/mutation` suite & neutral
-      evaluator manifest contract (`evaluation/m29_mutation_suite.py`) and the
-      exact baseline-plus-eligible-suite reconciliation gate
-      (`evaluation/m29_mutation_cohort.py`) are implemented and validated;
+      post-terminal evaluation runner, memory isolation, pending-interaction
+      handling, delivery safeguards, extractor-stage smokes, and 72-hour
+      cleanup before live evidence collection. The frozen `feature/mutation`
+      suite & neutral evaluator manifest contract
+      (`evaluation/m29_mutation_suite.py`), the exact baseline-plus-eligible-suite
+      reconciliation gate (`evaluation/m29_mutation_cohort.py`), and the
+      sanitized manifest & report-publication reconciliation layer
+      (`evaluation/m29_mutation_manifest.py`,
+      `evaluation/m29_mutation_reconciliation.py`) are implemented and validated;
    e. gather evidence in a historical 45-day cohort before claiming
       longitudinal robustness;
    f. evaluate hierarchical budget controls separately.
