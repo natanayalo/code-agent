@@ -1,0 +1,956 @@
+{
+  "candidate_identities": {
+    "antigravity-native-executor": {
+      "model": "gemini-3.8-flash",
+      "provider": "antigravity",
+      "reasoning_effort": "medium"
+    },
+    "codex-native-executor": {
+      "model": "gpt-6-luna",
+      "provider": "codex",
+      "reasoning_effort": "high"
+    }
+  },
+  "cases": [
+    {
+      "acceptance_oracle": "\"  Quick   Fix! \" becomes \"quick-fix\"; \"caf\u00e9 & TEA\" becomes \"caf\u00e9-tea\"; full-width \"\uff26\uff2f\uff2f\" becomes \"foo\"; punctuation-only input becomes the empty string. The input is not mutated.",
+      "acceptance_oracle_sha256": "03fcf78411d262d53ae08f7fdaede4ed2f516d90c4aba129ecfaae2efbf122f4",
+      "allowed_actions": [
+        "modify_workspace_files"
+      ],
+      "allowed_source_path": "taskboard/labels.py",
+      "candidate_timeout_seconds": 900,
+      "case_id": "m29-mut-01-label-norm-codex",
+      "clarification_questions": [],
+      "delivery_mode": "workspace",
+      "entrypoint": "normalize_label(value: str) -> str",
+      "mutation_mode": "mutation",
+      "neutral_evaluator": {
+        "budget": {
+          "max_cost_usd": null,
+          "max_tokens": 8192,
+          "timeout_seconds": 300
+        },
+        "fallback_policy": "none",
+        "model": "claude-3-7-sonnet",
+        "provider": "anthropic",
+        "reasoning_effort": null,
+        "runtime": "read_only",
+        "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
+        "tools": [
+          "read_file",
+          "list_dir"
+        ]
+      },
+      "pair_group": "m29-mut-pair-01-label-norm",
+      "pair_order": 1,
+      "prompt": "Implement normalize_label so it applies Unicode NFKC normalization and case folding, replaces each run of non-alphanumeric characters with one hyphen, and removes leading and trailing hyphens.\n\nMake the smallest implementation for this request in the task workspace. Do not change unrelated files or add dependencies. Report the files changed and any blockers. Do not modify or invoke runner-owned evaluation checks.",
+      "requires_clarification": false,
+      "requires_permission": false,
+      "target_repository_revision": "0000000000000000000000000000000000000000",
+      "task_budget": {
+        "max_cost_usd": null,
+        "max_tokens": null,
+        "timeout_seconds": 900
+      },
+      "task_class": "feature",
+      "topic": "label_normalization",
+      "verification_commands": [],
+      "worker_profile": "codex-native-executor"
+    },
+    {
+      "acceptance_oracle": "\"  Quick   Fix! \" becomes \"quick-fix\"; \"caf\u00e9 & TEA\" becomes \"caf\u00e9-tea\"; full-width \"\uff26\uff2f\uff2f\" becomes \"foo\"; punctuation-only input becomes the empty string. The input is not mutated.",
+      "acceptance_oracle_sha256": "03fcf78411d262d53ae08f7fdaede4ed2f516d90c4aba129ecfaae2efbf122f4",
+      "allowed_actions": [
+        "modify_workspace_files"
+      ],
+      "allowed_source_path": "taskboard/labels.py",
+      "candidate_timeout_seconds": 900,
+      "case_id": "m29-mut-01-label-norm-antigravity",
+      "clarification_questions": [],
+      "delivery_mode": "workspace",
+      "entrypoint": "normalize_label(value: str) -> str",
+      "mutation_mode": "mutation",
+      "neutral_evaluator": {
+        "budget": {
+          "max_cost_usd": null,
+          "max_tokens": 8192,
+          "timeout_seconds": 300
+        },
+        "fallback_policy": "none",
+        "model": "claude-3-7-sonnet",
+        "provider": "anthropic",
+        "reasoning_effort": null,
+        "runtime": "read_only",
+        "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
+        "tools": [
+          "read_file",
+          "list_dir"
+        ]
+      },
+      "pair_group": "m29-mut-pair-01-label-norm",
+      "pair_order": 2,
+      "prompt": "Implement normalize_label so it applies Unicode NFKC normalization and case folding, replaces each run of non-alphanumeric characters with one hyphen, and removes leading and trailing hyphens.\n\nMake the smallest implementation for this request in the task workspace. Do not change unrelated files or add dependencies. Report the files changed and any blockers. Do not modify or invoke runner-owned evaluation checks.",
+      "requires_clarification": false,
+      "requires_permission": false,
+      "target_repository_revision": "0000000000000000000000000000000000000000",
+      "task_budget": {
+        "max_cost_usd": null,
+        "max_tokens": null,
+        "timeout_seconds": 900
+      },
+      "task_class": "feature",
+      "topic": "label_normalization",
+      "verification_commands": [],
+      "worker_profile": "antigravity-native-executor"
+    },
+    {
+      "acceptance_oracle": "For input IDs [\"b\", \"a\", \"c\", \"d\"], where b and a have priority 2 and the same timestamp, c has priority 3 and a later timestamp, and d has priority 2 and an earlier timestamp, return IDs [\"c\", \"d\", \"a\", \"b\"]. Verify the input remains [\"b\", \"a\", \"c\", \"d\"].",
+      "acceptance_oracle_sha256": "9e6c7dbdbb220c95823dbd115562f075f4cac1b5c2a6f7ac4c3d13269e6fb9ae",
+      "allowed_actions": [
+        "modify_workspace_files"
+      ],
+      "allowed_source_path": "taskboard/ordering.py",
+      "candidate_timeout_seconds": 900,
+      "case_id": "m29-mut-02-task-order-antigravity",
+      "clarification_questions": [],
+      "delivery_mode": "workspace",
+      "entrypoint": "sort_tasks(tasks: list[Task]) -> list[Task]",
+      "mutation_mode": "mutation",
+      "neutral_evaluator": {
+        "budget": {
+          "max_cost_usd": null,
+          "max_tokens": 8192,
+          "timeout_seconds": 300
+        },
+        "fallback_policy": "none",
+        "model": "claude-3-7-sonnet",
+        "provider": "anthropic",
+        "reasoning_effort": null,
+        "runtime": "read_only",
+        "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
+        "tools": [
+          "read_file",
+          "list_dir"
+        ]
+      },
+      "pair_group": "m29-mut-pair-02-task-order",
+      "pair_order": 1,
+      "prompt": "Implement sort_tasks to order tasks by descending priority, then ascending created_at, then ascending task id for ties. Return a new list and leave the input order unchanged.\n\nMake the smallest implementation for this request in the task workspace. Do not change unrelated files or add dependencies. Report the files changed and any blockers. Do not modify or invoke runner-owned evaluation checks.",
+      "requires_clarification": false,
+      "requires_permission": false,
+      "target_repository_revision": "0000000000000000000000000000000000000000",
+      "task_budget": {
+        "max_cost_usd": null,
+        "max_tokens": null,
+        "timeout_seconds": 900
+      },
+      "task_class": "feature",
+      "topic": "task_ordering",
+      "verification_commands": [],
+      "worker_profile": "antigravity-native-executor"
+    },
+    {
+      "acceptance_oracle": "For input IDs [\"b\", \"a\", \"c\", \"d\"], where b and a have priority 2 and the same timestamp, c has priority 3 and a later timestamp, and d has priority 2 and an earlier timestamp, return IDs [\"c\", \"d\", \"a\", \"b\"]. Verify the input remains [\"b\", \"a\", \"c\", \"d\"].",
+      "acceptance_oracle_sha256": "9e6c7dbdbb220c95823dbd115562f075f4cac1b5c2a6f7ac4c3d13269e6fb9ae",
+      "allowed_actions": [
+        "modify_workspace_files"
+      ],
+      "allowed_source_path": "taskboard/ordering.py",
+      "candidate_timeout_seconds": 900,
+      "case_id": "m29-mut-02-task-order-codex",
+      "clarification_questions": [],
+      "delivery_mode": "workspace",
+      "entrypoint": "sort_tasks(tasks: list[Task]) -> list[Task]",
+      "mutation_mode": "mutation",
+      "neutral_evaluator": {
+        "budget": {
+          "max_cost_usd": null,
+          "max_tokens": 8192,
+          "timeout_seconds": 300
+        },
+        "fallback_policy": "none",
+        "model": "claude-3-7-sonnet",
+        "provider": "anthropic",
+        "reasoning_effort": null,
+        "runtime": "read_only",
+        "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
+        "tools": [
+          "read_file",
+          "list_dir"
+        ]
+      },
+      "pair_group": "m29-mut-pair-02-task-order",
+      "pair_order": 2,
+      "prompt": "Implement sort_tasks to order tasks by descending priority, then ascending created_at, then ascending task id for ties. Return a new list and leave the input order unchanged.\n\nMake the smallest implementation for this request in the task workspace. Do not change unrelated files or add dependencies. Report the files changed and any blockers. Do not modify or invoke runner-owned evaluation checks.",
+      "requires_clarification": false,
+      "requires_permission": false,
+      "target_repository_revision": "0000000000000000000000000000000000000000",
+      "task_budget": {
+        "max_cost_usd": null,
+        "max_tokens": null,
+        "timeout_seconds": 900
+      },
+      "task_class": "feature",
+      "topic": "task_ordering",
+      "verification_commands": [],
+      "worker_profile": "codex-native-executor"
+    },
+    {
+      "acceptance_oracle": "Use tasks a=(queued, Sam, [red]), b=(done, sam, [red]), c=(queued, Lee, [red, blue]), and d=(in_progress, SAM, [blue]), in that order. Status queued returns [a, c]; owner SAM returns [a, b, d]; tag red returns [a, b, c]; all three filters set to queued/sAm/red return [a]; done/Lee returns []; no filters returns all four in their original order.",
+      "acceptance_oracle_sha256": "4f14eff8f8e8d21d543a40a980a17d6e1f3357b9dbb93d6061ee640b0e41a7a2",
+      "allowed_actions": [
+        "modify_workspace_files"
+      ],
+      "allowed_source_path": "taskboard/filters.py",
+      "candidate_timeout_seconds": 900,
+      "case_id": "m29-mut-03-task-filters-codex",
+      "clarification_questions": [],
+      "delivery_mode": "workspace",
+      "entrypoint": "filter_tasks(tasks, *, status=None, owner=None, tag=None) -> list[Task]",
+      "mutation_mode": "mutation",
+      "neutral_evaluator": {
+        "budget": {
+          "max_cost_usd": null,
+          "max_tokens": 8192,
+          "timeout_seconds": 300
+        },
+        "fallback_policy": "none",
+        "model": "claude-3-7-sonnet",
+        "provider": "anthropic",
+        "reasoning_effort": null,
+        "runtime": "read_only",
+        "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
+        "tools": [
+          "read_file",
+          "list_dir"
+        ]
+      },
+      "pair_group": "m29-mut-pair-03-task-filters",
+      "pair_order": 1,
+      "prompt": "Implement optional task filters for exact status, case-insensitive owner, and exact tag. When more than one filter is supplied, require all of them to match. Preserve source order and leave the input unchanged.\n\nMake the smallest implementation for this request in the task workspace. Do not change unrelated files or add dependencies. Report the files changed and any blockers. Do not modify or invoke runner-owned evaluation checks.",
+      "requires_clarification": false,
+      "requires_permission": false,
+      "target_repository_revision": "0000000000000000000000000000000000000000",
+      "task_budget": {
+        "max_cost_usd": null,
+        "max_tokens": null,
+        "timeout_seconds": 900
+      },
+      "task_class": "feature",
+      "topic": "task_filters",
+      "verification_commands": [],
+      "worker_profile": "codex-native-executor"
+    },
+    {
+      "acceptance_oracle": "Use tasks a=(queued, Sam, [red]), b=(done, sam, [red]), c=(queued, Lee, [red, blue]), and d=(in_progress, SAM, [blue]), in that order. Status queued returns [a, c]; owner SAM returns [a, b, d]; tag red returns [a, b, c]; all three filters set to queued/sAm/red return [a]; done/Lee returns []; no filters returns all four in their original order.",
+      "acceptance_oracle_sha256": "4f14eff8f8e8d21d543a40a980a17d6e1f3357b9dbb93d6061ee640b0e41a7a2",
+      "allowed_actions": [
+        "modify_workspace_files"
+      ],
+      "allowed_source_path": "taskboard/filters.py",
+      "candidate_timeout_seconds": 900,
+      "case_id": "m29-mut-03-task-filters-antigravity",
+      "clarification_questions": [],
+      "delivery_mode": "workspace",
+      "entrypoint": "filter_tasks(tasks, *, status=None, owner=None, tag=None) -> list[Task]",
+      "mutation_mode": "mutation",
+      "neutral_evaluator": {
+        "budget": {
+          "max_cost_usd": null,
+          "max_tokens": 8192,
+          "timeout_seconds": 300
+        },
+        "fallback_policy": "none",
+        "model": "claude-3-7-sonnet",
+        "provider": "anthropic",
+        "reasoning_effort": null,
+        "runtime": "read_only",
+        "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
+        "tools": [
+          "read_file",
+          "list_dir"
+        ]
+      },
+      "pair_group": "m29-mut-pair-03-task-filters",
+      "pair_order": 2,
+      "prompt": "Implement optional task filters for exact status, case-insensitive owner, and exact tag. When more than one filter is supplied, require all of them to match. Preserve source order and leave the input unchanged.\n\nMake the smallest implementation for this request in the task workspace. Do not change unrelated files or add dependencies. Report the files changed and any blockers. Do not modify or invoke runner-owned evaluation checks.",
+      "requires_clarification": false,
+      "requires_permission": false,
+      "target_repository_revision": "0000000000000000000000000000000000000000",
+      "task_budget": {
+        "max_cost_usd": null,
+        "max_tokens": null,
+        "timeout_seconds": 900
+      },
+      "task_class": "feature",
+      "topic": "task_filters",
+      "verification_commands": [],
+      "worker_profile": "antigravity-native-executor"
+    },
+    {
+      "acceptance_oracle": "Cover first, middle, final, empty, and single-page requests over IDs [a, b, c, d]: limit 2 returns [a, b] with cursor b, then after b returns [c, d] with no cursor; limit 4 returns all items with no cursor; after d returns an empty page. A non-positive limit or unknown cursor raises ValueError; the cursor item is not repeated.",
+      "acceptance_oracle_sha256": "876ad41296ab24e98a320bf500d6f4a883d7862e0725bab0b7f284fe7ee8c022",
+      "allowed_actions": [
+        "modify_workspace_files"
+      ],
+      "allowed_source_path": "taskboard/pagination.py",
+      "candidate_timeout_seconds": 900,
+      "case_id": "m29-mut-04-cursor-page-antigravity",
+      "clarification_questions": [],
+      "delivery_mode": "workspace",
+      "entrypoint": "paginate_tasks(tasks, *, limit: int, after_id: str | None = None) -> Page",
+      "mutation_mode": "mutation",
+      "neutral_evaluator": {
+        "budget": {
+          "max_cost_usd": null,
+          "max_tokens": 8192,
+          "timeout_seconds": 300
+        },
+        "fallback_policy": "none",
+        "model": "claude-3-7-sonnet",
+        "provider": "anthropic",
+        "reasoning_effort": null,
+        "runtime": "read_only",
+        "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
+        "tools": [
+          "read_file",
+          "list_dir"
+        ]
+      },
+      "pair_group": "m29-mut-pair-04-cursor-page",
+      "pair_order": 1,
+      "prompt": "Implement exclusive cursor pagination over the supplied task order. The cursor is the ID of the last item on the previous page. Return a Page with the page items and a next_cursor set to the last returned ID only when more items remain.\n\nMake the smallest implementation for this request in the task workspace. Do not change unrelated files or add dependencies. Report the files changed and any blockers. Do not modify or invoke runner-owned evaluation checks.",
+      "requires_clarification": false,
+      "requires_permission": false,
+      "target_repository_revision": "0000000000000000000000000000000000000000",
+      "task_budget": {
+        "max_cost_usd": null,
+        "max_tokens": null,
+        "timeout_seconds": 900
+      },
+      "task_class": "feature",
+      "topic": "cursor_pagination",
+      "verification_commands": [],
+      "worker_profile": "antigravity-native-executor"
+    },
+    {
+      "acceptance_oracle": "Cover first, middle, final, empty, and single-page requests over IDs [a, b, c, d]: limit 2 returns [a, b] with cursor b, then after b returns [c, d] with no cursor; limit 4 returns all items with no cursor; after d returns an empty page. A non-positive limit or unknown cursor raises ValueError; the cursor item is not repeated.",
+      "acceptance_oracle_sha256": "876ad41296ab24e98a320bf500d6f4a883d7862e0725bab0b7f284fe7ee8c022",
+      "allowed_actions": [
+        "modify_workspace_files"
+      ],
+      "allowed_source_path": "taskboard/pagination.py",
+      "candidate_timeout_seconds": 900,
+      "case_id": "m29-mut-04-cursor-page-codex",
+      "clarification_questions": [],
+      "delivery_mode": "workspace",
+      "entrypoint": "paginate_tasks(tasks, *, limit: int, after_id: str | None = None) -> Page",
+      "mutation_mode": "mutation",
+      "neutral_evaluator": {
+        "budget": {
+          "max_cost_usd": null,
+          "max_tokens": 8192,
+          "timeout_seconds": 300
+        },
+        "fallback_policy": "none",
+        "model": "claude-3-7-sonnet",
+        "provider": "anthropic",
+        "reasoning_effort": null,
+        "runtime": "read_only",
+        "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
+        "tools": [
+          "read_file",
+          "list_dir"
+        ]
+      },
+      "pair_group": "m29-mut-pair-04-cursor-page",
+      "pair_order": 2,
+      "prompt": "Implement exclusive cursor pagination over the supplied task order. The cursor is the ID of the last item on the previous page. Return a Page with the page items and a next_cursor set to the last returned ID only when more items remain.\n\nMake the smallest implementation for this request in the task workspace. Do not change unrelated files or add dependencies. Report the files changed and any blockers. Do not modify or invoke runner-owned evaluation checks.",
+      "requires_clarification": false,
+      "requires_permission": false,
+      "target_repository_revision": "0000000000000000000000000000000000000000",
+      "task_budget": {
+        "max_cost_usd": null,
+        "max_tokens": null,
+        "timeout_seconds": 900
+      },
+      "task_class": "feature",
+      "topic": "cursor_pagination",
+      "verification_commands": [],
+      "worker_profile": "codex-native-executor"
+    },
+    {
+      "acceptance_oracle": "Verify the exact header and row order. A title containing a comma round-trips unchanged; a title containing a quote and newline round-trips unchanged; a missing owner parses as an empty field. Assert all record separators are LF and the function performs no file I/O.",
+      "acceptance_oracle_sha256": "afcd08fcba30db03b977087af320275fd87412baf23c012686e5d248446e266e",
+      "allowed_actions": [
+        "modify_workspace_files"
+      ],
+      "allowed_source_path": "taskboard/export.py",
+      "candidate_timeout_seconds": 900,
+      "case_id": "m29-mut-05-csv-export-codex",
+      "clarification_questions": [],
+      "delivery_mode": "workspace",
+      "entrypoint": "export_tasks_csv(tasks: list[Task]) -> str",
+      "mutation_mode": "mutation",
+      "neutral_evaluator": {
+        "budget": {
+          "max_cost_usd": null,
+          "max_tokens": 8192,
+          "timeout_seconds": 300
+        },
+        "fallback_policy": "none",
+        "model": "claude-3-7-sonnet",
+        "provider": "anthropic",
+        "reasoning_effort": null,
+        "runtime": "read_only",
+        "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
+        "tools": [
+          "read_file",
+          "list_dir"
+        ]
+      },
+      "pair_group": "m29-mut-pair-05-csv-export",
+      "pair_order": 1,
+      "prompt": "Implement an in-memory CSV export with the fixed header id,title,status,owner,priority, preserving task order and emitting an empty field for a missing owner. Use standard CSV escaping and LF line endings.\n\nMake the smallest implementation for this request in the task workspace. Do not change unrelated files or add dependencies. Report the files changed and any blockers. Do not modify or invoke runner-owned evaluation checks.",
+      "requires_clarification": false,
+      "requires_permission": false,
+      "target_repository_revision": "0000000000000000000000000000000000000000",
+      "task_budget": {
+        "max_cost_usd": null,
+        "max_tokens": null,
+        "timeout_seconds": 900
+      },
+      "task_class": "feature",
+      "topic": "csv_export",
+      "verification_commands": [],
+      "worker_profile": "codex-native-executor"
+    },
+    {
+      "acceptance_oracle": "Verify the exact header and row order. A title containing a comma round-trips unchanged; a title containing a quote and newline round-trips unchanged; a missing owner parses as an empty field. Assert all record separators are LF and the function performs no file I/O.",
+      "acceptance_oracle_sha256": "afcd08fcba30db03b977087af320275fd87412baf23c012686e5d248446e266e",
+      "allowed_actions": [
+        "modify_workspace_files"
+      ],
+      "allowed_source_path": "taskboard/export.py",
+      "candidate_timeout_seconds": 900,
+      "case_id": "m29-mut-05-csv-export-antigravity",
+      "clarification_questions": [],
+      "delivery_mode": "workspace",
+      "entrypoint": "export_tasks_csv(tasks: list[Task]) -> str",
+      "mutation_mode": "mutation",
+      "neutral_evaluator": {
+        "budget": {
+          "max_cost_usd": null,
+          "max_tokens": 8192,
+          "timeout_seconds": 300
+        },
+        "fallback_policy": "none",
+        "model": "claude-3-7-sonnet",
+        "provider": "anthropic",
+        "reasoning_effort": null,
+        "runtime": "read_only",
+        "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
+        "tools": [
+          "read_file",
+          "list_dir"
+        ]
+      },
+      "pair_group": "m29-mut-pair-05-csv-export",
+      "pair_order": 2,
+      "prompt": "Implement an in-memory CSV export with the fixed header id,title,status,owner,priority, preserving task order and emitting an empty field for a missing owner. Use standard CSV escaping and LF line endings.\n\nMake the smallest implementation for this request in the task workspace. Do not change unrelated files or add dependencies. Report the files changed and any blockers. Do not modify or invoke runner-owned evaluation checks.",
+      "requires_clarification": false,
+      "requires_permission": false,
+      "target_repository_revision": "0000000000000000000000000000000000000000",
+      "task_budget": {
+        "max_cost_usd": null,
+        "max_tokens": null,
+        "timeout_seconds": 900
+      },
+      "task_class": "feature",
+      "topic": "csv_export",
+      "verification_commands": [],
+      "worker_profile": "antigravity-native-executor"
+    },
+    {
+      "acceptance_oracle": "Verify every allowed edge, same-state no-op for each known status, and rejection of every other or unknown state with ValueError.",
+      "acceptance_oracle_sha256": "69afa351d51f62f380b12c0766f04149452999c94e5e43b217eaf5da2b22fd53",
+      "allowed_actions": [
+        "modify_workspace_files"
+      ],
+      "allowed_source_path": "taskboard/status.py",
+      "candidate_timeout_seconds": 900,
+      "case_id": "m29-mut-06-status-trans-antigravity",
+      "clarification_questions": [],
+      "delivery_mode": "workspace",
+      "entrypoint": "transition_status(current: str, requested: str) -> str",
+      "mutation_mode": "mutation",
+      "neutral_evaluator": {
+        "budget": {
+          "max_cost_usd": null,
+          "max_tokens": 8192,
+          "timeout_seconds": 300
+        },
+        "fallback_policy": "none",
+        "model": "claude-3-7-sonnet",
+        "provider": "anthropic",
+        "reasoning_effort": null,
+        "runtime": "read_only",
+        "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
+        "tools": [
+          "read_file",
+          "list_dir"
+        ]
+      },
+      "pair_group": "m29-mut-pair-06-status-trans",
+      "pair_order": 1,
+      "prompt": "Implement the task status transition rules: queued may move to in_progress or cancelled; in_progress may move to done or cancelled; done and cancelled are terminal. A request for the current known status is an idempotent no-op.\n\nMake the smallest implementation for this request in the task workspace. Do not change unrelated files or add dependencies. Report the files changed and any blockers. Do not modify or invoke runner-owned evaluation checks.",
+      "requires_clarification": false,
+      "requires_permission": false,
+      "target_repository_revision": "0000000000000000000000000000000000000000",
+      "task_budget": {
+        "max_cost_usd": null,
+        "max_tokens": null,
+        "timeout_seconds": 900
+      },
+      "task_class": "feature",
+      "topic": "status_transitions",
+      "verification_commands": [],
+      "worker_profile": "antigravity-native-executor"
+    },
+    {
+      "acceptance_oracle": "Verify every allowed edge, same-state no-op for each known status, and rejection of every other or unknown state with ValueError.",
+      "acceptance_oracle_sha256": "69afa351d51f62f380b12c0766f04149452999c94e5e43b217eaf5da2b22fd53",
+      "allowed_actions": [
+        "modify_workspace_files"
+      ],
+      "allowed_source_path": "taskboard/status.py",
+      "candidate_timeout_seconds": 900,
+      "case_id": "m29-mut-06-status-trans-codex",
+      "clarification_questions": [],
+      "delivery_mode": "workspace",
+      "entrypoint": "transition_status(current: str, requested: str) -> str",
+      "mutation_mode": "mutation",
+      "neutral_evaluator": {
+        "budget": {
+          "max_cost_usd": null,
+          "max_tokens": 8192,
+          "timeout_seconds": 300
+        },
+        "fallback_policy": "none",
+        "model": "claude-3-7-sonnet",
+        "provider": "anthropic",
+        "reasoning_effort": null,
+        "runtime": "read_only",
+        "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
+        "tools": [
+          "read_file",
+          "list_dir"
+        ]
+      },
+      "pair_group": "m29-mut-pair-06-status-trans",
+      "pair_order": 2,
+      "prompt": "Implement the task status transition rules: queued may move to in_progress or cancelled; in_progress may move to done or cancelled; done and cancelled are terminal. A request for the current known status is an idempotent no-op.\n\nMake the smallest implementation for this request in the task workspace. Do not change unrelated files or add dependencies. Report the files changed and any blockers. Do not modify or invoke runner-owned evaluation checks.",
+      "requires_clarification": false,
+      "requires_permission": false,
+      "target_repository_revision": "0000000000000000000000000000000000000000",
+      "task_budget": {
+        "max_cost_usd": null,
+        "max_tokens": null,
+        "timeout_seconds": 900
+      },
+      "task_class": "feature",
+      "topic": "status_transitions",
+      "verification_commands": [],
+      "worker_profile": "codex-native-executor"
+    },
+    {
+      "acceptance_oracle": "With defaults, attempts 1, 2, 3, and 6 return 1, 2, 4, and 30. Verify a custom base and cap, zero delay, a very large attempt, and ValueError for an attempt below one or a negative delay.",
+      "acceptance_oracle_sha256": "0b31b0986e61a4fd1718983f72ddcad6f7975c6e8c1c2cb3953c7aac00711cdb",
+      "allowed_actions": [
+        "modify_workspace_files"
+      ],
+      "allowed_source_path": "taskboard/retry.py",
+      "candidate_timeout_seconds": 900,
+      "case_id": "m29-mut-07-retry-delay-codex",
+      "clarification_questions": [],
+      "delivery_mode": "workspace",
+      "entrypoint": "retry_delay_seconds(attempt: int, *, base_seconds: int = 1, max_seconds: int = 30) -> int",
+      "mutation_mode": "mutation",
+      "neutral_evaluator": {
+        "budget": {
+          "max_cost_usd": null,
+          "max_tokens": 8192,
+          "timeout_seconds": 300
+        },
+        "fallback_policy": "none",
+        "model": "claude-3-7-sonnet",
+        "provider": "anthropic",
+        "reasoning_effort": null,
+        "runtime": "read_only",
+        "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
+        "tools": [
+          "read_file",
+          "list_dir"
+        ]
+      },
+      "pair_group": "m29-mut-pair-07-retry-delay",
+      "pair_order": 1,
+      "prompt": "Implement deterministic exponential retry delay as min(max_seconds, base_seconds * 2 ** (attempt - 1)). Attempts start at one; base and maximum delays may be zero but cannot be negative. Return the maximum delay without constructing an unbounded integer for a very large attempt.\n\nMake the smallest implementation for this request in the task workspace. Do not change unrelated files or add dependencies. Report the files changed and any blockers. Do not modify or invoke runner-owned evaluation checks.",
+      "requires_clarification": false,
+      "requires_permission": false,
+      "target_repository_revision": "0000000000000000000000000000000000000000",
+      "task_budget": {
+        "max_cost_usd": null,
+        "max_tokens": null,
+        "timeout_seconds": 900
+      },
+      "task_class": "feature",
+      "topic": "capped_retry_delay",
+      "verification_commands": [],
+      "worker_profile": "codex-native-executor"
+    },
+    {
+      "acceptance_oracle": "With defaults, attempts 1, 2, 3, and 6 return 1, 2, 4, and 30. Verify a custom base and cap, zero delay, a very large attempt, and ValueError for an attempt below one or a negative delay.",
+      "acceptance_oracle_sha256": "0b31b0986e61a4fd1718983f72ddcad6f7975c6e8c1c2cb3953c7aac00711cdb",
+      "allowed_actions": [
+        "modify_workspace_files"
+      ],
+      "allowed_source_path": "taskboard/retry.py",
+      "candidate_timeout_seconds": 900,
+      "case_id": "m29-mut-07-retry-delay-antigravity",
+      "clarification_questions": [],
+      "delivery_mode": "workspace",
+      "entrypoint": "retry_delay_seconds(attempt: int, *, base_seconds: int = 1, max_seconds: int = 30) -> int",
+      "mutation_mode": "mutation",
+      "neutral_evaluator": {
+        "budget": {
+          "max_cost_usd": null,
+          "max_tokens": 8192,
+          "timeout_seconds": 300
+        },
+        "fallback_policy": "none",
+        "model": "claude-3-7-sonnet",
+        "provider": "anthropic",
+        "reasoning_effort": null,
+        "runtime": "read_only",
+        "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
+        "tools": [
+          "read_file",
+          "list_dir"
+        ]
+      },
+      "pair_group": "m29-mut-pair-07-retry-delay",
+      "pair_order": 2,
+      "prompt": "Implement deterministic exponential retry delay as min(max_seconds, base_seconds * 2 ** (attempt - 1)). Attempts start at one; base and maximum delays may be zero but cannot be negative. Return the maximum delay without constructing an unbounded integer for a very large attempt.\n\nMake the smallest implementation for this request in the task workspace. Do not change unrelated files or add dependencies. Report the files changed and any blockers. Do not modify or invoke runner-owned evaluation checks.",
+      "requires_clarification": false,
+      "requires_permission": false,
+      "target_repository_revision": "0000000000000000000000000000000000000000",
+      "task_budget": {
+        "max_cost_usd": null,
+        "max_tokens": null,
+        "timeout_seconds": 900
+      },
+      "task_class": "feature",
+      "topic": "capped_retry_delay",
+      "verification_commands": [],
+      "worker_profile": "antigravity-native-executor"
+    },
+    {
+      "acceptance_oracle": "Verify repeated IDs with different payloads keep the first event, unique events keep their order, empty input returns empty, and the input list is unchanged.",
+      "acceptance_oracle_sha256": "f7cc5801b7809bba6f0ef0fbd97c4e305c346af2a14e61122d3e152d53023b67",
+      "allowed_actions": [
+        "modify_workspace_files"
+      ],
+      "allowed_source_path": "taskboard/events.py",
+      "candidate_timeout_seconds": 900,
+      "case_id": "m29-mut-08-event-dedup-antigravity",
+      "clarification_questions": [],
+      "delivery_mode": "workspace",
+      "entrypoint": "deduplicate_events(events: list[Event]) -> list[Event]",
+      "mutation_mode": "mutation",
+      "neutral_evaluator": {
+        "budget": {
+          "max_cost_usd": null,
+          "max_tokens": 8192,
+          "timeout_seconds": 300
+        },
+        "fallback_policy": "none",
+        "model": "claude-3-7-sonnet",
+        "provider": "anthropic",
+        "reasoning_effort": null,
+        "runtime": "read_only",
+        "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
+        "tools": [
+          "read_file",
+          "list_dir"
+        ]
+      },
+      "pair_group": "m29-mut-pair-08-event-dedup",
+      "pair_order": 1,
+      "prompt": "Implement event deduplication by event ID. Keep the first occurrence of each ID, preserve the order of those first occurrences, and return a new list without modifying the input.\n\nMake the smallest implementation for this request in the task workspace. Do not change unrelated files or add dependencies. Report the files changed and any blockers. Do not modify or invoke runner-owned evaluation checks.",
+      "requires_clarification": false,
+      "requires_permission": false,
+      "target_repository_revision": "0000000000000000000000000000000000000000",
+      "task_budget": {
+        "max_cost_usd": null,
+        "max_tokens": null,
+        "timeout_seconds": 900
+      },
+      "task_class": "feature",
+      "topic": "event_deduplication",
+      "verification_commands": [],
+      "worker_profile": "antigravity-native-executor"
+    },
+    {
+      "acceptance_oracle": "Verify repeated IDs with different payloads keep the first event, unique events keep their order, empty input returns empty, and the input list is unchanged.",
+      "acceptance_oracle_sha256": "f7cc5801b7809bba6f0ef0fbd97c4e305c346af2a14e61122d3e152d53023b67",
+      "allowed_actions": [
+        "modify_workspace_files"
+      ],
+      "allowed_source_path": "taskboard/events.py",
+      "candidate_timeout_seconds": 900,
+      "case_id": "m29-mut-08-event-dedup-codex",
+      "clarification_questions": [],
+      "delivery_mode": "workspace",
+      "entrypoint": "deduplicate_events(events: list[Event]) -> list[Event]",
+      "mutation_mode": "mutation",
+      "neutral_evaluator": {
+        "budget": {
+          "max_cost_usd": null,
+          "max_tokens": 8192,
+          "timeout_seconds": 300
+        },
+        "fallback_policy": "none",
+        "model": "claude-3-7-sonnet",
+        "provider": "anthropic",
+        "reasoning_effort": null,
+        "runtime": "read_only",
+        "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
+        "tools": [
+          "read_file",
+          "list_dir"
+        ]
+      },
+      "pair_group": "m29-mut-pair-08-event-dedup",
+      "pair_order": 2,
+      "prompt": "Implement event deduplication by event ID. Keep the first occurrence of each ID, preserve the order of those first occurrences, and return a new list without modifying the input.\n\nMake the smallest implementation for this request in the task workspace. Do not change unrelated files or add dependencies. Report the files changed and any blockers. Do not modify or invoke runner-owned evaluation checks.",
+      "requires_clarification": false,
+      "requires_permission": false,
+      "target_repository_revision": "0000000000000000000000000000000000000000",
+      "task_budget": {
+        "max_cost_usd": null,
+        "max_tokens": null,
+        "timeout_seconds": 900
+      },
+      "task_class": "feature",
+      "topic": "event_deduplication",
+      "verification_commands": [],
+      "worker_profile": "codex-native-executor"
+    },
+    {
+      "acceptance_oracle": "For types [\"create\", \"update\", \"create\", \"Create\"], return {\"Create\": 1, \"create\": 2, \"update\": 1} with keys in lexical order. Empty input returns {} and the event list is unchanged.",
+      "acceptance_oracle_sha256": "e3a66cfb0a40388f7ccd4debc71811699c0ec888678df6d541d577d6733b0730",
+      "allowed_actions": [
+        "modify_workspace_files"
+      ],
+      "allowed_source_path": "taskboard/events.py",
+      "candidate_timeout_seconds": 900,
+      "case_id": "m29-mut-09-event-counts-codex",
+      "clarification_questions": [],
+      "delivery_mode": "workspace",
+      "entrypoint": "count_events_by_type(events: list[Event]) -> dict[str, int]",
+      "mutation_mode": "mutation",
+      "neutral_evaluator": {
+        "budget": {
+          "max_cost_usd": null,
+          "max_tokens": 8192,
+          "timeout_seconds": 300
+        },
+        "fallback_policy": "none",
+        "model": "claude-3-7-sonnet",
+        "provider": "anthropic",
+        "reasoning_effort": null,
+        "runtime": "read_only",
+        "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
+        "tools": [
+          "read_file",
+          "list_dir"
+        ]
+      },
+      "pair_group": "m29-mut-pair-09-event-counts",
+      "pair_order": 1,
+      "prompt": "Implement event counts grouped by the exact event_type string. Return an empty mapping for no events and a deterministic mapping for non-empty input.\n\nMake the smallest implementation for this request in the task workspace. Do not change unrelated files or add dependencies. Report the files changed and any blockers. Do not modify or invoke runner-owned evaluation checks.",
+      "requires_clarification": false,
+      "requires_permission": false,
+      "target_repository_revision": "0000000000000000000000000000000000000000",
+      "task_budget": {
+        "max_cost_usd": null,
+        "max_tokens": null,
+        "timeout_seconds": 900
+      },
+      "task_class": "feature",
+      "topic": "event_counts",
+      "verification_commands": [],
+      "worker_profile": "codex-native-executor"
+    },
+    {
+      "acceptance_oracle": "For types [\"create\", \"update\", \"create\", \"Create\"], return {\"Create\": 1, \"create\": 2, \"update\": 1} with keys in lexical order. Empty input returns {} and the event list is unchanged.",
+      "acceptance_oracle_sha256": "e3a66cfb0a40388f7ccd4debc71811699c0ec888678df6d541d577d6733b0730",
+      "allowed_actions": [
+        "modify_workspace_files"
+      ],
+      "allowed_source_path": "taskboard/events.py",
+      "candidate_timeout_seconds": 900,
+      "case_id": "m29-mut-09-event-counts-antigravity",
+      "clarification_questions": [],
+      "delivery_mode": "workspace",
+      "entrypoint": "count_events_by_type(events: list[Event]) -> dict[str, int]",
+      "mutation_mode": "mutation",
+      "neutral_evaluator": {
+        "budget": {
+          "max_cost_usd": null,
+          "max_tokens": 8192,
+          "timeout_seconds": 300
+        },
+        "fallback_policy": "none",
+        "model": "claude-3-7-sonnet",
+        "provider": "anthropic",
+        "reasoning_effort": null,
+        "runtime": "read_only",
+        "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
+        "tools": [
+          "read_file",
+          "list_dir"
+        ]
+      },
+      "pair_group": "m29-mut-pair-09-event-counts",
+      "pair_order": 2,
+      "prompt": "Implement event counts grouped by the exact event_type string. Return an empty mapping for no events and a deterministic mapping for non-empty input.\n\nMake the smallest implementation for this request in the task workspace. Do not change unrelated files or add dependencies. Report the files changed and any blockers. Do not modify or invoke runner-owned evaluation checks.",
+      "requires_clarification": false,
+      "requires_permission": false,
+      "target_repository_revision": "0000000000000000000000000000000000000000",
+      "task_budget": {
+        "max_cost_usd": null,
+        "max_tokens": null,
+        "timeout_seconds": 900
+      },
+      "task_class": "feature",
+      "topic": "event_counts",
+      "verification_commands": [],
+      "worker_profile": "antigravity-native-executor"
+    },
+    {
+      "acceptance_oracle": "For statuses [\"queued\", \"done\", \"done\", \"cancelled\", \"archived\"], return {\"total\": 5, \"queued\": 1, \"in_progress\": 0, \"done\": 2, \"cancelled\": 1, \"other\": 1}. Empty input returns all six keys with zero values; the task list is unchanged.",
+      "acceptance_oracle_sha256": "d62f7127026942d33e35ec7773d2130358688ebc16a8da3b9e0761efc1524d4b",
+      "allowed_actions": [
+        "modify_workspace_files"
+      ],
+      "allowed_source_path": "taskboard/summary.py",
+      "candidate_timeout_seconds": 900,
+      "case_id": "m29-mut-10-task-summary-antigravity",
+      "clarification_questions": [],
+      "delivery_mode": "workspace",
+      "entrypoint": "summarize_tasks(tasks: list[Task]) -> dict[str, int]",
+      "mutation_mode": "mutation",
+      "neutral_evaluator": {
+        "budget": {
+          "max_cost_usd": null,
+          "max_tokens": 8192,
+          "timeout_seconds": 300
+        },
+        "fallback_policy": "none",
+        "model": "claude-3-7-sonnet",
+        "provider": "anthropic",
+        "reasoning_effort": null,
+        "runtime": "read_only",
+        "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
+        "tools": [
+          "read_file",
+          "list_dir"
+        ]
+      },
+      "pair_group": "m29-mut-pair-10-task-summary",
+      "pair_order": 1,
+      "prompt": "Implement summarize_tasks to return counts for total, queued, in_progress, done, cancelled, and other. Count every task in total, count known statuses in their own field, and count unrecognized statuses in other. Return all six keys even when their counts are zero.\n\nMake the smallest implementation for this request in the task workspace. Do not change unrelated files or add dependencies. Report the files changed and any blockers. Do not modify or invoke runner-owned evaluation checks.",
+      "requires_clarification": false,
+      "requires_permission": false,
+      "target_repository_revision": "0000000000000000000000000000000000000000",
+      "task_budget": {
+        "max_cost_usd": null,
+        "max_tokens": null,
+        "timeout_seconds": 900
+      },
+      "task_class": "feature",
+      "topic": "task_status_summary",
+      "verification_commands": [],
+      "worker_profile": "antigravity-native-executor"
+    },
+    {
+      "acceptance_oracle": "For statuses [\"queued\", \"done\", \"done\", \"cancelled\", \"archived\"], return {\"total\": 5, \"queued\": 1, \"in_progress\": 0, \"done\": 2, \"cancelled\": 1, \"other\": 1}. Empty input returns all six keys with zero values; the task list is unchanged.",
+      "acceptance_oracle_sha256": "d62f7127026942d33e35ec7773d2130358688ebc16a8da3b9e0761efc1524d4b",
+      "allowed_actions": [
+        "modify_workspace_files"
+      ],
+      "allowed_source_path": "taskboard/summary.py",
+      "candidate_timeout_seconds": 900,
+      "case_id": "m29-mut-10-task-summary-codex",
+      "clarification_questions": [],
+      "delivery_mode": "workspace",
+      "entrypoint": "summarize_tasks(tasks: list[Task]) -> dict[str, int]",
+      "mutation_mode": "mutation",
+      "neutral_evaluator": {
+        "budget": {
+          "max_cost_usd": null,
+          "max_tokens": 8192,
+          "timeout_seconds": 300
+        },
+        "fallback_policy": "none",
+        "model": "claude-3-7-sonnet",
+        "provider": "anthropic",
+        "reasoning_effort": null,
+        "runtime": "read_only",
+        "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
+        "tools": [
+          "read_file",
+          "list_dir"
+        ]
+      },
+      "pair_group": "m29-mut-pair-10-task-summary",
+      "pair_order": 2,
+      "prompt": "Implement summarize_tasks to return counts for total, queued, in_progress, done, cancelled, and other. Count every task in total, count known statuses in their own field, and count unrecognized statuses in other. Return all six keys even when their counts are zero.\n\nMake the smallest implementation for this request in the task workspace. Do not change unrelated files or add dependencies. Report the files changed and any blockers. Do not modify or invoke runner-owned evaluation checks.",
+      "requires_clarification": false,
+      "requires_permission": false,
+      "target_repository_revision": "0000000000000000000000000000000000000000",
+      "task_budget": {
+        "max_cost_usd": null,
+        "max_tokens": null,
+        "timeout_seconds": 900
+      },
+      "task_class": "feature",
+      "topic": "task_status_summary",
+      "verification_commands": [],
+      "worker_profile": "codex-native-executor"
+    }
+  ],
+  "neutral_evaluator": {
+    "budget": {
+      "max_cost_usd": null,
+      "max_tokens": 8192,
+      "timeout_seconds": 300
+    },
+    "fallback_policy": "none",
+    "model": "claude-3-7-sonnet",
+    "provider": "anthropic",
+    "reasoning_effort": null,
+    "runtime": "read_only",
+    "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
+    "tools": [
+      "read_file",
+      "list_dir"
+    ]
+  },
+  "schema_version": 1,
+  "suite_name": "m29-live-provider-evidence-mutation",
+  "target_repository_revision": "0000000000000000000000000000000000000000"
+}
