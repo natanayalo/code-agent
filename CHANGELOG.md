@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: define frozen M29 feature mutation suite and evaluator contract ([#417](https://github.com/natanayalo/code-agent/pull/417))
+
 - Feat: add post-terminal M29 evaluation mode ([#412](https://github.com/natanayalo/code-agent/pull/412))
 
 - Feat: add M29 Wave 4 investigation evidence suite ([#409](https://github.com/natanayalo/code-agent/pull/409))
