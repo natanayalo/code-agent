@@ -70,6 +70,16 @@ suite completion, so baseline tasks cannot age out between baseline and report
 generation. If collection cannot finish inside that window, stop and prepare a
 new reviewed manifest; do not move the cutoff silently.
 
+The `evaluation.m29_mutation_cohort.reconcile_m29_mutation_cohort` gate checks
+the post-cutoff inputs before report publication: every scheduled case must
+have a terminal timestamp at or before `as_of`, every case must be classified
+exactly once as eligible or excluded, the frozen baseline must be disjoint from
+the suite and match its frozen SHA-256, and each canonical extractor/report
+snapshot must equal the frozen baseline plus eligible suite IDs. Its returned
+public-safe record contains counts and hashes only. The caller must supply the
+canonical database snapshot; this helper does not launch cases or query the
+database.
+
 Store each baseline as a sorted exact ID set in the access-controlled private
 bundle, together with the extractor/build and policy hashes, profile, window
 boundaries, count, and SHA-256 of the sorted IDs using a frozen canonical
