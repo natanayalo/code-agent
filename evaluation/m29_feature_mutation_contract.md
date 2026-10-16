@@ -625,3 +625,30 @@ The preflight and closeout checklist applies to every outcome:
 If any eligible count is below ten for either profile, publish the canonical
 report as insufficient data for that cell. Evaluation results remain advisory;
 production routing and `evaluation/routing_metrics.json` stay static.
+
+## Runner implementation and verification
+
+The evaluation workflow and external neutral quality evaluation are implemented
+in `evaluation/m29_mutation_runner.py` (with supporting modules
+`evaluation/m29_mutation_runner_models.py`, `evaluation/m29_mutation_runner_preflight.py`,
+and `evaluation/m29_mutation_runner_archive.py`) and verified by unit and
+integration tests (`tests/unit/test_m29_mutation_runner.py`,
+`tests/integration/test_m29_mutation_runner_integration.py`):
+
+1. **Preflight gate verification**: Disposable database enforcement, disposable
+   workspace root verification, 72-hour maximum retention limit, canonical
+   extractor-stage smoke validation, and frozen baseline memory snapshot.
+2. **Per-case execution & isolation**: Before each case dispatch, the runner asserts
+   empty personal memory and frozen baseline memory context hash equality. Any
+   drift halts execution immediately.
+3. **Stop condition halts**: Detection of pending human interaction, delivery attempts,
+   protected paths modification, candidate execution identity mismatch, or
+   evaluator unavailability/fallback halts the suite immediately while retaining the
+   affected workspace for bounded inspection.
+4. **Post-terminal immutability**: Candidate terminal snapshot immutability is asserted
+   across read-only external quality evaluation; any mutation halts the runner.
+5. **Outcome-dependent cleanup**: Immediate cleanup occurs only for completed tasks with
+   passing quality evaluations after sanitized manifest archiving; failures, unassessable
+   runs, and stops are retained up to 72 hours under `MAX_EVALUATION_RETENTION_SECONDS`.
+6. **Live status**: Live provider collection remains gated, `feature/mutation`
+   remains at N=0, and production routing is static.
