@@ -18,6 +18,7 @@ from evaluation.m29_mutation_isolation import (
     check_protected_paths_stop_condition,
     cleanup_evaluation_workspace,
     compute_memory_context_hash,
+    compute_terminal_snapshot_checksum,
     create_terminal_snapshot,
     validate_evaluation_retention_seconds,
     validate_post_overlay_task_spec,
@@ -148,7 +149,7 @@ def test_validate_post_overlay_task_spec_valid_and_invalid() -> None:
         requires_clarification=False,
         requires_permission=False,
     )
-    constraints = {"skip_independent_review": True}
+    constraints = {"skip_independent_review": True, "post_terminal_quality_evaluation": True}
 
     # Valid spec with matching profile and revision
     errors = validate_post_overlay_task_spec(
@@ -160,6 +161,22 @@ def test_validate_post_overlay_task_spec_valid_and_invalid() -> None:
         actual_fixture_revision="rev-123",
     )
     assert errors == []
+
+    # enable_independent_verifier must be False
+    errors = validate_post_overlay_task_spec(
+        valid_spec, constraints, enable_independent_verifier=True
+    )
+    assert "enable_independent_verifier_must_be_false" in errors
+
+    # enable_independent_verifier in constraints must not be True
+    errors = validate_post_overlay_task_spec(
+        valid_spec, {**constraints, "enable_independent_verifier": True}
+    )
+    assert "enable_independent_verifier_must_be_false" in errors
+
+    # post_terminal_quality_evaluation constraint required
+    errors = validate_post_overlay_task_spec(valid_spec, {"skip_independent_review": True})
+    assert "post_terminal_quality_evaluation_constraint_required" in errors
 
     # Profile mismatch
     errors = validate_post_overlay_task_spec(
@@ -197,7 +214,7 @@ def test_validate_post_overlay_task_spec_dict_mapping() -> None:
         "requires_clarification": False,
         "requires_permission": False,
     }
-    constraints = {"skip_independent_review": True}
+    constraints = {"skip_independent_review": True, "post_terminal_quality_evaluation": True}
     assert validate_post_overlay_task_spec(valid_dict, constraints) == []
 
     invalid_dict = {"goal": "Bad task spec", "task_type": "invalid_type"}
@@ -226,8 +243,8 @@ def test_verify_pair_semantic_equality_matches() -> None:
     assert errors == []
 
 
-def test_verify_pair_semantic_equality_discrepancies() -> None:
-    """Discrepancies in controlled fields are flagged while profile difference is allowed."""
+def test_verify_pair_semantic_equality_case_metadata_discrepancies() -> None:
+    """Case-level metadata discrepancies in controlled fields are flagged."""
     case_a = _make_dummy_case(
         "case-a", "codex-native-executor", prompt="Prompt 1 for testing purposes"
     )
@@ -239,70 +256,131 @@ def test_verify_pair_semantic_equality_discrepancies() -> None:
         "task_type": "feature",
         "allowed_actions": ["modify_workspace_files"],
     }
-    constraints = {"skip_independent_review": True}
+    constraints = {"skip_independent_review": True, "post_terminal_quality_evaluation": True}
 
     # Prompt mismatch
-    errors = verify_pair_semantic_equality(case_a, case_b, spec, spec, constraints, constraints)
-    assert "pair_prompt_mismatch" in errors
+    assert "pair_prompt_mismatch" in verify_pair_semantic_equality(
+        case_a, case_b, spec, spec, constraints, constraints
+    )
+
+    case_a_match = _make_dummy_case("case-a", "codex-native-executor")
+
+    # Pair group mismatch
+    case_b_pair = case_a_match.model_copy(update={"pair_group": "other-pair-group"})
+    assert "pair_group_mismatch" in verify_pair_semantic_equality(
+        case_a_match, case_b_pair, spec, spec, constraints, constraints
+    )
+
+    # Topic mismatch
+    case_b_topic = case_a_match.model_copy(update={"topic": "other_topic"})
+    assert "pair_topic_mismatch" in verify_pair_semantic_equality(
+        case_a_match, case_b_topic, spec, spec, constraints, constraints
+    )
+
+    # Allowed source path mismatch
+    case_b_path = case_a_match.model_copy(update={"allowed_source_path": "taskboard/other.py"})
+    assert "pair_allowed_source_path_mismatch" in verify_pair_semantic_equality(
+        case_a_match, case_b_path, spec, spec, constraints, constraints
+    )
+
+    # Entrypoint mismatch
+    case_b_entry = case_a_match.model_copy(update={"entrypoint": "other_run"})
+    assert "pair_entrypoint_mismatch" in verify_pair_semantic_equality(
+        case_a_match, case_b_entry, spec, spec, constraints, constraints
+    )
+
+    # Acceptance oracle mismatch
+    case_b_oracle_text = case_a_match.model_copy(
+        update={"acceptance_oracle": "different oracle text min 10"}
+    )
+    assert "pair_acceptance_oracle_mismatch" in verify_pair_semantic_equality(
+        case_a_match, case_b_oracle_text, spec, spec, constraints, constraints
+    )
 
     # Oracle hash mismatch
-    case_b_oracle = _make_dummy_case("case-b", "antigravity-native-executor", oracle_hash="1" * 64)
-    case_a_match = _make_dummy_case("case-a", "codex-native-executor")
-    errors = verify_pair_semantic_equality(
+    case_b_oracle = case_a_match.model_copy(update={"acceptance_oracle_sha256": "1" * 64})
+    assert "pair_acceptance_oracle_hash_mismatch" in verify_pair_semantic_equality(
         case_a_match, case_b_oracle, spec, spec, constraints, constraints
     )
-    assert "pair_acceptance_oracle_hash_mismatch" in errors
+
+
+def test_verify_pair_semantic_equality_case_execution_discrepancies() -> None:
+    """Case-level execution configuration discrepancies are flagged."""
+    case = _make_dummy_case("case-a", "codex-native-executor")
+    spec = {
+        "goal": "Implement feature",
+        "task_type": "feature",
+        "allowed_actions": ["modify_workspace_files"],
+    }
+    constraints = {"skip_independent_review": True, "post_terminal_quality_evaluation": True}
 
     # Revision mismatch
-    case_b_rev = _make_dummy_case("case-b", "antigravity-native-executor", revision="b" * 40)
-    errors = verify_pair_semantic_equality(
-        case_a_match, case_b_rev, spec, spec, constraints, constraints
+    case_b_rev = case.model_copy(update={"target_repository_revision": "b" * 40})
+    assert "pair_target_repository_revision_mismatch" in verify_pair_semantic_equality(
+        case, case_b_rev, spec, spec, constraints, constraints
     )
-    assert "pair_target_repository_revision_mismatch" in errors
 
     # Timeout mismatch
-    case_b_timeout = _make_dummy_case("case-b", "antigravity-native-executor", timeout=600)
-    errors = verify_pair_semantic_equality(
-        case_a_match, case_b_timeout, spec, spec, constraints, constraints
+    case_b_timeout = case.model_copy(update={"candidate_timeout_seconds": 600})
+    assert "pair_candidate_timeout_mismatch" in verify_pair_semantic_equality(
+        case, case_b_timeout, spec, spec, constraints, constraints
     )
-    assert "pair_candidate_timeout_mismatch" in errors
 
     # Budget mismatch
-    case_b_budget = _make_dummy_case("case-b", "antigravity-native-executor")
-    case_b_budget = case_b_budget.model_copy(
-        update={"task_budget": MutationTaskBudget(timeout_seconds=500)}
+    case_b_budget = case.model_copy(update={"task_budget": MutationTaskBudget(timeout_seconds=500)})
+    assert "pair_task_budget_mismatch" in verify_pair_semantic_equality(
+        case, case_b_budget, spec, spec, constraints, constraints
     )
-    errors = verify_pair_semantic_equality(
-        case_a_match, case_b_budget, spec, spec, constraints, constraints
-    )
-    assert "pair_task_budget_mismatch" in errors
 
     # Evaluator mismatch
-    case_b_eval = _make_dummy_case("case-b", "antigravity-native-executor")
     eval_diff = DEFAULT_M29_NEUTRAL_EVALUATOR.model_copy(update={"model": "claude-other"})
-    case_b_eval = case_b_eval.model_copy(update={"neutral_evaluator": eval_diff})
-    errors = verify_pair_semantic_equality(
-        case_a_match, case_b_eval, spec, spec, constraints, constraints
+    case_b_eval = case.model_copy(update={"neutral_evaluator": eval_diff})
+    assert "pair_neutral_evaluator_mismatch" in verify_pair_semantic_equality(
+        case, case_b_eval, spec, spec, constraints, constraints
     )
-    assert "pair_neutral_evaluator_mismatch" in errors
 
-    # TaskSpec mismatch
-    spec_diff = {"task_type": "feature", "allowed_actions": ["other_action"]}
-    errors = verify_pair_semantic_equality(
-        case_a_match, case_a_match, spec, spec_diff, constraints, constraints
-    )
+
+def test_verify_pair_semantic_equality_spec_and_constraint_discrepancies() -> None:
+    """TaskSpec, constraints, and repo-profile discrepancies are flagged."""
+    case = _make_dummy_case("case-a", "codex-native-executor")
+    spec = {
+        "goal": "Implement feature",
+        "task_type": "feature",
+        "workspace_mode": "clone",
+        "risk_level": "low",
+        "assumptions": ["assume safe"],
+        "allowed_actions": ["modify_workspace_files"],
+    }
+    constraints = {"skip_independent_review": True, "post_terminal_quality_evaluation": True}
+
+    # Action mismatch
+    spec_action = dict(spec, allowed_actions=["other_action"])
+    errors = verify_pair_semantic_equality(case, case, spec, spec_action, constraints, constraints)
+    assert any("pair_task_spec_mismatch" in e for e in errors)
+
+    # Workspace mode mismatch
+    spec_ws = dict(spec, workspace_mode="none")
+    errors = verify_pair_semantic_equality(case, case, spec, spec_ws, constraints, constraints)
+    assert any("pair_task_spec_mismatch" in e for e in errors)
+
+    # Risk level mismatch
+    spec_risk = dict(spec, risk_level="high")
+    errors = verify_pair_semantic_equality(case, case, spec, spec_risk, constraints, constraints)
+    assert any("pair_task_spec_mismatch" in e for e in errors)
+
+    # Assumptions mismatch
+    spec_assump = dict(spec, assumptions=["different assumption"])
+    errors = verify_pair_semantic_equality(case, case, spec, spec_assump, constraints, constraints)
     assert any("pair_task_spec_mismatch" in e for e in errors)
 
     # Constraint mismatch
-    constraints_diff = {"skip_independent_review": False}
-    errors = verify_pair_semantic_equality(
-        case_a_match, case_a_match, spec, spec, constraints, constraints_diff
-    )
+    constraints_diff = dict(constraints, skip_independent_review=False)
+    errors = verify_pair_semantic_equality(case, case, spec, spec, constraints, constraints_diff)
     assert "pair_constraint_mismatch:skip_independent_review" in errors
 
     # Repo profile mismatch
     errors = verify_pair_semantic_equality(
-        case_a_match, case_a_match, spec, spec, constraints, constraints, "p1", "p2"
+        case, case, spec, spec, constraints, constraints, "p1", "p2"
     )
     assert "pair_repo_profile_mismatch" in errors
 
@@ -332,7 +410,14 @@ def test_terminal_snapshot_checksum_and_immutability() -> None:
     )
     assert verify_terminal_snapshot_immutability(snap1, snap2) == []
 
-    # Dict input with lists passes when values match
+    # Dict input with lists passes when values match and checksum is valid
+    valid_chk = compute_terminal_snapshot_checksum(
+        task_status="completed",
+        terminal_event_type="task_completed",
+        terminal_timestamp=NOW.isoformat(),
+        diff_sha256="diff123",
+        changed_files=["src/bar.py", "src/foo.py"],
+    )
     dict_before = {
         "task_status": "completed",
         "terminal_event_type": "task_completed",
@@ -340,11 +425,21 @@ def test_terminal_snapshot_checksum_and_immutability() -> None:
         "failure_kind": None,
         "diff_sha256": "diff123",
         "changed_files": ["src/bar.py", "src/foo.py"],
-        "checksum": "chk123",
+        "checksum": valid_chk,
     }
     dict_after = dict(dict_before)
     dict_after["changed_files"] = ["src/bar.py", "src/foo.py"]
     assert verify_terminal_snapshot_immutability(dict_before, dict_after) == []
+
+    # Invalid checksum detection
+    dict_invalid_chk = dict(dict_before, checksum="bad_checksum")
+    violations = verify_terminal_snapshot_immutability(dict_invalid_chk, dict_before)
+    assert any("terminal_snapshot_checksum_invalid:before" in v for v in violations)
+
+    # Empty checksum detection
+    dict_empty_chk = dict(dict_before, checksum="")
+    violations = verify_terminal_snapshot_immutability(dict_before, dict_empty_chk)
+    assert any("terminal_snapshot_checksum_invalid:after" in v for v in violations)
 
     # Mutated status
     snap_status = create_terminal_snapshot(
@@ -383,15 +478,39 @@ def test_check_pending_interaction_stop_condition() -> None:
     res = check_pending_interaction_stop_condition([interaction], [])
     assert res == "pending_human_interaction_detected"
 
-    # Timeline event present
+    # Timeline event present: APPROVAL_REQUESTED
     event = TaskTimelineEvent(
         attempt_number=0,
         sequence_number=1,
         event_type=TimelineEventType.APPROVAL_REQUESTED,
         created_at=NOW,
     )
-    res = check_pending_interaction_stop_condition([], [event])
-    assert res == "human_interaction_event_detected"
+    assert (
+        check_pending_interaction_stop_condition([], [event]) == "human_interaction_event_detected"
+    )
+
+    # APPROVAL_GRANTED and APPROVAL_REJECTED
+    event_granted = TaskTimelineEvent(
+        attempt_number=0,
+        sequence_number=2,
+        event_type=TimelineEventType.APPROVAL_GRANTED,
+        created_at=NOW,
+    )
+    assert (
+        check_pending_interaction_stop_condition([], [event_granted])
+        == "human_interaction_event_detected"
+    )
+
+    event_rejected = TaskTimelineEvent(
+        attempt_number=0,
+        sequence_number=3,
+        event_type=TimelineEventType.APPROVAL_REJECTED,
+        created_at=NOW,
+    )
+    assert (
+        check_pending_interaction_stop_condition([], [event_rejected])
+        == "human_interaction_event_detected"
+    )
 
 
 def test_check_delivery_stop_condition() -> None:
@@ -470,9 +589,8 @@ def test_check_protected_paths_stop_condition() -> None:
     assert any("unauthorized_source_path:taskboard/unauthorized.py" in v for v in violations)
 
 
-def test_retention_and_cleanup_helpers() -> None:
-    """Test 72-hour retention validation and workspace cleanup policy enforcement."""
-    # Retention limit validation
+def test_retention_seconds_and_policy() -> None:
+    """Test 72-hour retention validation and workspace cleanup policy builder."""
     validate_evaluation_retention_seconds(3600)
     validate_evaluation_retention_seconds(MAX_EVALUATION_RETENTION_SECONDS)
 
@@ -482,20 +600,22 @@ def test_retention_and_cleanup_helpers() -> None:
     with pytest.raises(ValueError, match="must be positive"):
         validate_evaluation_retention_seconds(0)
 
-    # Cleanup policy builder
     policy = build_evaluation_cleanup_policy()
     assert policy.delete_on_success is True
     assert policy.retain_on_failure is False
 
-    # Cleanup evaluation workspace
+
+def test_cleanup_evaluation_workspace(tmp_path: Path) -> None:
+    """Test cleanup_evaluation_workspace enforcing recorded boundaries and disk absence."""
     mock_manager = MagicMock(spec=WorkspaceManager)
     mock_manager.cleanup_workspace.return_value = True
 
+    nonexistent_path = tmp_path / "ws-nonexistent"
     handle = WorkspaceHandle(
         workspace_id="ws-eval-1",
         task_id="task-1",
-        workspace_path=Path("/tmp/ws-eval-1"),
-        repo_path=Path("/tmp/ws-eval-1"),
+        workspace_path=nonexistent_path,
+        repo_path=nonexistent_path,
         repo_url="https://github.invalid/repo",
         cleanup_policy=WorkspaceCleanupPolicy(delete_on_success=False, retain_on_failure=True),
     )
@@ -506,12 +626,54 @@ def test_retention_and_cleanup_helpers() -> None:
             mock_manager, handle, succeeded=True, recorded_workspace_ids=["other-ws"]
         )
 
-    # Successful cleanup with matching recorded ID
+    # Refuse cleanup if not in recorded paths
+    with pytest.raises(WorkspaceManagerError, match="not in recorded evaluation workspace paths"):
+        cleanup_evaluation_workspace(
+            mock_manager,
+            handle,
+            succeeded=True,
+            recorded_workspace_ids=["ws-eval-1"],
+            recorded_workspace_paths=[str(tmp_path / "other-path")],
+        )
+
+    # Refuse cleanup if cleanup_workspace returns False
+    failing_manager = MagicMock(spec=WorkspaceManager)
+    failing_manager.cleanup_workspace.return_value = False
+    with pytest.raises(WorkspaceManagerError, match="WorkspaceManager failed to clean up"):
+        cleanup_evaluation_workspace(
+            failing_manager, handle, succeeded=True, recorded_workspace_ids=["ws-eval-1"]
+        )
+
+    # Refuse cleanup if workspace_path still exists after cleanup
+    real_dir = tmp_path / "ws-existing"
+    real_dir.mkdir()
+    existing_handle = handle.model_copy(update={"workspace_path": real_dir})
+    with pytest.raises(WorkspaceManagerError, match="still exists after cleanup"):
+        cleanup_evaluation_workspace(
+            mock_manager, existing_handle, succeeded=True, recorded_workspace_ids=["ws-eval-1"]
+        )
+    real_dir.rmdir()
+
+    # Refuse cleanup if trusted_git_dir still exists after cleanup
+    trusted_git = tmp_path / "trusted-git"
+    trusted_git.mkdir()
+    git_handle = handle.model_copy(update={"trusted_git_dir": trusted_git})
+    with pytest.raises(WorkspaceManagerError, match="trusted git directory .* still exists"):
+        cleanup_evaluation_workspace(
+            mock_manager, git_handle, succeeded=True, recorded_workspace_ids=["ws-eval-1"]
+        )
+    trusted_git.rmdir()
+
+    # Successful cleanup with matching recorded ID and path
     result = cleanup_evaluation_workspace(
-        mock_manager, handle, succeeded=True, recorded_workspace_ids=["ws-eval-1"]
+        mock_manager,
+        handle,
+        succeeded=True,
+        recorded_workspace_ids=["ws-eval-1"],
+        recorded_workspace_paths=[str(nonexistent_path)],
     )
     assert result is True
-    assert mock_manager.cleanup_workspace.call_count == 1
+    assert mock_manager.cleanup_workspace.call_count >= 1
     call_handle = mock_manager.cleanup_workspace.call_args[0][0]
     assert call_handle.cleanup_policy.delete_on_success is True
     assert call_handle.cleanup_policy.retain_on_failure is False

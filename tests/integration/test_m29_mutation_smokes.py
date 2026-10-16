@@ -154,3 +154,90 @@ def test_m29_extractor_stage_smokes_detects_verification_applicable(tmp_path: Pa
     assert result.all_verification_inapplicable is False
     expected_v_msg = f"task {records[0].task_id} has verification_applicable=True"
     assert any(expected_v_msg in v for v in result.violations)
+
+
+def test_m29_extractor_stage_smokes_detects_coverage_and_classification_mismatches(
+    tmp_path: Path,
+) -> None:
+    """Validator catches task-ID coverage gaps and misclassified evidence items."""
+    db_url, records = _init_disposable_smoke_db(tmp_path)
+    policy = default_smoke_policy()
+    evidence_list, _ = load_task_evidence_snapshot(db_url, policy)
+    engine = create_engine_from_url(db_url)
+
+    from dataclasses import replace
+
+    from evaluation.m29_mutation_smokes import _assert_invariants_and_collect_violations
+    from evaluation.provider_reliability_extractor import extract_provider_reliability_report
+
+    report = extract_provider_reliability_report(db_url, policy)
+
+    with Session(engine) as session:
+        # 1. Missing task-ID coverage
+        partial_evidence = evidence_list[:-1]
+        res = _assert_invariants_and_collect_violations(session, records, partial_evidence, report)
+        assert res.is_valid is False
+        assert any("task_id coverage mismatch" in v for v in res.violations)
+
+        # 2. Corrupted evidence classifications
+        corrupt_evidence = list(evidence_list)
+        first = corrupt_evidence[0]
+
+        # task_class mismatch
+        c1 = [replace(first, task_class="bugfix")] + corrupt_evidence[1:]
+        res = _assert_invariants_and_collect_violations(session, records, c1, report)
+        assert any("task_class='bugfix'" in v for v in res.violations)
+
+        # mutation_mode mismatch
+        c2 = [replace(first, mutation_mode="vanilla")] + corrupt_evidence[1:]
+        res = _assert_invariants_and_collect_violations(session, records, c2, report)
+        assert any("mutation_mode='vanilla'" in v for v in res.violations)
+
+        # profile mismatch
+        c3 = [replace(first, profile="wrong-profile")] + corrupt_evidence[1:]
+        res = _assert_invariants_and_collect_violations(session, records, c3, report)
+        assert any("profile='wrong-profile'" in v for v in res.violations)
+
+        # accepted mismatch
+        c4 = [replace(first, accepted=not first.accepted)] + corrupt_evidence[1:]
+        res = _assert_invariants_and_collect_violations(session, records, c4, report)
+        assert any("accepted=" in v for v in res.violations)
+
+        # delivery_applicable is True
+        c5 = [replace(first, delivery_applicable=True)] + corrupt_evidence[1:]
+        res = _assert_invariants_and_collect_violations(session, records, c5, report)
+        assert any("delivery_applicable=True" in v for v in res.violations)
+
+        # execution_identity_status mismatch
+        c6 = [replace(first, execution_identity_status="unverified")] + corrupt_evidence[1:]
+        res = _assert_invariants_and_collect_violations(session, records, c6, report)
+        assert any("execution_identity_status='unverified'" in v for v in res.violations)
+
+    engine.dispose()
+
+
+def test_m29_extractor_stage_smokes_detects_matrix_and_sample_size_violations(
+    tmp_path: Path,
+) -> None:
+    """Validator catches incomplete record matrices and evidence cell sample size mismatches."""
+    db_url, records = _init_disposable_smoke_db(tmp_path)
+    policy = default_smoke_policy()
+    evidence_list, _ = load_task_evidence_snapshot(db_url, policy)
+    engine = create_engine_from_url(db_url)
+
+    from evaluation.m29_mutation_smokes import _assert_invariants_and_collect_violations
+    from evaluation.provider_reliability_extractor import extract_provider_reliability_report
+
+    report = extract_provider_reliability_report(db_url, policy)
+
+    with Session(engine) as session:
+        # Incomplete smoke records missing a profile
+        single_profile_records = [r for r in records if "codex" in r.profile]
+        res = _assert_invariants_and_collect_violations(
+            session, single_profile_records, evidence_list, report
+        )
+        assert res.is_valid is False
+        assert any("missing smoke combinations" in v for v in res.violations)
+        assert any("cell 'antigravity-native-executor' sample_size is" in v for v in res.violations)
+
+    engine.dispose()

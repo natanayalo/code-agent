@@ -8,6 +8,7 @@ import logging
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from db.enums import TimelineEventType
@@ -45,6 +46,8 @@ DEFAULT_PROTECTED_PATHS: tuple[str, ...] = (
 INTERACTION_STOP_EVENT_TYPES: frozenset[TimelineEventType] = frozenset(
     {
         TimelineEventType.APPROVAL_REQUESTED,
+        TimelineEventType.APPROVAL_GRANTED,
+        TimelineEventType.APPROVAL_REJECTED,
         TimelineEventType.INTERACTION_RESOLVED,
     }
 )
@@ -90,6 +93,7 @@ def validate_post_overlay_task_spec(
     actual_profile: str | None = None,
     expected_fixture_revision: str | None = None,
     actual_fixture_revision: str | None = None,
+    enable_independent_verifier: bool = False,
 ) -> list[str]:
     """Validate finalized post-overlay TaskSpec, profile, and fixture revision before dispatch."""
     if task_spec is None:
@@ -108,6 +112,13 @@ def validate_post_overlay_task_spec(
 
     errors = post_terminal_quality_evaluation_spec_errors(spec_model, constraints)
 
+    if enable_independent_verifier is not False:
+        errors.append("enable_independent_verifier_must_be_false")
+    if constraints.get("enable_independent_verifier") is True:
+        errors.append("enable_independent_verifier_must_be_false")
+    if constraints.get("post_terminal_quality_evaluation") is not True:
+        errors.append("post_terminal_quality_evaluation_constraint_required")
+
     if expected_profile is not None and actual_profile != expected_profile:
         errors.append(f"worker_profile_mismatch:{actual_profile}!={expected_profile}")
 
@@ -125,7 +136,11 @@ def _extract_comparable_spec_dict(spec: TaskSpec | Mapping[str, Any]) -> dict[st
     d = spec.model_dump(mode="json") if isinstance(spec, TaskSpec) else dict(spec)
     return {
         "task_type": d.get("task_type"),
+        "workspace_mode": d.get("workspace_mode"),
+        "risk_level": d.get("risk_level"),
+        "assumptions": d.get("assumptions") or [],
         "allowed_actions": sorted(d.get("allowed_actions") or []),
+        "forbidden_actions": sorted(d.get("forbidden_actions") or []),
         "setup_commands": d.get("setup_commands") or [],
         "verification_commands": d.get("verification_commands") or [],
         "delivery_mode": d.get("delivery_mode"),
@@ -152,8 +167,18 @@ def verify_pair_semantic_equality(
     """Verify evaluation-controlled semantic equality between matched pair cases."""
     errors: list[str] = []
 
+    if case_a.pair_group != case_b.pair_group:
+        errors.append("pair_group_mismatch")
+    if case_a.topic != case_b.topic:
+        errors.append("pair_topic_mismatch")
     if case_a.prompt != case_b.prompt:
         errors.append("pair_prompt_mismatch")
+    if case_a.allowed_source_path != case_b.allowed_source_path:
+        errors.append("pair_allowed_source_path_mismatch")
+    if case_a.entrypoint != case_b.entrypoint:
+        errors.append("pair_entrypoint_mismatch")
+    if case_a.acceptance_oracle != case_b.acceptance_oracle:
+        errors.append("pair_acceptance_oracle_mismatch")
     if case_a.acceptance_oracle_sha256 != case_b.acceptance_oracle_sha256:
         errors.append("pair_acceptance_oracle_hash_mismatch")
     if case_a.target_repository_revision != case_b.target_repository_revision:
@@ -170,13 +195,18 @@ def verify_pair_semantic_equality(
     if dict_a != dict_b:
         errors.append(f"pair_task_spec_mismatch:{dict_a}!={dict_b}")
 
-    controlled_keys = (
-        "skip_independent_review",
-        "post_terminal_quality_evaluation",
-        "delivery_mode",
-    )
-    for key in controlled_keys:
-        if constraints_a.get(key) != constraints_b.get(key):
+    norm_constraints_a = dict(constraints_a)
+    norm_constraints_b = dict(constraints_b)
+    if norm_constraints_a != norm_constraints_b:
+        differing_keys = sorted(
+            set(norm_constraints_a.keys()) ^ set(norm_constraints_b.keys())
+            | {
+                k
+                for k in norm_constraints_a
+                if k in norm_constraints_b and norm_constraints_a[k] != norm_constraints_b[k]
+            }
+        )
+        for key in differing_keys:
             errors.append(f"pair_constraint_mismatch:{key}")
 
     if repo_profile_a != repo_profile_b:
@@ -266,6 +296,20 @@ def verify_terminal_snapshot_immutability(
     d_after = asdict(after) if isinstance(after, TerminalSnapshot) else dict(after)
 
     violations: list[str] = []
+
+    for name, d_snap in (("before", d_before), ("after", d_after)):
+        recomputed = compute_terminal_snapshot_checksum(
+            task_status=str(d_snap.get("task_status", "")),
+            terminal_event_type=str(d_snap.get("terminal_event_type", "")),
+            terminal_timestamp=str(d_snap.get("terminal_timestamp", "")),
+            failure_kind=d_snap.get("failure_kind"),
+            diff_sha256=d_snap.get("diff_sha256"),
+            changed_files=list(d_snap.get("changed_files") or ()),
+        )
+        snap_chk = d_snap.get("checksum")
+        if not snap_chk or snap_chk != recomputed:
+            violations.append(f"terminal_snapshot_checksum_invalid:{name}:{snap_chk}!={recomputed}")
+
     for field in (
         "task_status",
         "terminal_event_type",
@@ -389,13 +433,35 @@ def cleanup_evaluation_workspace(
     *,
     succeeded: bool,
     recorded_workspace_ids: Collection[str] | None = None,
+    recorded_workspace_paths: Collection[str] | None = None,
 ) -> bool:
-    """Clean up an evaluation workspace enforcing recorded ID boundaries and delete policy."""
+    """Clean up an evaluation workspace enforcing recorded ID/path boundaries and delete policy."""
     if recorded_workspace_ids is not None and handle.workspace_id not in recorded_workspace_ids:
         raise WorkspaceManagerError(
             f"workspace '{handle.workspace_id}' is not in recorded evaluation workspace IDs"
         )
+    if recorded_workspace_paths is not None:
+        norm_recorded = {str(Path(p).resolve()) for p in recorded_workspace_paths}
+        if str(handle.workspace_path.resolve()) not in norm_recorded:
+            raise WorkspaceManagerError(
+                f"workspace path '{handle.workspace_path}' is not in recorded evaluation "
+                "workspace paths"
+            )
 
     policy_override = build_evaluation_cleanup_policy()
     handle_copy = handle.model_copy(update={"cleanup_policy": policy_override})
-    return workspace_manager.cleanup_workspace(handle_copy, succeeded=succeeded)
+    cleaned = workspace_manager.cleanup_workspace(handle_copy, succeeded=succeeded)
+    if not cleaned:
+        raise WorkspaceManagerError(
+            f"WorkspaceManager failed to clean up evaluation workspace '{handle.workspace_id}'"
+        )
+
+    if handle.workspace_path.exists():
+        raise WorkspaceManagerError(
+            f"workspace directory '{handle.workspace_path}' still exists after cleanup"
+        )
+    if handle.trusted_git_dir is not None and handle.trusted_git_dir.exists():
+        raise WorkspaceManagerError(
+            f"workspace trusted git directory '{handle.trusted_git_dir}' still exists after cleanup"
+        )
+    return True

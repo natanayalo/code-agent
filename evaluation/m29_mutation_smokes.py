@@ -311,32 +311,103 @@ def _check_db_task_records(
     return no_review_artifacts, status_and_events_unchanged
 
 
-def _assert_invariants_and_collect_violations(
-    session: Session,
+REQUIRED_SMOKE_COMBINATIONS: frozenset[tuple[str, str, str]] = frozenset(
+    (profile, outcome, path_variant)
+    for profile in M29_MUTATION_PROFILES
+    for outcome in ("pass", "fail", "unavailable")
+    for path_variant in ("ordinary", "worker_reported_failed_tests")
+)
+
+
+def _verify_smoke_record_matrix(
+    records: Sequence[SmokeTaskRecord],
+    violations: list[str],
+) -> None:
+    """Verify that records cover all canonical (profile, outcome, path_variant) combinations."""
+    actual_combinations = {(r.profile, r.external_outcome, r.path_variant) for r in records}
+    missing = REQUIRED_SMOKE_COMBINATIONS - actual_combinations
+    if missing:
+        violations.append(f"missing smoke combinations: {sorted(missing)}")
+
+
+def _verify_task_evidence_classification(
     records: Sequence[SmokeTaskRecord],
     task_evidence: Sequence[Any],
-    report: Any,
-) -> ExtractorStageSmokeResult:
-    """Verify all extractor and database invariants for smoke tasks."""
-    violations: list[str] = []
+    violations: list[str],
+) -> tuple[bool, bool]:
+    """Verify exact task-ID coverage and per-task extractor classification invariants."""
+    record_map = {r.task_id: r for r in records}
+    evidence_task_ids = {item.task_id for item in task_evidence}
+    expected_task_ids = set(record_map.keys())
 
-    # 1. Verify per-task evidence has inapplicable verification and review
+    if evidence_task_ids != expected_task_ids:
+        missing_ids = expected_task_ids - evidence_task_ids
+        extra_ids = evidence_task_ids - expected_task_ids
+        violations.append(
+            f"task_id coverage mismatch: missing={sorted(missing_ids)}, extra={sorted(extra_ids)}"
+        )
+
     for item in task_evidence:
+        rec = record_map.get(item.task_id)
+        if rec is None:
+            continue
+        if item.task_class != "feature":
+            violations.append(
+                f"task '{item.task_id}' has task_class='{item.task_class}', expected 'feature'"
+            )
+        if item.mutation_mode != "mutation":
+            violations.append(
+                f"task '{item.task_id}' has mutation_mode='{item.mutation_mode}', "
+                "expected 'mutation'"
+            )
+        if item.profile != rec.profile:
+            violations.append(
+                f"task '{item.task_id}' has profile='{item.profile}', expected '{rec.profile}'"
+            )
+        expected_accepted = rec.initial_status == TaskStatus.COMPLETED
+        if item.accepted != expected_accepted:
+            violations.append(
+                f"task '{item.task_id}' has accepted={item.accepted}, expected {expected_accepted}"
+            )
         if item.verification_applicable:
             violations.append(f"task {item.task_id} has verification_applicable=True")
         if item.review_applicable:
             violations.append(f"task {item.task_id} has review_applicable=True")
+        if item.delivery_applicable:
+            violations.append(f"task '{item.task_id}' has delivery_applicable=True")
+        if item.execution_identity_status != "verified":
+            violations.append(
+                f"task '{item.task_id}' has execution_identity_status="
+                f"'{item.execution_identity_status}', expected 'verified'"
+            )
 
-    # 2. Check report evidence cells
-    cells = {c.profile: c for c in report.evidence_cells}
+    all_v_inapp = bool(task_evidence) and all(
+        not item.verification_applicable for item in task_evidence
+    )
+    all_r_inapp = bool(task_evidence) and all(not item.review_applicable for item in task_evidence)
+    return all_v_inapp, all_r_inapp
+
+
+def _verify_evidence_cells(
+    report: Any,
+    records: Sequence[SmokeTaskRecord],
+    violations: list[str],
+) -> tuple[dict[str, float | None], dict[str, float | None]]:
+    """Verify evidence cells sample sizes and unapplicable stage pass rates."""
+    cells = {c.profile: c for c in getattr(report, "evidence_cells", [])}
     v_rates: dict[str, float | None] = {}
     r_rates: dict[str, float | None] = {}
 
     for profile in M29_MUTATION_PROFILES:
         cell = cells.get(profile)
+        expected_count = sum(1 for r in records if r.profile == profile)
         if cell is None:
             violations.append(f"missing evidence cell for profile '{profile}'")
             continue
+        if cell.sample_size != expected_count:
+            violations.append(
+                f"cell '{profile}' sample_size is {cell.sample_size}, expected {expected_count}"
+            )
         v_rate = cell.stage_outcome_rates.verification_pass_rate
         r_rate = cell.stage_outcome_rates.review_pass_rate
         v_rates[profile] = v_rate
@@ -346,13 +417,27 @@ def _assert_invariants_and_collect_violations(
         if r_rate is not None:
             violations.append(f"cell '{profile}' review_pass_rate is {r_rate}, expected None")
 
-    # 3. Check DB records: status, terminal event, and no review artifacts
+    return v_rates, r_rates
+
+
+def _assert_invariants_and_collect_violations(
+    session: Session,
+    records: Sequence[SmokeTaskRecord],
+    task_evidence: Sequence[Any],
+    report: Any,
+) -> ExtractorStageSmokeResult:
+    """Verify all extractor and database invariants for smoke tasks."""
+    violations: list[str] = []
+
+    _verify_smoke_record_matrix(records, violations)
+    all_v_inapp, all_r_inapp = _verify_task_evidence_classification(
+        records, task_evidence, violations
+    )
+    v_rates, r_rates = _verify_evidence_cells(report, records, violations)
+
     no_review_artifacts, status_and_events_unchanged = _check_db_task_records(
         session, records, violations
     )
-
-    all_v_inapp = all(not item.verification_applicable for item in task_evidence)
-    all_r_inapp = all(not item.review_applicable for item in task_evidence)
 
     return ExtractorStageSmokeResult(
         total_smoke_tasks=len(records),
@@ -389,16 +474,19 @@ def run_m29_extractor_stage_smokes(
 ) -> ExtractorStageSmokeResult:
     """Run canonical extractor against disposable DB and verify smoke invariants."""
     engine = create_engine_from_url(db_url)
-    smoke_records = list(records or build_default_smoke_records())
-    smoke_policy = policy or default_smoke_policy()
+    try:
+        smoke_records = list(records or build_default_smoke_records())
+        smoke_policy = policy or default_smoke_policy()
 
-    task_evidence, _ = load_task_evidence_snapshot(db_url, smoke_policy)
-    report = extract_provider_reliability_report(db_url, smoke_policy)
+        task_evidence, _ = load_task_evidence_snapshot(db_url, smoke_policy)
+        report = extract_provider_reliability_report(db_url, smoke_policy)
 
-    with Session(engine) as session:
-        return _assert_invariants_and_collect_violations(
-            session=session,
-            records=smoke_records,
-            task_evidence=task_evidence,
-            report=report,
-        )
+        with Session(engine) as session:
+            return _assert_invariants_and_collect_violations(
+                session=session,
+                records=smoke_records,
+                task_evidence=task_evidence,
+                report=report,
+            )
+    finally:
+        engine.dispose()
