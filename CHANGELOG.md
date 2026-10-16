@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: implement M29 feature mutation manifest and report reconciliation gates ([#418](https://github.com/natanayalo/code-agent/pull/418))
+
 - Feat: define frozen M29 feature mutation suite and evaluator contract ([#417](https://github.com/natanayalo/code-agent/pull/417))
 
 - Feat: add post-terminal M29 evaluation mode ([#412](https://github.com/natanayalo/code-agent/pull/412))
