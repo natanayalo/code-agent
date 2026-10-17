@@ -327,7 +327,7 @@ def test_candidate_stop_condition_delivery(tmp_path: Path) -> None:
         changed_files=("taskboard/labels.py",),
     )
     err = _check_candidate_stop_conditions(res_deliv, case)
-    assert err == "invalid_delivery_mode_not_workspace"
+    assert err is not None and "delivery_mode" in err
 
     ev = TaskTimelineEvent(
         attempt_number=0,
@@ -346,6 +346,45 @@ def test_candidate_stop_condition_delivery(tmp_path: Path) -> None:
         changed_files=("taskboard/labels.py",),
     )
     assert _check_candidate_stop_conditions(res_deliv_ev, case) == "delivery_event_detected"
+
+
+def test_candidate_stop_condition_task_spec_isolation(tmp_path: Path) -> None:
+    case = _make_case()
+    handle = _make_handle(tmp_path)
+
+    res_bad_cons = CandidateTaskExecutionResult(
+        task_id=handle.task_id,
+        workspace_handle=handle,
+        task_status="completed",
+        terminal_event_type=TimelineEventType.TASK_COMPLETED.value,
+        terminal_timestamp=NOW,
+        execution_identity=M29_MUTATION_IDENTITY_CONTRACT["codex-native-executor"],
+        changed_files=("taskboard/labels.py",),
+        constraints={"enable_independent_verifier": True, "post_terminal_quality_evaluation": True},
+    )
+    err_cons = _check_candidate_stop_conditions(res_bad_cons, case)
+    assert err_cons is not None and "task_spec_isolation_violation" in err_cons
+    assert "enable_independent_verifier_must_be_false" in err_cons
+
+    spec_bad = TaskSpec(
+        task_type="feature",
+        goal=case.prompt,
+        delivery_mode="workspace",
+        requires_clarification=True,
+        allowed_actions=["modify_workspace_files"],
+    )
+    res_bad_spec = CandidateTaskExecutionResult(
+        task_id=handle.task_id,
+        workspace_handle=handle,
+        task_status="completed",
+        terminal_event_type=TimelineEventType.TASK_COMPLETED.value,
+        terminal_timestamp=NOW,
+        execution_identity=M29_MUTATION_IDENTITY_CONTRACT["codex-native-executor"],
+        changed_files=("taskboard/labels.py",),
+        task_spec=spec_bad,
+    )
+    err_spec = _check_candidate_stop_conditions(res_bad_spec, case)
+    assert err_spec is not None and "task_spec_isolation_violation" in err_spec
 
 
 def test_candidate_stop_condition_protected_paths(tmp_path: Path) -> None:
@@ -491,7 +530,7 @@ def test_external_evaluator_verification() -> None:
     )
 
 
-def test_build_sanitized_case_entry() -> None:
+def test_build_sanitized_case_entry_basic() -> None:
     case = _make_case()
     eval_pass = _make_eval_result("pass")
 
@@ -530,6 +569,11 @@ def test_build_sanitized_case_entry() -> None:
     assert entry_term_fail.terminal_status == "failed"
     assert entry_term_fail.report_failure_kind == "test_failure"
 
+
+def test_build_sanitized_case_entry_evaluator_statuses() -> None:
+    case = _make_case()
+    eval_pass = _make_eval_result("pass")
+
     # Evaluator unavailable / unverified
     eval_unavail = ExternalEvaluationResult(
         acceptance_oracle_passed=False,
@@ -549,6 +593,35 @@ def test_build_sanitized_case_entry() -> None:
     assert entry_unavail.evaluator_identity_status == "unavailable"
     assert entry_unavail.evaluator_identity_matches is False
     assert entry_unavail.quality_reason == "infra_timeout"
+
+    # Evaluator verified status but identity mismatch -> mapped to 'mismatched'
+    eval_mismatch = ExternalEvaluationResult(
+        acceptance_oracle_passed=False,
+        regression_suite_passed=False,
+        neutral_review_passed=False,
+        evaluator_identity_status="verified",
+        evaluator_identity_matches=False,
+        reason="model_mismatch",
+        quality_status="not_assessable",
+    )
+    entry_mismatch = build_sanitized_case_entry(
+        case=case,
+        task_status="completed",
+        eval_result=eval_mismatch,
+    )
+    assert entry_mismatch.quality_status == "not_assessable"
+    assert entry_mismatch.evaluator_identity_status == "mismatched"
+    assert entry_mismatch.evaluator_identity_matches is False
+
+    # Exclusion reason marks accepted=False even if completed
+    entry_excluded = build_sanitized_case_entry(
+        case=case,
+        task_status="completed",
+        exclusion_reason="terminal_snapshot_mutated:diff_sha256",
+        eval_result=eval_pass,
+    )
+    assert entry_excluded.accepted is False
+    assert entry_excluded.exclusion_reason == "terminal_snapshot_mutated:diff_sha256"
 
 
 def test_validate_sanitized_archive() -> None:
@@ -644,6 +717,8 @@ def test_runner_memory_drift_stop(tmp_path: Path) -> None:
     assert "memory_isolation_violation" in str(result.stop_reason)
     assert len(result.raw_entries) == 20
     assert all(r.case_outcome == "stopped_preflight" for r in result.raw_entries)
+    assert "none" not in result.workspaces_retained
+    assert result.workspaces_retained == ()
 
 
 def test_runner_preflight_failure_non_disposable_db(tmp_path: Path) -> None:

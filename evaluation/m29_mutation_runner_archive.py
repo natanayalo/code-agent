@@ -52,12 +52,14 @@ def build_sanitized_case_entry(
         or eval_result.evaluator_identity_status != "verified"
     ):
         q_status: Literal["pass", "fail", "not_assessable"] = "not_assessable"
-        eval_id_status: Literal["verified", "mismatched", "unavailable"] = (
-            eval_result.evaluator_identity_status
-            if eval_result
-            and eval_result.evaluator_identity_status in ("mismatched", "unavailable")
-            else "unavailable"
-        )
+        if eval_result is None:
+            eval_id_status: Literal["verified", "mismatched", "unavailable"] = "unavailable"
+        elif eval_result.evaluator_identity_status in ("mismatched", "unavailable"):
+            eval_id_status = eval_result.evaluator_identity_status
+        elif not eval_result.evaluator_identity_matches:
+            eval_id_status = "mismatched"
+        else:
+            eval_id_status = "unavailable"
         eval_id_matches = False
         o_pass, r_pass, rev_pass = False, False, False
         q_reason = (

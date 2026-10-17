@@ -12,9 +12,6 @@ from typing import Literal
 from evaluation.m29_mutation_isolation import (
     MAX_EVALUATION_RETENTION_SECONDS,
     TerminalSnapshot,
-    check_delivery_stop_condition,
-    check_pending_interaction_stop_condition,
-    check_protected_paths_stop_condition,
     cleanup_evaluation_workspace,
     create_terminal_snapshot,
     validate_post_overlay_task_spec,
@@ -27,6 +24,14 @@ from evaluation.m29_mutation_runner_archive import (
     validate_sanitized_Archive,
     validate_sanitized_archive,
 )
+from evaluation.m29_mutation_runner_eval import (
+    build_completed_case,
+    build_post_dispatch_stopped_case,
+    build_post_eval_stopped_case,
+    build_stopped_case,
+    check_candidate_stop_conditions,
+    verify_external_evaluator,
+)
 from evaluation.m29_mutation_runner_models import (
     M29_MUTATION_IDENTITY_CONTRACT,
     CandidateDispatcher,
@@ -37,6 +42,7 @@ from evaluation.m29_mutation_runner_models import (
     RawCaseManifestEntry,
     SanitizedCaseManifestEntry,
     TaskCohortSnapshot,
+    make_raw_case_manifest_entry,
 )
 from evaluation.m29_mutation_runner_preflight import (
     capture_task_cohort_snapshot,
@@ -49,139 +55,15 @@ from evaluation.m29_mutation_suite import (
     DEFAULT_M29_NEUTRAL_EVALUATOR,
     M29MutationCase,
     M29MutationSuite,
-    NeutralEvaluatorManifest,
 )
-from evaluation.provider_reliability_models import ExecutionIdentity
 from orchestrator.state import MemoryContext
 from sandbox.workspace import WorkspaceHandle, WorkspaceManager
 
 LOGGER = logging.getLogger("m29_mutation_runner")
 
-
-def _check_candidate_stop_conditions(
-    result: CandidateTaskExecutionResult,
-    case: M29MutationCase,
-) -> str | None:
-    """Evaluate candidate execution outcome against all M29 stop condition gates."""
-    if result.pending_interaction or check_pending_interaction_stop_condition(
-        timeline_events=result.timeline_events
-    ):
-        return "pending_human_interaction_detected"
-
-    if (
-        "delivery" in result.terminal_event_type.lower()
-        or result.terminal_event_type == "TASK_DELIVERED"
-    ):
-        return f"delivery_violation:terminal_event_type={result.terminal_event_type}"
-
-    delivery_err = check_delivery_stop_condition(
-        result.task_spec or default_mutation_task_spec(case),
-        result.timeline_events,
-        result.artifacts,
-    )
-    if delivery_err:
-        return delivery_err
-
-    path_errs = check_protected_paths_stop_condition(
-        result.changed_files, allowed_source_path=case.allowed_source_path
-    )
-    if path_errs:
-        return f"protected_paths_violation:{';'.join(path_errs)}"
-
-    expected_id = M29_MUTATION_IDENTITY_CONTRACT[case.worker_profile]
-    actual_id = result.execution_identity
-    if (
-        result.execution_identity_status != "verified"
-        or actual_id is None
-        or actual_id.provider != expected_id.provider
-        or actual_id.model != expected_id.model
-        or actual_id.reasoning_effort != expected_id.reasoning_effort
-    ):
-        return f"candidate_identity_mismatch:expected={expected_id},actual={actual_id}"
-
-    if result.in_task_repairs > 0 or result.verification_events or result.review_artifacts:
-        return "in_task_verification_review_isolation_violation"
-
-    return None
-
-
-def _verify_external_evaluator(
-    eval_res: ExternalEvaluationResult,
-    expected_evaluator: NeutralEvaluatorManifest,
-) -> str | None:
-    """Verify evaluator identity, fallback policy, and isolation invariants."""
-    if not eval_res.evaluator_identity_matches:
-        return f"evaluator_identity_mismatch:{eval_res.reason or 'identity_not_matched'}"
-    if eval_res.quality_status == "not_assessable":
-        return f"evaluator_not_assessable:{eval_res.reason or 'unassessable'}"
-
-    act_id = eval_res.evaluator_identity
-    if (
-        act_id is None
-        or act_id.provider != expected_evaluator.provider
-        or act_id.model != expected_evaluator.model
-        or act_id.reasoning_effort != expected_evaluator.reasoning_effort
-    ):
-        return f"evaluator_identity_mismatch:expected={expected_evaluator},actual={act_id}"
-    if eval_res.evaluator_identity_status != "verified":
-        return f"evaluator_identity_unverified:{eval_res.evaluator_identity_status}"
-    if eval_res.fallback_attempted:
-        return "evaluator_fallback_attempted"
-    if eval_res.repairs_attempted > 0:
-        return "evaluator_repair_passes_forbidden"
-    if eval_res.emitted_verification_events:
-        return "evaluator_emitted_verification_events"
-    if eval_res.emitted_review_artifacts:
-        return "evaluator_emitted_review_artifacts"
-    return None
-
-
-def _make_raw_entry(
-    case: M29MutationCase,
-    *,
-    task_id: str = "unstarted",
-    workspace_id: str = "none",
-    workspace_path: str = "",
-    trusted_git_dir: str | None = None,
-    terminal_snapshot: TerminalSnapshot | None = None,
-    candidate_identity: ExecutionIdentity | None = None,
-    candidate_identity_status: str = "unknown_execution_identity",
-    time_to_terminal_seconds: float | None = None,
-    failure_kind: str | None = None,
-    diff_sha256: str | None = None,
-    raw_diff: str = "",
-    changed_files: tuple[str, ...] = (),
-    external_evaluation: ExternalEvaluationResult | None = None,
-    cleaned_up: bool = False,
-    stop_reason: str | None = None,
-    case_outcome: str = "stopped_preflight",
-) -> RawCaseManifestEntry:
-    prov = "codex" if case.worker_profile == "codex-native-executor" else "antigravity"
-    return RawCaseManifestEntry(
-        case_id=case.case_id,
-        task_id=task_id,
-        workspace_id=workspace_id,
-        workspace_path=workspace_path,
-        trusted_git_dir=trusted_git_dir,
-        pair_group=case.pair_group,
-        pair_order=case.pair_order,
-        topic=case.topic,
-        worker_profile=case.worker_profile,
-        provider=prov,
-        target_repository_revision=case.target_repository_revision,
-        terminal_snapshot=terminal_snapshot,
-        candidate_identity=candidate_identity,
-        candidate_identity_status=candidate_identity_status,
-        time_to_terminal_seconds=time_to_terminal_seconds,
-        failure_kind=failure_kind,
-        diff_sha256=diff_sha256,
-        raw_diff=raw_diff,
-        changed_files=changed_files,
-        external_evaluation=external_evaluation,
-        cleaned_up=cleaned_up,
-        stop_reason=stop_reason,
-        case_outcome=case_outcome,
-    )
+_check_candidate_stop_conditions = check_candidate_stop_conditions
+_verify_external_evaluator = verify_external_evaluator
+_make_raw_entry = make_raw_case_manifest_entry
 
 
 class M29MutationRunner:
@@ -201,6 +83,9 @@ class M29MutationRunner:
         as_of: datetime | None = None,
         baseline_ids_by_profile: Mapping[str, Collection[str]] | None = None,
         memory_context_provider: Callable[[M29MutationCase], MemoryContext] | None = None,
+        post_evaluation_snapshot_hook: (
+            Callable[[M29MutationCase, CandidateTaskExecutionResult], TerminalSnapshot] | None
+        ) = None,
     ) -> None:
         self.suite = suite
         self.db_url = db_url
@@ -213,24 +98,19 @@ class M29MutationRunner:
         self.as_of = as_of
         self.baseline_ids = baseline_ids_by_profile
         self.memory_context_provider = memory_context_provider
+        self.post_evaluation_snapshot_hook = post_evaluation_snapshot_hook
         self.workspace_root: Path = getattr(
             workspace_manager, "root_dir", getattr(workspace_manager, "workspace_root", Path("."))
         ).resolve()
         self._recorded_ws_ids: set[str] = set()
         self._recorded_ws_paths: set[str] = set()
 
-    def _execute_case(
-        self,
-        case: M29MutationCase,
-        current_mem: MemoryContext,
-        base_hash: str,
-    ) -> tuple[RawCaseManifestEntry, SanitizedCaseManifestEntry, bool, str | None]:
-        mem_errs = verify_memory_context_isolation(
-            current_mem, base_hash, require_empty_personal=True
-        )
+    def _check_pre_dispatch(
+        self, case: M29MutationCase, mem: MemoryContext, base_hash: str
+    ) -> str | None:
+        mem_errs = verify_memory_context_isolation(mem, base_hash, require_empty_personal=True)
         if mem_errs:
-            return self._build_stopped(case, f"memory_isolation_violation:{';'.join(mem_errs)}")
-
+            return f"memory_isolation_violation:{';'.join(mem_errs)}"
         spec, cons = default_mutation_task_spec(case), default_mutation_constraints()
         spec_errs = validate_post_overlay_task_spec(
             spec,
@@ -241,7 +121,39 @@ class M29MutationRunner:
             actual_fixture_revision=case.target_repository_revision,
         )
         if spec_errs:
-            return self._build_stopped(case, f"task_spec_validation_failed:{';'.join(spec_errs)}")
+            return f"task_spec_validation_failed:{';'.join(spec_errs)}"
+        return None
+
+    def _capture_terminal_snapshot(
+        self,
+        case: M29MutationCase,
+        cand_res: CandidateTaskExecutionResult,
+        *,
+        post_eval: bool = False,
+    ) -> TerminalSnapshot:
+        if post_eval and self.post_evaluation_snapshot_hook is not None:
+            return self.post_evaluation_snapshot_hook(case, cand_res)
+        dispatcher_capture = getattr(self.candidate_dispatcher, "capture_terminal_snapshot", None)
+        if callable(dispatcher_capture):
+            return dispatcher_capture(case, cand_res)
+        return create_terminal_snapshot(
+            cand_res.task_status,
+            cand_res.terminal_event_type,
+            cand_res.terminal_timestamp,
+            failure_kind=cand_res.failure_kind,
+            diff_sha256=cand_res.diff_sha256,
+            changed_files=cand_res.changed_files,
+        )
+
+    def _execute_case(
+        self,
+        case: M29MutationCase,
+        current_mem: MemoryContext,
+        base_hash: str,
+    ) -> tuple[RawCaseManifestEntry, SanitizedCaseManifestEntry, bool, str | None]:
+        pre_err = self._check_pre_dispatch(case, current_mem, base_hash)
+        if pre_err:
+            return self._build_stopped(case, pre_err)
 
         cand_res = self.candidate_dispatcher.dispatch_case(case, current_mem)
         self._recorded_ws_ids.add(cand_res.workspace_handle.workspace_id)
@@ -251,14 +163,7 @@ class M29MutationRunner:
         if stop_cond:
             return self._build_post_dispatch_stopped(case, cand_res, stop_cond)
 
-        snap_before = create_terminal_snapshot(
-            cand_res.task_status,
-            cand_res.terminal_event_type,
-            cand_res.terminal_timestamp,
-            failure_kind=cand_res.failure_kind,
-            diff_sha256=cand_res.diff_sha256,
-            changed_files=cand_res.changed_files,
-        )
+        snap_before = self._capture_terminal_snapshot(case, cand_res, post_eval=False)
         eval_res = self.external_evaluator.evaluate_case(
             case, cand_res.workspace_handle.workspace_path, snap_before
         )
@@ -271,22 +176,22 @@ class M29MutationRunner:
                 acceptance_oracle_passed=False,
                 regression_suite_passed=False,
                 neutral_review_passed=False,
-                evaluator_identity_matches=False,
                 reason=eval_err,
                 quality_status="not_assessable",
             )
 
-        snap_after = create_terminal_snapshot(
-            cand_res.task_status,
-            cand_res.terminal_event_type,
-            cand_res.terminal_timestamp,
-            failure_kind=cand_res.failure_kind,
-            diff_sha256=cand_res.diff_sha256,
-            changed_files=cand_res.changed_files,
-        )
+        snap_after = self._capture_terminal_snapshot(case, cand_res, post_eval=True)
         snap_errs = verify_terminal_snapshot_immutability(snap_before, snap_after)
         if snap_errs:
             reason = f"terminal_snapshot_mutated:{';'.join(snap_errs)}"
+            eval_res = replace(
+                eval_res,
+                acceptance_oracle_passed=False,
+                regression_suite_passed=False,
+                neutral_review_passed=False,
+                reason=reason,
+                quality_status="not_assessable",
+            )
             return self._build_post_eval_stopped(case, cand_res, snap_before, eval_res, reason)
 
         if eval_err:
@@ -294,154 +199,14 @@ class M29MutationRunner:
 
         return self._build_completed(case, cand_res, snap_before, eval_res)
 
-    def _build_stopped(
-        self, case: M29MutationCase, reason: str
-    ) -> tuple[RawCaseManifestEntry, SanitizedCaseManifestEntry, bool, str]:
-        raw = _make_raw_entry(case, stop_reason=reason, case_outcome="stopped_preflight")
-        san = build_sanitized_case_entry(
-            case=case,
-            task_status="failed",
-            failure_kind="stopped",
-            candidate_identity_status="unknown_execution_identity",
-            identity_matches=False,
-            exclusion_reason=reason,
-        )
-        return raw, san, False, reason
+    _build_stopped = staticmethod(build_stopped_case)
+    _build_post_dispatch_stopped = staticmethod(build_post_dispatch_stopped_case)
+    _build_post_eval_stopped = staticmethod(build_post_eval_stopped_case)
+    _build_completed = staticmethod(build_completed_case)
 
-    def _build_post_dispatch_stopped(
-        self, case: M29MutationCase, res: CandidateTaskExecutionResult, reason: str
-    ) -> tuple[RawCaseManifestEntry, SanitizedCaseManifestEntry, bool, str]:
-        snap = create_terminal_snapshot(
-            res.task_status,
-            res.terminal_event_type,
-            res.terminal_timestamp,
-            failure_kind=res.failure_kind,
-            diff_sha256=res.diff_sha256,
-            changed_files=res.changed_files,
-        )
-        hnd = res.workspace_handle
-        trusted_git = str(hnd.trusted_git_dir) if hnd.trusted_git_dir else None
-        raw = _make_raw_entry(
-            case,
-            task_id=res.task_id,
-            workspace_id=hnd.workspace_id,
-            workspace_path=str(hnd.workspace_path),
-            trusted_git_dir=trusted_git,
-            terminal_snapshot=snap,
-            candidate_identity=res.execution_identity,
-            candidate_identity_status=res.execution_identity_status,
-            time_to_terminal_seconds=res.time_to_terminal_seconds,
-            failure_kind=res.failure_kind,
-            diff_sha256=res.diff_sha256,
-            raw_diff=res.diff_text,
-            changed_files=res.changed_files,
-            stop_reason=reason,
-            case_outcome="interaction_pending" if "interaction" in reason else "stopped_safety",
-        )
-        san = build_sanitized_case_entry(
-            case=case,
-            task_status=res.task_status,
-            failure_kind=res.failure_kind,
-            time_to_terminal_seconds=res.time_to_terminal_seconds,
-            candidate_identity_status=res.execution_identity_status,
-            identity_matches=False,
-            exclusion_reason=reason,
-        )
-        return raw, san, False, reason
-
-    def _build_post_eval_stopped(
-        self,
-        case: M29MutationCase,
-        res: CandidateTaskExecutionResult,
-        snap: TerminalSnapshot,
-        eval_res: ExternalEvaluationResult,
-        reason: str,
-    ) -> tuple[RawCaseManifestEntry, SanitizedCaseManifestEntry, bool, str]:
-        hnd = res.workspace_handle
-        trusted_git = str(hnd.trusted_git_dir) if hnd.trusted_git_dir else None
-        raw = _make_raw_entry(
-            case,
-            task_id=res.task_id,
-            workspace_id=hnd.workspace_id,
-            workspace_path=str(hnd.workspace_path),
-            trusted_git_dir=trusted_git,
-            terminal_snapshot=snap,
-            candidate_identity=res.execution_identity,
-            candidate_identity_status=res.execution_identity_status,
-            time_to_terminal_seconds=res.time_to_terminal_seconds,
-            failure_kind=res.failure_kind,
-            diff_sha256=res.diff_sha256,
-            raw_diff=res.diff_text,
-            changed_files=res.changed_files,
-            external_evaluation=eval_res,
-            stop_reason=reason,
-            case_outcome=(
-                "stopped_mutation"
-                if reason.startswith("terminal_snapshot_mutated")
-                else "quality_not_assessable"
-            ),
-        )
-        san = build_sanitized_case_entry(
-            case=case,
-            task_status=res.task_status,
-            failure_kind=res.failure_kind,
-            time_to_terminal_seconds=res.time_to_terminal_seconds,
-            candidate_identity_status=res.execution_identity_status,
-            identity_matches=True,
-            exclusion_reason=None,
-            eval_result=eval_res,
-        )
-        return raw, san, False, reason
-
-    def _build_completed(
-        self,
-        case: M29MutationCase,
-        res: CandidateTaskExecutionResult,
-        snap: TerminalSnapshot,
-        eval_res: ExternalEvaluationResult,
-    ) -> tuple[RawCaseManifestEntry, SanitizedCaseManifestEntry, bool, None]:
-        q_pass = eval_res.quality_status == "pass"
-        term_comp = res.task_status == "completed"
-        outcome = (
-            "completed_quality_pass"
-            if term_comp and q_pass
-            else "completed_quality_fail"
-            if term_comp
-            else "failed_terminal"
-        )
-        hnd = res.workspace_handle
-        trusted_git = str(hnd.trusted_git_dir) if hnd.trusted_git_dir else None
-        raw = _make_raw_entry(
-            case,
-            task_id=res.task_id,
-            workspace_id=hnd.workspace_id,
-            workspace_path=str(hnd.workspace_path),
-            trusted_git_dir=trusted_git,
-            terminal_snapshot=snap,
-            candidate_identity=res.execution_identity,
-            candidate_identity_status=res.execution_identity_status,
-            time_to_terminal_seconds=res.time_to_terminal_seconds,
-            failure_kind=res.failure_kind,
-            diff_sha256=res.diff_sha256,
-            raw_diff=res.diff_text,
-            changed_files=res.changed_files,
-            external_evaluation=eval_res,
-            stop_reason=None,
-            case_outcome=outcome,
-        )
-        san = build_sanitized_case_entry(
-            case=case,
-            task_status=res.task_status,
-            failure_kind=res.failure_kind,
-            time_to_terminal_seconds=res.time_to_terminal_seconds,
-            candidate_identity_status=res.execution_identity_status,
-            identity_matches=True,
-            exclusion_reason=None,
-            eval_result=eval_res,
-        )
-        return raw, san, (outcome == "completed_quality_pass"), None
-
-    def _clean_workspace_if_eligible(self, raw: RawCaseManifestEntry) -> RawCaseManifestEntry:
+    def _clean_workspace_if_eligible(
+        self, raw: RawCaseManifestEntry
+    ) -> tuple[RawCaseManifestEntry, str | None]:
         hnd = WorkspaceHandle(
             workspace_id=raw.workspace_id,
             task_id=raw.task_id,
@@ -451,14 +216,85 @@ class M29MutationRunner:
             cleanup_policy=self.workspace_manager.cleanup_policy,
             trusted_git_dir=Path(raw.trusted_git_dir) if raw.trusted_git_dir else None,
         )
-        cleanup_evaluation_workspace(
-            self.workspace_manager,
-            hnd,
-            succeeded=True,
-            recorded_workspace_ids=self._recorded_ws_ids,
-            recorded_workspace_paths=self._recorded_ws_paths,
-        )
-        return replace(raw, cleaned_up=True)
+        try:
+            cleanup_evaluation_workspace(
+                self.workspace_manager,
+                hnd,
+                succeeded=True,
+                recorded_workspace_ids=self._recorded_ws_ids,
+                recorded_workspace_paths=self._recorded_ws_paths,
+            )
+            return replace(raw, cleaned_up=True), None
+        except Exception as exc:
+            LOGGER.error(
+                "Evaluation workspace cleanup failed for %s", raw.workspace_id, exc_info=True
+            )
+            err_msg = str(exc)
+            return replace(raw, cleaned_up=False, cleanup_error=err_msg), err_msg
+
+    def _cleanup_eligible_workspaces(
+        self,
+        eligible_indices: list[int],
+        raw_list: list[RawCaseManifestEntry],
+        cleaned_ws: list[str],
+        retained_ws: list[str],
+    ) -> str | None:
+        stop: str | None = None
+        for idx in eligible_indices:
+            raw = raw_list[idx]
+            if stop is not None:
+                if raw.workspace_id != "none":
+                    retained_ws.append(raw.workspace_id)
+                continue
+            cleaned_raw, err = self._clean_workspace_if_eligible(raw)
+            raw_list[idx] = cleaned_raw
+            if err:
+                stop = f"workspace_cleanup_failed:{err}"
+                if raw.workspace_id != "none":
+                    retained_ws.append(raw.workspace_id)
+            else:
+                cleaned_ws.append(raw.workspace_id)
+        return stop
+
+    def _finalize_run(
+        self,
+        *,
+        halted: bool,
+        suite_stop: str | None,
+        raw_list: list[RawCaseManifestEntry],
+        san_list: list[SanitizedCaseManifestEntry],
+        eligible_clean_indices: list[int],
+        cleaned_ws: list[str],
+        retained_ws: list[str],
+    ) -> tuple[bool, str | None, str | None]:
+        archive_chk: str | None = None
+        if not halted:
+            diffs = {r.case_id: r.raw_diff for r in raw_list if r.raw_diff}
+            try:
+                archive_chk = validate_sanitized_archive(
+                    san_list,
+                    sanitized_diffs=diffs,
+                    expected_case_count=len(self.suite.cases),
+                )
+            except Exception as exc:
+                LOGGER.error("Sanitized archive validation failed", exc_info=True)
+                halted = True
+                suite_stop = f"archive_validation_failed:{exc}"
+
+        if not halted:
+            cleanup_stop = self._cleanup_eligible_workspaces(
+                eligible_clean_indices, raw_list, cleaned_ws, retained_ws
+            )
+            if cleanup_stop:
+                halted = True
+                suite_stop = cleanup_stop
+                archive_chk = None
+        else:
+            for idx in eligible_clean_indices:
+                r = raw_list[idx]
+                if r.workspace_id != "none":
+                    retained_ws.append(r.workspace_id)
+        return halted, suite_stop, archive_chk
 
     def _run_preflight(
         self,
@@ -505,6 +341,7 @@ class M29MutationRunner:
         san_list: list[SanitizedCaseManifestEntry] = []
         cleaned_ws: list[str] = []
         retained_ws: list[str] = []
+        eligible_clean_indices: list[int] = []
         suite_stop: str | None = None
         halted = False
 
@@ -523,25 +360,30 @@ class M29MutationRunner:
             raw, san, can_clean, stop_reason = self._execute_case(
                 case, current_mem, snapshot.baseline_memory_context_hash
             )
-            if stop_reason:
-                halted = True
-                suite_stop = stop_reason
-                retained_ws.append(raw.workspace_id)
-            elif can_clean:
-                raw = self._clean_workspace_if_eligible(raw)
-                cleaned_ws.append(raw.workspace_id)
-            else:
-                retained_ws.append(raw.workspace_id)
-
             raw_list.append(raw)
             san_list.append(san)
 
-        final_status: Literal["completed", "halted"] = "halted" if halted else "completed"
-        archive_chk = (
-            validate_sanitized_archive(san_list, expected_case_count=len(self.suite.cases))
-            if final_status == "completed"
-            else None
+            if stop_reason:
+                halted = True
+                suite_stop = stop_reason
+                if raw.workspace_id != "none":
+                    retained_ws.append(raw.workspace_id)
+            elif can_clean:
+                eligible_clean_indices.append(len(raw_list) - 1)
+            else:
+                if raw.workspace_id != "none":
+                    retained_ws.append(raw.workspace_id)
+
+        halted, suite_stop, archive_chk = self._finalize_run(
+            halted=halted,
+            suite_stop=suite_stop,
+            raw_list=raw_list,
+            san_list=san_list,
+            eligible_clean_indices=eligible_clean_indices,
+            cleaned_ws=cleaned_ws,
+            retained_ws=retained_ws,
         )
+        final_status: Literal["completed", "halted"] = "halted" if halted else "completed"
         return M29MutationRunnerResult(
             suite_name=self.suite.suite_name,
             status=final_status,

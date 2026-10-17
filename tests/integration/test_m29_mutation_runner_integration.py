@@ -7,6 +7,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import pytest
+
+from evaluation.m29_mutation_isolation import TerminalSnapshot, create_terminal_snapshot
 from evaluation.m29_mutation_runner import (
     M29_MUTATION_IDENTITY_CONTRACT,
     CandidateDispatcher,
@@ -217,11 +220,11 @@ def test_mid_suite_candidate_stop_condition_delivery(tmp_path: Path) -> None:
     assert result.stop_reason is not None
     assert "delivery_violation" in result.stop_reason
 
-    # Cases 0 and 1 passed cleanly and were cleaned up
+    # Cases 0 and 1 passed cleanly and were retained (suite halted before archive verification)
     assert result.raw_entries[0].case_outcome == "completed_quality_pass"
     assert result.raw_entries[1].case_outcome == "completed_quality_pass"
-    assert not Path(result.raw_entries[0].workspace_path).exists()
-    assert not Path(result.raw_entries[1].workspace_path).exists()
+    assert Path(result.raw_entries[0].workspace_path).exists()
+    assert Path(result.raw_entries[1].workspace_path).exists()
 
     # Case 2 stopped on delivery and is retained for inspection
     assert result.raw_entries[2].case_outcome == "stopped_safety"
@@ -232,8 +235,8 @@ def test_mid_suite_candidate_stop_condition_delivery(tmp_path: Path) -> None:
         assert result.raw_entries[i].case_outcome == "stopped_preflight"
         assert "delivery_violation" in str(result.raw_entries[i].stop_reason)
 
-    assert len(result.workspaces_cleaned) == 2
-    assert len(result.workspaces_retained) == 1
+    assert len(result.workspaces_cleaned) == 0
+    assert len(result.workspaces_retained) == 3
     assert result.sanitized_archive_checksum is None
 
 
@@ -270,14 +273,14 @@ def test_mid_suite_evaluator_unavailability_halt(tmp_path: Path) -> None:
     assert "evaluator_identity_mismatch" in result.stop_reason
 
     assert result.raw_entries[0].case_outcome == "completed_quality_pass"
-    assert not Path(result.raw_entries[0].workspace_path).exists()
+    assert Path(result.raw_entries[0].workspace_path).exists()
 
     # Case 1 retained on unassessable / fallback
     assert result.raw_entries[1].case_outcome == "quality_not_assessable"
     assert Path(result.raw_entries[1].workspace_path).exists()
 
-    assert len(result.workspaces_cleaned) == 1
-    assert len(result.workspaces_retained) == 1
+    assert len(result.workspaces_cleaned) == 0
+    assert len(result.workspaces_retained) == 2
 
 
 def test_mid_suite_terminal_snapshot_mutation_halt(tmp_path: Path) -> None:
@@ -286,41 +289,27 @@ def test_mid_suite_terminal_snapshot_mutation_halt(tmp_path: Path) -> None:
     policy = WorkspaceCleanupPolicy()
     mgr = WorkspaceManager(root_dir=ws_root, cleanup_policy=policy)
     dispatcher = SyntheticDispatcher(ws_root, policy)
+    evaluator = SyntheticExternalEvaluator()
 
-    class MutatingEvaluator(ExternalEvaluator):
-        def evaluate_case(
-            self,
-            case: M29MutationCase,
-            workspace_path: Path,
-            terminal_snapshot: Any,
-        ) -> ExternalEvaluationResult:
-            # Side effect: tamper with candidate terminal snapshot fields
-            if case.case_id == suite.cases[1].case_id:
-                # Mutate task result fields after terminal snapshot was taken
-                dispatcher_result = getattr(dispatcher, "last_result", None)
-                if dispatcher_result:
-                    object.__setattr__(dispatcher_result, "diff_sha256", "mutated_diff_sha256")
-
-            return ExternalEvaluationResult(
-                acceptance_oracle_passed=True,
-                regression_suite_passed=True,
-                neutral_review_passed=True,
-                evaluator_identity=DEFAULT_M29_NEUTRAL_EVALUATOR,
-                evaluator_identity_matches=True,
-                quality_status="pass",
+    def mutating_snapshot_hook(
+        case: M29MutationCase, res: CandidateTaskExecutionResult
+    ) -> TerminalSnapshot:
+        if case.case_id == suite.cases[1].case_id:
+            # Re-read detects mutated diff_sha256 post-evaluation
+            return create_terminal_snapshot(
+                res.task_status,
+                res.terminal_event_type,
+                res.terminal_timestamp,
+                diff_sha256="mutated_diff_sha256",
             )
-
-    evaluator = MutatingEvaluator()
-
-    # Store last_result on dispatcher for mutation hook
-    orig_dispatch = dispatcher.dispatch_case
-
-    def hooked_dispatch(case: M29MutationCase, mem: MemoryContext) -> CandidateTaskExecutionResult:
-        res = orig_dispatch(case, mem)
-        dispatcher.last_result = res  # type: ignore[attr-defined]
-        return res
-
-    dispatcher.dispatch_case = hooked_dispatch  # type: ignore[method-assign]
+        return create_terminal_snapshot(
+            res.task_status,
+            res.terminal_event_type,
+            res.terminal_timestamp,
+            failure_kind=res.failure_kind,
+            diff_sha256=res.diff_sha256,
+            changed_files=res.changed_files,
+        )
 
     runner = M29MutationRunner(
         suite=suite,
@@ -330,6 +319,7 @@ def test_mid_suite_terminal_snapshot_mutation_halt(tmp_path: Path) -> None:
         candidate_dispatcher=dispatcher,
         external_evaluator=evaluator,
         smoke_result=_make_valid_smoke_result(),
+        post_evaluation_snapshot_hook=mutating_snapshot_hook,
     )
     result = runner.run()
 
@@ -338,6 +328,12 @@ def test_mid_suite_terminal_snapshot_mutation_halt(tmp_path: Path) -> None:
     assert "terminal_snapshot_mutated" in result.stop_reason
     assert result.raw_entries[1].case_outcome == "stopped_mutation"
     assert Path(result.raw_entries[1].workspace_path).exists()
+
+    # Thread 2: verify sanitized case is NOT accepted, and quality_status is not_assessable
+    assert result.sanitized_cases[1].accepted is False
+    assert result.sanitized_cases[1].quality_status == "not_assessable"
+    assert result.sanitized_cases[1].exclusion_reason is not None
+    assert "terminal_snapshot_mutated" in result.sanitized_cases[1].exclusion_reason
 
 
 def test_outcome_cleanup_vs_retention_non_stopping_outcomes(tmp_path: Path) -> None:
@@ -398,3 +394,78 @@ def test_outcome_cleanup_vs_retention_non_stopping_outcomes(tmp_path: Path) -> N
     # 18 cleaned, 2 retained
     assert len(result.workspaces_cleaned) == 18
     assert len(result.workspaces_retained) == 2
+
+
+def test_workspace_cleanup_failure_retains_and_halts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    suite = build_m29_mutation_suite()
+    ws_root = tmp_path / "workspaces"
+    policy = WorkspaceCleanupPolicy()
+    mgr = WorkspaceManager(root_dir=ws_root, cleanup_policy=policy)
+    dispatcher = SyntheticDispatcher(ws_root, policy)
+    evaluator = SyntheticExternalEvaluator()
+
+    def failing_cleanup(*args: Any, **kwargs: Any) -> None:
+        raise OSError("Permission denied: simulated disk lock on cleanup")
+
+    monkeypatch.setattr(
+        "evaluation.m29_mutation_runner.cleanup_evaluation_workspace",
+        failing_cleanup,
+    )
+
+    runner = M29MutationRunner(
+        suite=suite,
+        db_url="sqlite:///test_disposable_m29.db",
+        workspace_manager=mgr,
+        baseline_memory_context=MemoryContext(),
+        candidate_dispatcher=dispatcher,
+        external_evaluator=evaluator,
+        smoke_result=_make_valid_smoke_result(),
+    )
+    result = runner.run()
+
+    assert result.status == "halted"
+    assert result.stop_reason is not None
+    assert "workspace_cleanup_failed" in result.stop_reason
+    assert result.raw_entries[0].cleaned_up is False
+    assert result.raw_entries[0].cleanup_error is not None
+    assert "simulated disk lock" in result.raw_entries[0].cleanup_error
+    assert result.raw_entries[0].workspace_id in result.workspaces_retained
+    assert len(result.workspaces_cleaned) == 0
+    assert result.sanitized_archive_checksum is None
+
+
+def test_archive_validation_diff_credentials_halt(tmp_path: Path) -> None:
+    suite = build_m29_mutation_suite()
+    ws_root = tmp_path / "workspaces"
+    policy = WorkspaceCleanupPolicy()
+    mgr = WorkspaceManager(root_dir=ws_root, cleanup_policy=policy)
+
+    leak_case_id = suite.cases[0].case_id
+    overrides = {
+        leak_case_id: {
+            "diff_text": "diff --git a/token b/token\n+TOKEN_URL = 'https://secret.token'\n"
+        }
+    }
+    dispatcher = SyntheticDispatcher(ws_root, policy, overrides=overrides)
+    evaluator = SyntheticExternalEvaluator()
+
+    runner = M29MutationRunner(
+        suite=suite,
+        db_url="sqlite:///test_disposable_m29.db",
+        workspace_manager=mgr,
+        baseline_memory_context=MemoryContext(),
+        candidate_dispatcher=dispatcher,
+        external_evaluator=evaluator,
+        smoke_result=_make_valid_smoke_result(),
+    )
+    result = runner.run()
+
+    assert result.status == "halted"
+    assert result.stop_reason is not None
+    assert "archive_validation_failed" in result.stop_reason
+    assert "unsafe credential" in result.stop_reason
+    assert len(result.workspaces_cleaned) == 0
+    assert len(result.workspaces_retained) == 20
+    assert Path(result.raw_entries[0].workspace_path).exists()

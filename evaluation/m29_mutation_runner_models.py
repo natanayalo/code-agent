@@ -149,6 +149,56 @@ class M29MutationRunnerResult:
     sanitized_archive_checksum: str | None = None
 
 
+def make_raw_case_manifest_entry(
+    case: M29MutationCase,
+    *,
+    task_id: str = "unstarted",
+    workspace_id: str = "none",
+    workspace_path: str = "",
+    trusted_git_dir: str | None = None,
+    terminal_snapshot: TerminalSnapshot | None = None,
+    candidate_identity: ExecutionIdentity | None = None,
+    candidate_identity_status: str = "unknown_execution_identity",
+    time_to_terminal_seconds: float | None = None,
+    failure_kind: str | None = None,
+    diff_sha256: str | None = None,
+    raw_diff: str = "",
+    changed_files: tuple[str, ...] = (),
+    external_evaluation: ExternalEvaluationResult | None = None,
+    cleaned_up: bool = False,
+    cleanup_error: str | None = None,
+    stop_reason: str | None = None,
+    case_outcome: str = "stopped_preflight",
+) -> RawCaseManifestEntry:
+    prov = "codex" if case.worker_profile == "codex-native-executor" else "antigravity"
+    return RawCaseManifestEntry(
+        case_id=case.case_id,
+        task_id=task_id,
+        workspace_id=workspace_id,
+        workspace_path=workspace_path,
+        trusted_git_dir=trusted_git_dir,
+        pair_group=case.pair_group,
+        pair_order=case.pair_order,
+        topic=case.topic,
+        worker_profile=case.worker_profile,
+        provider=prov,
+        target_repository_revision=case.target_repository_revision,
+        terminal_snapshot=terminal_snapshot,
+        candidate_identity=candidate_identity,
+        candidate_identity_status=candidate_identity_status,
+        time_to_terminal_seconds=time_to_terminal_seconds,
+        failure_kind=failure_kind,
+        diff_sha256=diff_sha256,
+        raw_diff=raw_diff,
+        changed_files=changed_files,
+        external_evaluation=external_evaluation,
+        cleaned_up=cleaned_up,
+        cleanup_error=cleanup_error,
+        stop_reason=stop_reason,
+        case_outcome=case_outcome,
+    )
+
+
 __all__ = [
     "CandidateDispatcher",
     "CandidateTaskExecutionResult",
@@ -159,4 +209,5 @@ __all__ = [
     "RawCaseManifestEntry",
     "SanitizedCaseManifestEntry",
     "TaskCohortSnapshot",
+    "make_raw_case_manifest_entry",
 ]
