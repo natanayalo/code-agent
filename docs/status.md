@@ -49,9 +49,11 @@ allowlist redaction).
   versioned contract evaluating 30/60/90-day window variation, non-overlapping
   historical/recent temporal cohorts, and deterministic bootstrap resampling with
   public allowlist redaction
-- an opt-in M29 post-terminal quality mode for isolated `feature/mutation`
-  preparation, with persisted TaskSpec preflight and in-task verification/review
-  bypass; the evaluation runner and live collection remain gated
+- an M29 feature/mutation evaluation runner and post-terminal external quality
+  evaluator (`evaluation/m29_mutation_runner.py`) with preflight gates, terminal
+  snapshot immutability verification, stop-condition halts, and outcome-dependent
+  workspace cleanup/retention; live provider collection remains gated and
+  `feature/mutation` stays at N=0
 
 Completed work remains in [`CHANGELOG.md`](../CHANGELOG.md). The historical
 Temporal migration and rollback record is in the
@@ -184,10 +186,12 @@ Temporal migration and rollback record is in the
   `evaluation/m29_mutation_reconciliation.py`), and pre-dispatch isolation gates,
   stop-condition validators, 72-hour cleanup helpers, and canonical extractor
   smokes (`evaluation/m29_mutation_isolation.py`,
-  `evaluation/m29_mutation_smokes.py`) are implemented and validated. The full
-  runner still needs execution loop wiring and disposable stack launch before
-  live collection. Live cases remain gated, `feature/mutation` is N=0, and
-  production routing remains static.
+  `evaluation/m29_mutation_smokes.py`), and the full evaluation runner with
+  post-terminal external quality evaluation (`evaluation/m29_mutation_runner.py`,
+  `evaluation/m29_mutation_runner_models.py`, `evaluation/m29_mutation_runner_preflight.py`,
+  `evaluation/m29_mutation_runner_archive.py`) are implemented and validated.
+  Live cases remain gated, `feature/mutation` is N=0, and production routing
+  remains static.
 
 ## Known limitations
 
