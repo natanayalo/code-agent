@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: add m29 feature mutation evaluation runner and quality evaluator ([#420](https://github.com/natanayalo/code-agent/pull/420))
+
 - Feat: add M29 mutation memory isolation gate, validators, and extractor smokes ([#419](https://github.com/natanayalo/code-agent/pull/419))
 
 - Feat: implement M29 feature mutation manifest and report reconciliation gates ([#418](https://github.com/natanayalo/code-agent/pull/418))
