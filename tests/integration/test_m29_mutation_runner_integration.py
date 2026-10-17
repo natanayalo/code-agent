@@ -25,6 +25,7 @@ from evaluation.m29_mutation_suite import (
     M29MutationCase,
     build_m29_mutation_suite,
 )
+from evaluation.provider_reliability_models import ExecutionIdentity
 from orchestrator.state import MemoryContext
 from sandbox.workspace import WorkspaceCleanupPolicy, WorkspaceHandle, WorkspaceManager
 
@@ -281,6 +282,60 @@ def test_mid_suite_evaluator_unavailability_halt(tmp_path: Path) -> None:
 
     assert len(result.workspaces_cleaned) == 0
     assert len(result.workspaces_retained) == 2
+
+    # Evaluator failure preserves pre-evaluation completion (accepted=True, exclusion_reason=None)
+    assert result.sanitized_cases[1].accepted is True
+    assert result.sanitized_cases[1].exclusion_reason is None
+    assert result.sanitized_cases[1].quality_status == "not_assessable"
+    assert result.sanitized_cases[1].evaluator_identity_matches is False
+    assert result.sanitized_cases[1].evaluator_identity_status in ("mismatched", "unavailable")
+
+
+def test_evaluator_identity_mismatch_with_default_identity_matches_flag(tmp_path: Path) -> None:
+    suite = build_m29_mutation_suite()
+    ws_root = tmp_path / "workspaces"
+    policy = WorkspaceCleanupPolicy()
+    mgr = WorkspaceManager(root_dir=ws_root, cleanup_policy=policy)
+
+    stop_case_id = suite.cases[1].case_id
+    mismatched_identity = ExecutionIdentity(
+        provider="neutral",
+        model="claude-3-opus",
+        reasoning_effort="none",
+    )
+    eval_overrides = {
+        stop_case_id: {
+            "evaluator_identity": mismatched_identity,
+            "evaluator_identity_matches": True,
+            "evaluator_identity_status": "verified",
+            "quality_status": "pass",
+        }
+    }
+    dispatcher = SyntheticDispatcher(ws_root, policy)
+    evaluator = SyntheticExternalEvaluator(overrides=eval_overrides)
+
+    runner = M29MutationRunner(
+        suite=suite,
+        db_url="sqlite:///test_disposable_m29.db",
+        workspace_manager=mgr,
+        baseline_memory_context=MemoryContext(),
+        candidate_dispatcher=dispatcher,
+        external_evaluator=evaluator,
+        smoke_result=_make_valid_smoke_result(),
+    )
+    result = runner.run()
+
+    assert result.status == "halted"
+    assert result.stop_reason is not None
+    assert "evaluator_identity_mismatch" in result.stop_reason
+
+    # Pre-evaluation completion must be preserved
+    assert result.sanitized_cases[1].accepted is True
+    assert result.sanitized_cases[1].exclusion_reason is None
+    assert result.sanitized_cases[1].quality_status == "not_assessable"
+    # Mismatch must be enforced
+    assert result.sanitized_cases[1].evaluator_identity_matches is False
+    assert result.sanitized_cases[1].evaluator_identity_status == "mismatched"
 
 
 def test_mid_suite_terminal_snapshot_mutation_halt(tmp_path: Path) -> None:

@@ -176,6 +176,12 @@ class M29MutationRunner:
                 acceptance_oracle_passed=False,
                 regression_suite_passed=False,
                 neutral_review_passed=False,
+                evaluator_identity_matches=False,
+                evaluator_identity_status=(
+                    "mismatched"
+                    if eval_err.startswith("evaluator_identity_mismatch")
+                    else "unavailable"
+                ),
                 reason=eval_err,
                 quality_status="not_assessable",
             )

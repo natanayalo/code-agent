@@ -221,7 +221,7 @@ def build_post_eval_stopped_case(
         time_to_terminal_seconds=res.time_to_terminal_seconds,
         candidate_identity_status=res.execution_identity_status,
         identity_matches=True,
-        exclusion_reason=reason,
+        exclusion_reason=(reason if reason.startswith("terminal_snapshot_mutated") else None),
         eval_result=eval_res,
     )
     return raw, san, False, reason
