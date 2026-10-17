@@ -358,6 +358,31 @@ def test_gemini_native_runtime_keeps_memory_with_system_prompt_override(tmp_path
     assert "## Durable Memories" in run_native.call_args.args[0].prompt
 
 
+def test_gemini_cli_worker_native_pre_execution_cancellation(tmp_path: Path) -> None:
+    workspace = _make_workspace(tmp_path)
+    worker = GeminiCliWorker(
+        runtime_adapter=_ScriptedAdapter([]),
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(_make_container(workspace)),
+    )
+    request = WorkerRequest(task_text="cancel test", repo_url="https://example.com/repo.git")
+    with patch("workers.gemini_cli_worker_native.run_native_agent") as run_native:
+        result = worker._execute_native_runtime(
+            request,
+            workspace=workspace,
+            runtime_settings=CliRuntimeSettings(),
+            runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+            system_prompt_override="test",
+            cancel_token=lambda: True,
+        )
+        assert result.status == "error"
+        assert result.failure_kind == "timeout"
+        assert not run_native.called
+        assert result.model_execution is not None
+        assert result.model_execution.provider == "antigravity"
+        assert result.budget_usage["native_agent"]["model_execution"] is not None
+
+
 def test_gemini_native_prompt_includes_schema_and_planner_role(tmp_path: Path) -> None:
     workspace = _make_workspace(tmp_path)
     worker = GeminiCliWorker(

@@ -17,7 +17,12 @@ from db.base import utc_now
 from db.enums import ExecutionPlanNodeStatus
 from orchestrator.state import NodeOutcome, OrchestratorModel
 from repositories import ExecutionPlanRepository, session_scope
-from workers import FailureKind, WorkerRequest, WorkerResult
+from workers import (
+    FailureKind,
+    WorkerRequest,
+    WorkerResult,
+    stamp_native_agent_model_execution,
+)
 
 NODE_ACTIVITY_SCHEMA_VERSION = 1
 CLAIM_HEARTBEAT_SECONDS = 10
@@ -233,10 +238,15 @@ class NodeExecutionService:
             lambda: self._heartbeat_claim(attempt_id, token),
         )
         if result is None:
-            result = WorkerResult(
+            fallback_res = WorkerResult(
                 status="failure",
                 summary="Node execution returned no result.",
                 failure_kind="worker_failure",
+            )
+            result = stamp_native_agent_model_execution(
+                fallback_res,
+                request.model_execution,
+                runtime_mode=getattr(request, "runtime_mode", "native_agent") or "native_agent",
             )
         status, continuation = _node_status(result)
         outcome = NodeOutcome(

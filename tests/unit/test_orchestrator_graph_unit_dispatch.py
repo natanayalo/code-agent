@@ -86,6 +86,69 @@ async def test_await_worker_with_timeout_partial_result():
     assert hint == "worker timed out but yielded partial state after 1s"
 
 
+@pytest.mark.anyio
+async def test_await_worker_with_timeout_stamps_model_execution_on_timeout():
+    class HangingWorker(Worker):
+        async def run(self, request):
+            await asyncio.sleep(10)
+            return WorkerResult(status="success", summary="done")
+
+    worker = HangingWorker()
+    request = WorkerRequest(
+        session_id="test-timeout",
+        task_text="test timeout",
+        worker_type="codex",
+        runtime_mode="native_agent",
+        constraints={"model": "gpt-5"},
+    )
+    res, hint = await _await_worker_with_timeout(
+        worker,
+        request=request,
+        worker_type="codex",
+        session_id="test-timeout",
+        timeout_seconds=0.01,
+    )
+
+    assert res.status == "failure"
+    assert res.failure_kind == "timeout"
+    assert "timed out after" in hint
+    assert res.model_execution is not None
+    assert res.model_execution.provider == "codex"
+    assert res.model_execution.model == "gpt-5"
+    assert res.budget_usage["native_agent"]["model_execution"]["model"] == "gpt-5"
+
+
+@pytest.mark.anyio
+async def test_await_worker_with_timeout_stamps_model_execution_on_crash():
+    class CrashingWorker(Worker):
+        async def run(self, request):
+            raise RuntimeError("Fatal process crash")
+
+    worker = CrashingWorker()
+    request = WorkerRequest(
+        session_id="test-crash",
+        task_text="test crash",
+        worker_type="gemini",
+        runtime_mode="native_agent",
+        constraints={"model": "gemini-2.5-pro"},
+    )
+    res, hint = await _await_worker_with_timeout(
+        worker,
+        request=request,
+        worker_type="gemini",
+        session_id="test-crash",
+        timeout_seconds=5,
+    )
+
+    assert res.status == "error"
+    assert res.failure_kind == "unknown"
+    assert hint == "worker crashed unexpectedly"
+    assert res.model_execution is not None
+    assert res.model_execution.provider == "antigravity"
+    assert res.model_execution.model == "gemini-2.5-pro"
+    assert res.budget_usage["native_agent"]["model_execution"]["model"] == "gemini-2.5-pro"
+
+
 def test_dispatch_job_preserves_workspace_id() -> None:
     state = OrchestratorState.model_validate(
         {
@@ -174,3 +237,8 @@ def test_worker_profile_model_and_effort_projected_to_worker_request() -> None:
     assert worker_manifest.get("model") == "gpt-5.6-luna"
     assert worker_manifest.get("reasoning_effort") == "high"
     assert worker_manifest.get("worker_profile") == "codex-luna-high"
+    assert request.model_execution is not None
+    assert request.model_execution.provider == "codex"
+    assert request.model_execution.model == "gpt-5.6-luna"
+    assert request.model_execution.reasoning_effort == "high"
+    assert worker_manifest.get("model_execution") is not None

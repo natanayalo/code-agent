@@ -47,6 +47,7 @@ from workers.failure_taxonomy import classify_failure_kind
 from workers.model_config import (
     build_codex_model_cli_args,
     resolve_codex_model_config,
+    stamp_native_agent_model_execution,
 )
 from workers.native_agent_models import NativeAgentRunResult
 from workers.native_agent_runner import (
@@ -613,7 +614,12 @@ class CodexCliWorkerNativeMixin:
     ) -> WorkerResult:
         """Execute one native-agent `codex exec` run and map it into WorkerResult."""
         if cancel_token and cancel_token():
-            return _cancelled_before_native_execution_result(workspace)
+            cancelled_res = _cancelled_before_native_execution_result(workspace)
+            model_exec_fn = getattr(self, "_resolve_request_model_execution", None)
+            model_exec = model_exec_fn(request) if model_exec_fn else request.model_execution
+            return stamp_native_agent_model_execution(
+                cancelled_res, model_exec, runtime_mode=runtime_mode
+            )
 
         run_request, sandbox_metadata = self._prepare_native_agent_run_request(
             request, workspace, runtime_settings, runtime_mode, system_prompt_override
@@ -636,11 +642,34 @@ class CodexCliWorkerNativeMixin:
         run_request = replace(run_request, cancel_requested=cancel_token)
         native_result = run_native_agent(run_request)
 
+        result = self._build_native_agent_worker_result(
+            native_result=native_result,
+            sandbox_metadata=sandbox_metadata,
+            runtime_mode=runtime_mode,
+            workspace=workspace,
+        )
+        if cancel_token and cancel_token():
+            result.status = "error"
+            result.summary = "Codex native-agent run was cancelled by the orchestrator timeout."
+            result.failure_kind = "timeout"
+            result.next_action_hint = "inspect_workspace_artifacts"
+
+        set_span_status_from_outcome(result.status, result.summary)
+        return result
+
+    def _build_native_agent_worker_result(
+        self,
+        *,
+        native_result: NativeAgentRunResult,
+        sandbox_metadata: dict[str, Any],
+        runtime_mode: WorkerRuntimeMode,
+        workspace: WorkspaceHandle,
+    ) -> WorkerResult:
         summary = build_failure_summary(
             summary=format_native_run_summary(native_result),
             final_message=native_result.final_message,
         )
-        result = WorkerResult(
+        return WorkerResult(
             status=native_result.status,
             summary=summary,
             failure_kind=self._native_failure_kind(native_result),
@@ -671,11 +700,3 @@ class CodexCliWorkerNativeMixin:
             stderr=native_result.stderr,
             model_execution=sandbox_metadata.get("model_execution"),
         )
-        if cancel_token and cancel_token():
-            result.status = "error"
-            result.summary = "Codex native-agent run was cancelled by the orchestrator timeout."
-            result.failure_kind = "timeout"
-            result.next_action_hint = "inspect_workspace_artifacts"
-
-        set_span_status_from_outcome(result.status, result.summary)
-        return result

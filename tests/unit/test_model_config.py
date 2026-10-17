@@ -366,3 +366,99 @@ def test_parse_antigravity_slug_unsupported_suffix() -> None:
     base, effort = parse_antigravity_model_slug("gemini-3.8-flash-xhigh")
     assert base == "gemini-3.8-flash-xhigh"
     assert effort is None
+
+
+def test_resolve_codex_model_execution_precedence() -> None:
+    from workers.model_config import resolve_codex_model_execution
+
+    # Task constraints override all else
+    metadata = resolve_codex_model_execution(
+        task_constraints={"codex_model": "gpt-5.1-custom", "codex_reasoning_effort": "low"},
+        worker_profile={"model": "gpt-4o"},
+        env={"CODE_AGENT_CODEX_MODEL": "gpt-5.6"},
+    )
+    assert metadata.provider == "codex"
+    assert metadata.model == "gpt-5.1-custom"
+    assert metadata.reasoning_effort == "low"
+    assert metadata.model_source == "task_override"
+    assert metadata.reasoning_effort_source == "task_override"
+
+
+def test_resolve_antigravity_model_execution_precedence() -> None:
+    from db.enums import WorkerRuntimeMode
+    from workers.base import WorkerProfile
+    from workers.model_config import resolve_antigravity_model_execution
+
+    profile = WorkerProfile(
+        name="antigravity-custom",
+        worker_type="antigravity",
+        runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+        model="gemini-2.5-pro",
+        reasoning_effort="high",
+    )
+    metadata = resolve_antigravity_model_execution(
+        worker_profile=profile,
+        env={"CODE_AGENT_ANTIGRAVITY_MODEL": "gemini-3.0-flash"},
+    )
+    assert metadata.provider == "antigravity"
+    assert metadata.model == "gemini-2.5-pro"
+    assert metadata.reasoning_effort == "high"
+    assert metadata.model_source == "worker_profile"
+    assert metadata.reasoning_effort_source == "worker_profile"
+
+
+def test_resolve_worker_model_execution_routing() -> None:
+    from workers.model_config import resolve_worker_model_execution
+
+    codex_meta = resolve_worker_model_execution("codex", task_constraints={"model": "gpt-5"})
+    assert codex_meta is not None
+    assert codex_meta.provider == "codex"
+    assert codex_meta.model == "gpt-5"
+
+    gemini_meta = resolve_worker_model_execution(
+        "gemini", task_constraints={"model": "gemini-2.5-pro"}
+    )
+    assert gemini_meta is not None
+    assert gemini_meta.provider == "antigravity"
+    assert gemini_meta.model == "gemini-2.5-pro"
+
+    anti_meta = resolve_worker_model_execution("antigravity", default_model="gemini-3")
+    assert anti_meta is not None
+    assert anti_meta.provider == "antigravity"
+    assert anti_meta.model == "gemini-3"
+
+    unknown_meta = resolve_worker_model_execution("other_worker")
+    assert unknown_meta is None
+
+
+def test_stamp_native_agent_model_execution() -> None:
+    from workers.base import ModelExecutionMetadata, WorkerResult
+    from workers.model_config import stamp_native_agent_model_execution
+
+    model_exec = ModelExecutionMetadata(
+        provider="codex",
+        model="gpt-5.2-preview",
+        reasoning_effort="high",
+        model_source="task_override",
+        reasoning_effort_source="task_override",
+    )
+    initial_result = WorkerResult(
+        status="error",
+        summary="Timeout before execution",
+        budget_usage={"runtime_mode": "native_agent", "native_agent": {"exit_code": 124}},
+    )
+
+    stamped = stamp_native_agent_model_execution(
+        initial_result, model_exec, runtime_mode="native_agent"
+    )
+    assert stamped.model_execution == model_exec
+    assert stamped.budget_usage["native_agent"]["exit_code"] == 124
+    assert stamped.budget_usage["native_agent"]["model_execution"] == model_exec.model_dump(
+        mode="json"
+    )
+
+    # Non-native agent mode only sets result.model_execution
+    cli_result = WorkerResult(status="error", summary="CLI failure", budget_usage={})
+    stamped_cli = stamp_native_agent_model_execution(cli_result, model_exec, runtime_mode="cli")
+    assert stamped_cli.model_execution == model_exec
+    assert "native_agent" not in stamped_cli.budget_usage

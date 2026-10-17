@@ -20,7 +20,11 @@ from workers.antigravity_cli_adapter import (
 )
 from workers.base import WorkerRequest, WorkerResult
 from workers.cli_runtime import CliRuntimeSettings
-from workers.model_config import resolve_antigravity_model_config
+from workers.model_config import (
+    resolve_antigravity_model_config,
+    resolve_antigravity_model_execution,
+    stamp_native_agent_model_execution,
+)
 from workers.native_agent_artifacts import DEFAULT_NATIVE_AGENT_ARTIFACTS_DIR
 
 ANTIGRAVITY_READ_ONLY_TOOL_PERMISSION = "strict"
@@ -69,12 +73,25 @@ def antigravity_permission_boundary_result(
         return None
     if granted_permission_from_constraints(request.constraints) != ToolPermissionLevel.READ_ONLY:
         return None
-    return WorkerResult(
+    result = WorkerResult(
         status="failure",
         summary="Antigravity mutation requires workspace_write permission.",
         failure_kind="permission_denied",
         requested_permission=ToolPermissionLevel.WORKSPACE_WRITE.value,
         next_action_hint="request_higher_permission",
+    )
+    manifest_worker = (request.runtime_manifest or {}).get("worker")
+    model_exec = request.model_execution or resolve_antigravity_model_execution(
+        task_constraints=request.constraints,
+        manifest_worker=manifest_worker,
+        adapter_model=getattr(adapter, "model", None),
+        adapter_reasoning_effort=getattr(adapter, "reasoning_effort", None),
+        env=getattr(adapter, "env", None),
+    )
+    return stamp_native_agent_model_execution(
+        result,
+        model_exec,
+        runtime_mode=getattr(request, "runtime_mode", "native_agent") or "native_agent",
     )
 
 

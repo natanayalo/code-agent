@@ -88,6 +88,26 @@ def normalize_worker_profile_name(value: str | None) -> str | None:
     return stripped
 
 
+ConfigSource = Literal[
+    "task_override",
+    "worker_profile",
+    "environment",
+    "provider_default",
+]
+
+
+class ModelExecutionMetadata(WorkerModel):
+    """Authoritative execution identity describing what model/effort produced this result."""
+
+    provider: str
+    model: str
+    reasoning_effort: str | None = None
+    requested_model: str | None = None
+    requested_reasoning_effort: str | None = None
+    model_source: ConfigSource
+    reasoning_effort_source: ConfigSource | None = None
+
+
 class WorkerRequest(WorkerModel):
     """Normalized task input passed from the orchestrator to a worker."""
 
@@ -117,6 +137,7 @@ class WorkerRequest(WorkerModel):
     # Internal per-node writable namespace for read-only fan-out containers.
     scratch_namespace: str | None = None
     context_envelope: dict[str, Any] | None = None
+    model_execution: ModelExecutionMetadata | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -245,26 +266,6 @@ class WorkerMemoryEntry(WorkerModel):
     scope: str | None = None
     last_verified_at: datetime | None = None
     requires_verification: bool = True
-
-
-ConfigSource = Literal[
-    "task_override",
-    "worker_profile",
-    "environment",
-    "provider_default",
-]
-
-
-class ModelExecutionMetadata(WorkerModel):
-    """Authoritative execution identity describing what model/effort produced this result."""
-
-    provider: str
-    model: str
-    reasoning_effort: str | None = None
-    requested_model: str | None = None
-    requested_reasoning_effort: str | None = None
-    model_source: ConfigSource
-    reasoning_effort_source: ConfigSource | None = None
 
 
 class WorkerResult(WorkerModel):

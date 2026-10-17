@@ -178,6 +178,21 @@ def test_gemini_cli_worker_errors_without_repo_url(tmp_path: Path) -> None:
     assert result.status == "error"
     assert "repo_url" in (result.summary or "")
     assert result.next_action_hint == "provide_repo_url"
+    assert result.model_execution is not None
+    assert result.model_execution.provider == "antigravity"
+
+    native_result = asyncio.run(
+        worker.run(
+            WorkerRequest(
+                task_text="do something",
+                runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+            )
+        )
+    )
+    assert native_result.status == "error"
+    assert native_result.model_execution is not None
+    assert native_result.model_execution.provider == "antigravity"
+    assert native_result.budget_usage["native_agent"]["model_execution"] is not None
 
 
 def test_gemini_validate_request_phase_returns_none_for_valid_repo_url(tmp_path: Path) -> None:

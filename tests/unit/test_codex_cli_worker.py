@@ -180,6 +180,21 @@ def test_codex_cli_worker_requires_repo_url(tmp_path: Path) -> None:
         "CodexCliWorker requires a non-empty repo_url to provision a sandbox workspace."
     )
     assert result.next_action_hint == "provide_repo_url"
+    assert result.model_execution is not None
+    assert result.model_execution.provider == "codex"
+
+    native_result = asyncio.run(
+        worker.run(
+            WorkerRequest(
+                task_text="Inspect the repo",
+                runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+            )
+        )
+    )
+    assert native_result.status == "error"
+    assert native_result.model_execution is not None
+    assert native_result.model_execution.provider == "codex"
+    assert native_result.budget_usage["native_agent"]["model_execution"] is not None
 
 
 def test_codex_validate_request_phase_returns_none_for_valid_repo_url(tmp_path: Path) -> None:

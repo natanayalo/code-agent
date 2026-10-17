@@ -12,7 +12,7 @@ from sandbox.container import DEFAULT_SANDBOX_IMAGE
 from sandbox.native_agent_executor import DEFAULT_NATIVE_AGENT_IMAGE
 from sandbox.workspace import default_workspace_root
 from tools.registry import DEFAULT_TOOL_REGISTRY, ToolDefinition, ToolRegistry
-from workers.base import MaintenanceActionType
+from workers.base import MaintenanceActionType, ModelExecutionMetadata
 
 
 class RuntimeManifestModel(BaseModel):
@@ -59,6 +59,7 @@ class RuntimeWorkerManifest(RuntimeManifestModel):
     workspace_id: str | None = None
     model: str | None = None
     reasoning_effort: str | None = None
+    model_execution: ModelExecutionMetadata | None = None
 
 
 class RuntimeTaskPolicyManifest(RuntimeManifestModel):
@@ -182,6 +183,7 @@ def build_runtime_manifest(
     workspace_id: str | None = None,
     model: str | None = None,
     reasoning_effort: str | None = None,
+    model_execution: ModelExecutionMetadata | None = None,
     task_spec: Mapping[str, Any] | object | None = None,
     read_only: bool = False,
     network_enabled: bool = False,
@@ -214,6 +216,7 @@ def build_runtime_manifest(
             workspace_id=workspace_id,
             model=model,
             reasoning_effort=reasoning_effort,
+            model_execution=model_execution,
         ),
         task=RuntimeTaskPolicyManifest(
             read_only=read_only,

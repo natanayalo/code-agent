@@ -33,6 +33,7 @@ from tools import (
 )
 from workers.async_runner import run_sync_with_cancellable_executor
 from workers.base import (
+    ModelExecutionMetadata,
     Worker,
     WorkerRequest,
     WorkerResult,
@@ -50,6 +51,10 @@ from workers.gemini_cli_worker_native import (
     _prepare_workspace_gemini_home,
     _workspace_error_result,
     _workspace_task_id,
+)
+from workers.model_config import (
+    resolve_antigravity_model_execution,
+    stamp_native_agent_model_execution,
 )
 from workers.runtime_executor import RuntimeExecutor
 from workers.sandbox_adapter import SandboxSessionAdapter, ShellSessionFactory
@@ -296,7 +301,11 @@ class GeminiCliWorker(GeminiCliWorkerNativeMixin, Worker):
             )
             return result, None, None
         else:
-            result = self._runtime_mode_not_supported_result(runtime_mode)
+            result = stamp_native_agent_model_execution(
+                self._runtime_mode_not_supported_result(runtime_mode),
+                self._resolve_request_model_execution(request),
+                runtime_mode=runtime_mode,
+            )
 
         if result is None:
             raise RuntimeError(
@@ -304,6 +313,23 @@ class GeminiCliWorker(GeminiCliWorkerNativeMixin, Worker):
             )
 
         return result, container, session
+
+    def _resolve_request_model_execution(self, request: WorkerRequest) -> ModelExecutionMetadata:
+        """Resolve authoritative ModelExecutionMetadata for this Gemini/Antigravity request."""
+        if request.model_execution is not None:
+            return request.model_execution
+        adapter = getattr(self, "runtime_adapter", None)
+        manifest_worker = (request.runtime_manifest or {}).get("worker")
+        adapter_model = getattr(adapter, "model", None)
+        adapter_effort = getattr(adapter, "reasoning_effort", None)
+        adapter_env = getattr(adapter, "env", None)
+        return resolve_antigravity_model_execution(
+            task_constraints=request.constraints,
+            manifest_worker=manifest_worker,
+            adapter_model=adapter_model,
+            adapter_reasoning_effort=adapter_effort,
+            env=adapter_env,
+        )
 
     def _safe_provision_workspace(
         self,
@@ -337,9 +363,13 @@ class GeminiCliWorker(GeminiCliWorkerNativeMixin, Worker):
         system_prompt_override: str | None = None,
     ) -> WorkerResult:
         """Provision a workspace, run the CLI runtime, and return a typed result."""
+        model_exec = self._resolve_request_model_execution(request)
+        runtime_mode = self._resolve_runtime_mode(request)
         invalid_request_result = self._validate_request(request)
         if invalid_request_result is not None:
-            return invalid_request_result
+            return stamp_native_agent_model_execution(
+                invalid_request_result, model_exec, runtime_mode=runtime_mode
+            )
         repo_url = request.repo_url
         if repo_url is None:
             raise RuntimeError("GeminiCliWorker request validation expected repo_url to be set.")
@@ -357,9 +387,29 @@ class GeminiCliWorker(GeminiCliWorkerNativeMixin, Worker):
 
         workspace_or_error = self._safe_provision_workspace(request, repo_url, workspace_task_id)
         if isinstance(workspace_or_error, WorkerResult):
-            return workspace_or_error
-        workspace = workspace_or_error
+            return stamp_native_agent_model_execution(
+                workspace_or_error, model_exec, runtime_mode=runtime_mode
+            )
+        return self._execute_workspace_lifecycle(
+            request=request,
+            workspace=workspace_or_error,
+            workspace_task_id=workspace_task_id,
+            system_prompt_override=system_prompt_override,
+            cancel_token=cancel_token,
+            model_exec=model_exec,
+            runtime_mode=runtime_mode,
+        )
 
+    def _execute_workspace_lifecycle(
+        self,
+        request: WorkerRequest,
+        workspace: WorkspaceHandle,
+        workspace_task_id: str,
+        system_prompt_override: str | None,
+        cancel_token: Callable[[], bool] | None,
+        model_exec: ModelExecutionMetadata | None,
+        runtime_mode: str,
+    ) -> WorkerResult:
         result: WorkerResult | None = None
         run_succeeded = False
         container: DockerSandboxContainer | None = None
@@ -380,13 +430,17 @@ class GeminiCliWorker(GeminiCliWorkerNativeMixin, Worker):
             RuntimeError,
             UnknownToolError,
         ) as exc:
-            result = _workspace_error_result(
-                request=request,
-                workspace=workspace,
-                workspace_task_id=workspace_task_id,
-                exc=exc,
-                summary_prefix="GeminiCliWorker runtime setup failed",
-                next_action_hint="inspect_worker_configuration",
+            result = stamp_native_agent_model_execution(
+                _workspace_error_result(
+                    request=request,
+                    workspace=workspace,
+                    workspace_task_id=workspace_task_id,
+                    exc=exc,
+                    summary_prefix="GeminiCliWorker runtime setup failed",
+                    next_action_hint="inspect_worker_configuration",
+                ),
+                model_exec,
+                runtime_mode=runtime_mode,
             )
         finally:
             self._close_session(session)
