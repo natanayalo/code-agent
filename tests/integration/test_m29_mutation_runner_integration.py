@@ -12,11 +12,16 @@ import pytest
 from evaluation.m29_mutation_isolation import TerminalSnapshot, create_terminal_snapshot
 from evaluation.m29_mutation_runner import (
     M29_MUTATION_IDENTITY_CONTRACT,
+    PINNED_TASKBOARD_FIXTURE_REVISION,
     CandidateDispatcher,
     CandidateTaskExecutionResult,
     ExternalEvaluationResult,
     ExternalEvaluator,
     M29MutationRunner,
+    ReadOnlyExternalEvaluator,
+    clone_case_workspace_from_fixture,
+    compute_verifier_source_sha256,
+    create_taskboard_fixture_repo,
 )
 from evaluation.m29_mutation_runner_archive import validate_sanitized_archive
 from evaluation.m29_mutation_smokes import ExtractorStageSmokeResult
@@ -28,6 +33,7 @@ from evaluation.m29_mutation_suite import (
 from evaluation.provider_reliability_models import ExecutionIdentity
 from orchestrator.state import MemoryContext
 from sandbox.workspace import WorkspaceCleanupPolicy, WorkspaceHandle, WorkspaceManager
+from tests.unit.test_m29_mutation_fixture_and_verifier import REFERENCE_SOLUTIONS
 
 
 def _make_valid_smoke_result() -> ExtractorStageSmokeResult:
@@ -524,3 +530,89 @@ def test_archive_validation_diff_credentials_halt(tmp_path: Path) -> None:
     assert len(result.workspaces_cleaned) == 0
     assert len(result.workspaces_retained) == 20
     assert Path(result.raw_entries[0].workspace_path).exists()
+
+
+class RealFixtureCandidateDispatcher(CandidateDispatcher):
+    """Candidate dispatcher cloning real taskboard fixture and applying reference solutions."""
+
+    def __init__(self, fixture_dir: Path, ws_root: Path, policy: WorkspaceCleanupPolicy) -> None:
+        self.fixture_dir = fixture_dir
+        self.ws_root = ws_root
+        self.policy = policy
+
+    def dispatch_case(
+        self, case: M29MutationCase, memory_context: MemoryContext
+    ) -> CandidateTaskExecutionResult:
+        ws_id = f"ws-real-{case.case_id}"
+        ws_path = self.ws_root / ws_id
+        clone_case_workspace_from_fixture(
+            self.fixture_dir, ws_path, expected_revision=PINNED_TASKBOARD_FIXTURE_REVISION
+        )
+        sol = REFERENCE_SOLUTIONS[case.topic]
+        target_file = ws_path / case.allowed_source_path
+        target_file.write_text(sol, encoding="utf-8")
+
+        diff_text = (
+            f"diff --git a/{case.allowed_source_path} b/{case.allowed_source_path}\n+{case.topic}\n"
+        )
+        diff_sha = hashlib.sha256(diff_text.encode("utf-8")).hexdigest()
+
+        handle = WorkspaceHandle(
+            workspace_id=ws_id,
+            task_id=f"task-real-{case.case_id}",
+            workspace_path=ws_path,
+            repo_path=ws_path,
+            repo_url="",
+            cleanup_policy=self.policy,
+        )
+        return CandidateTaskExecutionResult(
+            task_id=handle.task_id,
+            workspace_handle=handle,
+            task_status="completed",
+            terminal_event_type="TASK_COMPLETED",
+            terminal_timestamp=datetime.now(UTC),
+            diff_sha256=diff_sha,
+            diff_text=diff_text,
+            changed_files=(case.allowed_source_path,),
+            execution_identity=M29_MUTATION_IDENTITY_CONTRACT[case.worker_profile],
+            execution_identity_status="verified",
+        )
+
+
+def test_full_suite_with_real_fixture_and_read_only_evaluator(tmp_path: Path) -> None:
+    fixture_dir = tmp_path / "taskboard_fixture"
+    create_taskboard_fixture_repo(fixture_dir)
+
+    ws_root = tmp_path / "workspaces"
+    policy = WorkspaceCleanupPolicy()
+    mgr = WorkspaceManager(root_dir=ws_root, cleanup_policy=policy)
+
+    suite = build_m29_mutation_suite()
+    dispatcher = RealFixtureCandidateDispatcher(fixture_dir, ws_root, policy)
+    evaluator = ReadOnlyExternalEvaluator()
+    verifier_sha = compute_verifier_source_sha256()
+
+    runner = M29MutationRunner(
+        suite=suite,
+        db_url="sqlite:///test_disposable_m29_real.db",
+        workspace_manager=mgr,
+        baseline_memory_context=MemoryContext(),
+        candidate_dispatcher=dispatcher,
+        external_evaluator=evaluator,
+        smoke_result=_make_valid_smoke_result(),
+        fixture_repo_path=fixture_dir,
+        expected_verifier_sha256=verifier_sha,
+    )
+    result = runner.run()
+
+    assert result.status == "completed"
+    assert result.stop_reason is None
+    assert all(
+        r.external_evaluation is not None and r.external_evaluation.quality_status == "pass"
+        for r in result.raw_entries
+    )
+    assert all(s.quality_status == "pass" for s in result.sanitized_cases)
+    assert all(r.case_outcome == "completed_quality_pass" for r in result.raw_entries)
+    assert len(result.workspaces_cleaned) == 20
+    assert result.sanitized_archive_checksum is not None
+    assert result.snapshot.verifier_source_sha256 == verifier_sha

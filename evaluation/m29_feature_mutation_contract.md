@@ -5,13 +5,19 @@ fail-closed cohort reconciliation helper (`evaluation/m29_mutation_cohort.py`),
 frozen `feature/mutation` suite & neutral evaluator manifest contract
 (`evaluation/m29_mutation_suite.py`), sanitized case manifest & report
 reconciliation publication gates (`evaluation/m29_mutation_manifest.py`,
-`evaluation/m29_mutation_reconciliation.py`), and pre-dispatch isolation gates,
-stop-condition validators, 72-hour cleanup helpers, and canonical extractor-stage
+`evaluation/m29_mutation_reconciliation.py`), pre-dispatch isolation gates,
+stop-condition validators, 72-hour cleanup helpers, canonical extractor-stage
 smokes (`evaluation/m29_mutation_isolation.py`,
-`evaluation/m29_mutation_smokes.py`) are implemented and verified; the
-runner execution loop and live collection remain gated on disposable stack launch
-and final runner wiring. This document defines the evaluation only. It does not start
-live cases or change production routing.
+`evaluation/m29_mutation_smokes.py`), disposable `taskboard` fixture builder
+(`evaluation/m29_mutation_fixture.py`), runner-owned read-only acceptance oracles
+and baseline regression verifier (`evaluation/m29_mutation_oracles.py`), concrete
+`ReadOnlyExternalEvaluator` with blinded neutral reviewer boundary and workspace
+immutability check (`evaluation/m29_mutation_verifier.py`), preflight verifier
+hash check, and pinned deterministic fixture revision
+`228071722c645e813af16053e56d007c25e9f127` are implemented and verified; the
+runner execution loop and live collection remain gated on disposable stack launch.
+This document defines the evaluation only. It does not start live cases or change
+production routing.
 
 ## Purpose and evidence boundary
 
@@ -48,11 +54,11 @@ isolated read-only evaluator. Verify after evaluation that the task status,
 terminal event, and archived diff are unchanged. Any attempted post-terminal
 mutation is a suite-stopping safety failure.
 
-The fixture repository and its exact 40-character commit SHA are deliberately
-left for the execution-preparation slice. Before any case starts, that slice
-must freeze both in the suite manifest; a moving branch or tag is not a valid
-revision. Each of the 20 cases starts from a fresh workspace at that exact
-revision. No case may inherit another case's files or git state.
+The disposable fixture repository (`taskboard`) is pinned to deterministic commit
+SHA `228071722c645e813af16053e56d007c25e9f127` (`PINNED_TASKBOARD_FIXTURE_REVISION`
+in `evaluation/m29_mutation_fixture.py` and `evaluation/m29_mutation_suite.py`).
+Each of the 20 cases starts from a fresh disposable clone at that exact revision.
+No case may inherit another case's files or git state.
 
 The evidence window remains the canonical 90-day window, with at least 10
 eligible terminal tasks in each provider cell. A terminal failure with verified

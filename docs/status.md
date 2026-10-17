@@ -49,11 +49,15 @@ allowlist redaction).
   versioned contract evaluating 30/60/90-day window variation, non-overlapping
   historical/recent temporal cohorts, and deterministic bootstrap resampling with
   public allowlist redaction
-- an M29 feature/mutation evaluation runner and post-terminal external quality
-  evaluator (`evaluation/m29_mutation_runner.py`) with preflight gates, terminal
-  snapshot immutability verification, stop-condition halts, and outcome-dependent
-  workspace cleanup/retention; live provider collection remains gated and
-  `feature/mutation` stays at N=0
+- an M29 feature/mutation evaluation runner, deterministic taskboard fixture
+  builder (`evaluation/m29_mutation_fixture.py`), runner-owned read-only acceptance
+  oracles (`evaluation/m29_mutation_oracles.py`), and concrete external evaluator
+  with blinded neutral review and immutability checks (`evaluation/m29_mutation_verifier.py`,
+  `evaluation/m29_mutation_runner.py`) with preflight gates, terminal snapshot
+  immutability verification, stop-condition halts, pinned revision
+  `228071722c645e813af16053e56d007c25e9f127`, and outcome-dependent workspace
+  cleanup/retention; live provider collection remains gated and `feature/mutation`
+  stays at N=0
 
 Completed work remains in [`CHANGELOG.md`](../CHANGELOG.md). The historical
 Temporal migration and rollback record is in the
@@ -184,12 +188,16 @@ Temporal migration and rollback record is in the
   helper (`evaluation/m29_mutation_cohort.py`), sanitized manifest &
   report-publication reconciliation layer (`evaluation/m29_mutation_manifest.py`,
   `evaluation/m29_mutation_reconciliation.py`), and pre-dispatch isolation gates,
-  stop-condition validators, 72-hour cleanup helpers, and canonical extractor
+  stop-condition validators, 72-hour cleanup helpers, canonical extractor
   smokes (`evaluation/m29_mutation_isolation.py`,
-  `evaluation/m29_mutation_smokes.py`), and the full evaluation runner with
-  post-terminal external quality evaluation (`evaluation/m29_mutation_runner.py`,
+  `evaluation/m29_mutation_smokes.py`), full evaluation runner with post-terminal
+  external quality evaluation (`evaluation/m29_mutation_runner.py`,
   `evaluation/m29_mutation_runner_models.py`, `evaluation/m29_mutation_runner_preflight.py`,
-  `evaluation/m29_mutation_runner_archive.py`) are implemented and validated.
+  `evaluation/m29_mutation_runner_archive.py`), deterministic taskboard fixture
+  builder (`evaluation/m29_mutation_fixture.py`), runner-owned read-only acceptance
+  oracles (`evaluation/m29_mutation_oracles.py`), concrete `ReadOnlyExternalEvaluator`
+  (`evaluation/m29_mutation_verifier.py`), and pinned deterministic revision
+  `228071722c645e813af16053e56d007c25e9f127` are implemented and validated.
   Live cases remain gated, `feature/mutation` is N=0, and production routing
   remains static.
 

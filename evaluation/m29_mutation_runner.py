@@ -9,6 +9,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
+from evaluation.m29_mutation_fixture import (
+    PINNED_TASKBOARD_FIXTURE_REVISION,
+    TaskboardFixtureInfo,
+    clone_case_workspace_from_fixture,
+    create_taskboard_fixture_repo,
+    verify_taskboard_fixture_repo,
+)
 from evaluation.m29_mutation_isolation import (
     MAX_EVALUATION_RETENTION_SECONDS,
     TerminalSnapshot,
@@ -18,6 +25,7 @@ from evaluation.m29_mutation_isolation import (
     verify_memory_context_isolation,
     verify_terminal_snapshot_immutability,
 )
+from evaluation.m29_mutation_oracles import compute_verifier_source_sha256
 from evaluation.m29_mutation_runner_archive import (
     build_sanitized_case_entry,
     reconcile_m29_publication_gate,
@@ -56,6 +64,12 @@ from evaluation.m29_mutation_suite import (
     M29MutationCase,
     M29MutationSuite,
 )
+from evaluation.m29_mutation_verifier import (
+    BlindedNeutralReviewRequest,
+    NeutralReviewerClient,
+    NeutralReviewOutcome,
+    ReadOnlyExternalEvaluator,
+)
 from orchestrator.state import MemoryContext
 from sandbox.workspace import WorkspaceHandle, WorkspaceManager
 
@@ -86,6 +100,8 @@ class M29MutationRunner:
         post_evaluation_snapshot_hook: (
             Callable[[M29MutationCase, CandidateTaskExecutionResult], TerminalSnapshot] | None
         ) = None,
+        fixture_repo_path: Path | None = None,
+        expected_verifier_sha256: str | None = None,
     ) -> None:
         self.suite = suite
         self.db_url = db_url
@@ -99,6 +115,8 @@ class M29MutationRunner:
         self.baseline_ids = baseline_ids_by_profile
         self.memory_context_provider = memory_context_provider
         self.post_evaluation_snapshot_hook = post_evaluation_snapshot_hook
+        self.fixture_repo_path = fixture_repo_path
+        self.expected_verifier_sha256 = expected_verifier_sha256
         self.workspace_root: Path = getattr(
             workspace_manager, "root_dir", getattr(workspace_manager, "workspace_root", Path("."))
         ).resolve()
@@ -316,6 +334,8 @@ class M29MutationRunner:
                 run_smokes_if_missing=True,
                 as_of=self.as_of,
                 baseline_ids_by_profile=self.baseline_ids,
+                fixture_repo_path=self.fixture_repo_path,
+                expected_verifier_sha256=self.expected_verifier_sha256,
             )
             return snapshot, None
         except Exception as exc:
@@ -404,6 +424,7 @@ class M29MutationRunner:
 
 
 __all__ = [
+    "BlindedNeutralReviewRequest",
     "CandidateDispatcher",
     "CandidateTaskExecutionResult",
     "ExternalEvaluationResult",
@@ -411,15 +432,24 @@ __all__ = [
     "M29MutationRunner",
     "M29MutationRunnerResult",
     "M29_MUTATION_IDENTITY_CONTRACT",
+    "NeutralReviewOutcome",
+    "NeutralReviewerClient",
+    "PINNED_TASKBOARD_FIXTURE_REVISION",
     "RawCaseManifestEntry",
+    "ReadOnlyExternalEvaluator",
     "SanitizedCaseManifestEntry",
     "TaskCohortSnapshot",
+    "TaskboardFixtureInfo",
     "build_sanitized_case_entry",
     "capture_task_cohort_snapshot",
+    "clone_case_workspace_from_fixture",
+    "compute_verifier_source_sha256",
+    "create_taskboard_fixture_repo",
     "default_mutation_constraints",
     "default_mutation_task_spec",
     "reconcile_m29_publication_gate",
     "run_mutation_preflight_checks",
     "validate_sanitized_Archive",
     "validate_sanitized_archive",
+    "verify_taskboard_fixture_repo",
 ]
