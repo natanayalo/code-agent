@@ -169,11 +169,11 @@ class ReadOnlyExternalEvaluator:
             return self.reviewer_client.review_blinded_diff(blinded_req, manifest)
 
         return NeutralReviewOutcome(
-            passed=oracles_passed,
-            evaluator_identity=manifest.identity,
-            evaluator_identity_status="verified",
+            passed=False,
+            evaluator_identity=None,
+            evaluator_identity_status="unavailable",
             fallback_attempted=False,
-            reason=None if oracles_passed else "acceptance_checks_failed",
+            reason="neutral_reviewer_client_unavailable",
         )
 
     def _run_staged_checks(

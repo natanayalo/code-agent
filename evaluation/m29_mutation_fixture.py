@@ -18,6 +18,8 @@ FIXED_GIT_ENV = {
     "GIT_COMMITTER_NAME": "Code Agent Evaluator",
     "GIT_COMMITTER_EMAIL": "evaluator@code-agent.local",
     "GIT_COMMITTER_DATE": "2026-09-01T00:00:00+00:00",
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_CONFIG_GLOBAL": os.devnull,
 }
 
 TASKBOARD_BASE_FILES: dict[str, str] = {
@@ -260,28 +262,36 @@ class TaskboardFixtureInfo:
 
 
 def _init_git_repo(repo_dir: Path) -> None:
-    subprocess.run(["git", "init", "-b", "master"], cwd=repo_dir, check=True, capture_output=True)
+    env = os.environ.copy()
+    env.update(FIXED_GIT_ENV)
+    subprocess.run(
+        ["git", "init", "-b", "master"], cwd=repo_dir, env=env, check=True, capture_output=True
+    )
     subprocess.run(
         ["git", "config", "user.name", FIXED_GIT_ENV["GIT_AUTHOR_NAME"]],
         cwd=repo_dir,
+        env=env,
         check=True,
         capture_output=True,
     )
     subprocess.run(
         ["git", "config", "user.email", FIXED_GIT_ENV["GIT_AUTHOR_EMAIL"]],
         cwd=repo_dir,
+        env=env,
         check=True,
         capture_output=True,
     )
     subprocess.run(
         ["git", "config", "core.autocrlf", "false"],
         cwd=repo_dir,
+        env=env,
         check=True,
         capture_output=True,
     )
     subprocess.run(
         ["git", "config", "core.eol", "lf"],
         cwd=repo_dir,
+        env=env,
         check=True,
         capture_output=True,
     )
@@ -292,24 +302,36 @@ def _write_fixture_files(repo_dir: Path) -> dict[str, str]:
     for rel_path, content in sorted(TASKBOARD_BASE_FILES.items()):
         dest = repo_dir / rel_path
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(content, encoding="utf-8")
+        dest.write_text(content, encoding="utf-8", newline="\n")
         file_hashes[rel_path] = hashlib.sha256(content.encode("utf-8")).hexdigest()
     return file_hashes
 
 
 def _commit_fixture(repo_dir: Path) -> str:
-    subprocess.run(["git", "add", "."], cwd=repo_dir, check=True, capture_output=True)
     env = os.environ.copy()
     env.update(FIXED_GIT_ENV)
+    subprocess.run(["git", "add", "."], cwd=repo_dir, env=env, check=True, capture_output=True)
     subprocess.run(
-        ["git", "commit", "-m", "feat: initial taskboard baseline fixture"],
+        [
+            "git",
+            "commit",
+            "--no-gpg-sign",
+            "--no-verify",
+            "-m",
+            "feat: initial taskboard baseline fixture",
+        ],
         cwd=repo_dir,
         env=env,
         check=True,
         capture_output=True,
     )
     out = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=repo_dir, check=True, capture_output=True, text=True
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo_dir,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
     )
     return out.stdout.strip()
 

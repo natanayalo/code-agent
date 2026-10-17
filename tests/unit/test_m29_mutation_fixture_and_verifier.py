@@ -25,6 +25,7 @@ from evaluation.m29_mutation_oracles import (
 )
 from evaluation.m29_mutation_runner_preflight import run_mutation_preflight_checks
 from evaluation.m29_mutation_suite import (
+    DEFAULT_M29_NEUTRAL_EVALUATOR,
     NeutralEvaluatorManifest,
     build_m29_mutation_suite,
     load_frozen_mutation_suite,
@@ -346,7 +347,16 @@ def test_read_only_external_evaluator_happy_path(tmp_path: Path, fixture_repo: P
         changed_files=[case.allowed_source_path],
     )
 
-    evaluator = ReadOnlyExternalEvaluator()
+    manifest = case.neutral_evaluator or DEFAULT_M29_NEUTRAL_EVALUATOR
+    reviewer = MockReviewerClient(
+        NeutralReviewOutcome(
+            passed=True,
+            reason=None,
+            evaluator_identity=manifest.identity,
+            evaluator_identity_status="verified",
+        )
+    )
+    evaluator = ReadOnlyExternalEvaluator(reviewer_client=reviewer)
     res = evaluator.evaluate_case(case, ws_dir, terminal_snap)
 
     assert res.quality_status == "pass"
@@ -356,6 +366,14 @@ def test_read_only_external_evaluator_happy_path(tmp_path: Path, fixture_repo: P
     assert res.evaluator_identity_matches is True
     assert len(res.commands_run) == 2
     assert res.exit_codes == (0, 0)
+
+    # Verify that omitting reviewer_client returns not_assessable
+    eval_no_client = ReadOnlyExternalEvaluator(reviewer_client=None)
+    res_no_client = eval_no_client.evaluate_case(case, ws_dir, terminal_snap)
+    assert res_no_client.quality_status == "not_assessable"
+    assert res_no_client.reason == "neutral_reviewer_client_unavailable"
+    assert res_no_client.neutral_review_passed is False
+    assert res_no_client.evaluator_identity_status == "unavailable"
 
 
 def test_read_only_external_evaluator_unimplemented_baseline_fails(
@@ -373,7 +391,16 @@ def test_read_only_external_evaluator_unimplemented_baseline_fails(
         changed_files=[case.allowed_source_path],
     )
 
-    evaluator = ReadOnlyExternalEvaluator()
+    manifest = case.neutral_evaluator or DEFAULT_M29_NEUTRAL_EVALUATOR
+    reviewer = MockReviewerClient(
+        NeutralReviewOutcome(
+            passed=True,
+            reason=None,
+            evaluator_identity=manifest.identity,
+            evaluator_identity_status="verified",
+        )
+    )
+    evaluator = ReadOnlyExternalEvaluator(reviewer_client=reviewer)
     res = evaluator.evaluate_case(case, ws_dir, terminal_snap)
 
     assert res.quality_status == "fail"
@@ -657,3 +684,75 @@ def test_read_only_evaluator_immutability_detection(
     res = evaluator.evaluate_case(case, ws_dir, terminal_snap)
     assert res.quality_status == "not_assessable"
     assert res.reason == "candidate_workspace_mutated_during_external_evaluation"
+
+
+def test_oracle_extended_contract_rejections(tmp_path: Path, fixture_repo: Path) -> None:
+    ws_dir = tmp_path / "ws_contract_rejections"
+    clone_case_workspace_from_fixture(
+        fixture_repo, ws_dir, expected_revision=PINNED_TASKBOARD_FIXTURE_REVISION
+    )
+
+    # 1. Baseline file integrity violation
+    models_file = ws_dir / "taskboard" / "models.py"
+    orig_models = models_file.read_text(encoding="utf-8")
+    models_file.write_text(orig_models + "\n# corrupted\n", encoding="utf-8")
+    with pytest.raises(AssertionError, match="Protected baseline file modified"):
+        run_baseline_regression_in_process(ws_dir)
+    models_file.write_text(orig_models, encoding="utf-8")
+
+    # 2. Pair 04: negative limit / middle-page rejection
+    bad_page = '''"""Bad pagination."""
+from .models import Page, Task
+def paginate_tasks(tasks: list[Task], *, limit: int, after_id: str | None = None) -> Page:
+    return Page(items=[], next_cursor=None)
+'''
+    (ws_dir / "taskboard" / "pagination.py").write_text(bad_page, encoding="utf-8")
+    with pytest.raises(AssertionError):
+        run_topic_acceptance_oracle_in_process("cursor_pagination", ws_dir)
+
+    # 3. Pair 05: file I/O performed
+    bad_csv_io = '''"""Bad csv with file I/O."""
+from .models import Task
+def export_tasks_csv(tasks: list[Task]) -> str:
+    with open("/dev/null", "w") as f:
+        f.write("")
+    return "id,title,status,owner,priority\\n"
+'''
+    (ws_dir / "taskboard" / "export.py").write_text(bad_csv_io, encoding="utf-8")
+    with pytest.raises(AssertionError, match="forbidden file I/O"):
+        run_topic_acceptance_oracle_in_process("csv_export", ws_dir)
+
+    # 4. Pair 07: negative max_seconds allowed
+    bad_retry = '''"""Bad retry."""
+def retry_delay_seconds(attempt: int, *, base_seconds: int = 1, max_seconds: int = 30) -> int:
+    return 10
+'''
+    (ws_dir / "taskboard" / "retry.py").write_text(bad_retry, encoding="utf-8")
+    with pytest.raises(AssertionError):
+        run_topic_acceptance_oracle_in_process("capped_retry_delay", ws_dir)
+
+    # 5. Pair 09: events list mutation
+    bad_events = '''"""Bad events."""
+from .models import Event
+def deduplicate_events(events: list[Event]) -> list[Event]:
+    return events
+def count_events_by_type(events: list[Event]) -> dict[str, int]:
+    if events:
+        events.pop()
+    return {"Create": 1, "create": 2, "update": 1}
+'''
+    (ws_dir / "taskboard" / "events.py").write_text(bad_events, encoding="utf-8")
+    with pytest.raises(AssertionError, match="Input events list was mutated"):
+        run_topic_acceptance_oracle_in_process("event_counts", ws_dir)
+
+    # 6. Pair 10: tasks list mutation
+    bad_summary = '''"""Bad summary."""
+from .models import Task
+def summarize_tasks(tasks: list[Task]) -> dict[str, int]:
+    if tasks:
+        tasks.clear()
+    return {"total": 5, "queued": 1, "in_progress": 0, "done": 2, "cancelled": 1, "other": 1}
+'''
+    (ws_dir / "taskboard" / "summary.py").write_text(bad_summary, encoding="utf-8")
+    with pytest.raises(AssertionError, match="Input tasks list was mutated"):
+        run_topic_acceptance_oracle_in_process("task_status_summary", ws_dir)

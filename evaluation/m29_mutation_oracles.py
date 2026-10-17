@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import builtins
 import csv
 import hashlib
 import importlib
@@ -13,6 +14,8 @@ import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+
+from evaluation.m29_mutation_fixture import TASKBOARD_BASE_FILES
 
 
 def _import_from_workspace(workspace_dir: Path, module_name: str) -> Any:
@@ -129,6 +132,10 @@ def _verify_pair_04_cursor_pagination(workspace_dir: Path) -> None:
     if [t.id for t in p1.items] != ["a", "b"] or p1.next_cursor != "b":
         raise AssertionError(f"First page failed: {p1}")
 
+    p_mid = paginate_tasks(tasks, limit=2, after_id="a")
+    if [t.id for t in p_mid.items] != ["b", "c"] or p_mid.next_cursor != "c":
+        raise AssertionError(f"Middle page failed: {p_mid}")
+
     p2 = paginate_tasks(tasks, limit=2, after_id="b")
     if [t.id for t in p2.items] != ["c", "d"] or p2.next_cursor is not None:
         raise AssertionError(f"Second page failed: {p2}")
@@ -141,11 +148,15 @@ def _verify_pair_04_cursor_pagination(workspace_dir: Path) -> None:
     if p4.items != [] or p4.next_cursor is not None:
         raise AssertionError(f"Past-the-end page failed: {p4}")
 
-    try:
-        paginate_tasks(tasks, limit=0)
-        raise AssertionError("limit=0 did not raise ValueError")
-    except ValueError:
-        pass
+    if [t.id for t in tasks] != ["a", "b", "c", "d"]:
+        raise AssertionError("Input list was mutated")
+
+    for bad_limit in [0, -1, -5]:
+        try:
+            paginate_tasks(tasks, limit=bad_limit)
+            raise AssertionError(f"limit={bad_limit} did not raise ValueError")
+        except ValueError:
+            pass
 
     try:
         paginate_tasks(tasks, limit=2, after_id="unknown")
@@ -168,7 +179,20 @@ def _verify_pair_05_csv_export(workspace_dir: Path) -> None:
         id="3", title='Task with "quotes"\nand newline', status="done", owner="bob", priority=3
     )
 
-    csv_data = export_tasks_csv([t1, t2, t3])
+    input_tasks = [t1, t2, t3]
+    orig_open = builtins.open
+
+    def forbid_open(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("export_tasks_csv performed forbidden file I/O")
+
+    builtins.open = forbid_open  # type: ignore[assignment]
+    try:
+        csv_data = export_tasks_csv(input_tasks)
+    finally:
+        builtins.open = orig_open  # type: ignore[assignment]
+
+    if input_tasks != [t1, t2, t3]:
+        raise AssertionError("Input list was mutated")
     if not isinstance(csv_data, str):
         raise AssertionError("export_tasks_csv did not return a string")
     if "\r" in csv_data:
@@ -271,6 +295,13 @@ def _verify_pair_07_capped_retry_delay(workspace_dir: Path) -> None:
         except ValueError:
             pass
 
+    for bad_max in [-1, -10]:
+        try:
+            retry_delay_seconds(1, max_seconds=bad_max)
+            raise AssertionError("Negative max_seconds did not raise ValueError")
+        except ValueError:
+            pass
+
 
 def _verify_pair_08_event_deduplication(workspace_dir: Path) -> None:
     models_mod = _import_from_workspace(workspace_dir, "taskboard.models")
@@ -311,7 +342,10 @@ def _verify_pair_09_event_counts(workspace_dir: Path) -> None:
         event_cls(id="3", event_type="create"),
         event_cls(id="4", event_type="Create"),
     ]
+    orig_events = list(events)
     counts = count_events_by_type(events)
+    if events != orig_events:
+        raise AssertionError("Input events list was mutated")
     expected = {"Create": 1, "create": 2, "update": 1}
     if counts != expected:
         raise AssertionError(f"Expected {expected}, got {counts}")
@@ -331,8 +365,11 @@ def _verify_pair_10_task_status_summary(workspace_dir: Path) -> None:
 
     statuses = ["queued", "done", "done", "cancelled", "archived"]
     tasks = [task_cls(id=str(i), title=f"T{i}", status=s) for i, s in enumerate(statuses)]
+    orig_tasks = list(tasks)
 
     res = summarize_tasks(tasks)
+    if tasks != orig_tasks:
+        raise AssertionError("Input tasks list was mutated")
     expected = {
         "total": 5,
         "queued": 1,
@@ -387,9 +424,15 @@ def run_baseline_regression_in_process(workspace_snapshot_dir: Path) -> None:
     if ws_str not in sys.path:
         sys.path.insert(0, ws_str)
 
+    for protected_rel in ("tests/test_baseline.py", "taskboard/models.py", "taskboard/__init__.py"):
+        fpath = workspace_snapshot_dir / protected_rel
+        if not fpath.is_file():
+            raise AssertionError(f"Protected baseline file missing: {protected_rel}")
+        actual_content = fpath.read_text(encoding="utf-8")
+        if actual_content != TASKBOARD_BASE_FILES[protected_rel]:
+            raise AssertionError(f"Protected baseline file modified: {protected_rel}")
+
     test_file = workspace_snapshot_dir / "tests" / "test_baseline.py"
-    if not test_file.is_file():
-        raise AssertionError(f"Baseline test file not found in workspace: {test_file}")
 
     for mod in list(sys.modules.keys()):
         if mod == "taskboard" or mod.startswith("taskboard."):

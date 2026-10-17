@@ -28,7 +28,12 @@ from evaluation.m29_mutation_smokes import ExtractorStageSmokeResult
 from evaluation.m29_mutation_suite import (
     DEFAULT_M29_NEUTRAL_EVALUATOR,
     M29MutationCase,
+    NeutralEvaluatorManifest,
     build_m29_mutation_suite,
+)
+from evaluation.m29_mutation_verifier import (
+    BlindedNeutralReviewRequest,
+    NeutralReviewOutcome,
 )
 from evaluation.provider_reliability_models import ExecutionIdentity
 from orchestrator.state import MemoryContext
@@ -579,6 +584,20 @@ class RealFixtureCandidateDispatcher(CandidateDispatcher):
         )
 
 
+class RealFixtureReviewerClient:
+    """Deterministic reviewer client for integration test suite execution."""
+
+    def review_blinded_diff(
+        self, request: BlindedNeutralReviewRequest, manifest: NeutralEvaluatorManifest
+    ) -> NeutralReviewOutcome:
+        return NeutralReviewOutcome(
+            passed=True,
+            reason=None,
+            evaluator_identity=manifest.identity,
+            evaluator_identity_status="verified",
+        )
+
+
 def test_full_suite_with_real_fixture_and_read_only_evaluator(tmp_path: Path) -> None:
     fixture_dir = tmp_path / "taskboard_fixture"
     create_taskboard_fixture_repo(fixture_dir)
@@ -589,7 +608,7 @@ def test_full_suite_with_real_fixture_and_read_only_evaluator(tmp_path: Path) ->
 
     suite = build_m29_mutation_suite()
     dispatcher = RealFixtureCandidateDispatcher(fixture_dir, ws_root, policy)
-    evaluator = ReadOnlyExternalEvaluator()
+    evaluator = ReadOnlyExternalEvaluator(reviewer_client=RealFixtureReviewerClient())
     verifier_sha = compute_verifier_source_sha256()
 
     runner = M29MutationRunner(
