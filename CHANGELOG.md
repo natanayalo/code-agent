@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: implement taskboard fixture builder, acceptance oracles, and ReadOnlyExternalEvaluator ([#421](https://github.com/natanayalo/code-agent/pull/421))
+
 - Feat: add m29 feature mutation evaluation runner and quality evaluator ([#420](https://github.com/natanayalo/code-agent/pull/420))
 
 - Feat: add M29 mutation memory isolation gate, validators, and extractor smokes ([#419](https://github.com/natanayalo/code-agent/pull/419))
