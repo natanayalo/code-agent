@@ -424,12 +424,16 @@ route decision
 
 1. Complete the operator-approved [separate `feature/mutation` evaluation
    contract](../evaluation/m29_feature_mutation_contract.md). The opt-in
-   post-terminal execution mode and persisted TaskSpec gate are in place; the
-   runner still needs frozen fixture/evaluator manifests, full memory isolation,
-   delivery and pending-interaction safeguards, pass/fail/unavailable
-   extractor-stage smokes for both profiles, exact baseline-plus-suite cohort
-   reconciliation, post-cutoff report gating, and bounded cleanup before live
-   evidence collection (currently N=0).
+   post-terminal execution mode, persisted TaskSpec gate, frozen suite and
+   evaluator manifests, deterministic taskboard fixture builder
+   (`evaluation/m29_mutation_fixture.py`), runner-owned read-only acceptance
+   oracles (`evaluation/m29_mutation_oracles.py`), concrete `ReadOnlyExternalEvaluator`
+   with blinded neutral review and immutability checks (`evaluation/m29_mutation_verifier.py`),
+   full memory isolation, delivery and pending-interaction safeguards, extractor-stage
+   smokes, cohort reconciliation, preflight verifier hash check, and 72-hour cleanup
+   are implemented and verified with pinned deterministic fixture revision
+   `228071722c645e813af16053e56d007c25e9f127`; live provider collection remains
+   gated on disposable stack launch (currently N=0).
 2. Persist authoritative configured/actual execution identity before dispatch so early failures do not create new `unknown_execution_identity` gaps; do not infer the three excluded Wave 4 Codex identities.
 3. Gather enough evidence in a historical 45-day cohort to assess longitudinal consistency; the current historical split contains zero included tasks.
 4. Evaluate hierarchical budget controls separately (task, node, repair, wall time, and concurrency limits).

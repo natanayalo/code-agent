@@ -34,6 +34,7 @@ class TaskCohortSnapshot:
     baseline_ids_by_profile: dict[str, tuple[str, ...]]
     frozen_baseline_ids_sha256_by_profile: dict[str, str]
     smoke_result: ExtractorStageSmokeResult | None = None
+    verifier_source_sha256: str | None = None
 
 
 @dataclass(frozen=True)

@@ -10,12 +10,14 @@ from pathlib import Path
 from typing import Any
 
 from evaluation.m29_mutation_cohort import M29_MUTATION_PROFILES
+from evaluation.m29_mutation_fixture import verify_taskboard_fixture_repo
 from evaluation.m29_mutation_isolation import (
     compute_memory_context_hash,
     validate_evaluation_retention_seconds,
     validate_post_overlay_task_spec,
     verify_pair_semantic_equality,
 )
+from evaluation.m29_mutation_oracles import compute_verifier_source_sha256
 from evaluation.m29_mutation_runner_models import TaskCohortSnapshot
 from evaluation.m29_mutation_smokes import (
     ExtractorStageSmokeResult,
@@ -36,6 +38,7 @@ def capture_task_cohort_snapshot(
     as_of: datetime,
     baseline_ids_by_profile: Mapping[str, Collection[str]] | None = None,
     smoke_result: ExtractorStageSmokeResult | None = None,
+    verifier_source_sha256: str | None = None,
 ) -> TaskCohortSnapshot:
     """Capture validated TaskCohortSnapshot with baseline hashes and window boundaries."""
     mem_hash = compute_memory_context_hash(baseline_memory_context)
@@ -56,6 +59,7 @@ def capture_task_cohort_snapshot(
         baseline_ids_by_profile=norm_ids,
         frozen_baseline_ids_sha256_by_profile=norm_hashes,
         smoke_result=smoke_result,
+        verifier_source_sha256=verifier_source_sha256,
     )
 
 
@@ -119,6 +123,8 @@ def run_mutation_preflight_checks(
     run_smokes_if_missing: bool = True,
     as_of: datetime | None = None,
     baseline_ids_by_profile: Mapping[str, Collection[str]] | None = None,
+    fixture_repo_path: Path | None = None,
+    expected_verifier_sha256: str | None = None,
 ) -> TaskCohortSnapshot:
     """Execute all preflight gates before any live case is dispatched."""
     validate_evaluation_retention_seconds(retention_seconds)
@@ -138,6 +144,24 @@ def run_mutation_preflight_checks(
     if len(baseline_memory_context.personal) > 0:
         raise ValueError("personal memory store must be empty for baseline isolation")
 
+    if fixture_repo_path is not None:
+        fixture_errs = verify_taskboard_fixture_repo(
+            fixture_repo_path, expected_revision=suite.target_repository_revision
+        )
+        if fixture_errs:
+            raise ValueError(
+                f"disposable fixture repository validation failed: {'; '.join(fixture_errs)}"
+            )
+
+    verifier_sha = expected_verifier_sha256
+    if expected_verifier_sha256 is not None:
+        actual_sha = compute_verifier_source_sha256()
+        if actual_sha != expected_verifier_sha256:
+            raise ValueError(
+                f"verifier source sha256 mismatch: expected {expected_verifier_sha256}, "
+                f"got {actual_sha}"
+            )
+
     _validate_preflight_pair_specs(suite)
 
     effective_as_of = as_of or datetime.now(UTC) + timedelta(hours=24)
@@ -146,6 +170,7 @@ def run_mutation_preflight_checks(
         as_of=effective_as_of,
         baseline_ids_by_profile=baseline_ids_by_profile,
         smoke_result=verified_smoke,
+        verifier_source_sha256=verifier_sha,
     )
 
 

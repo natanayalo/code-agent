@@ -12,11 +12,12 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from evaluation.m29_mutation_cohort import M29_MUTATION_PROFILES
+from evaluation.m29_mutation_fixture import PINNED_TASKBOARD_FIXTURE_REVISION
 from evaluation.provider_reliability_models import ExecutionIdentity
 
 M29_MUTATION_SUITE_NAME = "m29-live-provider-evidence-mutation"
 CANDIDATE_TIMEOUT_SECONDS = 900
-DEFAULT_FIXTURE_REVISION = "0000000000000000000000000000000000000000"
+DEFAULT_FIXTURE_REVISION = PINNED_TASKBOARD_FIXTURE_REVISION
 
 M29_MUTATION_PROMPT_TRAILER = (
     "Make the smallest implementation for this request in the task workspace. "
@@ -76,6 +77,15 @@ class NeutralEvaluatorManifest(StrictModel):
                 f"neutral evaluator provider '{self.provider}' cannot be a candidate provider"
             )
         return self
+
+    @property
+    def identity(self) -> ExecutionIdentity:
+        """Return the canonical ExecutionIdentity for this evaluator manifest."""
+        return ExecutionIdentity(
+            provider=self.provider,
+            model=self.model,
+            reasoning_effort=self.reasoning_effort,
+        )
 
 
 def _hash_text(text: str) -> str:
