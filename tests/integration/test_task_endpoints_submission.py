@@ -51,7 +51,21 @@ def _assert_completed_task_response(
     assert latest_run["session_id"] == payload["session_id"]
     assert latest_run["worker_type"] == "codex"
     assert latest_run["workspace_id"] == "workspace-task-44-1234"
-    assert latest_run["budget_usage"] == {"iterations_used": 2, "tool_calls_used": 1}
+    assert latest_run["budget_usage"] == {
+        "iterations_used": 2,
+        "tool_calls_used": 1,
+        "native_agent": {
+            "model_execution": {
+                "provider": "codex",
+                "model": "gpt-6-luna",
+                "reasoning_effort": "high",
+                "requested_model": None,
+                "requested_reasoning_effort": None,
+                "model_source": "provider_default",
+                "reasoning_effort_source": "provider_default",
+            }
+        },
+    }
     assert latest_run["verifier_outcome"]["status"] == "warning"
     assert latest_run["files_changed_count"] == 1
     assert latest_run["files_changed"] == ["note.txt"]
@@ -110,7 +124,21 @@ def _assert_task_persistence_records(session_factory, task_id: str, payload: dic
         assert worker_run.status is WorkerRunStatus.SUCCESS
         assert worker_run.session_id == payload["session_id"]
         assert worker_run.workspace_id == "workspace-task-44-1234"
-        assert worker_run.budget_usage == {"iterations_used": 2, "tool_calls_used": 1}
+        assert worker_run.budget_usage == {
+            "iterations_used": 2,
+            "tool_calls_used": 1,
+            "native_agent": {
+                "model_execution": {
+                    "provider": "codex",
+                    "model": "gpt-6-luna",
+                    "reasoning_effort": "high",
+                    "requested_model": None,
+                    "requested_reasoning_effort": None,
+                    "model_source": "provider_default",
+                    "reasoning_effort_source": "provider_default",
+                }
+            },
+        }
         assert worker_run.verifier_outcome["status"] == "warning"
         assert worker_run.files_changed_count == 1
         indexed_envelope = next(
