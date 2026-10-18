@@ -235,20 +235,24 @@ Temporal migration and rollback record is in the
    b. [Completed] add provider-specific pre-dispatch diagnostics (M29 Item 1b);
    c. [Completed] qualify the cumulative `investigation/read_only` sample floor,
       retaining the three Wave 4 Codex identity exclusions;
-   d. [Contract approved; execution preparation in progress] complete the
-      post-terminal evaluation runner, memory isolation, pending-interaction
-      handling, delivery safeguards, extractor-stage smokes, and 72-hour
-      cleanup before live evidence collection. The frozen `feature/mutation`
+   d. [Completed] complete the post-terminal evaluation runner, memory isolation,
+      pending-interaction handling, delivery safeguards, extractor-stage smokes, and
+      72-hour cleanup before live evidence collection. The frozen `feature/mutation`
       suite & neutral evaluator manifest contract
       (`evaluation/m29_mutation_suite.py`), the exact baseline-plus-eligible-suite
       reconciliation gate (`evaluation/m29_mutation_cohort.py`), the
       sanitized manifest & report-publication reconciliation layer
       (`evaluation/m29_mutation_manifest.py`,
-      `evaluation/m29_mutation_reconciliation.py`), and the pre-dispatch
+      `evaluation/m29_mutation_reconciliation.py`), the pre-dispatch
       memory isolation gate, stop-condition validators, 72-hour cleanup helpers,
       and canonical extractor-stage smokes
       (`evaluation/m29_mutation_isolation.py`,
-      `evaluation/m29_mutation_smokes.py`) are implemented and validated;
+      `evaluation/m29_mutation_smokes.py`), concrete `CandidateDispatcher`,
+      `NeutralReviewerClient`, and 72-hour retention watchdog live adapters
+      (`evaluation/m29_mutation_dispatcher.py`,
+      `evaluation/m29_mutation_reviewer_client.py`,
+      `evaluation/m29_mutation_watchdog.py`), and the operator wave CLI
+      (`scripts/e2e/run_m29_mutation_wave.py`) are implemented and validated;
    e. gather evidence in a historical 45-day cohort before claiming
       longitudinal robustness;
    f. evaluate hierarchical budget controls separately.

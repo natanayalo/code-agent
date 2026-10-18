@@ -430,7 +430,10 @@ route decision
    oracles (`evaluation/m29_mutation_oracles.py`), concrete `ReadOnlyExternalEvaluator`
    with blinded neutral review and immutability checks (`evaluation/m29_mutation_verifier.py`),
    full memory isolation, delivery and pending-interaction safeguards, extractor-stage
-   smokes, cohort reconciliation, preflight verifier hash check, and 72-hour cleanup
+   smokes, cohort reconciliation, preflight verifier hash check, concrete
+   `CandidateDispatcher`, `NeutralReviewerClient`, 72-hour retention watchdog
+   (`evaluation/m29_mutation_dispatcher.py`, `evaluation/m29_mutation_reviewer_client.py`,
+   `evaluation/m29_mutation_watchdog.py`), and the operator wave CLI (`scripts/e2e/run_m29_mutation_wave.py`)
    are implemented and verified with pinned deterministic fixture revision
    `228071722c645e813af16053e56d007c25e9f127`; live provider collection remains
    gated on disposable stack launch (currently N=0).

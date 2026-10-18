@@ -9,6 +9,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
+from evaluation.m29_mutation_dispatcher import (
+    DisposableDbMemoryIsolationManager,
+    HttpStackCandidateDispatcher,
+)
 from evaluation.m29_mutation_fixture import (
     PINNED_TASKBOARD_FIXTURE_REVISION,
     TaskboardFixtureInfo,
@@ -26,6 +30,7 @@ from evaluation.m29_mutation_isolation import (
     verify_terminal_snapshot_immutability,
 )
 from evaluation.m29_mutation_oracles import compute_verifier_source_sha256
+from evaluation.m29_mutation_reviewer_client import OpenRouterNeutralReviewerClient
 from evaluation.m29_mutation_runner_archive import (
     build_sanitized_case_entry,
     reconcile_m29_publication_gate,
@@ -70,6 +75,7 @@ from evaluation.m29_mutation_verifier import (
     NeutralReviewOutcome,
     ReadOnlyExternalEvaluator,
 )
+from evaluation.m29_mutation_watchdog import EvaluationRetentionWatchdog
 from orchestrator.state import MemoryContext
 from sandbox.workspace import WorkspaceHandle, WorkspaceManager
 
@@ -102,6 +108,7 @@ class M29MutationRunner:
         ) = None,
         fixture_repo_path: Path | None = None,
         expected_verifier_sha256: str | None = None,
+        retention_watchdog: EvaluationRetentionWatchdog | None = None,
     ) -> None:
         self.suite = suite
         self.db_url = db_url
@@ -117,6 +124,7 @@ class M29MutationRunner:
         self.post_evaluation_snapshot_hook = post_evaluation_snapshot_hook
         self.fixture_repo_path = fixture_repo_path
         self.expected_verifier_sha256 = expected_verifier_sha256
+        self.retention_watchdog = retention_watchdog
         self.workspace_root: Path = getattr(
             workspace_manager, "root_dir", getattr(workspace_manager, "workspace_root", Path("."))
         ).resolve()
@@ -176,6 +184,10 @@ class M29MutationRunner:
         cand_res = self.candidate_dispatcher.dispatch_case(case, current_mem)
         self._recorded_ws_ids.add(cand_res.workspace_handle.workspace_id)
         self._recorded_ws_paths.add(str(cand_res.workspace_handle.workspace_path.resolve()))
+        if self.retention_watchdog is not None:
+            self.retention_watchdog.record_workspace(
+                case.case_id, cand_res.task_id, cand_res.workspace_handle
+            )
 
         stop_cond = _check_candidate_stop_conditions(cand_res, case)
         if stop_cond:
@@ -248,12 +260,16 @@ class M29MutationRunner:
                 recorded_workspace_ids=self._recorded_ws_ids,
                 recorded_workspace_paths=self._recorded_ws_paths,
             )
+            if self.retention_watchdog is not None:
+                self.retention_watchdog.mark_cleaned(raw.workspace_id)
             return replace(raw, cleaned_up=True), None
         except Exception as exc:
             LOGGER.error(
                 "Evaluation workspace cleanup failed for %s", raw.workspace_id, exc_info=True
             )
             err_msg = str(exc)
+            if self.retention_watchdog is not None:
+                self.retention_watchdog.mark_cleaned(raw.workspace_id, error=err_msg)
             return replace(raw, cleaned_up=False, cleanup_error=err_msg), err_msg
 
     def _cleanup_eligible_workspaces(
@@ -427,13 +443,17 @@ __all__ = [
     "BlindedNeutralReviewRequest",
     "CandidateDispatcher",
     "CandidateTaskExecutionResult",
+    "DisposableDbMemoryIsolationManager",
+    "EvaluationRetentionWatchdog",
     "ExternalEvaluationResult",
     "ExternalEvaluator",
+    "HttpStackCandidateDispatcher",
     "M29MutationRunner",
     "M29MutationRunnerResult",
     "M29_MUTATION_IDENTITY_CONTRACT",
     "NeutralReviewOutcome",
     "NeutralReviewerClient",
+    "OpenRouterNeutralReviewerClient",
     "PINNED_TASKBOARD_FIXTURE_REVISION",
     "RawCaseManifestEntry",
     "ReadOnlyExternalEvaluator",
