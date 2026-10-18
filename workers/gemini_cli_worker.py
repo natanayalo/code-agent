@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
@@ -314,22 +315,41 @@ class GeminiCliWorker(GeminiCliWorkerNativeMixin, Worker):
 
         return result, container, session
 
-    def _resolve_request_model_execution(self, request: WorkerRequest) -> ModelExecutionMetadata:
+    def _resolve_request_model_execution(
+        self, request: WorkerRequest
+    ) -> ModelExecutionMetadata | None:
         """Resolve authoritative ModelExecutionMetadata for this Gemini/Antigravity request."""
-        if request.model_execution is not None:
+        if not self._is_antigravity_native_adapter():
+            legacy_model = getattr(self.runtime_adapter, "model", None)
+            if legacy_model:
+                return ModelExecutionMetadata(
+                    provider="gemini",
+                    model=str(legacy_model),
+                    reasoning_effort=None,
+                    model_source="environment",
+                )
+            return None
+
+        if request.model_execution is not None and request.model_execution.model_source in (
+            "task_override",
+            "worker_profile",
+        ):
             return request.model_execution
         adapter = getattr(self, "runtime_adapter", None)
         manifest_worker = (request.runtime_manifest or {}).get("worker")
         adapter_model = getattr(adapter, "model", None)
         adapter_effort = getattr(adapter, "reasoning_effort", None)
         adapter_env = getattr(adapter, "env", None)
-        return resolve_antigravity_model_execution(
-            task_constraints=request.constraints,
-            manifest_worker=manifest_worker,
-            adapter_model=adapter_model,
-            adapter_reasoning_effort=adapter_effort,
-            env=adapter_env,
-        )
+        try:
+            return resolve_antigravity_model_execution(
+                task_constraints=request.constraints,
+                manifest_worker=manifest_worker,
+                adapter_model=adapter_model,
+                adapter_reasoning_effort=adapter_effort,
+                env=adapter_env if adapter_env is not None else os.environ,
+            )
+        except ValueError:
+            return request.model_execution
 
     def _safe_provision_workspace(
         self,

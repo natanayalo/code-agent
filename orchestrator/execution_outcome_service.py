@@ -242,13 +242,16 @@ def _resolve_effective_model_execution(
             if (model or reasoning_effort)
             else None
         )
-        return resolve_worker_model_execution(
-            str(worker_type),
-            task_constraints=constraints,
-            worker_profile=worker_prof,
-            default_model=model,
-            default_reasoning_effort=reasoning_effort,
-        )
+        try:
+            return resolve_worker_model_execution(
+                str(worker_type),
+                task_constraints=constraints,
+                worker_profile=worker_prof,
+                default_model=model,
+                default_reasoning_effort=reasoning_effort,
+            )
+        except ValueError:
+            return None
     return None
 
 
@@ -259,11 +262,15 @@ def _resolve_persisted_budget_usage(
     runtime_mode: Any,
 ) -> dict[str, Any] | None:
     """Ensure native_agent runs retain authoritative model_execution in budget_usage."""
-    mode_str = getattr(runtime_mode, "value", str(runtime_mode)).strip().lower()
     persisted = dict(result.budget_usage or {}) if result and result.budget_usage else None
+    if persisted is not None and isinstance(persisted.get("nodes"), dict):
+        return persisted
+
+    mode_str = getattr(runtime_mode, "value", str(runtime_mode)).strip().lower()
     model_exec = _resolve_effective_model_execution(result, state, worker_type)
     if model_exec is not None and (
-        mode_str == "native_agent" or (persisted is not None and "native_agent" in persisted)
+        mode_str in ("native_agent", "worker_runtime_mode.native_agent")
+        or (persisted is not None and "native_agent" in persisted)
     ):
         if persisted is None:
             persisted = {}

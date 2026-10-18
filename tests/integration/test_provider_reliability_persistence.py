@@ -21,10 +21,11 @@ from evaluation.provider_reliability_extractor import extract_provider_reliabili
 from evaluation.provider_reliability_identity import resolve_task_execution_identity
 from evaluation.provider_reliability_models import ReliabilityReportPolicy
 from orchestrator.execution_outcome_service import _persist_execution_outcome
-from orchestrator.graph import execute_with_preflight
+from orchestrator.graph import _aggregate_decomposed_results, execute_with_preflight
 from orchestrator.provider_diagnostics import ProviderDiagnosticsService
 from orchestrator.provider_diagnostics_types import ProviderPreDispatchReport
 from orchestrator.state import (
+    NodeOutcome,
     OrchestratorState,
     RouteDecision,
     TaskRequest,
@@ -371,3 +372,79 @@ async def test_crashed_run_without_worker_result_persists_model_execution_identi
         assert status == "verified"
         assert identity is not None
         assert identity.model == "gpt-5.6-luna"
+
+
+@pytest.mark.asyncio
+async def test_decomposed_run_with_mixed_nodes_persists_without_native_agent_shadowing(
+    tmp_path: Path,
+) -> None:
+    db_url = f"sqlite+pysqlite:///{tmp_path / 'decomposed_mixed.db'}"
+    engine = create_engine_from_url(db_url)
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+    task_id = _create_task(session_factory)
+
+    meta1 = ModelExecutionMetadata(
+        provider="codex",
+        model="gpt-5.6-luna",
+        reasoning_effort="high",
+        model_source="worker_profile",
+    )
+    meta2 = ModelExecutionMetadata(
+        provider="codex",
+        model="gpt-5.2-preview",
+        reasoning_effort="low",
+        model_source="worker_profile",
+    )
+    r1 = WorkerResult(
+        status="success",
+        summary="Node 1 done",
+        model_execution=meta1,
+        budget_usage={
+            "runtime_mode": "native_agent",
+            "native_agent": {"model_execution": meta1.model_dump(mode="json")},
+        },
+    )
+    r2 = WorkerResult(
+        status="success",
+        summary="Node 2 done",
+        model_execution=meta2,
+        budget_usage={
+            "runtime_mode": "native_agent",
+            "native_agent": {"model_execution": meta2.model_dump(mode="json")},
+        },
+    )
+    outcomes = [
+        NodeOutcome(node_id="n1", status="completed", result=r1, dependencies=[]),
+        NodeOutcome(node_id="n2", status="completed", result=r2, dependencies=[]),
+    ]
+    aggregated = _aggregate_decomposed_results(outcomes)
+    assert aggregated.model_execution is None
+    assert "native_agent" not in aggregated.budget_usage
+    assert "nodes" in aggregated.budget_usage
+
+    state = _build_early_failure_state(task_id, meta1)
+    state.result = aggregated
+
+    _persist_execution_outcome(
+        _OutcomePersistenceService(session_factory),
+        task_id=task_id,
+        state=state,
+        started_at=NOW,
+        finished_at=NOW,
+        persist_friction_proposals=False,
+    )
+
+    with session_scope(session_factory) as session:
+        task = session.get(Task, task_id)
+        assert task is not None
+        runs = WorkerRunRepository(session).list_by_task(task_id)
+        assert len(runs) == 1
+        run = runs[0]
+        assert run.budget_usage is not None
+        assert "native_agent" not in run.budget_usage
+        assert "nodes" in run.budget_usage
+
+        identity, status = resolve_task_execution_identity(task, runs)
+        assert status == "mixed_execution_identity"
+        assert identity is None

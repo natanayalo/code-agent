@@ -361,7 +361,7 @@ def test_gemini_native_runtime_keeps_memory_with_system_prompt_override(tmp_path
 def test_gemini_cli_worker_native_pre_execution_cancellation(tmp_path: Path) -> None:
     workspace = _make_workspace(tmp_path)
     worker = GeminiCliWorker(
-        runtime_adapter=_ScriptedAdapter([]),
+        runtime_adapter=AntigravityCliRuntimeAdapter(),
         workspace_manager=_FakeWorkspaceManager(workspace),
         container_manager=_FakeContainerManager(_make_container(workspace)),
     )

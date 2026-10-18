@@ -166,8 +166,9 @@ def test_gemini_cli_worker_errors_without_repo_url(tmp_path: Path) -> None:
     """Worker should refuse to run when repo_url is absent."""
     workspace = _make_workspace(tmp_path)
     container = _make_container(workspace)
+    adapter = _ScriptedAdapter([])
     worker = GeminiCliWorker(
-        runtime_adapter=_ScriptedAdapter([]),
+        runtime_adapter=adapter,
         workspace_manager=_FakeWorkspaceManager(workspace),
         container_manager=_FakeContainerManager(container),
         session_factory=lambda _, **__: _FakeSession({}),
@@ -178,21 +179,14 @@ def test_gemini_cli_worker_errors_without_repo_url(tmp_path: Path) -> None:
     assert result.status == "error"
     assert "repo_url" in (result.summary or "")
     assert result.next_action_hint == "provide_repo_url"
-    assert result.model_execution is not None
-    assert result.model_execution.provider == "antigravity"
+    assert result.model_execution is None
 
-    native_result = asyncio.run(
-        worker.run(
-            WorkerRequest(
-                task_text="do something",
-                runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
-            )
-        )
-    )
-    assert native_result.status == "error"
-    assert native_result.model_execution is not None
-    assert native_result.model_execution.provider == "antigravity"
-    assert native_result.budget_usage["native_agent"]["model_execution"] is not None
+    # Configured legacy adapter stamps provider="gemini"
+    adapter.model = "gemini-1.5-pro"
+    legacy_result = asyncio.run(worker.run(WorkerRequest(task_text="do something")))
+    assert legacy_result.model_execution is not None
+    assert legacy_result.model_execution.provider == "gemini"
+    assert legacy_result.model_execution.model == "gemini-1.5-pro"
 
 
 def test_gemini_validate_request_phase_returns_none_for_valid_repo_url(tmp_path: Path) -> None:
@@ -486,3 +480,35 @@ def test_gemini_cli_worker_auto_enables_network(tmp_path: Path) -> None:
     )
 
     assert container_manager.start_requests[0].network_enabled is True
+
+
+def test_gemini_cli_worker_resolves_legacy_adapter_truthfully(tmp_path: Path) -> None:
+    workspace = _make_workspace(tmp_path)
+    container = _make_container(workspace)
+
+    # Legacy adapter with model set
+    adapter_with_model = _ScriptedAdapter([])
+    adapter_with_model.model = "gemini-1.5-pro"
+    worker_with_model = GeminiCliWorker(
+        runtime_adapter=adapter_with_model,
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(container),
+        session_factory=lambda _, **__: _FakeSession({}),
+    )
+    request = WorkerRequest(task_text="test", repo_url="https://example.com/repo.git")
+    meta_with_model = worker_with_model._resolve_request_model_execution(request)
+    assert meta_with_model is not None
+    assert meta_with_model.provider == "gemini"
+    assert meta_with_model.model == "gemini-1.5-pro"
+    assert meta_with_model.reasoning_effort is None
+
+    # Legacy adapter without model
+    adapter_without_model = _ScriptedAdapter([])
+    worker_without_model = GeminiCliWorker(
+        runtime_adapter=adapter_without_model,
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(container),
+        session_factory=lambda _, **__: _FakeSession({}),
+    )
+    meta_none = worker_without_model._resolve_request_model_execution(request)
+    assert meta_none is None

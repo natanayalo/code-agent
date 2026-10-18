@@ -462,3 +462,34 @@ def test_stamp_native_agent_model_execution() -> None:
     stamped_cli = stamp_native_agent_model_execution(cli_result, model_exec, runtime_mode="cli")
     assert stamped_cli.model_execution == model_exec
     assert "native_agent" not in stamped_cli.budget_usage
+
+
+def test_resolve_worker_model_execution_defaults_to_environ(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from workers.model_config import resolve_worker_model_execution
+
+    monkeypatch.setenv("CODE_AGENT_CODEX_MODEL", "gpt-5.6-turbo")
+    monkeypatch.setenv("CODE_AGENT_CODEX_REASONING_EFFORT", "medium")
+    meta = resolve_worker_model_execution("codex")
+    assert meta is not None
+    assert meta.model == "gpt-5.6-turbo"
+    assert meta.reasoning_effort == "medium"
+    assert meta.model_source == "environment"
+    assert meta.reasoning_effort_source == "environment"
+
+
+def test_resolve_worker_model_execution_guards_value_error() -> None:
+    from workers.model_config import resolve_worker_model_execution
+
+    meta = resolve_worker_model_execution(
+        "antigravity",
+        task_constraints={"model": "gemini-3.8-flash-low", "reasoning_effort": "high"},
+    )
+    assert meta is None
+
+    meta_auto = resolve_worker_model_execution(
+        "antigravity",
+        task_constraints={"model": "auto-gemini-2.5"},
+    )
+    assert meta_auto is None

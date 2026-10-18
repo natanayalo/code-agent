@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -461,24 +462,28 @@ def resolve_worker_model_execution(
 ) -> ModelExecutionMetadata | None:
     """Resolve authoritative execution metadata before/at worker dispatch."""
     norm_provider = provider.strip().lower() if isinstance(provider, str) else ""
-    if norm_provider == "codex":
-        return resolve_codex_model_execution(
-            task_constraints=task_constraints,
-            worker_profile=worker_profile,
-            env=environ,
-            default_model=default_model or DEFAULT_CODEX_MODEL,
-            default_reasoning_effort=default_reasoning_effort or DEFAULT_CODEX_REASONING_EFFORT,
-        )
-    if norm_provider in ("antigravity", "gemini"):
-        return resolve_antigravity_model_execution(
-            task_constraints=task_constraints,
-            worker_profile=worker_profile,
-            env=environ,
-            default_model=default_model or DEFAULT_ANTIGRAVITY_MODEL,
-            default_reasoning_effort=(
-                default_reasoning_effort or DEFAULT_ANTIGRAVITY_REASONING_EFFORT
-            ),
-        )
+    effective_env = os.environ if environ is None else environ
+    try:
+        if norm_provider == "codex":
+            return resolve_codex_model_execution(
+                task_constraints=task_constraints,
+                worker_profile=worker_profile,
+                env=effective_env,
+                default_model=default_model or DEFAULT_CODEX_MODEL,
+                default_reasoning_effort=default_reasoning_effort or DEFAULT_CODEX_REASONING_EFFORT,
+            )
+        if norm_provider in ("antigravity", "gemini"):
+            return resolve_antigravity_model_execution(
+                task_constraints=task_constraints,
+                worker_profile=worker_profile,
+                env=effective_env,
+                default_model=default_model or DEFAULT_ANTIGRAVITY_MODEL,
+                default_reasoning_effort=(
+                    default_reasoning_effort or DEFAULT_ANTIGRAVITY_REASONING_EFFORT
+                ),
+            )
+    except ValueError:
+        return None
     return None
 
 

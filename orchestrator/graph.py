@@ -316,7 +316,9 @@ def _resolve_request_model_execution_for_envelope(
     worker_type: str,
 ) -> ModelExecutionMetadata | None:
     """Resolve authoritative ModelExecutionMetadata for the outer orchestrator envelope."""
-    if isinstance(request.model_execution, ModelExecutionMetadata):
+    if isinstance(
+        request.model_execution, ModelExecutionMetadata
+    ) and request.model_execution.model_source in ("task_override", "worker_profile"):
         return request.model_execution
     worker_fn = getattr(worker, "_resolve_request_model_execution", None)
     if worker_fn is not None and callable(worker_fn):
@@ -328,6 +330,8 @@ def _resolve_request_model_execution_for_envelope(
                 return ModelExecutionMetadata.model_validate(resolved)
         except Exception:
             logger.debug("Worker model execution resolution failed in envelope", exc_info=True)
+    if isinstance(request.model_execution, ModelExecutionMetadata):
+        return request.model_execution
     manifest_worker = (
         (request.runtime_manifest or {}).get("worker")
         if isinstance(request.runtime_manifest, dict)
@@ -336,13 +340,16 @@ def _resolve_request_model_execution_for_envelope(
     model = manifest_worker.get("model") if isinstance(manifest_worker, dict) else None
     effort = manifest_worker.get("reasoning_effort") if isinstance(manifest_worker, dict) else None
     prof = {"model": model, "reasoning_effort": effort} if (model or effort) else None
-    return resolve_worker_model_execution(
-        worker_type,
-        task_constraints=request.constraints,
-        worker_profile=prof,
-        default_model=model,
-        default_reasoning_effort=effort,
-    )
+    try:
+        return resolve_worker_model_execution(
+            worker_type,
+            task_constraints=request.constraints,
+            worker_profile=prof,
+            default_model=model,
+            default_reasoning_effort=effort,
+        )
+    except ValueError:
+        return None
 
 
 async def _handle_worker_envelope_timeout(
@@ -939,13 +946,16 @@ def _resolve_state_model_execution(
         else None
     )
 
-    return resolve_worker_model_execution(
-        str(worker_type),
-        task_constraints=constraints,
-        worker_profile=worker_prof,
-        default_model=model,
-        default_reasoning_effort=reasoning_effort,
-    )
+    try:
+        return resolve_worker_model_execution(
+            str(worker_type),
+            task_constraints=constraints,
+            worker_profile=worker_prof,
+            default_model=model,
+            default_reasoning_effort=reasoning_effort,
+        )
+    except ValueError:
+        return None
 
 
 def _build_worker_request_runtime_manifest(
@@ -1354,6 +1364,11 @@ def _aggregate_decomposed_results(outcomes: list[NodeOutcome]) -> WorkerResult:
     status: Literal["success", "failure"] = (
         "failure" if failed is not None or skipped else "success"
     )
+    executed_outcomes = [
+        outcome
+        for outcome in outcomes
+        if outcome.status != "skipped" and outcome.result is not None
+    ]
     return WorkerResult(
         status=status,
         summary="Sequential DAG results:\n" + "\n".join(f"- {summary}" for summary in summaries),
@@ -1421,27 +1436,48 @@ def _aggregate_decomposed_results(outcomes: list[NodeOutcome]) -> WorkerResult:
         preflight_rejected=preflight_rejected,
         execution_not_started=execution_not_started,
         model_execution=(
-            outcomes[0].result.model_execution
+            executed_outcomes[0].result.model_execution
             if (
-                bool(outcomes)
-                and outcomes[0].result is not None
-                and isinstance(outcomes[0].result.model_execution, ModelExecutionMetadata)
+                bool(executed_outcomes)
+                and isinstance(executed_outcomes[0].result.model_execution, ModelExecutionMetadata)
                 and all(
-                    outcome.result is not None
-                    and isinstance(outcome.result.model_execution, ModelExecutionMetadata)
+                    isinstance(outcome.result.model_execution, ModelExecutionMetadata)
                     and (
                         outcome.result.model_execution.provider
-                        == outcomes[0].result.model_execution.provider
+                        == executed_outcomes[0].result.model_execution.provider
                         and outcome.result.model_execution.model
-                        == outcomes[0].result.model_execution.model
+                        == executed_outcomes[0].result.model_execution.model
                         and outcome.result.model_execution.reasoning_effort
-                        == outcomes[0].result.model_execution.reasoning_effort
+                        == executed_outcomes[0].result.model_execution.reasoning_effort
                     )
-                    for outcome in outcomes
+                    for outcome in executed_outcomes
                 )
             )
             else None
         ),
+    )
+
+
+def _fallback_decomposed_node_result(
+    request: WorkerRequest,
+    worker: Worker,
+    state: OrchestratorState,
+    node_envelope_artifact: ArtifactReference | None,
+) -> WorkerResult:
+    """Build a failure result stamping model_execution when node execution returns None."""
+    node_model_exec = request.model_execution or _resolve_request_model_execution_for_envelope(
+        worker, request, getattr(state.dispatch, "worker_type", "codex")
+    )
+    raw_fallback = WorkerResult(
+        status="failure",
+        summary="Node execution returned no result.",
+        failure_kind="worker_failure",
+        artifacts=[node_envelope_artifact] if node_envelope_artifact is not None else [],
+        model_execution=node_model_exec,
+    )
+    node_runtime_mode = getattr(state.dispatch, "runtime_mode", "native_agent")
+    return stamp_native_agent_model_execution(
+        raw_fallback, node_model_exec, runtime_mode=node_runtime_mode
     )
 
 
@@ -1602,13 +1638,8 @@ async def _await_decomposed_nodes(
             )
             if result is None:
                 logger.warning("Node execution result is None, falling back to failure default.")
-                result = WorkerResult(
-                    status="failure",
-                    summary="Node execution returned no result.",
-                    failure_kind="worker_failure",
-                    artifacts=(
-                        [node_envelope_artifact] if node_envelope_artifact is not None else []
-                    ),
+                result = _fallback_decomposed_node_result(
+                    request, worker, state, node_envelope_artifact
                 )
                 break
             if result.status == "success" or result.next_action_hint == "request_higher_permission":
@@ -1617,11 +1648,8 @@ async def _await_decomposed_nodes(
             logger.warning(
                 "Node execution completed without a result, falling back to failure default."
             )
-            result = WorkerResult(
-                status="failure",
-                summary="Node execution returned no result.",
-                failure_kind="worker_failure",
-                artifacts=[node_envelope_artifact] if node_envelope_artifact is not None else [],
+            result = _fallback_decomposed_node_result(
+                request, worker, state, node_envelope_artifact
             )
         if result.workspace_id is None and state.dispatch.workspace_id:
             result = result.model_copy(update={"workspace_id": state.dispatch.workspace_id})

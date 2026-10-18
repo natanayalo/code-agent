@@ -242,3 +242,90 @@ def test_worker_profile_model_and_effort_projected_to_worker_request() -> None:
     assert request.model_execution.model == "gpt-5.6-luna"
     assert request.model_execution.reasoning_effort == "high"
     assert worker_manifest.get("model_execution") is not None
+
+
+def test_envelope_model_execution_honors_worker_adapter_over_provider_default() -> None:
+    from orchestrator.graph import _resolve_request_model_execution_for_envelope
+    from workers.base import ModelExecutionMetadata
+
+    class _WorkerWithAdapter:
+        def _resolve_request_model_execution(
+            self, request: WorkerRequest
+        ) -> ModelExecutionMetadata:
+            del request
+            return ModelExecutionMetadata(
+                provider="codex",
+                model="gpt-5.6-luna",
+                reasoning_effort="high",
+                model_source="environment",
+            )
+
+    worker = _WorkerWithAdapter()
+    default_meta = ModelExecutionMetadata(
+        provider="codex",
+        model="gpt-6-luna",
+        reasoning_effort="high",
+        model_source="provider_default",
+    )
+    request = WorkerRequest(
+        task_text="test",
+        repo_url="https://example.com/repo.git",
+        model_execution=default_meta,
+    )
+    resolved = _resolve_request_model_execution_for_envelope(worker, request, "codex")
+    assert resolved is not None
+    assert resolved.model == "gpt-5.6-luna"
+    assert resolved.model_source == "environment"
+
+
+def test_aggregate_decomposed_results_ignores_skipped_outcomes() -> None:
+    from workers.base import ModelExecutionMetadata
+
+    meta = ModelExecutionMetadata(
+        provider="codex",
+        model="gpt-5.6-luna",
+        reasoning_effort="high",
+        model_source="worker_profile",
+    )
+    success_result = WorkerResult(
+        status="success",
+        summary="Node 1 done",
+        model_execution=meta,
+    )
+    skipped_result = WorkerResult(
+        status="failure",
+        summary="Node 2 skipped",
+        execution_not_started=True,
+        model_execution=None,
+    )
+    outcomes = [
+        NodeOutcome(node_id="n1", status="completed", result=success_result, dependencies=[]),
+        NodeOutcome(node_id="n2", status="skipped", result=skipped_result, dependencies=["n1"]),
+    ]
+    aggregated = _aggregate_decomposed_results(outcomes)
+    assert aggregated.model_execution == meta
+
+
+def test_aggregate_decomposed_results_detects_mixed_identities() -> None:
+    from workers.base import ModelExecutionMetadata
+
+    meta1 = ModelExecutionMetadata(
+        provider="codex",
+        model="gpt-5.6-luna",
+        reasoning_effort="high",
+        model_source="worker_profile",
+    )
+    meta2 = ModelExecutionMetadata(
+        provider="codex",
+        model="gpt-5.2-preview",
+        reasoning_effort="low",
+        model_source="worker_profile",
+    )
+    r1 = WorkerResult(status="success", summary="Node 1 done", model_execution=meta1)
+    r2 = WorkerResult(status="success", summary="Node 2 done", model_execution=meta2)
+    outcomes = [
+        NodeOutcome(node_id="n1", status="completed", result=r1, dependencies=[]),
+        NodeOutcome(node_id="n2", status="completed", result=r2, dependencies=[]),
+    ]
+    aggregated = _aggregate_decomposed_results(outcomes)
+    assert aggregated.model_execution is None

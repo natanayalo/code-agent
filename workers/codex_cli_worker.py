@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -373,21 +374,29 @@ class CodexCliWorker(CodexCliWorkerNativeMixin, Worker):
                 None,
             )
 
-    def _resolve_request_model_execution(self, request: WorkerRequest) -> ModelExecutionMetadata:
+    def _resolve_request_model_execution(
+        self, request: WorkerRequest
+    ) -> ModelExecutionMetadata | None:
         """Resolve authoritative ModelExecutionMetadata for this Codex request."""
-        if request.model_execution is not None:
+        if request.model_execution is not None and request.model_execution.model_source in (
+            "task_override",
+            "worker_profile",
+        ):
             return request.model_execution
         manifest_worker = (request.runtime_manifest or {}).get("worker")
         adapter_model = getattr(self.runtime_adapter, "model", None)
         adapter_effort = getattr(self.runtime_adapter, "reasoning_effort", None)
         adapter_env = getattr(self.runtime_adapter, "env", None)
-        return resolve_codex_model_execution(
-            task_constraints=request.constraints,
-            manifest_worker=manifest_worker,
-            adapter_model=adapter_model,
-            adapter_reasoning_effort=adapter_effort,
-            env=adapter_env,
-        )
+        try:
+            return resolve_codex_model_execution(
+                task_constraints=request.constraints,
+                manifest_worker=manifest_worker,
+                adapter_model=adapter_model,
+                adapter_reasoning_effort=adapter_effort,
+                env=adapter_env if adapter_env is not None else os.environ,
+            )
+        except ValueError:
+            return request.model_execution
 
     def _provision_workspace_safe(
         self,

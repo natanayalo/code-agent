@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -18,7 +19,7 @@ from workers.antigravity_cli_adapter import (
     AntigravityCliRuntimeAdapter,
     write_antigravity_settings,
 )
-from workers.base import WorkerRequest, WorkerResult
+from workers.base import ModelExecutionMetadata, WorkerRequest, WorkerResult
 from workers.cli_runtime import CliRuntimeSettings
 from workers.model_config import (
     resolve_antigravity_model_config,
@@ -81,13 +82,23 @@ def antigravity_permission_boundary_result(
         next_action_hint="request_higher_permission",
     )
     manifest_worker = (request.runtime_manifest or {}).get("worker")
-    model_exec = request.model_execution or resolve_antigravity_model_execution(
-        task_constraints=request.constraints,
-        manifest_worker=manifest_worker,
-        adapter_model=getattr(adapter, "model", None),
-        adapter_reasoning_effort=getattr(adapter, "reasoning_effort", None),
-        env=getattr(adapter, "env", None),
-    )
+    model_exec: ModelExecutionMetadata | None = None
+    if request.model_execution is not None and request.model_execution.model_source in (
+        "task_override",
+        "worker_profile",
+    ):
+        model_exec = request.model_execution
+    else:
+        try:
+            model_exec = resolve_antigravity_model_execution(
+                task_constraints=request.constraints,
+                manifest_worker=manifest_worker,
+                adapter_model=getattr(adapter, "model", None),
+                adapter_reasoning_effort=getattr(adapter, "reasoning_effort", None),
+                env=getattr(adapter, "env", None) or os.environ,
+            )
+        except ValueError:
+            model_exec = request.model_execution
     return stamp_native_agent_model_execution(
         result,
         model_exec,
