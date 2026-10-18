@@ -246,7 +246,7 @@ class NodeExecutionService:
             result = stamp_native_agent_model_execution(
                 fallback_res,
                 request.model_execution,
-                runtime_mode=getattr(request, "runtime_mode", "native_agent") or "native_agent",
+                runtime_mode=getattr(request, "runtime_mode", None),
             )
         status, continuation = _node_status(result)
         outcome = NodeOutcome(
