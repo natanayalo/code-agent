@@ -46,6 +46,12 @@ from workers.codex_exec_adapter import CodexExecCliRuntimeAdapter
 from workers.facade import WorkerFacade
 from workers.gemini_cli_adapter import GeminiCliRuntimeAdapter
 from workers.gemini_cli_worker import GeminiCliWorker
+from workers.model_config import (
+    resolve_antigravity_model_execution,
+    resolve_codex_model_execution,
+    resolve_worker_model_execution,
+    stamp_native_agent_model_execution,
+)
 from workers.native_agent_runner import (
     NativeAgentRunRequest,
     NativeAgentRunResult,
@@ -105,6 +111,10 @@ __all__ = [
     "normalize_worker_profile_name",
     "normalize_worker_type",
     "ShellWorker",
+    "resolve_antigravity_model_execution",
+    "resolve_codex_model_execution",
+    "resolve_worker_model_execution",
+    "stamp_native_agent_model_execution",
     "run_native_agent",
     "WorkerFacade",
 ]

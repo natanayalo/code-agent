@@ -120,10 +120,13 @@ from tools.numeric import coerce_positive_int_like
 from workers import (
     ArtifactReference,
     FailureKind,
+    ModelExecutionMetadata,
     Worker,
     WorkerProfile,
     WorkerRequest,
     WorkerResult,
+    resolve_worker_model_execution,
+    stamp_native_agent_model_execution,
 )
 from workers.constants import (
     DEFAULT_ORCHESTRATOR_GRACE_SECONDS,
@@ -307,6 +310,123 @@ async def _settle_cancelled_worker_task(
     return None
 
 
+def _resolve_request_model_execution_for_envelope(
+    worker: Worker,
+    request: WorkerRequest,
+    worker_type: str,
+) -> ModelExecutionMetadata | None:
+    """Resolve authoritative ModelExecutionMetadata for the outer orchestrator envelope."""
+    if (
+        isinstance(request.model_execution, ModelExecutionMetadata)
+        and request.model_execution.model_source in ("task_override", "worker_profile")
+        and request.model_execution.reasoning_effort_source in ("task_override", "worker_profile")
+    ):
+        return request.model_execution
+    worker_fn = getattr(worker, "_resolve_request_model_execution", None)
+    if worker_fn is not None and callable(worker_fn):
+        try:
+            resolved = worker_fn(request)
+            if isinstance(resolved, ModelExecutionMetadata):
+                return resolved
+            if isinstance(resolved, dict):
+                return ModelExecutionMetadata.model_validate(resolved)
+            return None
+        except Exception:
+            logger.debug("Worker model execution resolution failed in envelope", exc_info=True)
+    if isinstance(request.model_execution, ModelExecutionMetadata):
+        return request.model_execution
+    manifest_worker = (
+        (request.runtime_manifest or {}).get("worker")
+        if isinstance(request.runtime_manifest, dict)
+        else {}
+    )
+    model = manifest_worker.get("model") if isinstance(manifest_worker, dict) else None
+    effort = manifest_worker.get("reasoning_effort") if isinstance(manifest_worker, dict) else None
+    prof = {"model": model, "reasoning_effort": effort} if (model or effort) else None
+    try:
+        return resolve_worker_model_execution(
+            worker_type,
+            task_constraints=request.constraints,
+            worker_profile=prof,
+            default_model=model,
+            default_reasoning_effort=effort,
+        )
+    except ValueError:
+        return None
+
+
+async def _handle_worker_envelope_timeout(
+    worker_task: asyncio.Task[WorkerResult],
+    *,
+    worker_type: str,
+    session_id: str | None,
+    timeout_seconds: float,
+    model_exec: ModelExecutionMetadata | None,
+    runtime_mode: Any = None,
+) -> tuple[WorkerResult, str]:
+    logger.warning(
+        "Worker execution exceeded the orchestrator timeout envelope",
+        extra={
+            "session_id": session_id,
+            "worker_type": worker_type,
+            "timeout_seconds": timeout_seconds,
+        },
+    )
+    partial_result = await _settle_cancelled_worker_task(
+        worker_task,
+        worker_type=worker_type,
+        session_id=session_id,
+    )
+    if partial_result is not None:
+        return (
+            stamp_native_agent_model_execution(
+                partial_result, model_exec, runtime_mode=runtime_mode
+            ),
+            f"worker timed out but yielded partial state after {timeout_seconds}s",
+        )
+
+    timeout_result = _timed_out_worker_result(timeout_seconds)
+    return (
+        stamp_native_agent_model_execution(timeout_result, model_exec, runtime_mode=runtime_mode),
+        f"worker timed out after {timeout_seconds}s",
+    )
+
+
+async def _handle_worker_envelope_cancellation(
+    worker_task: asyncio.Task[WorkerResult],
+    *,
+    worker_type: str,
+    session_id: str | None,
+    model_exec: ModelExecutionMetadata | None,
+    runtime_mode: Any = None,
+) -> tuple[WorkerResult, str]:
+    logger.warning(
+        "Worker execution was cancelled at the orchestrator boundary",
+        extra={
+            "session_id": session_id,
+            "worker_type": worker_type,
+        },
+    )
+    partial_result = await _settle_cancelled_worker_task(
+        worker_task,
+        worker_type=worker_type,
+        session_id=session_id,
+    )
+    if partial_result is not None:
+        return (
+            stamp_native_agent_model_execution(
+                partial_result, model_exec, runtime_mode=runtime_mode
+            ),
+            "worker execution cancelled but yielded partial state",
+        )
+
+    cancelled_result = _cancelled_worker_result()
+    return (
+        stamp_native_agent_model_execution(cancelled_result, model_exec, runtime_mode=runtime_mode),
+        "worker execution cancelled",
+    )
+
+
 async def _await_worker_with_timeout(
     worker: Worker,
     request: WorkerRequest,
@@ -320,49 +440,31 @@ async def _await_worker_with_timeout(
     async def run_worker() -> WorkerResult:
         return await worker.run(request)
 
+    model_exec = _resolve_request_model_execution_for_envelope(worker, request, worker_type)
+    runtime_mode = getattr(request, "runtime_mode", None) or getattr(
+        worker, "default_runtime_mode", None
+    )
+
     worker_task: asyncio.Task[WorkerResult] = asyncio.create_task(run_worker())
     try:
         result = await asyncio.wait_for(asyncio.shield(worker_task), timeout=timeout_seconds)
     except TimeoutError:
-        logger.warning(
-            "Worker execution exceeded the orchestrator timeout envelope",
-            extra={
-                "session_id": session_id,
-                "worker_type": worker_type,
-                "timeout_seconds": timeout_seconds,
-            },
-        )
-        partial_result = await _settle_cancelled_worker_task(
+        return await _handle_worker_envelope_timeout(
             worker_task,
             worker_type=worker_type,
             session_id=session_id,
+            timeout_seconds=timeout_seconds,
+            model_exec=model_exec,
+            runtime_mode=runtime_mode,
         )
-        if partial_result is not None:
-            return (
-                partial_result,
-                (f"worker timed out but yielded partial state after {timeout_seconds}s"),
-            )
-
-        return _timed_out_worker_result(
-            timeout_seconds
-        ), f"worker timed out after {timeout_seconds}s"
     except asyncio.CancelledError:
-        logger.warning(
-            "Worker execution was cancelled at the orchestrator boundary",
-            extra={
-                "session_id": session_id,
-                "worker_type": worker_type,
-            },
-        )
-        partial_result = await _settle_cancelled_worker_task(
+        return await _handle_worker_envelope_cancellation(
             worker_task,
             worker_type=worker_type,
             session_id=session_id,
+            model_exec=model_exec,
+            runtime_mode=runtime_mode,
         )
-        if partial_result is not None:
-            return partial_result, "worker execution cancelled but yielded partial state"
-
-        return _cancelled_worker_result(), "worker execution cancelled"
     except Exception as exc:
         logger.exception(
             "Worker execution crashed unexpectedly at the orchestrator boundary",
@@ -371,8 +473,15 @@ async def _await_worker_with_timeout(
                 "worker_type": worker_type,
             },
         )
-        return _unexpected_worker_error_result(exc), "worker crashed unexpectedly"
-    return result, "worker result received"
+        error_result = _unexpected_worker_error_result(exc)
+        return (
+            stamp_native_agent_model_execution(error_result, model_exec, runtime_mode=runtime_mode),
+            "worker crashed unexpectedly",
+        )
+    stamped_result = stamp_native_agent_model_execution(
+        result, model_exec, runtime_mode=runtime_mode
+    )
+    return stamped_result, "worker result received"
 
 
 async def _evaluate_preflight_with_timeout(
@@ -605,10 +714,17 @@ async def execute_with_preflight(
         worker_type=worker_type,
         context_timeout_seconds=timeout_seconds,
     )
+    model_exec = _resolve_request_model_execution_for_envelope(worker, request, worker_type)
+    runtime_mode = getattr(request, "runtime_mode", None) or getattr(
+        worker, "default_runtime_mode", None
+    )
+
     if report is None and preflight_budget_exhausted:
-        return _preflight_budget_exhausted_result(request, ctx, timeout_seconds)
+        res, msg = _preflight_budget_exhausted_result(request, ctx, timeout_seconds)
+        return stamp_native_agent_model_execution(res, model_exec, runtime_mode=runtime_mode), msg
     if report is None:
-        return _preflight_timeout_result(request, ctx, service.preflight_timeout)
+        res, msg = _preflight_timeout_result(request, ctx, service.preflight_timeout)
+        return stamp_native_agent_model_execution(res, model_exec, runtime_mode=runtime_mode), msg
 
     remaining = max(
         0.0,
@@ -618,7 +734,7 @@ async def execute_with_preflight(
     diagnostic_artifact = _preflight_diagnostic_artifact(report)
 
     if not report.ready:
-        return _preflight_rejection_result(
+        res, msg = _preflight_rejection_result(
             request,
             report,
             diagnostic_artifact,
@@ -626,9 +742,11 @@ async def execute_with_preflight(
             task_id=task_id,
             worker_type=worker_type,
         )
+        return stamp_native_agent_model_execution(res, model_exec, runtime_mode=runtime_mode), msg
 
     if remaining <= 0:
-        return _preflight_budget_exhausted_result(request, ctx, timeout_seconds)
+        res, msg = _preflight_budget_exhausted_result(request, ctx, timeout_seconds)
+        return stamp_native_agent_model_execution(res, model_exec, runtime_mode=runtime_mode), msg
 
     result, progress = await _await_worker_with_timeout(
         worker,
@@ -772,6 +890,82 @@ def _is_scout_task(state: OrchestratorState) -> bool:
     return constraints.get("task_type") == "scout"
 
 
+def _resolve_state_model_execution(
+    state: OrchestratorState,
+    *,
+    worker: Any | None = None,
+    request: WorkerRequest | None = None,
+) -> ModelExecutionMetadata | None:
+    """Resolve authoritative ModelExecutionMetadata from request, state, or worker."""
+    if request is not None and request.model_execution is not None:
+        return request.model_execution
+
+    dispatch = (
+        WorkerDispatch.model_validate(state.dispatch)
+        if isinstance(state.dispatch, dict)
+        else state.dispatch
+    )
+    if dispatch and dispatch.model_execution is not None:
+        return dispatch.model_execution
+
+    if dispatch and dispatch.runtime_manifest is not None:
+        rm = dispatch.runtime_manifest
+        if isinstance(rm, dict):
+            w_manifest = rm.get("worker")
+            if isinstance(w_manifest, dict) and w_manifest.get("model_execution"):
+                m_exec = w_manifest["model_execution"]
+                return (
+                    ModelExecutionMetadata.model_validate(m_exec)
+                    if isinstance(m_exec, dict)
+                    else m_exec
+                )
+        elif hasattr(rm, "worker") and getattr(rm.worker, "model_execution", None):
+            return rm.worker.model_execution
+
+    if (
+        worker is not None
+        and hasattr(worker, "_resolve_request_model_execution")
+        and request is not None
+    ):
+        try:
+            resolved = worker._resolve_request_model_execution(request)
+            if isinstance(resolved, ModelExecutionMetadata):
+                return resolved
+            if isinstance(resolved, dict):
+                return ModelExecutionMetadata.model_validate(resolved)
+            return None
+        except Exception:
+            logger.debug("Worker-level model execution resolution failed", exc_info=True)
+
+    worker_type = (dispatch.worker_type if dispatch else None) or (
+        state.route.chosen_worker if state.route else None
+    )
+    if not worker_type:
+        return None
+
+    model = (dispatch.model if dispatch else None) or (state.route.model if state.route else None)
+    reasoning_effort = (dispatch.reasoning_effort if dispatch else None) or (
+        state.route.reasoning_effort if state.route else None
+    )
+    constraints = state.task.constraints if isinstance(state.task.constraints, dict) else {}
+    worker_prof = (
+        {"model": model, "reasoning_effort": reasoning_effort}
+        if (model or reasoning_effort)
+        else None
+    )
+
+    try:
+        return resolve_worker_model_execution(
+            str(worker_type),
+            task_constraints=constraints,
+            worker_profile=worker_prof,
+            default_model=model,
+            default_reasoning_effort=reasoning_effort,
+        )
+    except ValueError:
+        return None
+
+
 def _build_worker_request_runtime_manifest(
     state: OrchestratorState,
     *,
@@ -779,6 +973,7 @@ def _build_worker_request_runtime_manifest(
     runtime_mode: Any,
     read_only: bool,
     task_spec: TaskSpec | None = None,
+    model_execution: ModelExecutionMetadata | None = None,
 ) -> dict[str, Any]:
     """Build the frozen runtime manifest payload for a worker request."""
     route = state.route
@@ -791,6 +986,7 @@ def _build_worker_request_runtime_manifest(
     reasoning_effort = (dispatch.reasoning_effort if dispatch else None) or (
         route.reasoning_effort if route else None
     )
+    effective_model_execution = model_execution or _resolve_state_model_execution(state)
     return build_runtime_manifest(
         worker_type=(dispatch.worker_type if dispatch else None)
         or (route.chosen_worker if route else None),
@@ -799,6 +995,7 @@ def _build_worker_request_runtime_manifest(
         workspace_id=dispatch.workspace_id if dispatch else None,
         model=model,
         reasoning_effort=reasoning_effort,
+        model_execution=effective_model_execution,
         task_spec=task_spec or state.task_spec,
         read_only=read_only,
         network_enabled=False,
@@ -902,12 +1099,14 @@ def _build_worker_request(
     else:
         read_only = read_only_constraint
 
+    model_execution = _resolve_state_model_execution(state)
     runtime_manifest = _build_worker_request_runtime_manifest(
         state,
         worker_profile=worker_profile,
         runtime_mode=runtime_mode,
         read_only=bool(read_only),
         task_spec=effective_task_spec,
+        model_execution=model_execution,
     )
 
     return WorkerRequest(
@@ -934,6 +1133,7 @@ def _build_worker_request(
         read_only=read_only,
         response_format="json" if is_scout else "text",
         response_schema=scout_response_schema_for_constraints(constraints) if is_scout else None,
+        model_execution=model_execution,
     )
 
 
@@ -1172,6 +1372,11 @@ def _aggregate_decomposed_results(outcomes: list[NodeOutcome]) -> WorkerResult:
     status: Literal["success", "failure"] = (
         "failure" if failed is not None or skipped else "success"
     )
+    executed_outcomes = [
+        outcome
+        for outcome in outcomes
+        if outcome.status != "skipped" and outcome.result is not None
+    ]
     return WorkerResult(
         status=status,
         summary="Sequential DAG results:\n" + "\n".join(f"- {summary}" for summary in summaries),
@@ -1238,6 +1443,49 @@ def _aggregate_decomposed_results(outcomes: list[NodeOutcome]) -> WorkerResult:
         ),
         preflight_rejected=preflight_rejected,
         execution_not_started=execution_not_started,
+        model_execution=(
+            executed_outcomes[0].result.model_execution
+            if (
+                bool(executed_outcomes)
+                and isinstance(executed_outcomes[0].result.model_execution, ModelExecutionMetadata)
+                and all(
+                    isinstance(outcome.result.model_execution, ModelExecutionMetadata)
+                    and (
+                        outcome.result.model_execution.provider
+                        == executed_outcomes[0].result.model_execution.provider
+                        and outcome.result.model_execution.model
+                        == executed_outcomes[0].result.model_execution.model
+                        and outcome.result.model_execution.reasoning_effort
+                        == executed_outcomes[0].result.model_execution.reasoning_effort
+                    )
+                    for outcome in executed_outcomes
+                )
+            )
+            else None
+        ),
+    )
+
+
+def _fallback_decomposed_node_result(
+    request: WorkerRequest,
+    worker: Worker,
+    state: OrchestratorState,
+    node_envelope_artifact: ArtifactReference | None,
+) -> WorkerResult:
+    """Build a failure result stamping model_execution when node execution returns None."""
+    node_model_exec = request.model_execution or _resolve_request_model_execution_for_envelope(
+        worker, request, getattr(state.dispatch, "worker_type", "codex")
+    )
+    raw_fallback = WorkerResult(
+        status="failure",
+        summary="Node execution returned no result.",
+        failure_kind="worker_failure",
+        artifacts=[node_envelope_artifact] if node_envelope_artifact is not None else [],
+        model_execution=node_model_exec,
+    )
+    node_runtime_mode = getattr(state.dispatch, "runtime_mode", None)
+    return stamp_native_agent_model_execution(
+        raw_fallback, node_model_exec, runtime_mode=node_runtime_mode
     )
 
 
@@ -1398,13 +1646,8 @@ async def _await_decomposed_nodes(
             )
             if result is None:
                 logger.warning("Node execution result is None, falling back to failure default.")
-                result = WorkerResult(
-                    status="failure",
-                    summary="Node execution returned no result.",
-                    failure_kind="worker_failure",
-                    artifacts=(
-                        [node_envelope_artifact] if node_envelope_artifact is not None else []
-                    ),
+                result = _fallback_decomposed_node_result(
+                    request, worker, state, node_envelope_artifact
                 )
                 break
             if result.status == "success" or result.next_action_hint == "request_higher_permission":
@@ -1413,11 +1656,8 @@ async def _await_decomposed_nodes(
             logger.warning(
                 "Node execution completed without a result, falling back to failure default."
             )
-            result = WorkerResult(
-                status="failure",
-                summary="Node execution returned no result.",
-                failure_kind="worker_failure",
-                artifacts=[node_envelope_artifact] if node_envelope_artifact is not None else [],
+            result = _fallback_decomposed_node_result(
+                request, worker, state, node_envelope_artifact
             )
         if result.workspace_id is None and state.dispatch.workspace_id:
             result = result.model_copy(update={"workspace_id": state.dispatch.workspace_id})
@@ -3575,6 +3815,7 @@ def dispatch_job(state_input: OrchestratorState) -> dict[str, Any]:
         worker_type = state.route.chosen_worker
         if state.route.route_reason != "runtime_unavailable" and worker_type is None:
             raise ValueError("choose_worker must set route.chosen_worker before dispatch.")
+        model_exec = _resolve_state_model_execution(state)
         dispatch = WorkerDispatch(
             worker_type=worker_type,
             worker_profile=state.route.chosen_profile,
@@ -3582,6 +3823,7 @@ def dispatch_job(state_input: OrchestratorState) -> dict[str, Any]:
             workspace_id=state.dispatch.workspace_id,
             model=state.route.model,
             reasoning_effort=state.route.reasoning_effort,
+            model_execution=model_exec,
         )
         set_span_input_output(input_data=state.task.task_text, output_data=state.route.model_dump())
         return {

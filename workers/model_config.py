@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Final
 
-from workers.base import ConfigSource, ModelExecutionMetadata
+from workers.base import (
+    ConfigSource,
+    ModelExecutionMetadata,
+    WorkerProfile,
+    WorkerResult,
+)
 
 DEFAULT_CODEX_MODEL: Final[str] = "gpt-6-luna"
 DEFAULT_CODEX_REASONING_EFFORT: Final[str] = "high"
@@ -371,3 +377,146 @@ def build_antigravity_model_cli_args(config: ResolvedModelConfig) -> list[str]:
         if config.reasoning_effort:
             args.extend(["--effort", config.reasoning_effort])
     return args
+
+
+def resolve_codex_model_execution(
+    *,
+    task_constraints: Mapping[str, Any] | None = None,
+    manifest_worker: Mapping[str, Any] | None = None,
+    worker_profile: WorkerProfile | Mapping[str, Any] | None = None,
+    adapter_model: str | None = None,
+    adapter_reasoning_effort: str | None = None,
+    env: Mapping[str, str] | None = None,
+    default_model: str = DEFAULT_CODEX_MODEL,
+    default_reasoning_effort: str = DEFAULT_CODEX_REASONING_EFFORT,
+) -> ModelExecutionMetadata:
+    """Resolve authoritative ModelExecutionMetadata for a Codex run."""
+    manifest = dict(manifest_worker or {})
+    if worker_profile is not None:
+        if isinstance(worker_profile, Mapping):
+            if worker_profile.get("model") is not None:
+                manifest.setdefault("model", worker_profile.get("model"))
+            if worker_profile.get("reasoning_effort") is not None:
+                manifest.setdefault("reasoning_effort", worker_profile.get("reasoning_effort"))
+        elif hasattr(worker_profile, "model"):
+            if worker_profile.model is not None:
+                manifest.setdefault("model", worker_profile.model)
+            if getattr(worker_profile, "reasoning_effort", None) is not None:
+                manifest.setdefault("reasoning_effort", worker_profile.reasoning_effort)
+
+    return resolve_codex_model_config(
+        task_constraints=task_constraints,
+        manifest_worker=manifest,
+        adapter_model=adapter_model,
+        adapter_reasoning_effort=adapter_reasoning_effort,
+        env=env,
+        default_model=default_model,
+        default_reasoning_effort=default_reasoning_effort,
+    ).to_metadata()
+
+
+def resolve_antigravity_model_execution(
+    *,
+    task_constraints: Mapping[str, Any] | None = None,
+    manifest_worker: Mapping[str, Any] | None = None,
+    worker_profile: WorkerProfile | Mapping[str, Any] | None = None,
+    adapter_model: str | None = None,
+    adapter_reasoning_effort: str | None = None,
+    env: Mapping[str, str] | None = None,
+    default_model: str = DEFAULT_ANTIGRAVITY_MODEL,
+    default_reasoning_effort: str = DEFAULT_ANTIGRAVITY_REASONING_EFFORT,
+) -> ModelExecutionMetadata:
+    """Resolve authoritative ModelExecutionMetadata for an Antigravity run."""
+    manifest = dict(manifest_worker or {})
+    if worker_profile is not None:
+        if isinstance(worker_profile, Mapping):
+            if worker_profile.get("model") is not None:
+                manifest.setdefault("model", worker_profile.get("model"))
+            if worker_profile.get("reasoning_effort") is not None:
+                manifest.setdefault("reasoning_effort", worker_profile.get("reasoning_effort"))
+        elif hasattr(worker_profile, "model"):
+            if worker_profile.model is not None:
+                manifest.setdefault("model", worker_profile.model)
+            if getattr(worker_profile, "reasoning_effort", None) is not None:
+                manifest.setdefault("reasoning_effort", worker_profile.reasoning_effort)
+
+    return resolve_antigravity_model_config(
+        task_constraints=task_constraints,
+        manifest_worker=manifest,
+        adapter_model=adapter_model,
+        adapter_reasoning_effort=adapter_reasoning_effort,
+        env=env,
+        default_model=default_model,
+        default_reasoning_effort=default_reasoning_effort,
+    ).to_metadata()
+
+
+def resolve_worker_model_execution(
+    provider: str,
+    *,
+    task_constraints: Mapping[str, Any] | None = None,
+    worker_profile: WorkerProfile | Mapping[str, Any] | None = None,
+    environ: Mapping[str, str] | None = None,
+    default_model: str | None = None,
+    default_reasoning_effort: str | None = None,
+) -> ModelExecutionMetadata | None:
+    """Resolve authoritative execution metadata before/at worker dispatch."""
+    norm_provider = provider.strip().lower() if isinstance(provider, str) else ""
+    effective_env = os.environ if environ is None else environ
+    try:
+        if norm_provider == "codex":
+            return resolve_codex_model_execution(
+                task_constraints=task_constraints,
+                worker_profile=worker_profile,
+                env=effective_env,
+                default_model=default_model or DEFAULT_CODEX_MODEL,
+                default_reasoning_effort=default_reasoning_effort or DEFAULT_CODEX_REASONING_EFFORT,
+            )
+        if norm_provider in ("antigravity", "gemini"):
+            return resolve_antigravity_model_execution(
+                task_constraints=task_constraints,
+                worker_profile=worker_profile,
+                env=effective_env,
+                default_model=default_model or DEFAULT_ANTIGRAVITY_MODEL,
+                default_reasoning_effort=(
+                    default_reasoning_effort or DEFAULT_ANTIGRAVITY_REASONING_EFFORT
+                ),
+            )
+    except ValueError:
+        return None
+    return None
+
+
+def stamp_native_agent_model_execution(
+    result: WorkerResult,
+    model_execution: ModelExecutionMetadata | None,
+    *,
+    runtime_mode: Any = "native_agent",
+) -> WorkerResult:
+    """Stamp authoritative model_execution onto WorkerResult and budget_usage.
+
+    - If model_execution is None and result.model_execution is None, returns result unchanged.
+    - Preserves existing result.model_execution if already set; otherwise populates it.
+    - When runtime_mode is native_agent, ensures result.budget_usage contains
+      {"native_agent": {..., "model_execution": effective_model_execution.model_dump(mode="json")}}
+      without overwriting other keys in budget_usage or budget_usage["native_agent"].
+    """
+    if result is None or not isinstance(result, WorkerResult):
+        return result
+    effective_model_execution = result.model_execution or model_execution
+    if effective_model_execution is None:
+        return result
+
+    if result.model_execution is None:
+        result.model_execution = effective_model_execution
+
+    mode_str = getattr(runtime_mode, "value", str(runtime_mode)).strip().lower()
+    if mode_str in ("native_agent", "worker_runtime_mode.native_agent"):
+        budget_usage = dict(result.budget_usage or {})
+        native_agent_data = dict(budget_usage.get("native_agent") or {})
+        if "model_execution" not in native_agent_data or not native_agent_data["model_execution"]:
+            native_agent_data["model_execution"] = effective_model_execution.model_dump(mode="json")
+        budget_usage["native_agent"] = native_agent_data
+        result.budget_usage = budget_usage
+
+    return result

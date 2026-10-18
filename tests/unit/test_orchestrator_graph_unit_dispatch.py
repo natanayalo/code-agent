@@ -86,6 +86,69 @@ async def test_await_worker_with_timeout_partial_result():
     assert hint == "worker timed out but yielded partial state after 1s"
 
 
+@pytest.mark.anyio
+async def test_await_worker_with_timeout_stamps_model_execution_on_timeout():
+    class HangingWorker(Worker):
+        async def run(self, request):
+            await asyncio.sleep(10)
+            return WorkerResult(status="success", summary="done")
+
+    worker = HangingWorker()
+    request = WorkerRequest(
+        session_id="test-timeout",
+        task_text="test timeout",
+        worker_type="codex",
+        runtime_mode="native_agent",
+        constraints={"model": "gpt-5"},
+    )
+    res, hint = await _await_worker_with_timeout(
+        worker,
+        request=request,
+        worker_type="codex",
+        session_id="test-timeout",
+        timeout_seconds=0.01,
+    )
+
+    assert res.status == "failure"
+    assert res.failure_kind == "timeout"
+    assert "timed out after" in hint
+    assert res.model_execution is not None
+    assert res.model_execution.provider == "codex"
+    assert res.model_execution.model == "gpt-5"
+    assert res.budget_usage["native_agent"]["model_execution"]["model"] == "gpt-5"
+
+
+@pytest.mark.anyio
+async def test_await_worker_with_timeout_stamps_model_execution_on_crash():
+    class CrashingWorker(Worker):
+        async def run(self, request):
+            raise RuntimeError("Fatal process crash")
+
+    worker = CrashingWorker()
+    request = WorkerRequest(
+        session_id="test-crash",
+        task_text="test crash",
+        worker_type="gemini",
+        runtime_mode="native_agent",
+        constraints={"model": "gemini-2.5-pro"},
+    )
+    res, hint = await _await_worker_with_timeout(
+        worker,
+        request=request,
+        worker_type="gemini",
+        session_id="test-crash",
+        timeout_seconds=5,
+    )
+
+    assert res.status == "error"
+    assert res.failure_kind == "unknown"
+    assert hint == "worker crashed unexpectedly"
+    assert res.model_execution is not None
+    assert res.model_execution.provider == "antigravity"
+    assert res.model_execution.model == "gemini-2.5-pro"
+    assert res.budget_usage["native_agent"]["model_execution"]["model"] == "gemini-2.5-pro"
+
+
 def test_dispatch_job_preserves_workspace_id() -> None:
     state = OrchestratorState.model_validate(
         {
@@ -174,3 +237,195 @@ def test_worker_profile_model_and_effort_projected_to_worker_request() -> None:
     assert worker_manifest.get("model") == "gpt-5.6-luna"
     assert worker_manifest.get("reasoning_effort") == "high"
     assert worker_manifest.get("worker_profile") == "codex-luna-high"
+    assert request.model_execution is not None
+    assert request.model_execution.provider == "codex"
+    assert request.model_execution.model == "gpt-5.6-luna"
+    assert request.model_execution.reasoning_effort == "high"
+    assert worker_manifest.get("model_execution") is not None
+
+
+def test_envelope_model_execution_honors_worker_adapter_over_provider_default() -> None:
+    from orchestrator.graph import _resolve_request_model_execution_for_envelope
+    from workers.base import ModelExecutionMetadata
+
+    class _WorkerWithAdapter:
+        def _resolve_request_model_execution(
+            self, request: WorkerRequest
+        ) -> ModelExecutionMetadata:
+            del request
+            return ModelExecutionMetadata(
+                provider="codex",
+                model="gpt-5.6-luna",
+                reasoning_effort="high",
+                model_source="environment",
+            )
+
+    worker = _WorkerWithAdapter()
+    default_meta = ModelExecutionMetadata(
+        provider="codex",
+        model="gpt-6-luna",
+        reasoning_effort="high",
+        model_source="provider_default",
+    )
+    request = WorkerRequest(
+        task_text="test",
+        repo_url="https://example.com/repo.git",
+        model_execution=default_meta,
+    )
+    resolved = _resolve_request_model_execution_for_envelope(worker, request, "codex")
+    assert resolved is not None
+    assert resolved.model == "gpt-5.6-luna"
+    assert resolved.model_source == "environment"
+
+
+def test_aggregate_decomposed_results_ignores_skipped_outcomes() -> None:
+    from workers.base import ModelExecutionMetadata
+
+    meta = ModelExecutionMetadata(
+        provider="codex",
+        model="gpt-5.6-luna",
+        reasoning_effort="high",
+        model_source="worker_profile",
+    )
+    success_result = WorkerResult(
+        status="success",
+        summary="Node 1 done",
+        model_execution=meta,
+    )
+    skipped_result = WorkerResult(
+        status="failure",
+        summary="Node 2 skipped",
+        execution_not_started=True,
+        model_execution=None,
+    )
+    outcomes = [
+        NodeOutcome(node_id="n1", status="completed", result=success_result, dependencies=[]),
+        NodeOutcome(node_id="n2", status="skipped", result=skipped_result, dependencies=["n1"]),
+    ]
+    aggregated = _aggregate_decomposed_results(outcomes)
+    assert aggregated.model_execution == meta
+
+
+def test_aggregate_decomposed_results_detects_mixed_identities() -> None:
+    from workers.base import ModelExecutionMetadata
+
+    meta1 = ModelExecutionMetadata(
+        provider="codex",
+        model="gpt-5.6-luna",
+        reasoning_effort="high",
+        model_source="worker_profile",
+    )
+    meta2 = ModelExecutionMetadata(
+        provider="codex",
+        model="gpt-5.2-preview",
+        reasoning_effort="low",
+        model_source="worker_profile",
+    )
+    r1 = WorkerResult(status="success", summary="Node 1 done", model_execution=meta1)
+    r2 = WorkerResult(status="success", summary="Node 2 done", model_execution=meta2)
+    outcomes = [
+        NodeOutcome(node_id="n1", status="completed", result=r1, dependencies=[]),
+        NodeOutcome(node_id="n2", status="completed", result=r2, dependencies=[]),
+    ]
+    aggregated = _aggregate_decomposed_results(outcomes)
+    assert aggregated.model_execution is None
+
+
+def test_envelope_model_execution_returns_none_when_worker_resolves_none() -> None:
+    from orchestrator.graph import _resolve_request_model_execution_for_envelope
+    from workers.base import ModelExecutionMetadata
+
+    class _NoneResolvingWorker:
+        def _resolve_request_model_execution(
+            self, request: WorkerRequest
+        ) -> ModelExecutionMetadata | None:
+            del request
+            return None
+
+    worker = _NoneResolvingWorker()
+    default_meta = ModelExecutionMetadata(
+        provider="antigravity",
+        model="gemini-3.8-flash",
+        reasoning_effort="medium",
+        model_source="provider_default",
+    )
+    request = WorkerRequest(
+        task_text="test",
+        repo_url="https://example.com/repo.git",
+        model_execution=default_meta,
+    )
+    resolved = _resolve_request_model_execution_for_envelope(worker, request, "gemini")
+    assert resolved is None
+
+
+def test_envelope_model_execution_does_not_short_circuit_on_partial_override() -> None:
+    from orchestrator.graph import _resolve_request_model_execution_for_envelope
+    from workers.base import ModelExecutionMetadata
+
+    called = False
+
+    class _WorkerWithAdapter:
+        def _resolve_request_model_execution(
+            self, request: WorkerRequest
+        ) -> ModelExecutionMetadata:
+            nonlocal called
+            called = True
+            return ModelExecutionMetadata(
+                provider="codex",
+                model=request.model_execution.model,
+                reasoning_effort="low",
+                model_source="task_override",
+                reasoning_effort_source="environment",
+            )
+
+    worker = _WorkerWithAdapter()
+    partial_meta = ModelExecutionMetadata(
+        provider="codex",
+        model="gpt-5.4",
+        reasoning_effort="high",
+        model_source="task_override",
+        reasoning_effort_source="provider_default",
+    )
+    request = WorkerRequest(
+        task_text="test",
+        repo_url="https://example.com/repo.git",
+        model_execution=partial_meta,
+    )
+    resolved = _resolve_request_model_execution_for_envelope(worker, request, "codex")
+    assert called is True
+    assert resolved is not None
+    assert resolved.model == "gpt-5.4"
+    assert resolved.reasoning_effort == "low"
+    assert resolved.reasoning_effort_source == "environment"
+
+
+def test_await_worker_with_timeout_does_not_coerce_none_runtime_mode_to_native_agent() -> None:
+    from orchestrator.graph import _await_worker_with_timeout
+
+    class _SimpleWorker(Worker):
+        async def run(self, request: WorkerRequest) -> WorkerResult:
+            del request
+            return WorkerResult(
+                status="success",
+                summary="Done",
+                budget_usage={"iterations_used": 1},
+            )
+
+    worker = _SimpleWorker()
+    request = WorkerRequest(
+        task_text="test",
+        repo_url="https://example.com/repo.git",
+        runtime_mode=None,
+    )
+    result, _ = asyncio.run(
+        _await_worker_with_timeout(
+            worker,
+            request,
+            worker_type="codex",
+            session_id="session-1",
+            timeout_seconds=5.0,
+        )
+    )
+    assert result.budget_usage == {"iterations_used": 1}
+    assert "native_agent" not in result.budget_usage
+    assert result.model_execution is not None

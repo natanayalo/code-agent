@@ -517,6 +517,9 @@ def test_codex_cli_worker_native_pre_execution_cancellation(tmp_path: Path) -> N
         assert worker_result.status == "error"
         assert worker_result.failure_kind == "timeout"
         assert not run_native.called
+        assert worker_result.model_execution is not None
+        assert worker_result.model_execution.provider == "codex"
+        assert worker_result.budget_usage["native_agent"]["model_execution"] is not None
 
 
 def test_codex_native_command_includes_output_schema_path(tmp_path: Path) -> None:

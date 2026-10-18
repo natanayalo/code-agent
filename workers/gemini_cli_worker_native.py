@@ -43,6 +43,7 @@ from workers.cli_runtime import (
     ShellSessionProtocol,
 )
 from workers.failure_taxonomy import classify_failure_kind
+from workers.model_config import stamp_native_agent_model_execution
 from workers.native_agent_models import NativeAgentRunResult
 from workers.native_agent_runner import (
     NativeAgentRunRequest,
@@ -719,12 +720,17 @@ class GeminiCliWorkerNativeMixin:
         ):
             return permission_result
         if cancel_token and cancel_token():
-            return WorkerResult(
+            cancelled_res = WorkerResult(
                 status="error",
                 summary="Gemini native-agent run was cancelled before execution.",
                 failure_kind="timeout",
                 artifacts=_workspace_artifacts(workspace),
                 next_action_hint="inspect_workspace_artifacts",
+            )
+            model_exec_fn = getattr(self, "_resolve_request_model_execution", None)
+            model_exec = model_exec_fn(request) if model_exec_fn else request.model_execution
+            return stamp_native_agent_model_execution(
+                cancelled_res, model_exec, runtime_mode=runtime_mode
             )
 
         run_request, provider_metadata = self._build_native_agent_run_request(

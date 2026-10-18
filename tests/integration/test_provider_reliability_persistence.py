@@ -9,14 +9,23 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from db.base import Base
-from db.enums import OrchestrationRuntime, TaskStatus, WorkerRuntimeMode, WorkerType
+from db.enums import (
+    OrchestrationRuntime,
+    TaskStatus,
+    WorkerRunStatus,
+    WorkerRuntimeMode,
+    WorkerType,
+)
+from db.models import Task, WorkerRun
 from evaluation.provider_reliability_extractor import extract_provider_reliability_report
+from evaluation.provider_reliability_identity import resolve_task_execution_identity
 from evaluation.provider_reliability_models import ReliabilityReportPolicy
 from orchestrator.execution_outcome_service import _persist_execution_outcome
-from orchestrator.graph import execute_with_preflight
+from orchestrator.graph import _aggregate_decomposed_results, execute_with_preflight
 from orchestrator.provider_diagnostics import ProviderDiagnosticsService
 from orchestrator.provider_diagnostics_types import ProviderPreDispatchReport
 from orchestrator.state import (
+    NodeOutcome,
     OrchestratorState,
     RouteDecision,
     TaskRequest,
@@ -28,12 +37,13 @@ from repositories import (
     SessionRepository,
     TaskRepository,
     UserRepository,
+    WorkerRunRepository,
     create_engine_from_url,
     create_session_factory,
     session_scope,
 )
 from tests.integration.provider_reliability_support import NOW
-from workers.base import WorkerRequest, WorkerResult
+from workers.base import ModelExecutionMetadata, WorkerRequest, WorkerResult
 
 
 class _PersistenceWorker:
@@ -209,3 +219,232 @@ async def test_preflight_rejection_persists_into_extractor_evidence(
 
     assert report.exclusions.by_reason["preflight_only_rejection"] == 1
     assert report.exclusions.included_tasks_count == 0
+
+
+def _build_early_failure_state(
+    task_id: str, model_exec: ModelExecutionMetadata
+) -> OrchestratorState:
+    timeout_result = WorkerResult(
+        status="failure",
+        summary="Worker timed out before completion",
+        failure_kind="timeout",
+        model_execution=model_exec,
+        budget_usage={
+            "runtime_mode": "native_agent",
+            "native_agent": {
+                "exit_code": 124,
+                "model_execution": model_exec.model_dump(mode="json"),
+            },
+        },
+    )
+    return OrchestratorState(
+        task=TaskRequest(task_id=task_id, task_text="Early failure task"),
+        route=RouteDecision(
+            chosen_worker="codex",
+            chosen_profile="codex-native-executor",
+            runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+            model="gpt-5.6-luna",
+            reasoning_effort="high",
+        ),
+        dispatch=WorkerDispatch(
+            worker_type="codex",
+            worker_profile="codex-native-executor",
+            runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+            model="gpt-5.6-luna",
+            reasoning_effort="high",
+            model_execution=model_exec,
+        ),
+        task_spec=TaskSpec(
+            goal="Early failure task",
+            task_type="feature",
+            allowed_actions=["modify_workspace_files"],
+            delivery_mode="workspace",
+        ),
+        result=timeout_result,
+        attempt_count=1,
+    )
+
+
+@pytest.mark.asyncio
+async def test_early_failure_persists_model_execution_identity(tmp_path: Path) -> None:
+    db_url = f"sqlite+pysqlite:///{tmp_path / 'persisted_early_failure.db'}"
+    engine = create_engine_from_url(db_url)
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+    task_id = _create_task(session_factory)
+
+    model_exec = ModelExecutionMetadata(
+        provider="codex",
+        model="gpt-5.6-luna",
+        reasoning_effort="high",
+        model_source="worker_profile",
+        reasoning_effort_source="worker_profile",
+    )
+    state = _build_early_failure_state(task_id, model_exec)
+    _persist_execution_outcome(
+        _OutcomePersistenceService(session_factory),
+        task_id=task_id,
+        state=state,
+        started_at=NOW,
+        finished_at=NOW,
+        persist_friction_proposals=False,
+    )
+
+    with session_scope(session_factory) as session:
+        task = session.get(Task, task_id)
+        assert task is not None
+        runs = WorkerRunRepository(session).list_by_task(task_id)
+        assert len(runs) == 1
+        run = runs[0]
+        assert run.budget_usage is not None
+        assert "native_agent" in run.budget_usage
+        assert run.budget_usage["native_agent"]["model_execution"]["model"] == "gpt-5.6-luna"
+
+        identity, status = resolve_task_execution_identity(task, runs)
+        assert status == "verified"
+        assert identity is not None
+        assert identity.provider == "codex"
+        assert identity.model == "gpt-5.6-luna"
+        assert identity.reasoning_effort == "high"
+
+
+def test_historical_run_without_budget_usage_resolves_unknown_legacy(tmp_path: Path) -> None:
+    db_url = f"sqlite+pysqlite:///{tmp_path / 'persisted_historical.db'}"
+    engine = create_engine_from_url(db_url)
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+    task_id = _create_task(session_factory)
+
+    with session_scope(session_factory) as session:
+        task = session.get(Task, task_id)
+        assert task is not None
+        historical_run = WorkerRun(
+            task_id=task_id,
+            worker_type=WorkerType.CODEX,
+            status=WorkerRunStatus.FAILURE,
+            started_at=NOW,
+            budget_usage=None,
+        )
+        hist_identity, hist_status = resolve_task_execution_identity(task, [historical_run])
+        assert hist_identity is None
+        assert hist_status == "unknown_legacy"
+
+
+@pytest.mark.asyncio
+async def test_crashed_run_without_worker_result_persists_model_execution_identity(
+    tmp_path: Path,
+) -> None:
+    db_url = f"sqlite+pysqlite:///{tmp_path / 'crashed_no_result.db'}"
+    engine = create_engine_from_url(db_url)
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+    task_id = _create_task(session_factory)
+
+    model_exec = ModelExecutionMetadata(
+        provider="codex",
+        model="gpt-5.6-luna",
+        reasoning_effort="high",
+        model_source="worker_profile",
+        reasoning_effort_source="worker_profile",
+    )
+    state = _build_early_failure_state(task_id, model_exec)
+    state.result = None
+
+    _persist_execution_outcome(
+        _OutcomePersistenceService(session_factory),
+        task_id=task_id,
+        state=state,
+        started_at=NOW,
+        finished_at=NOW,
+        persist_friction_proposals=False,
+    )
+
+    with session_scope(session_factory) as session:
+        task = session.get(Task, task_id)
+        assert task is not None
+        runs = WorkerRunRepository(session).list_by_task(task_id)
+        assert len(runs) == 1
+        run = runs[0]
+        assert run.budget_usage is not None
+        assert run.budget_usage["native_agent"]["model_execution"]["model"] == "gpt-5.6-luna"
+
+        identity, status = resolve_task_execution_identity(task, runs)
+        assert status == "verified"
+        assert identity is not None
+        assert identity.model == "gpt-5.6-luna"
+
+
+@pytest.mark.asyncio
+async def test_decomposed_run_with_mixed_nodes_persists_without_native_agent_shadowing(
+    tmp_path: Path,
+) -> None:
+    db_url = f"sqlite+pysqlite:///{tmp_path / 'decomposed_mixed.db'}"
+    engine = create_engine_from_url(db_url)
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+    task_id = _create_task(session_factory)
+
+    meta1 = ModelExecutionMetadata(
+        provider="codex",
+        model="gpt-5.6-luna",
+        reasoning_effort="high",
+        model_source="worker_profile",
+    )
+    meta2 = ModelExecutionMetadata(
+        provider="codex",
+        model="gpt-5.2-preview",
+        reasoning_effort="low",
+        model_source="worker_profile",
+    )
+    r1 = WorkerResult(
+        status="success",
+        summary="Node 1 done",
+        model_execution=meta1,
+        budget_usage={
+            "runtime_mode": "native_agent",
+            "native_agent": {"model_execution": meta1.model_dump(mode="json")},
+        },
+    )
+    r2 = WorkerResult(
+        status="success",
+        summary="Node 2 done",
+        model_execution=meta2,
+        budget_usage={
+            "runtime_mode": "native_agent",
+            "native_agent": {"model_execution": meta2.model_dump(mode="json")},
+        },
+    )
+    outcomes = [
+        NodeOutcome(node_id="n1", status="completed", result=r1, dependencies=[]),
+        NodeOutcome(node_id="n2", status="completed", result=r2, dependencies=[]),
+    ]
+    aggregated = _aggregate_decomposed_results(outcomes)
+    assert aggregated.model_execution is None
+    assert "native_agent" not in aggregated.budget_usage
+    assert "nodes" in aggregated.budget_usage
+
+    state = _build_early_failure_state(task_id, meta1)
+    state.result = aggregated
+
+    _persist_execution_outcome(
+        _OutcomePersistenceService(session_factory),
+        task_id=task_id,
+        state=state,
+        started_at=NOW,
+        finished_at=NOW,
+        persist_friction_proposals=False,
+    )
+
+    with session_scope(session_factory) as session:
+        task = session.get(Task, task_id)
+        assert task is not None
+        runs = WorkerRunRepository(session).list_by_task(task_id)
+        assert len(runs) == 1
+        run = runs[0]
+        assert run.budget_usage is not None
+        assert "native_agent" not in run.budget_usage
+        assert "nodes" in run.budget_usage
+
+        identity, status = resolve_task_execution_identity(task, runs)
+        assert status == "mixed_execution_identity"
+        assert identity is None

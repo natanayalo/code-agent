@@ -14,6 +14,7 @@ from orchestrator.node_execution import (
     logical_activity_key,
 )
 from workers import WorkerRequest, WorkerResult
+from workers.model_config import ModelExecutionMetadata
 
 
 def test_node_activity_request_requires_canonical_identity_and_digest() -> None:
@@ -126,3 +127,62 @@ async def test_node_execution_service_execute_branches():
             execute_worker=AsyncMock(),
         )
         assert ref.status == "terminal_replay"
+
+
+@pytest.mark.asyncio
+async def test_node_execution_service_fallback_does_not_coerce_none_runtime_mode() -> None:
+    session_factory = MagicMock()
+    sess = MagicMock()
+    session_factory.return_value.__enter__.return_value = sess
+
+    service = NodeExecutionService(session_factory)
+    activity = NodeActivityRequest(
+        task_id="t1",
+        plan_id="p1",
+        node_id="n1",
+        logical_attempt=1,
+        logical_activity_key=logical_activity_key("p1", "n1", 1),
+        effective_input_digest="a" * 64,
+    )
+    request = WorkerRequest(
+        task_text="text",
+        repo_url="url",
+        worker_type=WorkerType.CODEX,
+        runtime_mode=None,
+        model_execution=ModelExecutionMetadata(
+            provider="openai",
+            model="o3",
+            reasoning_effort="high",
+            model_source="task_override",
+            reasoning_effort_source="task_override",
+        ),
+    )
+
+    attempt = MagicMock()
+    attempt.id = "att1"
+    attempt.claim_token = "tok1"
+
+    with patch("orchestrator.node_execution.ExecutionPlanRepository") as mock_repo_cls:
+        repo_mock = mock_repo_cls.return_value
+        repo_mock.get_by_id.return_value = MagicMock(task_id="t1")
+        repo_mock.claim_activity.return_value = ("claimed", attempt)
+        repo_mock.finish_attempt.return_value = MagicMock()
+
+        async def _execute_none() -> WorkerResult | None:  # type: ignore[return-value]
+            return None
+
+        _ref, outcome = await service.execute(
+            activity=activity,
+            request=request,
+            effective_input_summary={},
+            execute_worker=_execute_none,  # type: ignore[arg-type]
+        )
+
+        assert outcome is not None
+        assert outcome.result.status == "failure"
+        assert outcome.result.summary == "Node execution returned no result."
+        assert outcome.result.model_execution == request.model_execution
+        # Crucially: since request.runtime_mode is None,
+        # native_agent must NOT be stamped into budget_usage
+        budget_usage = outcome.result.budget_usage
+        assert budget_usage is None or "native_agent" not in budget_usage

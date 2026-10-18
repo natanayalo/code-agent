@@ -17,6 +17,7 @@ from workers import (
     SUPPORTED_WORKER_TYPES as WORKER_SUPPORTED_TYPES,
 )
 from workers import (
+    ModelExecutionMetadata,
     WorkerDeliveryMode,
     WorkerResult,
     WorkerRuntimeMode,
@@ -373,6 +374,7 @@ class WorkerDispatch(OrchestratorModel):
     runtime_manifest: dict[str, Any] | None = None
     model: str | None = None
     reasoning_effort: str | None = None
+    model_execution: ModelExecutionMetadata | None = None
 
     @field_validator("worker_type", mode="before")
     @classmethod

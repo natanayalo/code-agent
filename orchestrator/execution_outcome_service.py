@@ -57,6 +57,8 @@ from repositories import (
     WorkerRunRepository,
     session_scope,
 )
+from workers.base import ModelExecutionMetadata
+from workers.model_config import resolve_worker_model_execution
 
 logger = logging.getLogger("orchestrator.execution")
 
@@ -202,6 +204,83 @@ def _build_artifact_index(
     return artifact_index, review_artifact_entries
 
 
+def _resolve_effective_model_execution(
+    result: Any | None,
+    state: OrchestratorState,
+    worker_type: str | None,
+) -> ModelExecutionMetadata | None:
+    """Find authoritative model execution metadata from result, dispatch, or manifest."""
+    if result is not None and getattr(result, "model_execution", None) is not None:
+        return result.model_execution
+    dispatch = state.dispatch
+    if dispatch and getattr(dispatch, "model_execution", None) is not None:
+        return dispatch.model_execution
+    dispatch_manifest = getattr(dispatch, "runtime_manifest", None) if dispatch else None
+    if dispatch_manifest is not None:
+        rm = dispatch_manifest
+        if isinstance(rm, dict):
+            w_manifest = rm.get("worker")
+            if isinstance(w_manifest, dict) and w_manifest.get("model_execution"):
+                m_exec = w_manifest["model_execution"]
+                return (
+                    ModelExecutionMetadata.model_validate(m_exec)
+                    if isinstance(m_exec, dict)
+                    else m_exec
+                )
+        elif hasattr(rm, "worker") and getattr(rm.worker, "model_execution", None):
+            return rm.worker.model_execution
+
+    if worker_type:
+        route = state.route
+        model = (dispatch.model if dispatch else None) or (route.model if route else None)
+        reasoning_effort = (dispatch.reasoning_effort if dispatch else None) or (
+            route.reasoning_effort if route else None
+        )
+        constraints = state.task.constraints if isinstance(state.task.constraints, dict) else {}
+        worker_prof = (
+            {"model": model, "reasoning_effort": reasoning_effort}
+            if (model or reasoning_effort)
+            else None
+        )
+        try:
+            return resolve_worker_model_execution(
+                str(worker_type),
+                task_constraints=constraints,
+                worker_profile=worker_prof,
+                default_model=model,
+                default_reasoning_effort=reasoning_effort,
+            )
+        except ValueError:
+            return None
+    return None
+
+
+def _resolve_persisted_budget_usage(
+    result: Any | None,
+    state: OrchestratorState,
+    worker_type: str | None,
+    runtime_mode: Any,
+) -> dict[str, Any] | None:
+    """Ensure native_agent runs retain authoritative model_execution in budget_usage."""
+    persisted = dict(result.budget_usage or {}) if result and result.budget_usage else None
+    if persisted is not None and isinstance(persisted.get("nodes"), dict):
+        return persisted
+
+    mode_str = getattr(runtime_mode, "value", str(runtime_mode)).strip().lower()
+    model_exec = _resolve_effective_model_execution(result, state, worker_type)
+    if model_exec is not None and (
+        mode_str in ("native_agent", "worker_runtime_mode.native_agent")
+        or (persisted is not None and "native_agent" in persisted)
+    ):
+        if persisted is None:
+            persisted = {}
+        native_dict = dict(persisted.get("native_agent") or {})
+        if "model_execution" not in native_dict or not native_dict["model_execution"]:
+            native_dict["model_execution"] = model_exec.model_dump(mode="json")
+        persisted["native_agent"] = native_dict
+    return persisted
+
+
 def _create_worker_run(
     worker_run_repo: WorkerRunRepository,
     task: Any,
@@ -214,6 +293,10 @@ def _create_worker_run(
 ) -> Any:
     result = state.result
     worker_type = _worker_type_for_persistence(state)
+    runtime_mode = (state.dispatch.runtime_mode if state.dispatch else None) or (
+        state.route.runtime_mode if state.route else None
+    )
+    budget_usage = _resolve_persisted_budget_usage(result, state, worker_type, runtime_mode)
     return worker_run_repo.create_for_task(
         task=task,
         worker_type=worker_type,
@@ -223,7 +306,7 @@ def _create_worker_run(
         status=_worker_run_status_from_result(state),
         summary=result.summary if result is not None else "Worker did not return a result.",
         requested_permission=result.requested_permission if result is not None else None,
-        budget_usage=result.budget_usage if result is not None else None,
+        budget_usage=budget_usage,
         verifier_outcome=_serialize_verification_report(state.verification)
         or ({"failure_kind": result.failure_kind} if result and result.failure_kind else None),
         commands_run=[
@@ -240,8 +323,7 @@ def _create_worker_run(
         retention_expires_at=retention_expires_at,
         worker_profile=(state.dispatch.worker_profile if state.dispatch else None)
         or (state.route.chosen_profile if state.route else None),
-        runtime_mode=(state.dispatch.runtime_mode if state.dispatch else None)
-        or (state.route.runtime_mode if state.route else None),
+        runtime_mode=runtime_mode,
     )
 
 

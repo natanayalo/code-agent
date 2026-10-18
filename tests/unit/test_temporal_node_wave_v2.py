@@ -274,6 +274,15 @@ async def test_singleton_merge_projects_runtime_manifest_into_parent_state(
             "workspace_id": None,
             "model": None,
             "reasoning_effort": None,
+            "model_execution": {
+                "provider": "codex",
+                "model": "gpt-6-luna",
+                "reasoning_effort": "high",
+                "requested_model": None,
+                "requested_reasoning_effort": None,
+                "model_source": "provider_default",
+                "reasoning_effort_source": "provider_default",
+            },
         }
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -18,9 +19,13 @@ from workers.antigravity_cli_adapter import (
     AntigravityCliRuntimeAdapter,
     write_antigravity_settings,
 )
-from workers.base import WorkerRequest, WorkerResult
+from workers.base import ModelExecutionMetadata, WorkerRequest, WorkerResult
 from workers.cli_runtime import CliRuntimeSettings
-from workers.model_config import resolve_antigravity_model_config
+from workers.model_config import (
+    resolve_antigravity_model_config,
+    resolve_antigravity_model_execution,
+    stamp_native_agent_model_execution,
+)
 from workers.native_agent_artifacts import DEFAULT_NATIVE_AGENT_ARTIFACTS_DIR
 
 ANTIGRAVITY_READ_ONLY_TOOL_PERMISSION = "strict"
@@ -69,12 +74,37 @@ def antigravity_permission_boundary_result(
         return None
     if granted_permission_from_constraints(request.constraints) != ToolPermissionLevel.READ_ONLY:
         return None
-    return WorkerResult(
+    result = WorkerResult(
         status="failure",
         summary="Antigravity mutation requires workspace_write permission.",
         failure_kind="permission_denied",
         requested_permission=ToolPermissionLevel.WORKSPACE_WRITE.value,
         next_action_hint="request_higher_permission",
+    )
+    manifest_worker = (request.runtime_manifest or {}).get("worker")
+    model_exec: ModelExecutionMetadata | None = None
+    if (
+        request.model_execution is not None
+        and request.model_execution.model_source in ("task_override", "worker_profile")
+        and request.model_execution.reasoning_effort_source in ("task_override", "worker_profile")
+    ):
+        model_exec = request.model_execution
+    else:
+        try:
+            model_exec = resolve_antigravity_model_execution(
+                task_constraints=request.constraints,
+                manifest_worker=manifest_worker,
+                adapter_model=getattr(adapter, "model", None),
+                adapter_reasoning_effort=getattr(adapter, "reasoning_effort", None),
+                env=getattr(adapter, "env", None) or os.environ,
+            )
+        except ValueError:
+            model_exec = request.model_execution
+    return stamp_native_agent_model_execution(
+        result,
+        model_exec,
+        runtime_mode=getattr(request, "runtime_mode", None)
+        or getattr(adapter, "default_runtime_mode", "native_agent"),
     )
 
 

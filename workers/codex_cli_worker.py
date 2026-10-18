@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -35,6 +36,7 @@ from tools import (
 from workers.async_runner import run_sync_with_cancellable_executor
 from workers.base import (
     ArtifactReference,
+    ModelExecutionMetadata,
     Worker,
     WorkerRequest,
     WorkerResult,
@@ -44,6 +46,10 @@ from workers.cli_runtime import (
     CliRuntimeSettings,
     ShellSessionProtocol,
     settings_from_budget,
+)
+from workers.model_config import (
+    resolve_codex_model_execution,
+    stamp_native_agent_model_execution,
 )
 
 logger = logging.getLogger(__name__)
@@ -358,7 +364,41 @@ class CodexCliWorker(CodexCliWorkerNativeMixin, Worker):
             )
             return result, None, None
         else:
-            return self._runtime_mode_not_supported_result(runtime_mode), None, None
+            unsupported = self._runtime_mode_not_supported_result(runtime_mode)
+            model_exec = self._resolve_request_model_execution(request)
+            return (
+                stamp_native_agent_model_execution(
+                    unsupported, model_exec, runtime_mode=runtime_mode
+                ),
+                None,
+                None,
+            )
+
+    def _resolve_request_model_execution(
+        self, request: WorkerRequest
+    ) -> ModelExecutionMetadata | None:
+        """Resolve authoritative ModelExecutionMetadata for this Codex request."""
+        if (
+            request.model_execution is not None
+            and request.model_execution.model_source in ("task_override", "worker_profile")
+            and request.model_execution.reasoning_effort_source
+            in ("task_override", "worker_profile")
+        ):
+            return request.model_execution
+        manifest_worker = (request.runtime_manifest or {}).get("worker")
+        adapter_model = getattr(self.runtime_adapter, "model", None)
+        adapter_effort = getattr(self.runtime_adapter, "reasoning_effort", None)
+        adapter_env = getattr(self.runtime_adapter, "env", None)
+        try:
+            return resolve_codex_model_execution(
+                task_constraints=request.constraints,
+                manifest_worker=manifest_worker,
+                adapter_model=adapter_model,
+                adapter_reasoning_effort=adapter_effort,
+                env=adapter_env if adapter_env is not None else os.environ,
+            )
+        except ValueError:
+            return request.model_execution
 
     def _provision_workspace_safe(
         self,
@@ -392,9 +432,13 @@ class CodexCliWorker(CodexCliWorkerNativeMixin, Worker):
         system_prompt_override: str | None = None,
     ) -> WorkerResult:
         """Provision a workspace, run the CLI runtime, and return a typed result."""
+        model_exec = self._resolve_request_model_execution(request)
+        runtime_mode = self._resolve_runtime_mode(request)
         invalid_request_result = self._validate_request(request)
         if invalid_request_result is not None:
-            return invalid_request_result
+            return stamp_native_agent_model_execution(
+                invalid_request_result, model_exec, runtime_mode=runtime_mode
+            )
         repo_url = request.repo_url
         if repo_url is None:
             raise RuntimeError("CodexCliWorker request validation expected repo_url to be set.")
@@ -412,8 +456,30 @@ class CodexCliWorker(CodexCliWorkerNativeMixin, Worker):
 
         workspace = self._provision_workspace_safe(request, repo_url, workspace_task_id)
         if isinstance(workspace, WorkerResult):
-            return workspace
+            return stamp_native_agent_model_execution(
+                workspace, model_exec, runtime_mode=runtime_mode
+            )
 
+        return self._execute_workspace_lifecycle(
+            request=request,
+            workspace=workspace,
+            workspace_task_id=workspace_task_id,
+            system_prompt_override=system_prompt_override,
+            cancel_token=cancel_token,
+            model_exec=model_exec,
+            runtime_mode=runtime_mode,
+        )
+
+    def _execute_workspace_lifecycle(
+        self,
+        request: WorkerRequest,
+        workspace: WorkspaceHandle,
+        workspace_task_id: str,
+        system_prompt_override: str | None,
+        cancel_token: Callable[[], bool] | None,
+        model_exec: ModelExecutionMetadata | None,
+        runtime_mode: str,
+    ) -> WorkerResult:
         result: WorkerResult | None = None
         run_succeeded = False
         container: DockerSandboxContainer | None = None
@@ -434,13 +500,17 @@ class CodexCliWorker(CodexCliWorkerNativeMixin, Worker):
             RuntimeError,
             UnknownToolError,
         ) as exc:
-            result = _workspace_error_result(
-                request=request,
-                workspace=workspace,
-                workspace_task_id=workspace_task_id,
-                exc=exc,
-                summary_prefix="CodexCliWorker runtime setup failed",
-                next_action_hint="inspect_worker_configuration",
+            result = stamp_native_agent_model_execution(
+                _workspace_error_result(
+                    request=request,
+                    workspace=workspace,
+                    workspace_task_id=workspace_task_id,
+                    exc=exc,
+                    summary_prefix="CodexCliWorker runtime setup failed",
+                    next_action_hint="inspect_worker_configuration",
+                ),
+                model_exec,
+                runtime_mode=runtime_mode,
             )
         finally:
             self._close_session(session)

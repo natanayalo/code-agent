@@ -180,6 +180,21 @@ def test_codex_cli_worker_requires_repo_url(tmp_path: Path) -> None:
         "CodexCliWorker requires a non-empty repo_url to provision a sandbox workspace."
     )
     assert result.next_action_hint == "provide_repo_url"
+    assert result.model_execution is not None
+    assert result.model_execution.provider == "codex"
+
+    native_result = asyncio.run(
+        worker.run(
+            WorkerRequest(
+                task_text="Inspect the repo",
+                runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
+            )
+        )
+    )
+    assert native_result.status == "error"
+    assert native_result.model_execution is not None
+    assert native_result.model_execution.provider == "codex"
+    assert native_result.budget_usage["native_agent"]["model_execution"] is not None
 
 
 def test_codex_validate_request_phase_returns_none_for_valid_repo_url(tmp_path: Path) -> None:
@@ -644,3 +659,47 @@ def test_codex_cli_worker_auto_enables_network(tmp_path: Path) -> None:
     )
 
     assert container_manager.start_requests[0].network_enabled is True
+
+
+def test_codex_cli_worker_partial_override_preserves_adapter_reasoning_effort(
+    tmp_path: Path,
+) -> None:
+    from workers.base import ModelExecutionMetadata
+    from workers.codex_exec_adapter import CodexExecCliRuntimeAdapter
+
+    workspace = _workspace_handle(tmp_path)
+    container = DockerSandboxContainer(
+        working_dir="/workspace",
+        workspace=workspace,
+        container_name="sandbox-workspace-task-47",
+        image="python:3.12-slim",
+    )
+
+    native_adapter = CodexExecCliRuntimeAdapter()
+    native_adapter.reasoning_effort = "low"
+    worker = CodexCliWorker(
+        runtime_adapter=native_adapter,
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(container),
+        session_factory=lambda _, **__: _FakeSession({}),
+    )
+    # request has partial override: model is overridden by task,
+    # but reasoning_effort is provider_default
+    partial_meta = ModelExecutionMetadata(
+        provider="codex",
+        model="gpt-5.4",
+        reasoning_effort="high",
+        model_source="task_override",
+        reasoning_effort_source="provider_default",
+    )
+    request = WorkerRequest(
+        task_text="test",
+        repo_url="https://example.com/repo.git",
+        constraints={"model": "gpt-5.4"},
+        model_execution=partial_meta,
+    )
+    resolved = worker._resolve_request_model_execution(request)
+    assert resolved is not None
+    assert resolved.model == "gpt-5.4"
+    assert resolved.reasoning_effort == "low"
+    assert resolved.reasoning_effort_source == "environment"
