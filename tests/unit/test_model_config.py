@@ -463,6 +463,9 @@ def test_stamp_native_agent_model_execution() -> None:
     assert stamped_cli.model_execution == model_exec
     assert "native_agent" not in stamped_cli.budget_usage
 
+    # None result returns None safely
+    assert stamp_native_agent_model_execution(None, model_exec) is None  # type: ignore[arg-type]
+
 
 def test_resolve_worker_model_execution_defaults_to_environ(
     monkeypatch: pytest.MonkeyPatch,

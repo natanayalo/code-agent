@@ -501,6 +501,8 @@ def stamp_native_agent_model_execution(
       {"native_agent": {..., "model_execution": effective_model_execution.model_dump(mode="json")}}
       without overwriting other keys in budget_usage or budget_usage["native_agent"].
     """
+    if result is None or not isinstance(result, WorkerResult):
+        return result
     effective_model_execution = result.model_execution or model_execution
     if effective_model_execution is None:
         return result
