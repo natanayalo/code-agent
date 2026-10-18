@@ -316,9 +316,11 @@ def _resolve_request_model_execution_for_envelope(
     worker_type: str,
 ) -> ModelExecutionMetadata | None:
     """Resolve authoritative ModelExecutionMetadata for the outer orchestrator envelope."""
-    if isinstance(
-        request.model_execution, ModelExecutionMetadata
-    ) and request.model_execution.model_source in ("task_override", "worker_profile"):
+    if (
+        isinstance(request.model_execution, ModelExecutionMetadata)
+        and request.model_execution.model_source in ("task_override", "worker_profile")
+        and request.model_execution.reasoning_effort_source in ("task_override", "worker_profile")
+    ):
         return request.model_execution
     worker_fn = getattr(worker, "_resolve_request_model_execution", None)
     if worker_fn is not None and callable(worker_fn):
@@ -328,6 +330,7 @@ def _resolve_request_model_execution_for_envelope(
                 return resolved
             if isinstance(resolved, dict):
                 return ModelExecutionMetadata.model_validate(resolved)
+            return None
         except Exception:
             logger.debug("Worker model execution resolution failed in envelope", exc_info=True)
     if isinstance(request.model_execution, ModelExecutionMetadata):
@@ -359,7 +362,7 @@ async def _handle_worker_envelope_timeout(
     session_id: str | None,
     timeout_seconds: float,
     model_exec: ModelExecutionMetadata | None,
-    runtime_mode: str,
+    runtime_mode: Any = None,
 ) -> tuple[WorkerResult, str]:
     logger.warning(
         "Worker execution exceeded the orchestrator timeout envelope",
@@ -395,7 +398,7 @@ async def _handle_worker_envelope_cancellation(
     worker_type: str,
     session_id: str | None,
     model_exec: ModelExecutionMetadata | None,
-    runtime_mode: str,
+    runtime_mode: Any = None,
 ) -> tuple[WorkerResult, str]:
     logger.warning(
         "Worker execution was cancelled at the orchestrator boundary",
@@ -438,7 +441,9 @@ async def _await_worker_with_timeout(
         return await worker.run(request)
 
     model_exec = _resolve_request_model_execution_for_envelope(worker, request, worker_type)
-    runtime_mode = getattr(request, "runtime_mode", "native_agent") or "native_agent"
+    runtime_mode = getattr(request, "runtime_mode", None) or getattr(
+        worker, "default_runtime_mode", None
+    )
 
     worker_task: asyncio.Task[WorkerResult] = asyncio.create_task(run_worker())
     try:
@@ -710,7 +715,9 @@ async def execute_with_preflight(
         context_timeout_seconds=timeout_seconds,
     )
     model_exec = _resolve_request_model_execution_for_envelope(worker, request, worker_type)
-    runtime_mode = getattr(request, "runtime_mode", "native_agent") or "native_agent"
+    runtime_mode = getattr(request, "runtime_mode", None) or getattr(
+        worker, "default_runtime_mode", None
+    )
 
     if report is None and preflight_budget_exhausted:
         res, msg = _preflight_budget_exhausted_result(request, ctx, timeout_seconds)
@@ -926,6 +933,7 @@ def _resolve_state_model_execution(
                 return resolved
             if isinstance(resolved, dict):
                 return ModelExecutionMetadata.model_validate(resolved)
+            return None
         except Exception:
             logger.debug("Worker-level model execution resolution failed", exc_info=True)
 
@@ -1475,7 +1483,7 @@ def _fallback_decomposed_node_result(
         artifacts=[node_envelope_artifact] if node_envelope_artifact is not None else [],
         model_execution=node_model_exec,
     )
-    node_runtime_mode = getattr(state.dispatch, "runtime_mode", "native_agent")
+    node_runtime_mode = getattr(state.dispatch, "runtime_mode", None)
     return stamp_native_agent_model_execution(
         raw_fallback, node_model_exec, runtime_mode=node_runtime_mode
     )

@@ -83,9 +83,10 @@ def antigravity_permission_boundary_result(
     )
     manifest_worker = (request.runtime_manifest or {}).get("worker")
     model_exec: ModelExecutionMetadata | None = None
-    if request.model_execution is not None and request.model_execution.model_source in (
-        "task_override",
-        "worker_profile",
+    if (
+        request.model_execution is not None
+        and request.model_execution.model_source in ("task_override", "worker_profile")
+        and request.model_execution.reasoning_effort_source in ("task_override", "worker_profile")
     ):
         model_exec = request.model_execution
     else:
@@ -102,7 +103,8 @@ def antigravity_permission_boundary_result(
     return stamp_native_agent_model_execution(
         result,
         model_exec,
-        runtime_mode=getattr(request, "runtime_mode", "native_agent") or "native_agent",
+        runtime_mode=getattr(request, "runtime_mode", None)
+        or getattr(adapter, "default_runtime_mode", "native_agent"),
     )
 
 

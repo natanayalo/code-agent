@@ -378,9 +378,11 @@ class CodexCliWorker(CodexCliWorkerNativeMixin, Worker):
         self, request: WorkerRequest
     ) -> ModelExecutionMetadata | None:
         """Resolve authoritative ModelExecutionMetadata for this Codex request."""
-        if request.model_execution is not None and request.model_execution.model_source in (
-            "task_override",
-            "worker_profile",
+        if (
+            request.model_execution is not None
+            and request.model_execution.model_source in ("task_override", "worker_profile")
+            and request.model_execution.reasoning_effort_source
+            in ("task_override", "worker_profile")
         ):
             return request.model_execution
         manifest_worker = (request.runtime_manifest or {}).get("worker")

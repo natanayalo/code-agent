@@ -330,9 +330,11 @@ class GeminiCliWorker(GeminiCliWorkerNativeMixin, Worker):
                 )
             return None
 
-        if request.model_execution is not None and request.model_execution.model_source in (
-            "task_override",
-            "worker_profile",
+        if (
+            request.model_execution is not None
+            and request.model_execution.model_source in ("task_override", "worker_profile")
+            and request.model_execution.reasoning_effort_source
+            in ("task_override", "worker_profile")
         ):
             return request.model_execution
         adapter = getattr(self, "runtime_adapter", None)

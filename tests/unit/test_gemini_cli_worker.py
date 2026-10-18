@@ -512,3 +512,42 @@ def test_gemini_cli_worker_resolves_legacy_adapter_truthfully(tmp_path: Path) ->
     )
     meta_none = worker_without_model._resolve_request_model_execution(request)
     assert meta_none is None
+
+
+def test_gemini_cli_worker_partial_override_preserves_adapter_reasoning_effort(
+    tmp_path: Path,
+) -> None:
+    from workers.antigravity_cli_worker_native import AntigravityCliRuntimeAdapter
+    from workers.base import ModelExecutionMetadata
+
+    workspace = _make_workspace(tmp_path)
+    container = _make_container(workspace)
+
+    native_adapter = AntigravityCliRuntimeAdapter()
+    native_adapter.reasoning_effort = "low"
+    worker = GeminiCliWorker(
+        runtime_adapter=native_adapter,
+        workspace_manager=_FakeWorkspaceManager(workspace),
+        container_manager=_FakeContainerManager(container),
+        session_factory=lambda _, **__: _FakeSession({}),
+    )
+    # request has partial override: model is overridden by task,
+    # but reasoning_effort is provider_default
+    partial_meta = ModelExecutionMetadata(
+        provider="antigravity",
+        model="gemini-3-pro",
+        reasoning_effort="medium",
+        model_source="task_override",
+        reasoning_effort_source="provider_default",
+    )
+    request = WorkerRequest(
+        task_text="test",
+        repo_url="https://example.com/repo.git",
+        constraints={"model": "gemini-3-pro"},
+        model_execution=partial_meta,
+    )
+    resolved = worker._resolve_request_model_execution(request)
+    assert resolved is not None
+    assert resolved.model == "gemini-3-pro"
+    assert resolved.reasoning_effort == "low"
+    assert resolved.reasoning_effort_source == "environment"

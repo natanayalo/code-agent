@@ -329,3 +329,103 @@ def test_aggregate_decomposed_results_detects_mixed_identities() -> None:
     ]
     aggregated = _aggregate_decomposed_results(outcomes)
     assert aggregated.model_execution is None
+
+
+def test_envelope_model_execution_returns_none_when_worker_resolves_none() -> None:
+    from orchestrator.graph import _resolve_request_model_execution_for_envelope
+    from workers.base import ModelExecutionMetadata
+
+    class _NoneResolvingWorker:
+        def _resolve_request_model_execution(
+            self, request: WorkerRequest
+        ) -> ModelExecutionMetadata | None:
+            del request
+            return None
+
+    worker = _NoneResolvingWorker()
+    default_meta = ModelExecutionMetadata(
+        provider="antigravity",
+        model="gemini-3.8-flash",
+        reasoning_effort="medium",
+        model_source="provider_default",
+    )
+    request = WorkerRequest(
+        task_text="test",
+        repo_url="https://example.com/repo.git",
+        model_execution=default_meta,
+    )
+    resolved = _resolve_request_model_execution_for_envelope(worker, request, "gemini")
+    assert resolved is None
+
+
+def test_envelope_model_execution_does_not_short_circuit_on_partial_override() -> None:
+    from orchestrator.graph import _resolve_request_model_execution_for_envelope
+    from workers.base import ModelExecutionMetadata
+
+    called = False
+
+    class _WorkerWithAdapter:
+        def _resolve_request_model_execution(
+            self, request: WorkerRequest
+        ) -> ModelExecutionMetadata:
+            nonlocal called
+            called = True
+            return ModelExecutionMetadata(
+                provider="codex",
+                model=request.model_execution.model,
+                reasoning_effort="low",
+                model_source="task_override",
+                reasoning_effort_source="environment",
+            )
+
+    worker = _WorkerWithAdapter()
+    partial_meta = ModelExecutionMetadata(
+        provider="codex",
+        model="gpt-5.4",
+        reasoning_effort="high",
+        model_source="task_override",
+        reasoning_effort_source="provider_default",
+    )
+    request = WorkerRequest(
+        task_text="test",
+        repo_url="https://example.com/repo.git",
+        model_execution=partial_meta,
+    )
+    resolved = _resolve_request_model_execution_for_envelope(worker, request, "codex")
+    assert called is True
+    assert resolved is not None
+    assert resolved.model == "gpt-5.4"
+    assert resolved.reasoning_effort == "low"
+    assert resolved.reasoning_effort_source == "environment"
+
+
+def test_await_worker_with_timeout_does_not_coerce_none_runtime_mode_to_native_agent() -> None:
+    from orchestrator.graph import _await_worker_with_timeout
+
+    class _SimpleWorker(Worker):
+        async def run(self, request: WorkerRequest) -> WorkerResult:
+            del request
+            return WorkerResult(
+                status="success",
+                summary="Done",
+                budget_usage={"iterations_used": 1},
+            )
+
+    worker = _SimpleWorker()
+    request = WorkerRequest(
+        task_text="test",
+        repo_url="https://example.com/repo.git",
+        runtime_mode=None,
+    )
+    result, _ = asyncio.run(
+        _await_worker_with_timeout(
+            worker,
+            request,
+            worker_type="codex",
+            session_id="session-1",
+            timeout_seconds=5.0,
+        )
+    )
+    assert result.budget_usage == {"iterations_used": 1}
+    assert "native_agent" not in result.budget_usage
+    assert result.model_execution is not None
