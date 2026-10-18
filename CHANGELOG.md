@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: preserve execution identity on pre-dispatch and early failure paths ([#422](https://github.com/natanayalo/code-agent/pull/422))
+
 - Feat: implement taskboard fixture builder, acceptance oracles, and ReadOnlyExternalEvaluator ([#421](https://github.com/natanayalo/code-agent/pull/421))
 
 - Feat: add m29 feature mutation evaluation runner and quality evaluator ([#420](https://github.com/natanayalo/code-agent/pull/420))
