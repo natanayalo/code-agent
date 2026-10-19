@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -14,18 +15,25 @@ from sqlalchemy.orm import Session
 
 from db.base import Base
 from db.models import (
+    MemoryAdmissionDecision,
     MemoryObservation,
+    MemoryProposal,
+    MemoryProposalCategory,
     PersonalMemory,
     ProjectMemory,
+    SessionState,
 )
 from evaluation.m29_mutation_dispatcher import (
     DisposableDbMemoryIsolationManager,
     HttpStackCandidateDispatcher,
+    _extract_changed_files,
+    _extract_workspace_diff,
 )
 from evaluation.m29_mutation_isolation import (
     build_evaluation_cleanup_policy,
 )
 from evaluation.m29_mutation_reviewer_client import OpenRouterNeutralReviewerClient
+from evaluation.m29_mutation_runner_models import CandidateTaskExecutionResult
 from evaluation.m29_mutation_suite import (
     DEFAULT_M29_NEUTRAL_EVALUATOR,
     NEUTRAL_EVALUATOR_SYSTEM_PROMPT,
@@ -304,6 +312,81 @@ class TestOpenRouterNeutralReviewerClient:
         assert outcome.evaluator_identity_status == "unavailable"
         assert "http_status_502" in str(outcome.reason)
 
+    def test_missing_model_fails_closed_with_unavailable(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                status_code=200,
+                json={
+                    "choices": [{"message": {"content": json.dumps({"passed": True})}}],
+                },
+            )
+
+        client = OpenRouterNeutralReviewerClient(
+            api_key="test-key",
+            httpx_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        )
+        req = BlindedNeutralReviewRequest(
+            case_topic="sample",
+            prompt="goal",
+            acceptance_oracle="oracle",
+            allowed_source_path="src/a.py",
+            diff_text="+line",
+        )
+        outcome = client.review_blinded_diff(req, DEFAULT_M29_NEUTRAL_EVALUATOR)
+        assert not outcome.passed
+        assert outcome.evaluator_identity is None
+        assert outcome.evaluator_identity_status == "unavailable"
+        assert "missing_or_invalid_response_model_identity" in str(outcome.reason)
+
+    def test_missing_choices_returns_unavailable(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                status_code=200,
+                json={"model": "anthropic/claude-3-7-sonnet", "choices": []},
+            )
+
+        client = OpenRouterNeutralReviewerClient(
+            api_key="test-key",
+            httpx_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        )
+        req = BlindedNeutralReviewRequest(
+            case_topic="sample",
+            prompt="goal",
+            acceptance_oracle="oracle",
+            allowed_source_path="src/a.py",
+            diff_text="+line",
+        )
+        outcome = client.review_blinded_diff(req, DEFAULT_M29_NEUTRAL_EVALUATOR)
+        assert not outcome.passed
+        assert outcome.evaluator_identity_status == "unavailable"
+        assert "missing_choices_in_response" in str(outcome.reason)
+
+    def test_missing_boolean_passed_returns_unavailable(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                status_code=200,
+                json={
+                    "model": "anthropic/claude-3-7-sonnet",
+                    "choices": [{"message": {"content": json.dumps({"status": "ok"})}}],
+                },
+            )
+
+        client = OpenRouterNeutralReviewerClient(
+            api_key="test-key",
+            httpx_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        )
+        req = BlindedNeutralReviewRequest(
+            case_topic="sample",
+            prompt="goal",
+            acceptance_oracle="oracle",
+            allowed_source_path="src/a.py",
+            diff_text="+line",
+        )
+        outcome = client.review_blinded_diff(req, DEFAULT_M29_NEUTRAL_EVALUATOR)
+        assert not outcome.passed
+        assert outcome.evaluator_identity_status == "unavailable"
+        assert "missing_boolean_passed" in str(outcome.reason)
+
 
 class TestDisposableDbMemoryIsolationManager:
     """Tests for DisposableDbMemoryIsolationManager memory loading and clearing."""
@@ -363,6 +446,125 @@ class TestDisposableDbMemoryIsolationManager:
         mem_after = mgr.load_memory_context("taskboard")
         assert len(mem_after.personal) == 0
 
+    def test_project_memory_restoration_and_session_state_purge(self, tmp_path: Path) -> None:
+        db_file = tmp_path / "test_iso_restore.db"
+        db_url = f"sqlite:///{db_file}"
+        _setup_test_db(db_url)
+        mgr = DisposableDbMemoryIsolationManager(db_url)
+
+        engine = create_engine(db_url)
+        with Session(engine) as session:
+            session.add(ProjectMemory(repo_url="taskboard", memory_key="k1", value={"v": 1}))
+            session.commit()
+
+        base_mem = mgr.load_memory_context("taskboard")
+        assert len(base_mem.project) == 1
+
+        # Simulate case writing non-baseline project memory, session state, proposal
+        with Session(engine) as session:
+            session.add(ProjectMemory(repo_url="taskboard", memory_key="k2", value={"v": 2}))
+            session.add(SessionState(session_id="sess-1", active_goal="test goal"))
+            prop = MemoryProposal(
+                category=MemoryProposalCategory.PROJECT,
+                repo_url="taskboard",
+                memory_key="k3",
+                value={"v": 3},
+            )
+            session.add(prop)
+            session.flush()
+            session.add(
+                MemoryAdmissionDecision(
+                    proposal_id=prop.id,
+                    category="project",
+                    memory_key="k3",
+                    candidate_payload={"v": 3},
+                    decision="reject",
+                    risk_level="low",
+                    reason="test reason",
+                )
+            )
+            session.commit()
+
+        # Discard writes restores project memory to baseline and purges other tables
+        mgr.discard_case_memory_writes()
+        restored_mem = mgr.load_memory_context("taskboard")
+        assert len(restored_mem.project) == 1
+        assert restored_mem.project[0].memory_key == "k1"
+
+        with Session(engine) as session:
+            from sqlalchemy import select
+
+            assert session.scalars(select(SessionState)).all() == []
+            assert session.scalars(select(MemoryProposal)).all() == []
+            assert session.scalars(select(MemoryAdmissionDecision)).all() == []
+
+    def test_resolved_repo_url_matching(self, tmp_path: Path) -> None:
+        db_file = tmp_path / "test_iso_repo_match.db"
+        db_url = f"sqlite:///{db_file}"
+        _setup_test_db(db_url)
+        mgr = DisposableDbMemoryIsolationManager(db_url)
+
+        engine = create_engine(db_url)
+        with Session(engine) as session:
+            session.add(
+                ProjectMemory(
+                    repo_url="https://github.com/natanayalo/taskboard",
+                    memory_key="arch",
+                    value={"pattern": "mvc"},
+                )
+            )
+            session.commit()
+
+        # Passing "taskboard" matches via repo_url.contains("taskboard") or fallback
+        mem = mgr.load_memory_context("taskboard")
+        assert len(mem.project) == 1
+        assert mem.project[0].memory_key == "arch"
+
+
+def _make_mock_task_snapshot_payload(task_id: str, ws_id: str) -> dict[str, Any]:
+    return {
+        "task_id": task_id,
+        "session_id": "sess-1",
+        "status": "completed",
+        "task_text": "sample task",
+        "created_at": datetime.now(UTC).isoformat(),
+        "updated_at": datetime.now(UTC).isoformat(),
+        "latest_run": {
+            "run_id": "run-1",
+            "worker_type": "codex",
+            "workspace_id": ws_id,
+            "status": "completed",
+            "started_at": datetime.now(UTC).isoformat(),
+            "budget_usage": {
+                "native_agent": {
+                    "model_execution": {
+                        "provider": "codex",
+                        "model": "gpt-6-luna",
+                        "reasoning_effort": "high",
+                    }
+                }
+            },
+            "artifacts": [
+                {
+                    "artifact_id": "art-1",
+                    "artifact_type": "patch",
+                    "name": "changes.patch",
+                    "uri": "workspace/changes.patch",
+                }
+            ],
+        },
+        "pending_interactions": [],
+        "timeline": [
+            {
+                "id": "ev-1",
+                "event_type": "TASK_COMPLETED",
+                "sequence_number": 1,
+                "attempt_number": 0,
+                "created_at": datetime(2026, 10, 19, 10, 0, 0, tzinfo=UTC).isoformat(),
+            }
+        ],
+    }
+
 
 class TestHttpStackCandidateDispatcher:
     """Tests for HttpStackCandidateDispatcher interaction and terminal capture."""
@@ -380,32 +582,7 @@ class TestHttpStackCandidateDispatcher:
         ws_path.mkdir(parents=True)
         (ws_path / "file.txt").write_text("hello world\n")
 
-        task_snapshot_payload = {
-            "task_id": task_id,
-            "session_id": "sess-1",
-            "status": "completed",
-            "task_text": "sample task",
-            "created_at": datetime.now(UTC).isoformat(),
-            "updated_at": datetime.now(UTC).isoformat(),
-            "latest_run": {
-                "run_id": "run-1",
-                "worker_type": "codex",
-                "workspace_id": ws_id,
-                "status": "completed",
-                "started_at": datetime.now(UTC).isoformat(),
-                "budget_usage": {
-                    "native_agent": {
-                        "model_execution": {
-                            "provider": "codex",
-                            "model": "gpt-6-luna",
-                            "reasoning_effort": "high",
-                        }
-                    }
-                },
-            },
-            "pending_interactions": [],
-            "timeline": [],
-        }
+        task_snapshot_payload = _make_mock_task_snapshot_payload(task_id, ws_id)
 
         def handler(request: httpx.Request) -> httpx.Response:
             if request.method == "POST" and request.url.path == "/tasks":
@@ -432,7 +609,10 @@ class TestHttpStackCandidateDispatcher:
 
         assert result.task_id == task_id
         assert result.task_status == "completed"
+        assert result.terminal_event_type == "TASK_COMPLETED"
         assert not result.pending_interaction
+        assert len(result.timeline_events) == 1
+        assert len(result.artifacts) == 1
         assert result.execution_identity == ExecutionIdentity(
             provider="codex", model="gpt-6-luna", reasoning_effort="high"
         )
@@ -440,9 +620,10 @@ class TestHttpStackCandidateDispatcher:
         assert len(watchdog.records) == 1
         assert watchdog.records[0].workspace_id == ws_id
 
-        # Verify terminal snapshot immutability capture
+        # Verify terminal snapshot immutability capture derives event from re-queried timeline
         snap = dispatcher.capture_terminal_snapshot(case, result)
         assert snap.task_status == "completed"
+        assert snap.terminal_event_type == "TASK_COMPLETED"
         assert snap.checksum is not None
 
     def test_pending_interaction_early_stop(self, tmp_path: Path) -> None:
@@ -489,6 +670,86 @@ class TestHttpStackCandidateDispatcher:
         result = dispatcher.dispatch_case(case, MemoryContext())
         assert result.pending_interaction
         assert result.terminal_event_type == "interaction_requested"
+
+    def test_capture_terminal_snapshot_fails_closed_on_error(self, tmp_path: Path) -> None:
+        db_file = tmp_path / "test_disp_err.db"
+        db_url = f"sqlite:///{db_file}"
+        _setup_test_db(db_url)
+        ws_root = tmp_path / "workspaces"
+        ws_root.mkdir(parents=True)
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(status_code=500, text="Internal Server Error")
+
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        dispatcher = HttpStackCandidateDispatcher(
+            api_base_url="http://testserver",
+            db_url=db_url,
+            workspace_root=ws_root,
+            httpx_client=client,
+        )
+        case = _make_sample_case()
+        handle = WorkspaceHandle(
+            workspace_id="ws-err",
+            task_id="task-err",
+            workspace_path=ws_root / "ws-err",
+            repo_path=ws_root / "ws-err",
+            repo_url="",
+            cleanup_policy=build_evaluation_cleanup_policy(),
+        )
+        cand_res = CandidateTaskExecutionResult(
+            task_id="task-err",
+            workspace_handle=handle,
+            task_status="completed",
+            terminal_event_type="TASK_COMPLETED",
+            terminal_timestamp=datetime.now(UTC),
+        )
+        with pytest.raises(RuntimeError, match="HTTP 500"):
+            dispatcher.capture_terminal_snapshot(case, cand_res)
+
+    def test_trusted_git_dir_and_target_revision_diff(self, tmp_path: Path) -> None:
+        import subprocess
+
+        repo_dir = tmp_path / "repo"
+        repo_dir.mkdir(parents=True)
+        trusted_git = tmp_path / "trusted_git"
+
+        def run_git(*args: str) -> str:
+            base_cmd = ["git", "-C", str(repo_dir), "-c", "user.name=T", "-c", "user.email=t@e.com"]
+            res = subprocess.run(
+                [*base_cmd, *args],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            return res.stdout.strip()
+
+        subprocess.run(
+            ["git", "init", "-b", "main", str(repo_dir)],
+            check=True,
+            capture_output=True,
+        )
+        (repo_dir / "file.txt").write_text("initial\n")
+        run_git("add", ".")
+        run_git("commit", "-m", "init")
+        base_rev = run_git("rev-parse", "HEAD")
+
+        shutil.copytree(repo_dir / ".git", trusted_git)
+
+        (repo_dir / "file.txt").write_text("modified\n")
+        run_git("add", ".")
+        run_git("commit", "-m", "worker commit")
+
+        diff_text = _extract_workspace_diff(
+            repo_dir, target_revision=base_rev, trusted_git_dir=trusted_git
+        )
+        assert "-initial" in diff_text
+        assert "+modified" in diff_text
+
+        changed_files = _extract_changed_files(
+            repo_dir, target_revision=base_rev, trusted_git_dir=trusted_git
+        )
+        assert "file.txt" in changed_files
 
 
 class TestOperatorCliSubcommands:

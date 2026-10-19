@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import sys
+from collections.abc import Mapping
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,10 +31,12 @@ from evaluation.m29_mutation_runner_models import M29MutationRunnerResult
 from evaluation.m29_mutation_runner_preflight import run_mutation_preflight_checks
 from evaluation.m29_mutation_suite import (
     M29_MUTATION_SUITE_NAME,
+    M29MutationCase,
     build_m29_mutation_suite,
 )
 from evaluation.m29_mutation_verifier import ReadOnlyExternalEvaluator
 from evaluation.m29_mutation_watchdog import EvaluationRetentionWatchdog
+from orchestrator.state import MemoryContext
 from sandbox.workspace import WorkspaceManager
 
 LOGGER = logging.getLogger("run_m29_mutation_wave")
@@ -148,56 +151,31 @@ def handle_preflight(args: argparse.Namespace) -> int:
     return 0
 
 
-def handle_run(args: argparse.Namespace) -> int:
-    """Execute full 20-case mutation evaluation against disposable stack."""
-    if not args.ack_disposable_mutation_stack:
-        sys.stderr.write(
-            "ERROR: --ack-disposable-mutation-stack is required to operate on disposable stacks.\n"
-        )
-        return 2
+def _extract_cohort_as_of_and_baseline_ids(
+    bundle_data: dict[str, Any],
+) -> tuple[datetime | None, Mapping[str, Any] | None]:
+    """Extract and parse frozen as_of and baseline task IDs from task cohort snapshot."""
+    as_of: datetime | None = None
+    baseline_ids: Mapping[str, Any] | None = None
+    cohort_snap = bundle_data.get("task_cohort_snapshot")
+    if isinstance(cohort_snap, dict):
+        raw_as_of = cohort_snap.get("as_of")
+        if isinstance(raw_as_of, str):
+            if raw_as_of.endswith("Z"):
+                raw_as_of = raw_as_of[:-1] + "+00:00"
+            as_of = datetime.fromisoformat(raw_as_of)
+            if as_of.tzinfo is None:
+                as_of = as_of.replace(tzinfo=UTC)
+        elif isinstance(raw_as_of, datetime):
+            as_of = raw_as_of
+        baseline_ids = cohort_snap.get("baseline_ids_by_profile")
+    return as_of, baseline_ids
 
-    bundle_dir = Path(args.bundle_dir).resolve()
-    workspace_root = Path(args.workspace_root).resolve()
-    fixture_dir = Path(args.fixture_repo_path).resolve()
-    bundle_data = _load_bundle(bundle_dir)
 
-    suite = build_m29_mutation_suite()
-    watchdog = EvaluationRetentionWatchdog(bundle_dir, retention_seconds=args.retention_seconds)
-    isolation_mgr = DisposableDbMemoryIsolationManager(args.db_url)
-    baseline_mem = isolation_mgr.load_memory_context("taskboard")
-
-    dispatcher = HttpStackCandidateDispatcher(
-        api_base_url=args.api_base_url,
-        db_url=args.db_url,
-        workspace_root=workspace_root,
-        repo_key="taskboard",
-        branch="main",
-        auth_token=args.auth_token,
-        retention_watchdog=watchdog,
-    )
-    reviewer = OpenRouterNeutralReviewerClient(
-        api_key=args.openrouter_api_key,
-        base_url=args.openrouter_base_url,
-    )
-    evaluator = ReadOnlyExternalEvaluator(reviewer_client=reviewer)
-    wm = WorkspaceManager(workspace_root)
-
-    runner = M29MutationRunner(
-        suite=suite,
-        db_url=args.db_url,
-        workspace_manager=wm,
-        baseline_memory_context=baseline_mem,
-        candidate_dispatcher=dispatcher,
-        external_evaluator=evaluator,
-        retention_seconds=args.retention_seconds,
-        fixture_repo_path=fixture_dir,
-        retention_watchdog=watchdog,
-        memory_context_provider=lambda case: isolation_mgr.load_memory_context("taskboard"),
-    )
-
-    print(f"Starting M29 feature/mutation wave ({len(suite.cases)} cases)...")
-    res: M29MutationRunnerResult = runner.run()
-
+def _save_run_results(
+    bundle_dir: Path, bundle_data: dict[str, Any], res: M29MutationRunnerResult
+) -> None:
+    """Save raw entries, sanitized cases, and updated bundle manifest to disk."""
     raw_path = bundle_dir / "raw_entries.json"
     raw_payload = [asdict(r) for r in res.raw_entries]
     raw_path.write_text(json.dumps(raw_payload, indent=2, default=_json_serial), encoding="utf-8")
@@ -219,6 +197,71 @@ def handle_run(args: argparse.Namespace) -> int:
         }
     )
     _save_bundle(bundle_dir, bundle_data)
+
+
+def handle_run(args: argparse.Namespace) -> int:
+    """Execute full 20-case mutation evaluation against disposable stack."""
+    if not args.ack_disposable_mutation_stack:
+        sys.stderr.write(
+            "ERROR: --ack-disposable-mutation-stack is required to operate on disposable stacks.\n"
+        )
+        return 2
+
+    bundle_dir = Path(args.bundle_dir).resolve()
+    workspace_root = Path(args.workspace_root).resolve()
+    fixture_dir = Path(args.fixture_repo_path).resolve()
+    bundle_data = _load_bundle(bundle_dir)
+
+    suite = build_m29_mutation_suite()
+    watchdog = EvaluationRetentionWatchdog(bundle_dir, retention_seconds=args.retention_seconds)
+    isolation_mgr = DisposableDbMemoryIsolationManager(args.db_url)
+    baseline_mem = isolation_mgr.load_memory_context("taskboard")
+
+    as_of, baseline_ids = _extract_cohort_as_of_and_baseline_ids(bundle_data)
+    expected_verifier_sha = (
+        bundle_data.get("verifier_source_sha256") or compute_verifier_source_sha256()
+    )
+
+    dispatcher = HttpStackCandidateDispatcher(
+        api_base_url=args.api_base_url,
+        db_url=args.db_url,
+        workspace_root=workspace_root,
+        repo_key="taskboard",
+        branch="main",
+        auth_token=args.auth_token,
+        retention_watchdog=watchdog,
+    )
+    reviewer = OpenRouterNeutralReviewerClient(
+        api_key=args.openrouter_api_key,
+        base_url=args.openrouter_base_url,
+    )
+    evaluator = ReadOnlyExternalEvaluator(reviewer_client=reviewer)
+    wm = WorkspaceManager(workspace_root)
+
+    def _provide_case_memory(case: M29MutationCase) -> MemoryContext:
+        isolation_mgr.discard_case_memory_writes()
+        return isolation_mgr.load_memory_context("taskboard")
+
+    runner = M29MutationRunner(
+        suite=suite,
+        db_url=args.db_url,
+        workspace_manager=wm,
+        baseline_memory_context=baseline_mem,
+        candidate_dispatcher=dispatcher,
+        external_evaluator=evaluator,
+        retention_seconds=args.retention_seconds,
+        fixture_repo_path=fixture_dir,
+        expected_verifier_sha256=expected_verifier_sha,
+        as_of=as_of,
+        baseline_ids_by_profile=baseline_ids,
+        retention_watchdog=watchdog,
+        memory_context_provider=_provide_case_memory,
+    )
+
+    print(f"Starting M29 feature/mutation wave ({len(suite.cases)} cases)...")
+    res: M29MutationRunnerResult = runner.run()
+
+    _save_run_results(bundle_dir, bundle_data, res)
 
     print(
         f"M29 wave run complete: status={res.status}, "

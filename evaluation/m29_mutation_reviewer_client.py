@@ -66,7 +66,10 @@ def _parse_json_verdict(raw_content: str) -> tuple[bool, tuple[str, ...], str | 
         data = json.loads(text)
         if not isinstance(data, dict):
             return False, ("Verdict payload is not a JSON object",), "invalid_json_shape"
-        passed = bool(data.get("passed", False))
+        if not isinstance(data.get("passed"), bool):
+            err_msg = "Verdict payload missing boolean 'passed' field"
+            return False, (err_msg,), "missing_boolean_passed"
+        passed = data["passed"]
         raw_findings = data.get("blocking_findings") or []
         findings = tuple(str(f) for f in raw_findings) if isinstance(raw_findings, list) else ()
         return passed, findings, None
@@ -108,15 +111,20 @@ class OpenRouterNeutralReviewerClient:
 
     def _parse_response_identity(
         self, response_data: dict[str, Any], manifest: NeutralEvaluatorManifest
-    ) -> ExecutionIdentity:
+    ) -> ExecutionIdentity | None:
         returned_model = response_data.get("model")
         if not returned_model or not isinstance(returned_model, str):
-            return manifest.identity
+            return None
 
         if "/" in returned_model:
             resp_provider, resp_model = returned_model.split("/", 1)
-        else:
+        elif manifest.provider:
             resp_provider, resp_model = manifest.provider, returned_model
+        else:
+            return None
+
+        if not resp_provider or not resp_model:
+            return None
 
         return ExecutionIdentity(
             provider=resp_provider,
@@ -172,6 +180,15 @@ class OpenRouterNeutralReviewerClient:
         self, resp_json: dict[str, Any], manifest: NeutralEvaluatorManifest
     ) -> NeutralReviewOutcome:
         actual_identity = self._parse_response_identity(resp_json, manifest)
+        if actual_identity is None:
+            return NeutralReviewOutcome(
+                passed=False,
+                evaluator_identity=None,
+                evaluator_identity_status="unavailable",
+                fallback_attempted=False,
+                reason="missing_or_invalid_response_model_identity",
+            )
+
         expected_identity = manifest.identity
         if (
             actual_identity.provider != expected_identity.provider
@@ -193,7 +210,8 @@ class OpenRouterNeutralReviewerClient:
             return NeutralReviewOutcome(
                 passed=False,
                 evaluator_identity=actual_identity,
-                evaluator_identity_status="verified",
+                evaluator_identity_status="unavailable",
+                fallback_attempted=False,
                 reason="missing_choices_in_response",
             )
 
@@ -204,7 +222,8 @@ class OpenRouterNeutralReviewerClient:
                 passed=False,
                 blocking_findings=findings,
                 evaluator_identity=actual_identity,
-                evaluator_identity_status="verified",
+                evaluator_identity_status="unavailable",
+                fallback_attempted=False,
                 reason=parse_err,
             )
 
