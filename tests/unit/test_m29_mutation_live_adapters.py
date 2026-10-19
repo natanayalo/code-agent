@@ -10,7 +10,7 @@ from typing import Any
 
 import httpx
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from db.base import Base
@@ -55,6 +55,20 @@ def _make_sample_case() -> M29MutationCase:
     return suite.cases[0]
 
 
+_PASS_VERDICT = json.dumps({"passed": True, "blocking_findings": []})
+
+
+def _make_handle(ws_id: str, ws_path: Path, task_id: str | None = None) -> WorkspaceHandle:
+    return WorkspaceHandle(
+        workspace_id=ws_id,
+        task_id=task_id or f"task-{ws_id}",
+        workspace_path=ws_path,
+        repo_path=ws_path,
+        repo_url="",
+        cleanup_policy=build_evaluation_cleanup_policy(),
+    )
+
+
 def _setup_test_db(db_url: str) -> None:
     engine = create_engine(db_url)
     Base.metadata.create_all(engine)
@@ -69,14 +83,7 @@ class TestEvaluationRetentionWatchdog:
 
         ws_dir = tmp_path / "workspaces" / "ws-1"
         ws_dir.mkdir(parents=True)
-        handle = WorkspaceHandle(
-            workspace_id="ws-1",
-            task_id="task-1",
-            workspace_path=ws_dir,
-            repo_path=ws_dir,
-            repo_url="",
-            cleanup_policy=build_evaluation_cleanup_policy(),
-        )
+        handle = _make_handle("ws-1", ws_dir, task_id="task-1")
 
         now = datetime(2026, 10, 19, 12, 0, 0, tzinfo=UTC)
         rec = watchdog.record_workspace("case-01", "task-1", handle, now=now)
@@ -100,14 +107,7 @@ class TestEvaluationRetentionWatchdog:
 
         ws_dir = tmp_path / "workspaces" / "ws-2"
         ws_dir.mkdir(parents=True)
-        handle = WorkspaceHandle(
-            workspace_id="ws-2",
-            task_id="task-2",
-            workspace_path=ws_dir,
-            repo_path=ws_dir,
-            repo_url="",
-            cleanup_policy=build_evaluation_cleanup_policy(),
-        )
+        handle = _make_handle("ws-2", ws_dir, task_id="task-2")
         watchdog.record_workspace("case-02", "task-2", handle)
         assert len(watchdog.uncleaned_records) == 1
 
@@ -133,14 +133,7 @@ class TestEvaluationRetentionWatchdog:
         t0 = datetime(2026, 10, 19, 10, 0, 0, tzinfo=UTC)
         ws_unexp = ws_root / "ws-unexp"
         ws_unexp.mkdir()
-        h_unexp = WorkspaceHandle(
-            workspace_id="ws-unexp",
-            task_id="t-unexp",
-            workspace_path=ws_unexp,
-            repo_path=ws_unexp,
-            repo_url="",
-            cleanup_policy=build_evaluation_cleanup_policy(),
-        )
+        h_unexp = _make_handle("ws-unexp", ws_unexp, task_id="t-unexp")
         watchdog.record_workspace("case-1", "t-unexp", h_unexp, now=t0)
 
         # ws-expired: provisioned at T0 - 2h, deadline T0 - 1h
@@ -149,15 +142,8 @@ class TestEvaluationRetentionWatchdog:
         git_dir = ws_root / ".code-agent-git" / "ws-exp"
         git_dir.mkdir(parents=True)
         (git_dir / "HEAD").write_text("ref: refs/heads/main\n")
-        h_exp = WorkspaceHandle(
-            workspace_id="ws-exp",
-            task_id="t-exp",
-            workspace_path=ws_exp,
-            repo_path=ws_exp,
-            repo_url="",
-            cleanup_policy=build_evaluation_cleanup_policy(),
-            trusted_git_dir=git_dir,
-        )
+        h_exp = _make_handle("ws-exp", ws_exp, task_id="t-exp")
+        h_exp.trusted_git_dir = git_dir
         watchdog.record_workspace("case-2", "t-exp", h_exp, now=t0 - timedelta(hours=2))
 
         # Sweep at t0: ws-exp is expired, ws-unexp is not
@@ -221,13 +207,7 @@ class TestOpenRouterNeutralReviewerClient:
                 status_code=200,
                 json={
                     "model": "anthropic/claude-3-7-sonnet",
-                    "choices": [
-                        {
-                            "message": {
-                                "content": json.dumps({"passed": True, "blocking_findings": []})
-                            }
-                        }
-                    ],
+                    "choices": [{"message": {"content": _PASS_VERDICT}}],
                 },
             )
 
@@ -265,13 +245,7 @@ class TestOpenRouterNeutralReviewerClient:
                 status_code=200,
                 json={
                     "model": "openai/gpt-4o",  # Mismatched model returned!
-                    "choices": [
-                        {
-                            "message": {
-                                "content": json.dumps({"passed": True, "blocking_findings": []})
-                            }
-                        }
-                    ],
+                    "choices": [{"message": {"content": _PASS_VERDICT}}],
                 },
             )
 
@@ -492,8 +466,6 @@ class TestDisposableDbMemoryIsolationManager:
         assert restored_mem.project[0].memory_key == "k1"
 
         with Session(engine) as session:
-            from sqlalchemy import select
-
             assert session.scalars(select(SessionState)).all() == []
             assert session.scalars(select(MemoryProposal)).all() == []
             assert session.scalars(select(MemoryAdmissionDecision)).all() == []
@@ -522,19 +494,20 @@ class TestDisposableDbMemoryIsolationManager:
 
 
 def _make_mock_task_snapshot_payload(task_id: str, ws_id: str) -> dict[str, Any]:
+    now_iso = datetime.now(UTC).isoformat()
     return {
         "task_id": task_id,
         "session_id": "sess-1",
         "status": "completed",
         "task_text": "sample task",
-        "created_at": datetime.now(UTC).isoformat(),
-        "updated_at": datetime.now(UTC).isoformat(),
+        "created_at": now_iso,
+        "updated_at": now_iso,
         "latest_run": {
             "run_id": "run-1",
             "worker_type": "codex",
             "workspace_id": ws_id,
             "status": "completed",
-            "started_at": datetime.now(UTC).isoformat(),
+            "started_at": now_iso,
             "budget_usage": {
                 "native_agent": {
                     "model_execution": {
@@ -604,8 +577,26 @@ class TestHttpStackCandidateDispatcher:
             httpx_client=client,
         )
 
+        with Session(create_engine(db_url)) as session:
+            session.add(ProjectMemory(repo_url="taskboard", memory_key="pm-init", value={"v": 1}))
+            session.commit()
+
         case = _make_sample_case()
         result = dispatcher.dispatch_case(case, MemoryContext())
+
+        with Session(create_engine(db_url)) as session:
+            pms = session.scalars(select(ProjectMemory)).all()
+            assert len(pms) == 1
+            assert pms[0].memory_key == "pm-init"
+
+        custom_mgr = DisposableDbMemoryIsolationManager(db_url)
+        disp_custom = HttpStackCandidateDispatcher(
+            api_base_url="http://testserver",
+            db_url=db_url,
+            workspace_root=ws_root,
+            memory_isolation_manager=custom_mgr,
+        )
+        assert disp_custom.memory_isolation_manager is custom_mgr
 
         assert result.task_id == task_id
         assert result.task_status == "completed"
@@ -635,21 +626,22 @@ class TestHttpStackCandidateDispatcher:
         ws_root.mkdir(parents=True)
         task_id = "task-hitl-1"
 
+        now_iso = datetime.now(UTC).isoformat()
         snapshot_with_interaction = {
             "task_id": task_id,
             "session_id": "sess-2",
             "status": "paused",
             "task_text": "sample task",
-            "created_at": datetime.now(UTC).isoformat(),
-            "updated_at": datetime.now(UTC).isoformat(),
+            "created_at": now_iso,
+            "updated_at": now_iso,
             "pending_interactions": [
                 {
                     "interaction_id": "int-1",
                     "interaction_type": "approval",
                     "status": "pending",
                     "summary": "approve delete?",
-                    "created_at": datetime.now(UTC).isoformat(),
-                    "updated_at": datetime.now(UTC).isoformat(),
+                    "created_at": now_iso,
+                    "updated_at": now_iso,
                 }
             ],
             "timeline": [],
@@ -689,14 +681,7 @@ class TestHttpStackCandidateDispatcher:
             httpx_client=client,
         )
         case = _make_sample_case()
-        handle = WorkspaceHandle(
-            workspace_id="ws-err",
-            task_id="task-err",
-            workspace_path=ws_root / "ws-err",
-            repo_path=ws_root / "ws-err",
-            repo_url="",
-            cleanup_policy=build_evaluation_cleanup_policy(),
-        )
+        handle = _make_handle("ws-err", ws_root / "ws-err", task_id="task-err")
         cand_res = CandidateTaskExecutionResult(
             task_id="task-err",
             workspace_handle=handle,
@@ -746,10 +731,18 @@ class TestHttpStackCandidateDispatcher:
         assert "-initial" in diff_text
         assert "+modified" in diff_text
 
+        # Add runtime noise directories and untracked files
+        (repo_dir / "artifacts" / "cmd-1").mkdir(parents=True)
+        (repo_dir / "artifacts" / "cmd-1" / "stdout.log").write_text("cmd stdout\n")
+        (repo_dir / ".agent_home").mkdir(parents=True)
+        (repo_dir / ".agent_home" / "session.json").write_text("{}\n")
+        (repo_dir / ".code-agent").mkdir(parents=True)
+        (repo_dir / ".code-agent" / "meta.json").write_text("{}\n")
+
         changed_files = _extract_changed_files(
             repo_dir, target_revision=base_rev, trusted_git_dir=trusted_git
         )
-        assert "file.txt" in changed_files
+        assert changed_files == ("file.txt",)
 
 
 class TestOperatorCliSubcommands:

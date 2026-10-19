@@ -230,6 +230,7 @@ def handle_run(args: argparse.Namespace) -> int:
         branch="main",
         auth_token=args.auth_token,
         retention_watchdog=watchdog,
+        memory_isolation_manager=isolation_mgr,
     )
     reviewer = OpenRouterNeutralReviewerClient(
         api_key=args.openrouter_api_key,

@@ -13,7 +13,7 @@ from typing import Any
 
 import httpx
 from sqlalchemy import create_engine, delete, select
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
 from db.models import (
     MemoryAdmissionDecision,
@@ -44,6 +44,7 @@ from evaluation.provider_reliability_identity import (
 from evaluation.provider_reliability_models import ExecutionIdentity
 from orchestrator.execution_types import TaskSnapshot
 from orchestrator.state import MemoryContext, MemoryEntry, ObservationContextEntry
+from sandbox.audit import _should_ignore_path
 from sandbox.workspace import WorkspaceHandle
 
 LOGGER = logging.getLogger("m29_mutation_dispatcher")
@@ -52,10 +53,8 @@ LOGGER = logging.getLogger("m29_mutation_dispatcher")
 def _build_git_cmd(workspace_path: Path, trusted_git_dir: Path | None = None) -> list[str]:
     cmd = ["git", "-c", "core.hooksPath=/dev/null"]
     if trusted_git_dir is not None and trusted_git_dir.exists():
-        cmd.extend([f"--git-dir={trusted_git_dir}", f"--work-tree={workspace_path}"])
-    else:
-        cmd.extend(["-C", str(workspace_path)])
-    return cmd
+        return [*cmd, f"--git-dir={trusted_git_dir}", f"--work-tree={workspace_path}"]
+    return [*cmd, "-C", str(workspace_path)]
 
 
 def _extract_workspace_diff(
@@ -103,10 +102,13 @@ def _extract_changed_files(
             check=False,
         )
         if proc_diff.returncode == 0:
-            files.update(line.strip() for line in proc_diff.stdout.splitlines() if line.strip())
+            for line in proc_diff.stdout.splitlines():
+                path = line.strip().rstrip("/")
+                if path and not _should_ignore_path(path):
+                    files.add(path)
 
         proc_status = subprocess.run(
-            [*git_cmd, "status", "--porcelain"],
+            [*git_cmd, "status", "--porcelain", "--untracked-files=all"],
             cwd=workspace_path,
             capture_output=True,
             text=True,
@@ -117,8 +119,12 @@ def _extract_changed_files(
                 if len(line) >= 4:
                     status_code = line[:2]
                     file_path = line[3:].strip()
+                    if " -> " in file_path:
+                        file_path = file_path.split(" -> ")[-1].strip()
                     if status_code in ("??", "A ", " M", "M ", "AM", "D ", " D", "R "):
-                        files.add(file_path)
+                        clean_path = file_path.rstrip("/")
+                        if clean_path and not _should_ignore_path(clean_path):
+                            files.add(clean_path)
     except Exception as exc:
         LOGGER.warning("Failed to extract changed files from %s: %s", workspace_path, exc)
     return tuple(sorted(files))
@@ -132,6 +138,21 @@ class DisposableDbMemoryIsolationManager:
         self.engine = create_engine(db_url, echo=False)
         self.session_factory = sessionmaker(bind=self.engine)
         self._baseline_project_memory: dict[tuple[str, str], dict[str, Any]] | None = None
+
+    def _capture_baseline_project_memory(self, session: Session) -> None:
+        if self._baseline_project_memory is None:
+            all_proj = session.scalars(select(ProjectMemory)).all()
+            self._baseline_project_memory = {
+                (pm.repo_url, pm.memory_key): {
+                    "value": pm.value,
+                    "source": pm.source,
+                    "confidence": pm.confidence,
+                    "scope": pm.scope,
+                    "last_verified_at": pm.last_verified_at,
+                    "requires_verification": pm.requires_verification,
+                }
+                for pm in all_proj
+            }
 
     def load_memory_context(self, repo_url: str | None = None) -> MemoryContext:
         """Load frozen MemoryContext asserting empty personal memory store."""
@@ -151,18 +172,7 @@ class DisposableDbMemoryIsolationManager:
             if not proj_rows and repo_url:
                 proj_rows = session.scalars(select(ProjectMemory)).all()
 
-            if self._baseline_project_memory is None:
-                self._baseline_project_memory = {
-                    (pm.repo_url, pm.memory_key): {
-                        "value": pm.value,
-                        "source": pm.source,
-                        "confidence": pm.confidence,
-                        "scope": pm.scope,
-                        "last_verified_at": pm.last_verified_at,
-                        "requires_verification": pm.requires_verification,
-                    }
-                    for pm in proj_rows
-                }
+            self._capture_baseline_project_memory(session)
 
             project_entries = [
                 MemoryEntry(
@@ -234,22 +244,21 @@ class DisposableDbMemoryIsolationManager:
                 for key, row in current_map.items():
                     if key not in self._baseline_project_memory:
                         session.delete(row)
-            else:
-                session.execute(delete(ProjectMemory))
             session.commit()
 
 
 def _extract_failure_kind(snap: TaskSnapshot) -> str | None:
     """Extract failure kind from task last_error or execution plan attempt nodes."""
-    failure_kind = snap.last_error
-    if not failure_kind and snap.execution_plan:
+    if snap.last_error:
+        return snap.last_error
+    if snap.execution_plan:
         for node in reversed(snap.execution_plan.nodes):
             if node.failure_kind:
                 return node.failure_kind
             for attempt in reversed(node.attempts):
                 if attempt.failure_kind:
                     return attempt.failure_kind
-    return failure_kind
+    return None
 
 
 def _extract_candidate_evidence(terminal_snap: TaskSnapshot) -> dict[str, Any]:
@@ -258,31 +267,25 @@ def _extract_candidate_evidence(terminal_snap: TaskSnapshot) -> dict[str, Any]:
 
     artifacts: list[dict[str, Any]] = []
     if terminal_snap.latest_run is not None:
-        if terminal_snap.latest_run.artifact_index:
-            for a in terminal_snap.latest_run.artifact_index:
+        for a in terminal_snap.latest_run.artifact_index or ():
+            artifacts.append(dict(a))
+        for a in terminal_snap.latest_run.artifacts or ():
+            artifacts.append(a.model_dump(mode="json") if hasattr(a, "model_dump") else dict(a))
+    if terminal_snap.execution_plan:
+        for node in terminal_snap.execution_plan.nodes:
+            for a in node.output_artifacts or ():
                 artifacts.append(dict(a))
-        if terminal_snap.latest_run.artifacts:
-            for a in terminal_snap.latest_run.artifacts:
-                artifacts.append(a.model_dump(mode="json") if hasattr(a, "model_dump") else dict(a))
-    if terminal_snap.execution_plan:
-        for node in terminal_snap.execution_plan.nodes:
-            if node.output_artifacts:
-                for a in node.output_artifacts:
-                    artifacts.append(dict(a))
 
-    in_task_repairs = 0
-    if terminal_snap.execution_plan:
-        for node in terminal_snap.execution_plan.nodes:
-            in_task_repairs += max(node.retry_count, max(0, len(node.attempts) - 1))
-    for ev in timeline_events:
-        if "repair" in getattr(ev, "event_type", "").lower():
-            in_task_repairs += 1
+    in_task_repairs = sum(
+        max(node.retry_count, max(0, len(node.attempts) - 1))
+        for node in (terminal_snap.execution_plan.nodes if terminal_snap.execution_plan else ())
+    ) + sum(1 for ev in timeline_events if "repair" in getattr(ev, "event_type", "").lower())
 
-    verification_events: list[str] = []
-    for ev in timeline_events:
-        etype = getattr(ev, "event_type", "")
-        if "verification" in etype.lower() or "verifier" in etype.lower():
-            verification_events.append(etype)
+    verification_events: list[str] = [
+        getattr(ev, "event_type", "")
+        for ev in timeline_events
+        if any(k in getattr(ev, "event_type", "").lower() for k in ("verification", "verifier"))
+    ]
     if terminal_snap.latest_run and terminal_snap.latest_run.verifier_outcome:
         verification_events.append("verifier_outcome_recorded")
     if terminal_snap.execution_plan:
@@ -333,6 +336,7 @@ class HttpStackCandidateDispatcher(CandidateDispatcher):
         max_poll_seconds: float = 1200.0,
         retention_watchdog: EvaluationRetentionWatchdog | None = None,
         httpx_client: httpx.Client | None = None,
+        memory_isolation_manager: DisposableDbMemoryIsolationManager | None = None,
     ) -> None:
         self.api_base_url = api_base_url.rstrip("/")
         self.db_url = db_url
@@ -346,7 +350,9 @@ class HttpStackCandidateDispatcher(CandidateDispatcher):
         self._external_client = httpx_client
         self._db_engine = create_engine(db_url, echo=False)
         self._session_factory = sessionmaker(bind=self._db_engine)
-        self.memory_isolation_manager = DisposableDbMemoryIsolationManager(db_url)
+        self.memory_isolation_manager = (
+            memory_isolation_manager or DisposableDbMemoryIsolationManager(db_url)
+        )
 
     def _get_client(self) -> httpx.Client:
         if self._external_client is not None:
@@ -464,14 +470,12 @@ class HttpStackCandidateDispatcher(CandidateDispatcher):
                 WorkerRun(budget_usage=snapshot.latest_run.budget_usage)
             )
             if status == "verified" and raw_meta:
-                return (
-                    ExecutionIdentity(
-                        provider=raw_meta.get("provider", ""),
-                        model=raw_meta.get("model", ""),
-                        reasoning_effort=raw_meta.get("reasoning_effort"),
-                    ),
-                    "verified",
+                ident = ExecutionIdentity(
+                    provider=raw_meta.get("provider", ""),
+                    model=raw_meta.get("model", ""),
+                    reasoning_effort=raw_meta.get("reasoning_effort"),
                 )
+                return ident, "verified"
             if status == "mixed":
                 return None, "mixed_execution_identity"
 
@@ -486,6 +490,10 @@ class HttpStackCandidateDispatcher(CandidateDispatcher):
     ) -> CandidateTaskExecutionResult:
         """Submit case via POST /tasks, poll until terminal, and extract outcome."""
         try:
+            if self.memory_isolation_manager._baseline_project_memory is None:
+                with self.memory_isolation_manager.session_factory() as session:
+                    self.memory_isolation_manager._capture_baseline_project_memory(session)
+
             start_time = datetime.now(UTC)
             initial_snap = self._submit_task(case)
             task_id = initial_snap.task_id
