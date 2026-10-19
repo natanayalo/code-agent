@@ -13,8 +13,11 @@ smokes (`evaluation/m29_mutation_isolation.py`,
 and baseline regression verifier (`evaluation/m29_mutation_oracles.py`), concrete
 `ReadOnlyExternalEvaluator` with blinded neutral reviewer boundary and workspace
 immutability check (`evaluation/m29_mutation_verifier.py`), preflight verifier
-hash check, and pinned deterministic fixture revision
-`228071722c645e813af16053e56d007c25e9f127` are implemented and verified; the
+hash check, pinned deterministic fixture revision
+`228071722c645e813af16053e56d007c25e9f127`, concrete runtime adapters
+(`HttpStackCandidateDispatcher`, `DisposableDbMemoryIsolationManager`,
+`OpenRouterNeutralReviewerClient`, `EvaluationRetentionWatchdog`), and operator
+wave CLI (`scripts/e2e/run_m29_mutation_wave.py`) are implemented and verified; the
 runner execution loop and live collection remain gated on disposable stack launch.
 This document defines the evaluation only. It does not start live cases or change
 production routing.
