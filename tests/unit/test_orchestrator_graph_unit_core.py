@@ -125,7 +125,9 @@ def test_build_worker_request_from_state():
     assert request.task_spec is not None
     assert request.task_spec["goal"] == "Add worker interface"
     assert request.constraints == {"requires_approval": False}
-    assert request.budget == {"max_minutes": 15}
+    assert request.budget["max_minutes"] == 15
+    assert "budget_spec" in request.budget
+    assert "hierarchical_budget" in request.budget
     assert request.worker_profile == "codex-native-executor"
     assert request.runtime_mode == "native_agent"
     assert request.runtime_manifest is not None
@@ -133,7 +135,9 @@ def test_build_worker_request_from_state():
     assert request.runtime_manifest["worker"]["worker_profile"] == "codex-native-executor"
     assert request.runtime_manifest["worker"]["runtime_mode"] == "native_agent"
     assert request.runtime_manifest["task"]["delivery_mode"] == "workspace"
-    assert request.runtime_manifest["task"]["budget"] == {"max_minutes": 15}
+    assert request.runtime_manifest["task"]["budget"]["max_minutes"] == 15
+    assert "budget_spec" in request.runtime_manifest["task"]["budget"]
+    assert "hierarchical_budget" in request.runtime_manifest["task"]["budget"]
     assert request.runtime_manifest["maintenance_actions"][0]["request_only"] is True
 
 

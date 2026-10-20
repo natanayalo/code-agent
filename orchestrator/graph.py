@@ -48,6 +48,13 @@ from orchestrator.constants import (
 )
 from orchestrator.context_envelope import assemble_context_envelope
 from orchestrator.decomposition import decompose_task_plan
+from orchestrator.hierarchical_budget import (
+    attach_hierarchical_budget_usage,
+    check_pre_dispatch_budget_gate,
+    compute_hierarchical_budget_ledger,
+    effective_slice_budget,
+    resolve_budget_spec,
+)
 from orchestrator.node_execution import (
     NodeActivityInProgress,
     NodeActivityRequest,
@@ -182,14 +189,31 @@ def _resolve_orchestrator_timeout_seconds(state: OrchestratorState) -> int:
     if explicit_timeout is not None:
         return explicit_timeout
 
+    active_slice: Literal["primary", "node", "repair"] = (
+        "repair"
+        if state.completion_loop.phase == "repair_requested"
+        else "node"
+        if state.current_node_id
+        or (state.decomposed_plan and state.decomposed_plan.status == "decomposed")
+        else "primary"
+    )
+    slice_budget = effective_slice_budget(state, active_slice=active_slice)
+    slice_timeout = coerce_positive_int_like(slice_budget.get("worker_timeout_seconds"))
+
     worker_timeout_seconds = coerce_positive_int_like(budget.get("worker_timeout_seconds"))
     if worker_timeout_seconds is None:
         max_minutes = coerce_positive_int_like(budget.get("max_minutes"))
         if max_minutes is not None:
             worker_timeout_seconds = max_minutes * 60
 
-    if worker_timeout_seconds is not None:
-        return worker_timeout_seconds + ORCHESTRATOR_TIMEOUT_GRACE_SECONDS
+    effective_worker_timeout = (
+        min(filter(None, [slice_timeout, worker_timeout_seconds]))
+        if (slice_timeout or worker_timeout_seconds)
+        else None
+    )
+
+    if effective_worker_timeout is not None:
+        return effective_worker_timeout + ORCHESTRATOR_TIMEOUT_GRACE_SECONDS
 
     return DEFAULT_ORCHESTRATOR_TIMEOUT_SECONDS
 
@@ -974,6 +998,7 @@ def _build_worker_request_runtime_manifest(
     read_only: bool,
     task_spec: TaskSpec | None = None,
     model_execution: ModelExecutionMetadata | None = None,
+    budget_override: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the frozen runtime manifest payload for a worker request."""
     route = state.route
@@ -999,7 +1024,7 @@ def _build_worker_request_runtime_manifest(
         task_spec=task_spec or state.task_spec,
         read_only=read_only,
         network_enabled=False,
-        budget=state.task.budget,
+        budget=budget_override or state.task.budget,
         requested_tools=state.task.tools,
     ).model_dump(mode="json")
 
@@ -1099,6 +1124,14 @@ def _build_worker_request(
     else:
         read_only = read_only_constraint
 
+    active_slice: Literal["primary", "node", "repair"] = (
+        "repair"
+        if state.completion_loop.phase == "repair_requested"
+        else "node"
+        if task_spec_override is not None
+        else "primary"
+    )
+    slice_budget = effective_slice_budget(state, active_slice=active_slice)
     model_execution = _resolve_state_model_execution(state)
     runtime_manifest = _build_worker_request_runtime_manifest(
         state,
@@ -1107,6 +1140,7 @@ def _build_worker_request(
         read_only=bool(read_only),
         task_spec=effective_task_spec,
         model_execution=model_execution,
+        budget_override=slice_budget,
     )
 
     return WorkerRequest(
@@ -1122,7 +1156,7 @@ def _build_worker_request(
         if effective_task_spec is not None
         else None,
         constraints=constraints,
-        budget=dict(state.task.budget),
+        budget=slice_budget,
         secrets=dict((state.task.secrets or {}) | {"POETRY_VIRTUALENVS_IN_PROJECT": "true"}),
         secret_refs=state.task.secret_refs,
         tools=state.task.tools,
@@ -1337,7 +1371,9 @@ async def _execute_decomposed_node(
     return result, None
 
 
-def _aggregate_decomposed_results(outcomes: list[NodeOutcome]) -> WorkerResult:
+def _aggregate_decomposed_results(
+    outcomes: list[NodeOutcome], state: OrchestratorState | None = None
+) -> WorkerResult:
     """Merge sequential node results into the existing parent worker contract."""
     failed = next(
         (outcome for outcome in outcomes if outcome.status in ("failed", "blocked")),
@@ -1377,6 +1413,11 @@ def _aggregate_decomposed_results(outcomes: list[NodeOutcome]) -> WorkerResult:
         for outcome in outcomes
         if outcome.status != "skipped" and outcome.result is not None
     ]
+    hierarchical_budget = (
+        compute_hierarchical_budget_ledger(state, active_slice="node").model_dump(mode="json")
+        if state is not None
+        else None
+    )
     return WorkerResult(
         status=status,
         summary="Sequential DAG results:\n" + "\n".join(f"- {summary}" for summary in summaries),
@@ -1388,6 +1429,7 @@ def _aggregate_decomposed_results(outcomes: list[NodeOutcome]) -> WorkerResult:
         budget_usage={
             "node_count": len(outcomes),
             "nodes": {outcome.node_id: outcome.result.budget_usage or {} for outcome in outcomes},
+            **({"hierarchical_budget": hierarchical_budget} if hierarchical_budget else {}),
         },
         commands_run=all_commands,
         files_changed=changed_files,
@@ -1567,10 +1609,46 @@ async def _await_decomposed_nodes(
             }
             for dependency in dependencies
         }
-        node_state = state.model_copy(update={"task_plan": None, "task_spec": ready_node.task_spec})
+        budget_spec = resolve_budget_spec(state.task.budget, constraints=state.task.constraints)
+        allowed_attempts = min(ready_node.max_attempts, budget_spec.node.max_node_attempts)
         attempts = 0
         result: WorkerResult | None = None
-        while attempts < ready_node.max_attempts:
+        attempt_outcomes = list(outcomes)
+        while attempts < allowed_attempts:
+            node_state = state.model_copy(
+                update={
+                    "task_plan": None,
+                    "task_spec": ready_node.task_spec,
+                    "node_outcomes": attempt_outcomes,
+                }
+            )
+            gate_eligible, gate_reason, gate_ledger = check_pre_dispatch_budget_gate(
+                node_state, active_slice="node"
+            )
+            if not gate_eligible:
+                model_exec = _resolve_state_model_execution(node_state)
+                result = WorkerResult(
+                    status="failure",
+                    failure_kind="budget_exceeded",
+                    execution_not_started=True,
+                    next_action_hint="await_manual_follow_up",
+                    summary=(
+                        f"Node execution halted: hierarchical budget exhausted ({gate_reason})."
+                    ),
+                    budget_usage={
+                        "hierarchical_budget": gate_ledger.model_dump(mode="json"),
+                        **(
+                            {
+                                "native_agent": {
+                                    "model_execution": model_exec.model_dump(mode="json")
+                                }
+                            }
+                            if model_exec
+                            else {}
+                        ),
+                    },
+                )
+                break
             attempts += 1
             parent_task_text = state.normalized_task_text or state.task.task_text
             node_task_text = (
@@ -1631,7 +1709,7 @@ async def _await_decomposed_nodes(
             last_manifest = request.runtime_manifest
             result, persisted_outcome = await _execute_decomposed_node(
                 session_factory=session_factory,
-                state=state,
+                state=node_state,
                 worker=worker,
                 request=request,
                 node=ready_node,
@@ -1650,8 +1728,19 @@ async def _await_decomposed_nodes(
                     request, worker, state, node_envelope_artifact
                 )
                 break
+            result = attach_hierarchical_budget_usage(result, node_state, active_slice="node")
             if result.status == "success" or result.next_action_hint == "request_higher_permission":
                 break
+            attempt_outcomes = [o for o in attempt_outcomes if o.node_id != ready_node.node_id]
+            attempt_outcomes.append(
+                NodeOutcome(
+                    node_id=ready_node.node_id,
+                    status="failed",
+                    result=result,
+                    dependencies=ready_node.depends_on,
+                    attempts=attempts,
+                )
+            )
         if result is None:
             logger.warning(
                 "Node execution completed without a result, falling back to failure default."
@@ -1684,7 +1773,8 @@ async def _await_decomposed_nodes(
         if result.next_action_hint == "request_higher_permission":
             break
 
-    return _aggregate_decomposed_results(outcomes), outcomes, last_manifest
+    terminal_state = state.model_copy(update={"node_outcomes": outcomes})
+    return _aggregate_decomposed_results(outcomes, state=terminal_state), outcomes, last_manifest
 
 
 def _default_worker_result_provider(request: WorkerRequest) -> WorkerResult:
@@ -2478,7 +2568,10 @@ def decompose_task(state_input: OrchestratorState) -> dict[str, Any]:
             "current_step": "decompose_task",
             "decomposed_plan": state.decomposed_plan.model_dump(mode="json"),
         }
-    decomposition = decompose_task_plan(state.task_plan, state.task_spec)
+    budget_spec = resolve_budget_spec(state.task.budget, constraints=state.task.constraints)
+    decomposition = decompose_task_plan(
+        state.task_plan, state.task_spec, max_node_attempts=budget_spec.node.max_node_attempts
+    )
     if decomposition.status == "decomposed":
         message = f"task decomposed into {len(decomposition.nodes)} sequential nodes"
     elif decomposition.status == "fallback":
@@ -3970,71 +4063,110 @@ def build_await_result_node(
                             agg_manifest["context_envelope_status"] = "disabled"
                         request = request.model_copy(update={"runtime_manifest": agg_manifest})
                     else:
-                        request = _build_worker_request(state)
-                        envelope_artifact: ArtifactReference | None = None
-                        envelope_status = "disabled"
-                        if context_envelope_enabled:
-                            ws_path = (
-                                workspace_path_resolver(request.workspace_id)
-                                if workspace_path_resolver and request.workspace_id
-                                else None
+                        active_slice: Literal["primary", "node", "repair"] = (
+                            "repair" if repair_execution else "primary"
+                        )
+                        gate_eligible, gate_reason, gate_ledger = check_pre_dispatch_budget_gate(
+                            state, active_slice=active_slice
+                        )
+                        if not gate_eligible:
+                            model_exec = _resolve_state_model_execution(state)
+                            result = WorkerResult(
+                                status="failure",
+                                failure_kind="budget_exceeded",
+                                execution_not_started=True,
+                                next_action_hint="await_manual_follow_up",
+                                summary=(
+                                    "Task execution halted: hierarchical budget "
+                                    f"exhausted ({gate_reason})."
+                                ),
+                                budget_usage={
+                                    "hierarchical_budget": gate_ledger.model_dump(mode="json"),
+                                    **(
+                                        {
+                                            "native_agent": {
+                                                "model_execution": model_exec.model_dump(
+                                                    mode="json"
+                                                )
+                                            }
+                                        }
+                                        if model_exec
+                                        else {}
+                                    ),
+                                },
                             )
-                            trusted_git = (
-                                ws_path.parent / ".code-agent-git" / request.workspace_id
-                                if ws_path and request.workspace_id
-                                else None
-                            )
-                            trusted_dir = (
-                                trusted_git if trusted_git and trusted_git.is_dir() else None
-                            )
-                            envelope, envelope_status = assemble_context_envelope(
-                                task_id=state.task.task_id or "",
-                                session_id=state.session.session_id if state.session else None,
-                                node_id=None,
-                                dispatch_role="primary",
-                                logical_attempt=state.attempt_count or 1,
-                                task_spec=state.task_spec,
-                                task_text=request.task_text,
-                                memory_context=state.memory,
-                                worker_request=request,
-                                prior_node_context=None,
-                                workspace_path=ws_path,
-                                trusted_git_dir=trusted_dir,
-                            )
-                            if envelope is not None:
-                                envelope_dump = envelope.model_dump(mode="json")
-                                request = request.model_copy(
-                                    update={"context_envelope": copy.deepcopy(envelope_dump)}
+                            progress_message = "budget exhausted before dispatch"
+                            request = _build_worker_request(state)
+                        else:
+                            request = _build_worker_request(state)
+                            envelope_artifact: ArtifactReference | None = None
+                            envelope_status = "disabled"
+                            if context_envelope_enabled:
+                                ws_path = (
+                                    workspace_path_resolver(request.workspace_id)
+                                    if workspace_path_resolver and request.workspace_id
+                                    else None
                                 )
-                                envelope_artifact = ArtifactReference(
-                                    name="context_envelope",
-                                    uri=f"envelope://{envelope.envelope_id}",
-                                    artifact_type="context_envelope",
-                                    artifact_metadata=copy.deepcopy(envelope_dump),
+                                trusted_git = (
+                                    ws_path.parent / ".code-agent-git" / request.workspace_id
+                                    if ws_path and request.workspace_id
+                                    else None
                                 )
-                        curr_manifest = dict(request.runtime_manifest or {})
-                        curr_manifest["context_envelope_status"] = envelope_status
-                        request = request.model_copy(update={"runtime_manifest": curr_manifest})
+                                trusted_dir = (
+                                    trusted_git if trusted_git and trusted_git.is_dir() else None
+                                )
+                                envelope, envelope_status = assemble_context_envelope(
+                                    task_id=state.task.task_id or "",
+                                    session_id=state.session.session_id if state.session else None,
+                                    node_id=None,
+                                    dispatch_role="primary",
+                                    logical_attempt=state.attempt_count or 1,
+                                    task_spec=state.task_spec,
+                                    task_text=request.task_text,
+                                    memory_context=state.memory,
+                                    worker_request=request,
+                                    prior_node_context=None,
+                                    workspace_path=ws_path,
+                                    trusted_git_dir=trusted_dir,
+                                )
+                                if envelope is not None:
+                                    envelope_dump = envelope.model_dump(mode="json")
+                                    request = request.model_copy(
+                                        update={"context_envelope": copy.deepcopy(envelope_dump)}
+                                    )
+                                    envelope_artifact = ArtifactReference(
+                                        name="context_envelope",
+                                        uri=f"envelope://{envelope.envelope_id}",
+                                        artifact_type="context_envelope",
+                                        artifact_metadata=copy.deepcopy(envelope_dump),
+                                    )
+                            curr_manifest = dict(request.runtime_manifest or {})
+                            curr_manifest["context_envelope_status"] = envelope_status
+                            request = request.model_copy(update={"runtime_manifest": curr_manifest})
 
-                        logical_key = (
-                            f"{state.task.task_id}:attempt:{state.attempt_count or 1}:primary"
-                        )
-                        result, progress_message = await execute_with_preflight(
-                            bound_worker,
-                            request,
-                            worker_type=worker_type or "unknown",
-                            session_id=request.session_id,
-                            timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
-                            diagnostics_service=diagnostics_service,
-                            secret_registry=secret_registry,
-                            task_id=state.task.task_id,
-                            attempt_count=state.attempt_count or 1,
-                            logical_execution_key=logical_key,
-                        )
-                        if result is not None and envelope_artifact is not None:
-                            result = result.model_copy(
-                                update={"artifacts": [*result.artifacts, envelope_artifact]}
+                            logical_key = (
+                                f"{state.task.task_id}:attempt:{state.attempt_count or 1}:primary"
                             )
+                            result, progress_message = await execute_with_preflight(
+                                bound_worker,
+                                request,
+                                worker_type=worker_type or "unknown",
+                                session_id=request.session_id,
+                                timeout_seconds=_resolve_orchestrator_timeout_seconds(state),
+                                diagnostics_service=diagnostics_service,
+                                secret_registry=secret_registry,
+                                task_id=state.task.task_id,
+                                attempt_count=state.attempt_count or 1,
+                                logical_execution_key=logical_key,
+                            )
+                            if result is not None and envelope_artifact is not None:
+                                result = result.model_copy(
+                                    update={"artifacts": [*result.artifacts, envelope_artifact]}
+                                )
+                            if result is not None:
+                                result = attach_hierarchical_budget_usage(
+                                    result, state, active_slice=active_slice
+                                )
                     if result.workspace_id is None and state.dispatch.workspace_id:
                         result = result.model_copy(
                             update={"workspace_id": state.dispatch.workspace_id}

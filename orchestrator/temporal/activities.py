@@ -51,6 +51,7 @@ from orchestrator.graph import (
     _build_worker_request,
     _effective_input_evidence,
     _resolve_orchestrator_timeout_seconds,
+    _resolve_state_model_execution,
     _session_state_update_from_result,
     _skipped_node_result,
     build_await_result_node,
@@ -63,6 +64,12 @@ from orchestrator.graph import (
     check_approval,
     execute_with_preflight,
     summarize_result,
+)
+from orchestrator.hierarchical_budget import (
+    attach_hierarchical_budget_usage,
+    check_pre_dispatch_budget_gate,
+    compute_hierarchical_budget_ledger,
+    resolve_budget_spec,
 )
 from orchestrator.node_execution import (
     CLAIM_HEARTBEAT_SECONDS,
@@ -126,6 +133,7 @@ from repositories import (
 from sandbox import DEFAULT_SECRET_REGISTRY
 from sandbox.scratch import scratch_namespace_component
 from workers import ArtifactReference, WorkerResult
+from workers.model_config import stamp_native_agent_model_execution
 
 logger = logging.getLogger(__name__)
 
@@ -1565,6 +1573,7 @@ class TaskExecutionActivities:
                     effective_read_only = bool(effective_request.read_only) and (
                         effective_manifest.get("task", {}).get("read_only") is True
                     )
+                    node_ledger = compute_hierarchical_budget_ledger(state, active_slice="node")
                     if not (
                         fanout_contract_enabled
                         and self.service.decomposed_fanout_enabled
@@ -1583,6 +1592,8 @@ class TaskExecutionActivities:
                                 for persisted in plan.nodes
                             ),
                             fanout_disabled=state.fanout_disabled_for_remainder,
+                            max_concurrent_nodes=node_ledger.max_concurrent_nodes,
+                            remaining_worker_calls=node_ledger.remaining_worker_calls,
                         )
                     ):
                         return singleton
@@ -1653,6 +1664,8 @@ class TaskExecutionActivities:
                             },
                             has_unresolved_blocker=False,
                             fanout_disabled=state.fanout_disabled_for_remainder,
+                            max_concurrent_nodes=node_ledger.max_concurrent_nodes,
+                            remaining_worker_calls=node_ledger.remaining_worker_calls,
                         )
                     ):
                         return singleton
@@ -1806,6 +1819,25 @@ class TaskExecutionActivities:
         selected_worker = _resolve_selected_worker(self.service.worker, selected_worker_type)
 
         async def _execute_worker() -> WorkerResult:
+            gate_eligible, gate_reason, gate_ledger = check_pre_dispatch_budget_gate(
+                state, active_slice="node"
+            )
+            if not gate_eligible:
+                model_exec = _resolve_state_model_execution(state)
+                fail_result = WorkerResult(
+                    status="failure",
+                    failure_kind="budget_exceeded",
+                    execution_not_started=True,
+                    next_action_hint="await_manual_follow_up",
+                    summary=(
+                        f"DAG node execution halted: hierarchical budget exhausted ({gate_reason})."
+                    ),
+                    budget_usage={"hierarchical_budget": gate_ledger.model_dump(mode="json")},
+                )
+                if model_exec:
+                    fail_result = stamp_native_agent_model_execution(fail_result, model_exec)
+                return fail_result
+
             diagnostics_service = ProviderDiagnosticsService(
                 secret_registry=getattr(self.service, "secret_registry", DEFAULT_SECRET_REGISTRY),
                 secret_env=getattr(selected_worker, "secret_env", None),
@@ -1823,6 +1855,8 @@ class TaskExecutionActivities:
                 logical_execution_key=node_activity.logical_activity_key,
                 diagnostics_service=diagnostics_service,
             )
+            if result is not None:
+                result = attach_hierarchical_budget_usage(result, state, active_slice="node")
             if result is not None and node_envelope_artifact is not None:
                 result = result.model_copy(
                     update={"artifacts": [*result.artifacts, node_envelope_artifact]}
@@ -2028,14 +2062,18 @@ class TaskExecutionActivities:
 
                 outcomes = restore_merged_node_outcomes(plan, session=session)
                 state.node_outcomes = outcomes
-                state.result = _aggregate_decomposed_results(outcomes)
+                state.result = _aggregate_decomposed_results(outcomes, state=state)
                 current = next(
                     (outcome for outcome in outcomes if outcome.node_id == node.node_id), None
                 )
                 if current is None:
                     raise ValueError(f"Outcome for node {node.node_id} was not found after merge.")
+                budget_spec = resolve_budget_spec(
+                    state.task.budget, constraints=state.task.constraints
+                )
+                allowed_attempts = min(contract.max_attempts, budget_spec.node.max_node_attempts)
                 if current.status == "blocked":
-                    if current.attempts >= contract.max_attempts:
+                    if current.attempts >= allowed_attempts:
                         ExecutionPlanRepository(session).update_node(
                             plan_id=plan.id,
                             node_id=node.node_id,
@@ -2053,7 +2091,13 @@ class TaskExecutionActivities:
                 if current.result.failure_kind == "read_only_violation":
                     state.fanout_disabled_for_remainder = True
                     return NodeWaveMergeResult(continuation="fail_task")
-                if current.status == "failed" and current.attempts < contract.max_attempts:
+                node_ledger = compute_hierarchical_budget_ledger(state, active_slice="node")
+                if (
+                    current.status == "failed"
+                    and current.attempts < allowed_attempts
+                    and node_ledger.remaining_worker_calls > 0
+                    and node_ledger.remaining_wall_time_seconds > 0
+                ):
                     ExecutionPlanRepository(session).update_node(
                         plan_id=plan.id,
                         node_id=node.node_id,
@@ -2175,22 +2219,29 @@ class TaskExecutionActivities:
                 )
             outcomes = restore_merged_node_outcomes(plan, session=session)
             state.node_outcomes = outcomes
-            state.result = _aggregate_decomposed_results(outcomes)
+            state.result = _aggregate_decomposed_results(outcomes, state=state)
             continuation: Literal["continue", "retry_node", "await_permission", "fail_task"] = (
                 "continue"
             )
             blocked: NodeOutcome | None = None
             if missing_evidence:
                 continuation = "fail_task"
+            budget_spec = resolve_budget_spec(state.task.budget, constraints=state.task.constraints)
+            node_ledger = compute_hierarchical_budget_ledger(state, active_slice="node")
             for outcome in outcomes:
                 contract = contracts.get(outcome.node_id)
+                allowed_attempts = (
+                    min(contract.max_attempts, budget_spec.node.max_node_attempts)
+                    if contract
+                    else budget_spec.node.max_node_attempts
+                )
                 if outcome.result.failure_kind == "read_only_violation":
                     state.fanout_disabled_for_remainder = True
                     continuation = "fail_task"
                 if outcome.status == "blocked" and blocked is None:
                     blocked = outcome
                     state.fanout_disabled_for_remainder = True
-                    if contract is None or outcome.attempts >= contract.max_attempts:
+                    if contract is None or outcome.attempts >= allowed_attempts:
                         ExecutionPlanRepository(session).update_node(
                             plan_id=plan.id,
                             node_id=outcome.node_id,
@@ -2204,9 +2255,11 @@ class TaskExecutionActivities:
                 elif (
                     outcome.status == "failed"
                     and contract
-                    and outcome.attempts < contract.max_attempts
+                    and outcome.attempts < allowed_attempts
                     and outcome.result.failure_kind != "read_only_violation"
                     and continuation != "fail_task"
+                    and node_ledger.remaining_worker_calls > 0
+                    and node_ledger.remaining_wall_time_seconds > 0
                 ):
                     ExecutionPlanRepository(session).update_node(
                         plan_id=plan.id,

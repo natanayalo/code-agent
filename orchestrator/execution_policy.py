@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 
 from db.enums import TaskStatus, WorkerRunStatus, WorkerType, coerce_worker_type
 from orchestrator.acceptance import task_acceptance_rejection
+from orchestrator.hierarchical_budget import resolve_budget_spec
 from orchestrator.state import OrchestratorState
 from tools.numeric import coerce_non_negative_int_like, coerce_positive_int_like
 
@@ -36,6 +37,22 @@ DEFAULT_EXECUTION_BUDGETS: dict[str, dict[str, int]] = {
         "max_tool_calls": 24,
         "max_shell_commands": 24,
         "max_retries": 2,
+        "max_task_wall_time_seconds": 1200,
+        "max_worker_calls": 6,
+        "max_concurrent_nodes": 2,
+        "max_node_attempts": 2,
+        "max_repair_passes": 2,
+        "max_review_repair_passes": 1,
+        "node_timeout_seconds": 300,
+        "repair_timeout_seconds": 300,
+        "node_max_iterations": 6,
+        "repair_max_iterations": 5,
+        "node_max_tool_calls": 16,
+        "repair_max_tool_calls": 12,
+        "node_max_shell_commands": 16,
+        "repair_max_shell_commands": 12,
+        "node_max_retries": 1,
+        "repair_max_retries": 1,
     },
     UNATTENDED_EXECUTION_MODE: {
         "max_iterations": 5,
@@ -43,6 +60,22 @@ DEFAULT_EXECUTION_BUDGETS: dict[str, dict[str, int]] = {
         "max_tool_calls": 12,
         "max_shell_commands": 12,
         "max_retries": 1,
+        "max_task_wall_time_seconds": 600,
+        "max_worker_calls": 4,
+        "max_concurrent_nodes": 2,
+        "max_node_attempts": 2,
+        "max_repair_passes": 2,
+        "max_review_repair_passes": 1,
+        "node_timeout_seconds": 180,
+        "repair_timeout_seconds": 180,
+        "node_max_iterations": 4,
+        "repair_max_iterations": 3,
+        "node_max_tool_calls": 8,
+        "repair_max_tool_calls": 8,
+        "node_max_shell_commands": 8,
+        "repair_max_shell_commands": 8,
+        "node_max_retries": 1,
+        "repair_max_retries": 1,
     },
 }
 GLOBAL_BUDGET_CAPS: dict[str, int] = {
@@ -56,6 +89,22 @@ GLOBAL_BUDGET_CAPS: dict[str, int] = {
     "max_retries": 10,
     "max_verifier_passes": 5,
     "max_observation_characters": 12000,
+    "max_task_wall_time_seconds": 1800,
+    "max_worker_calls": 16,
+    "max_concurrent_nodes": 2,
+    "max_node_attempts": 3,
+    "max_repair_passes": 4,
+    "max_review_repair_passes": 3,
+    "node_timeout_seconds": 900,
+    "repair_timeout_seconds": 900,
+    "node_max_iterations": 20,
+    "repair_max_iterations": 20,
+    "node_max_tool_calls": 100,
+    "repair_max_tool_calls": 100,
+    "node_max_shell_commands": 100,
+    "repair_max_shell_commands": 100,
+    "node_max_retries": 10,
+    "repair_max_retries": 10,
 }
 SCOUT_BUDGET_CAPS: dict[str, Any] = {
     "execution_mode": UNATTENDED_EXECUTION_MODE,
@@ -64,6 +113,23 @@ SCOUT_BUDGET_CAPS: dict[str, Any] = {
     "max_tool_calls": 8,
     "max_shell_commands": 8,
     "max_retries": 0,
+    "max_task_wall_time_seconds": 180,
+    "max_worker_calls": 1,
+    "max_concurrent_nodes": 1,
+    "max_node_attempts": 1,
+    "max_repair_passes": 0,
+    "max_verifier_passes": 0,
+    "max_review_repair_passes": 0,
+    "node_timeout_seconds": 180,
+    "repair_timeout_seconds": 180,
+    "node_max_iterations": 3,
+    "repair_max_iterations": 3,
+    "node_max_tool_calls": 8,
+    "repair_max_tool_calls": 8,
+    "node_max_shell_commands": 8,
+    "repair_max_shell_commands": 8,
+    "node_max_retries": 0,
+    "repair_max_retries": 0,
 }
 DEEP_SCOUT_PER_PHASE_BUDGET_CAPS: dict[str, Any] = {
     "execution_mode": UNATTENDED_EXECUTION_MODE,
@@ -72,12 +138,54 @@ DEEP_SCOUT_PER_PHASE_BUDGET_CAPS: dict[str, Any] = {
     "max_tool_calls": 16,
     "max_shell_commands": 16,
     "max_retries": 0,
+    "max_task_wall_time_seconds": 720,
+    "max_worker_calls": 2,
+    "max_concurrent_nodes": 1,
+    "max_node_attempts": 1,
+    "max_repair_passes": 0,
+    "max_verifier_passes": 0,
+    "max_review_repair_passes": 0,
+    "node_timeout_seconds": 360,
+    "repair_timeout_seconds": 360,
+    "node_max_iterations": 5,
+    "repair_max_iterations": 5,
+    "node_max_tool_calls": 16,
+    "repair_max_tool_calls": 16,
+    "node_max_shell_commands": 16,
+    "repair_max_shell_commands": 16,
+    "node_max_retries": 0,
+    "repair_max_retries": 0,
 }
 NON_NEGATIVE_BUDGET_KEYS = frozenset(
-    {"max_retries", "max_verifier_passes", "max_tool_calls", "max_shell_commands"}
+    {
+        "max_retries",
+        "max_verifier_passes",
+        "max_tool_calls",
+        "max_shell_commands",
+        "max_repair_passes",
+        "max_review_repair_passes",
+        "node_max_tool_calls",
+        "repair_max_tool_calls",
+        "node_max_shell_commands",
+        "repair_max_shell_commands",
+        "node_max_retries",
+        "repair_max_retries",
+    }
 )
 NON_NEGATIVE_DEFAULT_BUDGET_KEYS = frozenset(
-    {"max_retries", "max_tool_calls", "max_shell_commands"}
+    {
+        "max_retries",
+        "max_tool_calls",
+        "max_shell_commands",
+        "max_repair_passes",
+        "max_review_repair_passes",
+        "node_max_tool_calls",
+        "repair_max_tool_calls",
+        "node_max_shell_commands",
+        "repair_max_shell_commands",
+        "node_max_retries",
+        "repair_max_retries",
+    }
 )
 
 
@@ -142,6 +250,27 @@ def _apply_execution_budget_policy(
         elif key in effective_budget:
             effective_budget.pop(key, None)
 
+    worker_timeout = effective_budget.get("worker_timeout_seconds", 300)
+    effective_budget["max_task_wall_time_seconds"] = max(
+        effective_budget.get("max_task_wall_time_seconds", worker_timeout),
+        worker_timeout,
+    )
+    if "node_timeout_seconds" in effective_budget:
+        effective_budget["node_timeout_seconds"] = min(
+            effective_budget["node_timeout_seconds"],
+            worker_timeout,
+            effective_budget["max_task_wall_time_seconds"],
+        )
+    if "repair_timeout_seconds" in effective_budget:
+        effective_budget["repair_timeout_seconds"] = min(
+            effective_budget["repair_timeout_seconds"],
+            worker_timeout,
+            effective_budget["max_task_wall_time_seconds"],
+        )
+
+    spec = resolve_budget_spec(effective_budget, constraints=constraints, channel=channel)
+    effective_budget["budget_spec"] = spec.model_dump(mode="json")
+
     return effective_budget
 
 
@@ -185,6 +314,9 @@ def normalize_scout_submission(
             if coerced_val < 0:
                 raise ValueError(f"Budget value for {key} cannot be negative")
             normalized_budget[key] = min(coerced_val, cap)
+
+    spec = resolve_budget_spec(normalized_budget, constraints=normalized_constraints)
+    normalized_budget["budget_spec"] = spec.model_dump(mode="json")
 
     return normalized_constraints, normalized_budget
 

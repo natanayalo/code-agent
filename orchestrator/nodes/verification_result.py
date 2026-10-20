@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Final, Literal
 
 from db.enums import TimelineEventType
+from orchestrator.hierarchical_budget import resolve_effective_verifier_repair_budget
 from orchestrator.nodes.utils import (
     _ensure_state,
     _has_meaningful_deliverable,
@@ -23,7 +24,6 @@ from orchestrator.state import (
     is_task_read_only,
 )
 from orchestrator.verification import resolve_verification_commands
-from tools.numeric import coerce_non_negative_int_like
 
 logger = logging.getLogger(__name__)
 
@@ -52,28 +52,7 @@ _VERIFIER_REPAIRABLE_WORKER_FAILURE_KINDS: Final = frozenset(
 
 def _resolve_verifier_repair_handoff_budget(state: OrchestratorState) -> tuple[int, int]:
     """Resolve bounded verifier-repair settings from constraints and verifier budget caps."""
-    constraints = state.task.constraints if isinstance(state.task.constraints, dict) else {}
-    budget = state.task.budget if isinstance(state.task.budget, dict) else {}
-
-    configured_max_passes = coerce_non_negative_int_like(
-        constraints.get(VERIFIER_REPAIR_MAX_PASSES_CONSTRAINT)
-    )
-    max_passes = (
-        configured_max_passes
-        if configured_max_passes is not None
-        else DEFAULT_INDEPENDENT_VERIFIER_MAX_REPAIR_PASSES
-    )
-
-    verifier_budget_cap = coerce_non_negative_int_like(budget.get("max_verifier_passes"))
-    if verifier_budget_cap is not None:
-        max_passes = min(max_passes, verifier_budget_cap)
-
-    used_passes = coerce_non_negative_int_like(
-        constraints.get(VERIFIER_REPAIR_PASSES_USED_CONSTRAINT)
-    )
-    if used_passes is None:
-        used_passes = 0
-    return max_passes, used_passes
+    return resolve_effective_verifier_repair_budget(state)
 
 
 def _cleanup_verifier_repair_handoff_constraints(constraints: Mapping[str, Any]) -> dict[str, Any]:
