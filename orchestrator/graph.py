@@ -53,6 +53,7 @@ from orchestrator.hierarchical_budget import (
     check_pre_dispatch_budget_gate,
     compute_hierarchical_budget_ledger,
     effective_slice_budget,
+    resolve_budget_spec,
 )
 from orchestrator.node_execution import (
     NodeActivityInProgress,
@@ -1608,15 +1609,24 @@ async def _await_decomposed_nodes(
             }
             for dependency in dependencies
         }
-        node_state = state.model_copy(update={"task_plan": None, "task_spec": ready_node.task_spec})
+        budget_spec = resolve_budget_spec(state.task.budget, constraints=state.task.constraints)
+        allowed_attempts = min(ready_node.max_attempts, budget_spec.node.max_node_attempts)
         attempts = 0
         result: WorkerResult | None = None
-        while attempts < ready_node.max_attempts:
+        attempt_outcomes = list(outcomes)
+        while attempts < allowed_attempts:
+            node_state = state.model_copy(
+                update={
+                    "task_plan": None,
+                    "task_spec": ready_node.task_spec,
+                    "node_outcomes": attempt_outcomes,
+                }
+            )
             gate_eligible, gate_reason, gate_ledger = check_pre_dispatch_budget_gate(
-                state, active_slice="node"
+                node_state, active_slice="node"
             )
             if not gate_eligible:
-                model_exec = _resolve_state_model_execution(state)
+                model_exec = _resolve_state_model_execution(node_state)
                 result = WorkerResult(
                     status="failure",
                     failure_kind="budget_exceeded",
@@ -1699,7 +1709,7 @@ async def _await_decomposed_nodes(
             last_manifest = request.runtime_manifest
             result, persisted_outcome = await _execute_decomposed_node(
                 session_factory=session_factory,
-                state=state,
+                state=node_state,
                 worker=worker,
                 request=request,
                 node=ready_node,
@@ -1718,9 +1728,19 @@ async def _await_decomposed_nodes(
                     request, worker, state, node_envelope_artifact
                 )
                 break
-            result = attach_hierarchical_budget_usage(result, state, active_slice="node")
+            result = attach_hierarchical_budget_usage(result, node_state, active_slice="node")
             if result.status == "success" or result.next_action_hint == "request_higher_permission":
                 break
+            attempt_outcomes = [o for o in attempt_outcomes if o.node_id != ready_node.node_id]
+            attempt_outcomes.append(
+                NodeOutcome(
+                    node_id=ready_node.node_id,
+                    status="failed",
+                    result=result,
+                    dependencies=ready_node.depends_on,
+                    attempts=attempts,
+                )
+            )
         if result is None:
             logger.warning(
                 "Node execution completed without a result, falling back to failure default."
@@ -1753,7 +1773,8 @@ async def _await_decomposed_nodes(
         if result.next_action_hint == "request_higher_permission":
             break
 
-    return _aggregate_decomposed_results(outcomes, state=state), outcomes, last_manifest
+    terminal_state = state.model_copy(update={"node_outcomes": outcomes})
+    return _aggregate_decomposed_results(outcomes, state=terminal_state), outcomes, last_manifest
 
 
 def _default_worker_result_provider(request: WorkerRequest) -> WorkerResult:
@@ -2547,7 +2568,10 @@ def decompose_task(state_input: OrchestratorState) -> dict[str, Any]:
             "current_step": "decompose_task",
             "decomposed_plan": state.decomposed_plan.model_dump(mode="json"),
         }
-    decomposition = decompose_task_plan(state.task_plan, state.task_spec)
+    budget_spec = resolve_budget_spec(state.task.budget, constraints=state.task.constraints)
+    decomposition = decompose_task_plan(
+        state.task_plan, state.task_spec, max_node_attempts=budget_spec.node.max_node_attempts
+    )
     if decomposition.status == "decomposed":
         message = f"task decomposed into {len(decomposition.nodes)} sequential nodes"
     elif decomposition.status == "fallback":

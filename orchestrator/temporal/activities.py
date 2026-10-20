@@ -69,6 +69,7 @@ from orchestrator.hierarchical_budget import (
     attach_hierarchical_budget_usage,
     check_pre_dispatch_budget_gate,
     compute_hierarchical_budget_ledger,
+    resolve_budget_spec,
 )
 from orchestrator.node_execution import (
     CLAIM_HEARTBEAT_SECONDS,
@@ -2086,10 +2087,14 @@ class TaskExecutionActivities:
                 if current.result.failure_kind == "read_only_violation":
                     state.fanout_disabled_for_remainder = True
                     return NodeWaveMergeResult(continuation="fail_task")
+                budget_spec = resolve_budget_spec(
+                    state.task.budget, constraints=state.task.constraints
+                )
+                allowed_attempts = min(contract.max_attempts, budget_spec.node.max_node_attempts)
                 node_ledger = compute_hierarchical_budget_ledger(state, active_slice="node")
                 if (
                     current.status == "failed"
-                    and current.attempts < contract.max_attempts
+                    and current.attempts < allowed_attempts
                     and node_ledger.remaining_worker_calls > 0
                     and node_ledger.remaining_wall_time_seconds > 0
                 ):
@@ -2221,16 +2226,22 @@ class TaskExecutionActivities:
             blocked: NodeOutcome | None = None
             if missing_evidence:
                 continuation = "fail_task"
+            budget_spec = resolve_budget_spec(state.task.budget, constraints=state.task.constraints)
             node_ledger = compute_hierarchical_budget_ledger(state, active_slice="node")
             for outcome in outcomes:
                 contract = contracts.get(outcome.node_id)
+                allowed_attempts = (
+                    min(contract.max_attempts, budget_spec.node.max_node_attempts)
+                    if contract
+                    else budget_spec.node.max_node_attempts
+                )
                 if outcome.result.failure_kind == "read_only_violation":
                     state.fanout_disabled_for_remainder = True
                     continuation = "fail_task"
                 if outcome.status == "blocked" and blocked is None:
                     blocked = outcome
                     state.fanout_disabled_for_remainder = True
-                    if contract is None or outcome.attempts >= contract.max_attempts:
+                    if contract is None or outcome.attempts >= allowed_attempts:
                         ExecutionPlanRepository(session).update_node(
                             plan_id=plan.id,
                             node_id=outcome.node_id,
@@ -2244,7 +2255,7 @@ class TaskExecutionActivities:
                 elif (
                     outcome.status == "failed"
                     and contract
-                    and outcome.attempts < contract.max_attempts
+                    and outcome.attempts < allowed_attempts
                     and outcome.result.failure_kind != "read_only_violation"
                     and continuation != "fail_task"
                     and node_ledger.remaining_worker_calls > 0

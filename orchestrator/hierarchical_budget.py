@@ -140,20 +140,20 @@ def _resolve_primary_limits(
         min_secs if min_secs > 0 else None
     )
     if is_deep:
-        def_timeout, def_iter, def_tools, def_retries = 360, 5, 16, 0
+        t, it, tc, r = 360, 5, 16, 0
     elif is_scout:
-        def_timeout, def_iter, def_tools, def_retries = 180, 3, 8, 0
+        t, it, tc, r = 180, 3, 8, 0
     elif mode == "interactive":
-        def_timeout, def_iter, def_tools, def_retries = 600, 8, 24, 2
+        t, it, tc, r = 600, 8, 24, 2
     else:
-        def_timeout, def_iter, def_tools, def_retries = 300, 5, 12, 1
+        t, it, tc, r = 300, 5, 12, 1
 
     return SliceBudgetLimits(
-        timeout_seconds=min(raw_timeout or def_timeout, 900),
-        max_iterations=_extract_int(b, "max_iterations", 20, def_iter),
-        max_tool_calls=_extract_non_neg(b, "max_tool_calls", 100, def_tools),
-        max_shell_commands=_extract_non_neg(b, "max_shell_commands", 100, def_tools),
-        max_retries=_extract_non_neg(b, "max_retries", 10, def_retries),
+        timeout_seconds=min(raw_timeout or t, 900),
+        max_iterations=_extract_int(b, "max_iterations", 20, it),
+        max_tool_calls=_extract_non_neg(b, "max_tool_calls", 100, tc),
+        max_shell_commands=_extract_non_neg(b, "max_shell_commands", 100, tc),
+        max_retries=_extract_non_neg(b, "max_retries", 10, r),
     )
 
 
@@ -161,21 +161,17 @@ def _resolve_whole_task_limits(
     b: Mapping[str, Any], primary: SliceBudgetLimits, mode: str, is_scout: bool, is_deep: bool
 ) -> tuple[int, int, int]:
     if is_deep:
-        def_wall = DEFAULT_DEEP_SCOUT_TASK_WALL_TIME_SECONDS
-        def_calls = DEFAULT_DEEP_SCOUT_MAX_WORKER_CALLS
+        w, c = DEFAULT_DEEP_SCOUT_TASK_WALL_TIME_SECONDS, DEFAULT_DEEP_SCOUT_MAX_WORKER_CALLS
     elif is_scout:
-        def_wall = DEFAULT_SCOUT_TASK_WALL_TIME_SECONDS
-        def_calls = DEFAULT_SCOUT_MAX_WORKER_CALLS
+        w, c = DEFAULT_SCOUT_TASK_WALL_TIME_SECONDS, DEFAULT_SCOUT_MAX_WORKER_CALLS
     elif mode == "interactive":
-        def_wall = DEFAULT_INTERACTIVE_TASK_WALL_TIME_SECONDS
-        def_calls = DEFAULT_INTERACTIVE_MAX_WORKER_CALLS
+        w, c = DEFAULT_INTERACTIVE_TASK_WALL_TIME_SECONDS, DEFAULT_INTERACTIVE_MAX_WORKER_CALLS
     else:
-        def_wall = DEFAULT_UNATTENDED_TASK_WALL_TIME_SECONDS
-        def_calls = DEFAULT_UNATTENDED_MAX_WORKER_CALLS
+        w, c = DEFAULT_UNATTENDED_TASK_WALL_TIME_SECONDS, DEFAULT_UNATTENDED_MAX_WORKER_CALLS
 
-    raw_wall = coerce_positive_int_like(b.get("max_task_wall_time_seconds")) or def_wall
+    raw_wall = coerce_positive_int_like(b.get("max_task_wall_time_seconds")) or w
     max_wall = min(max(raw_wall, primary.timeout_seconds), GLOBAL_MAX_TASK_WALL_TIME_SECONDS)
-    max_calls = _extract_int(b, "max_worker_calls", GLOBAL_MAX_WORKER_CALLS, def_calls)
+    max_calls = _extract_int(b, "max_worker_calls", GLOBAL_MAX_WORKER_CALLS, c)
     def_conc = SCOUT_MAX_CONCURRENT_NODES if is_scout else DEFAULT_MAX_CONCURRENT_NODES
     max_conc = (
         SCOUT_MAX_CONCURRENT_NODES
@@ -287,17 +283,20 @@ def resolve_budget_spec(
     )
 
 
-def _compute_calls_used(state: OrchestratorState) -> int:
+def _compute_calls_used(state: OrchestratorState, repair_passes_used: int = 0) -> int:
     completed = [o for o in state.node_outcomes if o.status != "skipped"]
     if completed:
         return sum(max(o.attempts or 1, 1) for o in completed)
     if state.scout_phase_results:
         return len(state.scout_phase_results)
-    if state.result is not None:
-        return max(state.attempt_count or 1, 1)
+
     evs = ("worker_completed", "worker_failed", "worker_error")
     fin = sum(1 for e in state.timeline_events if e.event_type in evs)
-    return max(fin, state.attempt_count or 0)
+    if state.result is not None:
+        return max(fin, (state.attempt_count or 1) + repair_passes_used, 1)
+
+    prior_attempts = max(0, (state.attempt_count or 0) - 1)
+    return max(fin, prior_attempts + repair_passes_used)
 
 
 def _compute_wall_seconds_used(state: OrchestratorState) -> float:
@@ -340,9 +339,6 @@ def compute_hierarchical_budget_ledger(
 ) -> HierarchicalBudgetLedger:
     """Derive current hierarchical budget consumption, remaining quota, and exhaustion."""
     spec = resolve_budget_spec(state.task.budget, constraints=state.task.constraints)
-    calls_used = _compute_calls_used(state) + (1 if count_current_call else 0)
-    wall_seconds_used = _compute_wall_seconds_used(state) + current_call_wall_seconds
-
     constraints = state.task.constraints if isinstance(state.task.constraints, dict) else {}
     verifier_used, _ = _repair_counts(
         constraints, "independent_verifier_repair_passes_used", "verifier_repair_passes_used"
@@ -351,6 +347,11 @@ def compute_hierarchical_budget_ledger(
         constraints, "independent_review_repair_passes_used", "repair_passes_used"
     )
     repair_passes_used = max(verifier_used + review_used, state.completion_loop.repair_pass or 0)
+
+    calls_used = _compute_calls_used(state, repair_passes_used=repair_passes_used) + (
+        1 if count_current_call else 0
+    )
+    wall_seconds_used = _compute_wall_seconds_used(state) + current_call_wall_seconds
 
     remaining_calls = max(0, spec.max_worker_calls - calls_used)
     remaining_wall_time = max(0.0, float(spec.max_task_wall_time_seconds) - wall_seconds_used)
@@ -389,26 +390,16 @@ def effective_slice_budget(
     """Return task budget clamped to active slice limits and remaining whole-task wall time."""
     spec = resolve_budget_spec(state.task.budget, constraints=state.task.constraints)
     ledger = compute_hierarchical_budget_ledger(state, active_slice=active_slice)
-    slice_limits: SliceBudgetLimits = (
-        spec.primary
-        if active_slice == "primary"
-        else spec.node
-        if active_slice == "node"
-        else spec.repair
-    )
-
-    clamped_timeout = min(
-        slice_limits.timeout_seconds,
-        max(1, int(ledger.remaining_wall_time_seconds)),
-    )
+    limits = {"primary": spec.primary, "node": spec.node, "repair": spec.repair}[active_slice]
+    clamped_timeout = min(limits.timeout_seconds, max(1, int(ledger.remaining_wall_time_seconds)))
 
     return {
         **state.task.budget,
         "worker_timeout_seconds": clamped_timeout,
-        "max_iterations": slice_limits.max_iterations,
-        "max_tool_calls": slice_limits.max_tool_calls,
-        "max_shell_commands": slice_limits.max_shell_commands,
-        "max_retries": slice_limits.max_retries,
+        "max_iterations": limits.max_iterations,
+        "max_tool_calls": limits.max_tool_calls,
+        "max_shell_commands": limits.max_shell_commands,
+        "max_retries": limits.max_retries,
         "budget_spec": spec.model_dump(mode="json"),
         "hierarchical_budget": ledger.model_dump(mode="json"),
     }
@@ -431,8 +422,12 @@ def attach_hierarchical_budget_usage(
     active_slice: Literal["primary", "node", "repair"],
 ) -> WorkerResult:
     """Enrich WorkerResult budget_usage while preserving existing keys."""
+    current_wall = float((result.budget_usage or {}).get("wall_clock_seconds") or 0.0)
     ledger = compute_hierarchical_budget_ledger(
-        state, active_slice=active_slice, count_current_call=True
+        state,
+        active_slice=active_slice,
+        count_current_call=True,
+        current_call_wall_seconds=current_wall,
     )
     current_usage = {
         **(result.budget_usage or {}),

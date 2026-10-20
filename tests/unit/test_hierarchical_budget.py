@@ -278,6 +278,112 @@ def test_attach_hierarchical_budget_usage_preserves_native_agent_and_nodes():
     assert enriched.budget_usage["nodes"]["node_1"]["wall_clock_seconds"] == 12.5
     assert "hierarchical_budget" in enriched.budget_usage
     assert enriched.budget_usage["hierarchical_budget"]["max_worker_calls"] == 4
+    # Current call's wall clock seconds should be forwarded into hierarchical ledger
+    assert enriched.budget_usage["hierarchical_budget"]["wall_clock_seconds_used"] == 12.5
+
+
+def test_initial_dispatch_budget_gate_allows_single_call_scout():
+    """Initial dispatch with attempt_count=1 and max_worker_calls=1 must not fail-closed."""
+    state = _make_state(
+        budget={"max_worker_calls": 1},
+        constraints={"task_type": "scout"},
+        attempt_count=1,
+        result=None,
+        timeline_events=[],
+    )
+    ledger = compute_hierarchical_budget_ledger(state, active_slice="primary")
+    assert ledger.worker_calls_used == 0
+    assert ledger.remaining_worker_calls == 1
+
+    eligible, reason, gate_ledger = check_pre_dispatch_budget_gate(state, active_slice="primary")
+    assert eligible
+    assert reason is None
+    assert gate_ledger.remaining_worker_calls == 1
+
+
+def test_decompose_task_wires_max_node_attempts_budget():
+    from orchestrator.graph import decompose_task
+    from orchestrator.state import TaskPlan, TaskPlanStep
+
+    state = _make_state(
+        budget={"max_node_attempts": 1},
+    )
+    state = state.model_copy(
+        update={
+            "task_plan": TaskPlan(
+                triggered=True,
+                complexity_reason="multi_file_task",
+                steps=[
+                    TaskPlanStep(
+                        step_id="step-1",
+                        title="Step 1",
+                        expected_outcome="Desc 1",
+                        node_kind="inspect",
+                        execution_mode="read_only",
+                        aggregation_role="context",
+                    ),
+                    TaskPlanStep(
+                        step_id="step-2",
+                        title="Step 2",
+                        expected_outcome="Desc 2",
+                        node_kind="implement",
+                        execution_mode="mutable",
+                        aggregation_role="mutation",
+                    ),
+                ],
+            ),
+            "task_spec": TaskSpec(
+                task_type="feature",
+                goal="Goal",
+                acceptance_criteria=["AC1"],
+                verification_commands=["pytest"],
+            ),
+        }
+    )
+    res = decompose_task(state)
+    assert res["decomposed_plan"]["status"] == "decomposed"
+    for node in res["decomposed_plan"]["nodes"]:
+        assert node["max_attempts"] == 1
+
+
+def test_decomposed_node_accumulation_exhausts_budget_gate():
+    """Sequential DAG node accumulation should increment calls in pre-dispatch gate."""
+    state = _make_state(
+        budget={"max_worker_calls": 2, "max_task_wall_time_seconds": 600},
+    )
+    # Node 1 finishes
+    outcome_1 = NodeOutcome(
+        node_id="node_1",
+        status="completed",
+        result=WorkerResult(status="success", budget_usage={"wall_clock_seconds": 30.0}),
+        attempts=1,
+    )
+    node_state_1 = state.model_copy(update={"node_outcomes": [outcome_1]})
+    eligible_1, reason_1, ledger_1 = check_pre_dispatch_budget_gate(
+        node_state_1, active_slice="node"
+    )
+    assert eligible_1
+    assert reason_1 is None
+    assert ledger_1.worker_calls_used == 1
+    assert ledger_1.wall_clock_seconds_used == 30.0
+    assert ledger_1.remaining_worker_calls == 1
+
+    # Node 2 finishes (2 calls used out of 2)
+    outcome_2 = NodeOutcome(
+        node_id="node_2",
+        status="completed",
+        result=WorkerResult(status="success", budget_usage={"wall_clock_seconds": 40.0}),
+        attempts=1,
+    )
+    node_state_2 = state.model_copy(update={"node_outcomes": [outcome_1, outcome_2]})
+    eligible_2, reason_2, ledger_2 = check_pre_dispatch_budget_gate(
+        node_state_2, active_slice="node"
+    )
+    assert not eligible_2
+    assert reason_2 == "max_worker_calls"
+    assert ledger_2.worker_calls_used == 2
+    assert ledger_2.wall_clock_seconds_used == 70.0
+    assert ledger_2.remaining_worker_calls == 0
 
 
 def test_evaluate_hierarchical_budget_compliance_clean_and_violations():
