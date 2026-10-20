@@ -247,6 +247,46 @@ def build_mutation_paired_report(
     )
 
 
+def render_mutation_paired_markdown(report: M29MutationPairedAnalysisReport) -> str:
+    """Render a deterministic sanitized Markdown supplement for feature/mutation pairs."""
+    assert_sanitized_mutation_paired_report(report.model_dump(mode="json"))
+    s = report.paired_summary
+    return "\n".join(
+        [
+            "# M29 Feature/Mutation Paired Analysis",
+            "",
+            f"- **Suite**: `{report.suite_name}`",
+            f"- **Build SHA**: `{report.build_sha}`",
+            f"- **Manifest SHA-256**: `{report.manifest_sha256}`",
+            f"- **Observation Reference (`as_of`)**: `{report.as_of.isoformat()}`",
+            "",
+            "This supplement is descriptive and does not change production routing.",
+            "",
+            "## Pre-Evaluation Task Completion",
+            "",
+            (
+                "| Pairs | Both Completed | Codex Only | Antigravity Only | Neither | "
+                "Identity-Complete Pairs |"
+            ),
+            "|---:|---:|---:|---:|---:|---:|",
+            f"| {s.pair_count} | {s.both_completed_count} | {s.codex_only_completed_count} | "
+            f"{s.antigravity_only_completed_count} | {s.neither_completed_count} | "
+            f"{s.identity_complete_pair_count} |",
+            "",
+            "## Post-Terminal Independent Feature Quality",
+            "",
+            (
+                "| Pairs | Both Quality Pass | Codex Only Pass | Antigravity Only Pass | "
+                "Neither Pass |"
+            ),
+            "|---:|---:|---:|---:|---:|",
+            f"| {s.pair_count} | {s.both_quality_pass_count} | {s.codex_only_quality_pass_count} | "
+            f"{s.antigravity_only_quality_pass_count} | {s.neither_quality_pass_count} |",
+            "",
+        ]
+    )
+
+
 class M29MutationManifest(StrictModel):
     """Sanitized case-level manifest bound to M29 feature/mutation reports."""
 
@@ -536,4 +576,5 @@ __all__ = [
     "assert_sanitized_mutation_paired_report",
     "build_mutation_paired_report",
     "manifest_sha256",
+    "render_mutation_paired_markdown",
 ]

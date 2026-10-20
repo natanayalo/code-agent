@@ -190,14 +190,17 @@ Temporal migration and rollback record is in the
   `evaluation/m29_mutation_reconciliation.py`), and pre-dispatch isolation gates,
   stop-condition validators, 72-hour cleanup helpers, canonical extractor
   smokes (`evaluation/m29_mutation_isolation.py`,
-  `evaluation/m29_mutation_smokes.py`), full evaluation runner with post-terminal
-  external quality evaluation (`evaluation/m29_mutation_runner.py`,
+  `evaluation/m29_mutation_smokes.py`), post-cutoff cohort reconciliation and
+  publication orchestrator (`evaluation/m29_mutation_publication.py`), full evaluation
+  runner with post-terminal external quality evaluation (`evaluation/m29_mutation_runner.py`,
   `evaluation/m29_mutation_runner_models.py`, `evaluation/m29_mutation_runner_preflight.py`,
   `evaluation/m29_mutation_runner_archive.py`), deterministic taskboard fixture
   builder (`evaluation/m29_mutation_fixture.py`), runner-owned read-only acceptance
   oracles (`evaluation/m29_mutation_oracles.py`), concrete `ReadOnlyExternalEvaluator`
-  (`evaluation/m29_mutation_verifier.py`), and pinned deterministic revision
-  `228071722c645e813af16053e56d007c25e9f127` are implemented and validated.
+  (`evaluation/m29_mutation_verifier.py`), pinned deterministic revision
+  `228071722c645e813af16053e56d007c25e9f127`, and the complete operator CLI
+  with `init`, `preflight`, `run`, `publish`, and `sweep-retention`
+  (`scripts/e2e/run_m29_mutation_wave.py`) are implemented and validated.
   Live cases remain gated, `feature/mutation` is N=0, and production routing
   remains static.
 
@@ -243,8 +246,9 @@ Temporal migration and rollback record is in the
       reconciliation gate (`evaluation/m29_mutation_cohort.py`), the
       sanitized manifest & report-publication reconciliation layer
       (`evaluation/m29_mutation_manifest.py`,
-      `evaluation/m29_mutation_reconciliation.py`), the pre-dispatch
-      memory isolation gate, stop-condition validators, 72-hour cleanup helpers,
+      `evaluation/m29_mutation_reconciliation.py`), the post-cutoff cohort
+      reconciliation and publication orchestrator (`evaluation/m29_mutation_publication.py`),
+      the pre-dispatch memory isolation gate, stop-condition validators, 72-hour cleanup helpers,
       and canonical extractor-stage smokes
       (`evaluation/m29_mutation_isolation.py`,
       `evaluation/m29_mutation_smokes.py`), concrete `CandidateDispatcher`,
@@ -252,6 +256,7 @@ Temporal migration and rollback record is in the
       (`evaluation/m29_mutation_dispatcher.py`,
       `evaluation/m29_mutation_reviewer_client.py`,
       `evaluation/m29_mutation_watchdog.py`), and the operator wave CLI
+      with `init`, `preflight`, `run`, `publish`, and `sweep-retention`
       (`scripts/e2e/run_m29_mutation_wave.py`) are implemented and validated;
    e. gather evidence in a historical 45-day cohort before claiming
       longitudinal robustness;
