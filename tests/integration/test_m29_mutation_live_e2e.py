@@ -242,24 +242,9 @@ def _assert_publication_flow(
         "fixture_revision": suite.target_repository_revision,
         "verifier_source_sha256": verifier_sha,
         "build_sha": "0123456789abcdef",
-        "task_cohort_snapshot": {
-            "as_of": as_of.isoformat(),
-            "window_start_at": (as_of - timedelta(days=90)).isoformat(),
-            "window_end_at": as_of.isoformat(),
-            "baseline_memory_context_hash": "a" * 64,
-            "baseline_ids_by_profile": {
-                "codex-native-executor": [],
-                "antigravity-native-executor": [],
-            },
-            "frozen_baseline_ids_sha256_by_profile": {
-                "codex-native-executor": "4f53cda18c2baa0c0354bb5f9a3ecbe5"
-                "ed12ab4d8e11ba873c2f11161202b945",
-                "antigravity-native-executor": "4f53cda18c2baa0c0354bb5f9a3ecbe5"
-                "ed12ab4d8e11ba873c2f11161202b945",
-            },
-        },
     }
     _save_run_results(bundle_dir, bundle_data, result)
+    assert "task_cohort_snapshot" in bundle_data
 
     output_dir = bundle_dir / "published"
     artifacts = reconcile_and_publish_mutation_wave(
@@ -357,3 +342,77 @@ def test_live_adapters_e2e_stack_with_watchdog(tmp_path: Path) -> None:
 
     _assert_publication_flow(bundle_dir, db_url, fixture_dir, suite, verifier_sha, as_of, result)
     _assert_watchdog_sweep(ws_root, watchdog, mgr, policy)
+
+
+def test_cli_preflight_error_handling_and_stale_baseline_cleanup(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    fixture_dir = tmp_path / "fixture"
+    create_taskboard_fixture_repo(fixture_dir)
+    bundle_dir = tmp_path / "bundle_preflight"
+    bundle_dir.mkdir(parents=True)
+    (bundle_dir / "bundle.json").write_text('{"status": "initialized"}', encoding="utf-8")
+    db_path = tmp_path / "preflight.db"
+    db_url = f"sqlite:///{db_path}"
+    Base.metadata.create_all(create_engine(db_url))
+    ws_root = tmp_path / "ws_preflight"
+    ws_root.mkdir(parents=True)
+
+    from evaluation.m29_mutation_runner_preflight import TaskCohortSnapshot
+    from scripts.e2e.run_m29_mutation_wave import main as cli_main
+
+    now = datetime.now(UTC)
+    dummy_snap = TaskCohortSnapshot(
+        as_of=now,
+        window_start_at=now - timedelta(days=90),
+        window_end_at=now,
+        baseline_memory_context_hash="0" * 64,
+        baseline_ids_by_profile={"codex-native-executor": (), "antigravity-native-executor": ()},
+        frozen_baseline_ids_sha256_by_profile={
+            "codex-native-executor": "0" * 64,
+            "antigravity-native-executor": "0" * 64,
+        },
+    )
+    monkeypatch.setattr(
+        "scripts.e2e.run_m29_mutation_wave.run_mutation_preflight_checks",
+        lambda **kwargs: dummy_snap,
+    )
+
+    # 1. Invalid --as-of returns exit code 1
+    rc_invalid_as_of = cli_main(
+        [
+            "preflight",
+            "--bundle-dir",
+            str(bundle_dir),
+            "--workspace-root",
+            str(ws_root),
+            "--fixture-repo-path",
+            str(fixture_dir),
+            "--db-url",
+            db_url,
+            "--as-of",
+            "not-a-valid-datetime",
+            "--ack-disposable-mutation-stack",
+        ]
+    )
+    assert rc_invalid_as_of == 1
+
+    # 2. Re-running preflight on empty DB removes stale baseline_report.json
+    stale_baseline = bundle_dir / "baseline_report.json"
+    stale_baseline.write_text('{"stale": true}', encoding="utf-8")
+    rc_valid = cli_main(
+        [
+            "preflight",
+            "--bundle-dir",
+            str(bundle_dir),
+            "--workspace-root",
+            str(ws_root),
+            "--fixture-repo-path",
+            str(fixture_dir),
+            "--db-url",
+            db_url,
+            "--ack-disposable-mutation-stack",
+        ]
+    )
+    assert rc_valid == 0
+    assert not stale_baseline.exists()

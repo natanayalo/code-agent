@@ -63,16 +63,8 @@ def _seed_db_task(
         chosen_profile=profile,
         runtime_mode=WorkerRuntimeMode.NATIVE_AGENT,
         orchestration_runtime=OrchestrationRuntime.TEMPORAL,
-        task_spec={
-            "task_type": "feature",
-            "allowed_actions": ["modify_workspace_files"],
-            "verification_commands": [],
-            "delivery_mode": "workspace",
-        },
-        constraints={
-            "skip_independent_review": True,
-            "post_terminal_quality_evaluation": True,
-        },
+        task_spec={"task_type": "feature", "allowed_actions": ["modify_workspace_files"]},
+        constraints={"skip_independent_review": True, "post_terminal_quality_evaluation": True},
         created_at=created_at,
         updated_at=finished_at,
     )
@@ -104,15 +96,15 @@ def _seed_db_task(
         artifact_index=[],
     )
     task.worker_runs.append(run)
-    event_type = "task_completed" if status == TaskStatus.COMPLETED else "task_failed"
-    event = TaskTimelineEvent(
-        id=f"evt-{task_id}",
-        task_id=task_id,
-        event_type=event_type,
-        created_at=finished_at,
-        payload={},
+    task.timeline_events.append(
+        TaskTimelineEvent(
+            id=f"evt-{task_id}",
+            task_id=task_id,
+            event_type="task_completed" if status == TaskStatus.COMPLETED else "task_failed",
+            created_at=finished_at,
+            payload={},
+        )
     )
-    task.timeline_events.append(event)
     session.add(task)
     return task
 
@@ -245,13 +237,10 @@ def _prepare_20_case_bundle(
     archive_checksum = validate_sanitized_archive(sanitized_cases)
     bundle_data = _build_test_bundle_data(suite, tmp_path, as_of, archive_checksum)
 
-    (bundle_dir / "bundle.json").write_text(json.dumps(bundle_data, indent=2), encoding="utf-8")
-    (bundle_dir / "raw_entries.json").write_text(
-        json.dumps(raw_entries, indent=2), encoding="utf-8"
-    )
+    (bundle_dir / "bundle.json").write_text(json.dumps(bundle_data), encoding="utf-8")
+    (bundle_dir / "raw_entries.json").write_text(json.dumps(raw_entries), encoding="utf-8")
     (bundle_dir / "sanitized_cases.json").write_text(
-        json.dumps([c.model_dump(mode="json") for c in sanitized_cases], indent=2),
-        encoding="utf-8",
+        json.dumps([c.model_dump(mode="json") for c in sanitized_cases]), encoding="utf-8"
     )
     return bundle_dir, raw_entries, sanitized_cases
 
@@ -318,10 +307,7 @@ def test_reconcile_and_publish_mutation_wave_happy_path(tmp_path: Path) -> None:
 
     output_dir = tmp_path / "published"
     artifacts = reconcile_and_publish_mutation_wave(
-        bundle_dir=bundle_dir,
-        db_url=db_url,
-        output_dir=output_dir,
-        now=now,
+        bundle_dir=bundle_dir, db_url=db_url, output_dir=output_dir, now=now
     )
 
     expected_files = {
@@ -363,10 +349,7 @@ def test_reconcile_and_publish_fails_before_cutoff(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="is before cutoff"):
         reconcile_and_publish_mutation_wave(
-            bundle_dir=bundle_dir,
-            db_url=db_url,
-            output_dir=tmp_path / "published",
-            now=now,
+            bundle_dir=bundle_dir, db_url=db_url, output_dir=tmp_path / "pub", now=now
         )
 
 
@@ -389,10 +372,7 @@ def test_reconcile_and_publish_fails_if_bundle_not_completed(tmp_path: Path) -> 
 
     with pytest.raises(ValueError, match="must be 'completed' or 'published'"):
         reconcile_and_publish_mutation_wave(
-            bundle_dir=bundle_dir,
-            db_url=db_url,
-            output_dir=tmp_path / "published",
-            now=now,
+            bundle_dir=bundle_dir, db_url=db_url, output_dir=tmp_path / "pub", now=now
         )
 
 
@@ -415,10 +395,7 @@ def test_reconcile_and_publish_fails_if_checksum_mismatch(tmp_path: Path) -> Non
 
     with pytest.raises(ValueError, match="sanitized archive checksum mismatch"):
         reconcile_and_publish_mutation_wave(
-            bundle_dir=bundle_dir,
-            db_url=db_url,
-            output_dir=tmp_path / "published",
-            now=now,
+            bundle_dir=bundle_dir, db_url=db_url, output_dir=tmp_path / "pub", now=now
         )
 
 
@@ -445,10 +422,7 @@ def test_reconcile_and_publish_fails_if_task_missing_in_db(tmp_path: Path) -> No
 
     with pytest.raises(ValueError, match="not found in canonical database snapshot"):
         reconcile_and_publish_mutation_wave(
-            bundle_dir=bundle_dir,
-            db_url=db_url,
-            output_dir=tmp_path / "published",
-            now=now,
+            bundle_dir=bundle_dir, db_url=db_url, output_dir=tmp_path / "pub", now=now
         )
 
 
@@ -504,29 +478,26 @@ def test_bundle_validation_missing_files_and_counts(tmp_path: Path) -> None:
     bundle_dir.mkdir()
     now = datetime(2026, 10, 20, 12, 0, 0, tzinfo=UTC)
 
-    # Missing bundle.json
-    with pytest.raises(FileNotFoundError, match="bundle.json not found"):
+    def _call() -> None:
         reconcile_and_publish_mutation_wave(
             bundle_dir=bundle_dir, db_url="sqlite:///:memory:", output_dir=tmp_path / "out", now=now
         )
+
+    # Missing bundle.json
+    with pytest.raises(FileNotFoundError, match="bundle.json not found"):
+        _call()
 
     (bundle_dir / "bundle.json").write_text(json.dumps({"status": "completed"}), encoding="utf-8")
     with pytest.raises(FileNotFoundError, match="raw_entries.json not found"):
-        reconcile_and_publish_mutation_wave(
-            bundle_dir=bundle_dir, db_url="sqlite:///:memory:", output_dir=tmp_path / "out", now=now
-        )
+        _call()
 
     (bundle_dir / "raw_entries.json").write_text(json.dumps([]), encoding="utf-8")
     with pytest.raises(FileNotFoundError, match="sanitized_cases.json not found"):
-        reconcile_and_publish_mutation_wave(
-            bundle_dir=bundle_dir, db_url="sqlite:///:memory:", output_dir=tmp_path / "out", now=now
-        )
+        _call()
 
     (bundle_dir / "sanitized_cases.json").write_text(json.dumps([]), encoding="utf-8")
     with pytest.raises(ValueError, match="raw_entries count mismatch"):
-        reconcile_and_publish_mutation_wave(
-            bundle_dir=bundle_dir, db_url="sqlite:///:memory:", output_dir=tmp_path / "out", now=now
-        )
+        _call()
 
 
 def test_reconcile_fails_on_profile_or_status_drift(tmp_path: Path) -> None:
@@ -569,10 +540,7 @@ def test_reconcile_fails_on_profile_or_status_drift(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="profile mismatch"):
         reconcile_and_publish_mutation_wave(
-            bundle_dir=bundle_dir,
-            db_url=db_url,
-            output_dir=tmp_path / "out",
-            now=now,
+            bundle_dir=bundle_dir, db_url=db_url, output_dir=tmp_path / "out", now=now
         )
 
 
@@ -597,10 +565,7 @@ def test_reconcile_with_baseline_report_file(tmp_path: Path) -> None:
     (bundle_dir / "baseline_report.json").write_text(render_json_report(rep), encoding="utf-8")
 
     artifacts = reconcile_and_publish_mutation_wave(
-        bundle_dir=bundle_dir,
-        db_url=db_url,
-        output_dir=tmp_path / "out_baseline",
-        now=now,
+        bundle_dir=bundle_dir, db_url=db_url, output_dir=tmp_path / "out_baseline", now=now
     )
     assert len(artifacts.written_files) == 9
 
@@ -625,7 +590,7 @@ def test_resolve_build_sha_git_fallback(monkeypatch: pytest.MonkeyPatch) -> None
     assert fallback_sha == "0" * 40
 
 
-def test_reconcile_additional_validation_rejections(tmp_path: Path) -> None:
+def test_reconcile_archive_and_timestamp_rejections(tmp_path: Path) -> None:
     db_path = tmp_path / "checks.db"
     db_url = f"sqlite:///{db_path}"
     engine = create_engine(db_url)
@@ -671,33 +636,154 @@ def test_reconcile_additional_validation_rejections(tmp_path: Path) -> None:
         reconcile_and_publish_mutation_wave(
             bundle_dir=bundle_dir, db_url=db_url, output_dir=tmp_path / "out3", now=now
         )
-    # Restore
-    raw_data[0]["terminal_snapshot"]["terminal_timestamp"] = orig_ts
-    raw_file.write_text(json.dumps(raw_data), encoding="utf-8")
+
+
+def test_reconcile_outcome_rejections(tmp_path: Path) -> None:
+    db_path = tmp_path / "checks2.db"
+    db_url = f"sqlite:///{db_path}"
+    engine = create_engine(db_url)
+    Base.metadata.create_all(engine)
+
+    as_of = datetime(2026, 10, 20, 12, 0, 0, tzinfo=UTC)
+    now = as_of + timedelta(minutes=10)
+
+    with Session(engine) as session:
+        bundle_dir, _raw, sanitized_cases = _prepare_20_case_bundle(tmp_path, session, as_of)
+
+    san_file = bundle_dir / "sanitized_cases.json"
+    bundle_file = bundle_dir / "bundle.json"
+    bundle_data_mut = json.loads(bundle_file.read_text(encoding="utf-8"))
+
+    def _sync_mut(cases: list[M29MutationManifestCase]) -> None:
+        bundle_data_mut["sanitized_archive_checksum"] = validate_sanitized_archive(cases)
+        bundle_file.write_text(json.dumps(bundle_data_mut), encoding="utf-8")
+        san_file.write_text(
+            json.dumps([c.model_dump(mode="json") for c in cases]), encoding="utf-8"
+        )
 
     # 4. Accepted mismatch between DB and manifest
-    san_data_mut = json.loads(san_file.read_text(encoding="utf-8"))
-    san_data_mut[0]["accepted"] = False
-    san_data_mut[0]["terminal_status"] = "failed"
-    san_data_mut[0]["failure_kind"] = "test_failure"
-    san_data_mut[0]["report_failure_kind"] = "test_failure"
-    cases_mut = [M29MutationManifestCase.model_validate(c) for c in san_data_mut]
-    bundle_data_mut = json.loads((bundle_dir / "bundle.json").read_text(encoding="utf-8"))
-    bundle_data_mut["sanitized_archive_checksum"] = validate_sanitized_archive(cases_mut)
-    (bundle_dir / "bundle.json").write_text(json.dumps(bundle_data_mut), encoding="utf-8")
-    san_file.write_text(json.dumps(san_data_mut), encoding="utf-8")
+    c_mut = [c.model_copy() for c in sanitized_cases]
+    c_mut[0] = c_mut[0].model_copy(
+        update={
+            "accepted": False,
+            "terminal_status": "failed",
+            "failure_kind": "test_failure",
+            "report_failure_kind": "test_failure",
+        }
+    )
+    _sync_mut(c_mut)
     with pytest.raises(ValueError, match="accepted mismatch"):
         reconcile_and_publish_mutation_wave(
             bundle_dir=bundle_dir, db_url=db_url, output_dir=tmp_path / "out4", now=now
         )
 
     # 5. Excluded case unexpectedly in canonical snapshot
-    san_data_mut[0]["exclusion_reason"] = "environment_failure"
-    cases_mut2 = [M29MutationManifestCase.model_validate(c) for c in san_data_mut]
-    bundle_data_mut["sanitized_archive_checksum"] = validate_sanitized_archive(cases_mut2)
-    (bundle_dir / "bundle.json").write_text(json.dumps(bundle_data_mut), encoding="utf-8")
-    san_file.write_text(json.dumps(san_data_mut), encoding="utf-8")
+    c_mut[0] = c_mut[0].model_copy(update={"exclusion_reason": "environment_failure"})
+    _sync_mut(c_mut)
     with pytest.raises(ValueError, match="unexpectedly included in canonical database snapshot"):
         reconcile_and_publish_mutation_wave(
             bundle_dir=bundle_dir, db_url=db_url, output_dir=tmp_path / "out5", now=now
+        )
+
+    # 6. Failure kind mismatch for failed eligible case
+    with Session(engine) as session:
+        failed_task = session.get(Task, "task-case-01")
+        if failed_task:
+            failed_task.status = TaskStatus.FAILED
+            for r in failed_task.worker_runs:
+                r.status = WorkerRunStatus.FAILURE
+                r.verifier_outcome = {"status": "failed", "failure_kind": "compile_error"}
+            for e in failed_task.timeline_events:
+                e.event_type = "task_failed"
+            session.commit()
+    c_mut[0] = c_mut[0].model_copy(
+        update={"exclusion_reason": None, "report_failure_kind": "test_failure"}
+    )
+    _sync_mut(c_mut)
+    with pytest.raises(ValueError, match="failure_kind mismatch"):
+        reconcile_and_publish_mutation_wave(
+            bundle_dir=bundle_dir, db_url=db_url, output_dir=tmp_path / "out6", now=now
+        )
+
+
+def test_reconcile_snapshot_presence_rejections(tmp_path: Path) -> None:
+    db_path = tmp_path / "checks3.db"
+    db_url = f"sqlite:///{db_path}"
+    engine = create_engine(db_url)
+    Base.metadata.create_all(engine)
+
+    as_of = datetime(2026, 10, 20, 12, 0, 0, tzinfo=UTC)
+    now = as_of + timedelta(minutes=10)
+
+    with Session(engine) as session:
+        bundle_dir, _raw, _san = _prepare_20_case_bundle(tmp_path, session, as_of)
+
+    bundle_file = bundle_dir / "bundle.json"
+    bundle_data_mut = json.loads(bundle_file.read_text(encoding="utf-8"))
+
+    # 7. Missing task_cohort_snapshot
+    del bundle_data_mut["task_cohort_snapshot"]
+    bundle_file.write_text(json.dumps(bundle_data_mut), encoding="utf-8")
+    with pytest.raises(ValueError, match="missing 'task_cohort_snapshot'"):
+        reconcile_and_publish_mutation_wave(
+            bundle_dir=bundle_dir, db_url=db_url, output_dir=tmp_path / "out7", now=now
+        )
+
+    # 8. Missing required field in task_cohort_snapshot
+    bundle_data_mut["task_cohort_snapshot"] = {"window_start_at": "2026-07-01T00:00:00Z"}
+    bundle_file.write_text(json.dumps(bundle_data_mut), encoding="utf-8")
+    with pytest.raises(ValueError, match="missing required field 'as_of'"):
+        reconcile_and_publish_mutation_wave(
+            bundle_dir=bundle_dir, db_url=db_url, output_dir=tmp_path / "out8", now=now
+        )
+
+
+def test_expected_execution_identities_preserves_read_only_profiles(tmp_path: Path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'ro.db'}"
+    engine = create_engine(db_url)
+    Base.metadata.create_all(engine)
+    as_of = datetime(2026, 10, 20, 12, 0, 0, tzinfo=UTC)
+
+    with Session(engine) as session:
+        t = _seed_db_task(
+            session,
+            "task-ro-1",
+            "codex-native-executor-read-only",
+            as_of - timedelta(days=2),
+            as_of - timedelta(days=1),
+        )
+        t.task_spec = {"task_type": "docs", "allowed_actions": []}
+        t.constraints = {"read_only": True}
+        session.commit()
+
+    snap, report = extract_mutation_baseline_snapshot(db_url, as_of)
+    assert report.exclusions.by_reason.get("execution_identity_mismatch", 0) == 0
+
+
+def test_reconcile_fails_if_robustness_tasks_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_url = f"sqlite:///{tmp_path / 'rob_drift.db'}"
+    engine = create_engine(db_url)
+    Base.metadata.create_all(engine)
+    as_of = datetime(2026, 10, 20, 12, 0, 0, tzinfo=UTC)
+
+    with Session(engine) as session:
+        bundle_dir, _raw, _san = _prepare_20_case_bundle(tmp_path, session, as_of)
+
+    from evaluation import m29_mutation_publication as pub_mod
+
+    orig_extract = pub_mod._extract_post_cutoff_reports
+
+    def mock_extract(*args: Any, **kwargs: Any) -> Any:
+        can, rob, cr, op, rr = orig_extract(*args, **kwargs)
+        return can, rob[:-1], cr, op, rr
+
+    monkeypatch.setattr(pub_mod, "_extract_post_cutoff_reports", mock_extract)
+    with pytest.raises(ValueError, match="reconciled extractor IDs"):
+        reconcile_and_publish_mutation_wave(
+            bundle_dir=bundle_dir,
+            db_url=db_url,
+            output_dir=tmp_path / "out_drift",
+            now=as_of + timedelta(seconds=1),
         )

@@ -41,6 +41,7 @@ from evaluation.provider_reliability_extractor import (
     load_task_evidence_snapshot,
 )
 from evaluation.provider_reliability_models import (
+    DEFAULT_EXPECTED_EXECUTION_IDENTITIES,
     ProviderReliabilityReport,
     ProviderReliabilityRobustnessPolicy,
     ProviderReliabilityRobustnessReport,
@@ -130,7 +131,10 @@ def extract_mutation_baseline_snapshot(
         window_start_at=window_start,
         window_end_at=as_of_utc,
         evidence_scope="current_execution_cohort",
-        expected_execution_identities=dict(M29_FROZEN_MUTATION_CANDIDATE_IDENTITIES),
+        expected_execution_identities={
+            **DEFAULT_EXPECTED_EXECUTION_IDENTITIES,
+            **M29_FROZEN_MUTATION_CANDIDATE_IDENTITIES,
+        },
     )
     tasks, exclusions = load_task_evidence_snapshot(db_url, policy)
     report = build_provider_reliability_report(tasks, exclusions, policy)
@@ -194,7 +198,15 @@ def _load_and_validate_bundle_for_publication(
             f"got '{computed_checksum}'"
         )
 
-    cohort_snap = bundle_data.get("task_cohort_snapshot") or {}
+    cohort_snap = bundle_data.get("task_cohort_snapshot")
+    if not isinstance(cohort_snap, dict) or not cohort_snap:
+        raise ValueError(
+            "bundle.json missing 'task_cohort_snapshot'; run preflight or runner before publishing"
+        )
+    for req_field in ("as_of", "window_start_at", "window_end_at"):
+        if req_field not in cohort_snap or not cohort_snap[req_field]:
+            raise ValueError(f"task_cohort_snapshot missing required field '{req_field}'")
+
     as_of = _parse_utc_datetime(cohort_snap["as_of"])
     window_start = _parse_utc_datetime(cohort_snap["window_start_at"])
     window_end = _parse_utc_datetime(cohort_snap["window_end_at"])
@@ -217,11 +229,16 @@ def _extract_post_cutoff_reports(
     bootstrap_seed: int,
 ) -> tuple[
     list[ExtractedTaskEvidence],
+    list[ExtractedTaskEvidence],
     ProviderReliabilityReport,
     ProviderReliabilityReport,
     ProviderReliabilityRobustnessReport,
 ]:
     """Extract canonical, operational, and robustness reports from database snapshot."""
+    expected_identities = {
+        **DEFAULT_EXPECTED_EXECUTION_IDENTITIES,
+        **M29_FROZEN_MUTATION_CANDIDATE_IDENTITIES,
+    }
     canonical_policy = ReliabilityReportPolicy(
         schema_version=2,
         lookback_days=90,
@@ -231,7 +248,7 @@ def _extract_post_cutoff_reports(
         window_start_at=window_start_at,
         window_end_at=window_end_at,
         evidence_scope="current_execution_cohort",
-        expected_execution_identities=dict(M29_FROZEN_MUTATION_CANDIDATE_IDENTITIES),
+        expected_execution_identities=expected_identities,
     )
     can_tasks, can_exclusions = load_task_evidence_snapshot(db_url, canonical_policy)
     canonical_report = build_provider_reliability_report(
@@ -261,14 +278,14 @@ def _extract_post_cutoff_reports(
         window_start_at=window_start_at,
         window_end_at=window_end_at,
         evidence_scope="current_execution_cohort",
-        expected_execution_identities=dict(M29_FROZEN_MUTATION_CANDIDATE_IDENTITIES),
+        expected_execution_identities=expected_identities,
         bootstrap_iterations=bootstrap_iterations,
         bootstrap_seed=bootstrap_seed,
     )
     rob_tasks, rob_exclusions = load_task_evidence_snapshot(db_url, robustness_policy)
     robustness_report = evaluate_robustness_snapshot(rob_tasks, rob_exclusions, robustness_policy)
 
-    return can_tasks, canonical_report, operational_report, robustness_report
+    return can_tasks, rob_tasks, canonical_report, operational_report, robustness_report
 
 
 def _cross_check_scheduled_tasks_with_db(
@@ -312,6 +329,11 @@ def _cross_check_scheduled_tasks_with_db(
                     f"task '{task_id}' accepted mismatch: DB={db_ev.accepted}, "
                     f"manifest={c.accepted}"
                 )
+            if not c.accepted and db_ev.failure_kind != c.report_failure_kind:
+                raise ValueError(
+                    f"task '{task_id}' failure_kind mismatch: DB='{db_ev.failure_kind}', "
+                    f"manifest='{c.report_failure_kind}'"
+                )
             if abs((db_ev.terminal_timestamp - raw_ts).total_seconds()) > 1.0:
                 raise ValueError(
                     f"task '{task_id}' terminal timestamp drift: "
@@ -331,6 +353,7 @@ def _cross_check_and_reconcile_cohort(
     raw_entries: list[dict[str, Any]],
     sanitized_cases: list[M29MutationManifestCase],
     canonical_tasks: list[ExtractedTaskEvidence],
+    robustness_tasks: list[ExtractedTaskEvidence],
     cohort_snap: dict[str, Any],
     as_of: datetime,
     window_start_at: datetime,
@@ -374,6 +397,17 @@ def _cross_check_and_reconcile_cohort(
         ]
         for p in M29_MUTATION_PROFILES
     }
+    report = {
+        p: [
+            t.task_id
+            for t in robustness_tasks
+            if t.task_class == "feature"
+            and t.mutation_mode == "mutation"
+            and t.profile == p
+            and t.task_id is not None
+        ]
+        for p in M29_MUTATION_PROFILES
+    }
 
     return reconcile_m29_mutation_cohort(
         as_of=as_of,
@@ -389,7 +423,7 @@ def _cross_check_and_reconcile_cohort(
         excluded_suite_ids_by_profile=excluded,
         terminal_at_by_task_id=terminal_at_by_task_id,
         current_ids_by_profile=current,
-        report_ids_by_profile=current,
+        report_ids_by_profile=report,
     )
 
 
@@ -500,6 +534,7 @@ def reconcile_and_publish_mutation_wave(
 
     (
         can_tasks,
+        rob_tasks,
         can_report,
         op_report,
         rob_report,
@@ -508,14 +543,15 @@ def reconcile_and_publish_mutation_wave(
     )
 
     cohort_recon = _cross_check_and_reconcile_cohort(
-        raw_entries,
-        sanitized_cases,
-        can_tasks,
-        cohort_snap,
-        as_of,
-        window_start,
-        window_end,
-        effective_now,
+        raw_entries=raw_entries,
+        sanitized_cases=sanitized_cases,
+        canonical_tasks=can_tasks,
+        robustness_tasks=rob_tasks,
+        cohort_snap=cohort_snap,
+        as_of=as_of,
+        window_start_at=window_start,
+        window_end_at=window_end,
+        effective_now=effective_now,
     )
 
     manifest, paired_rep, file_contents, m_sha = _render_and_validate_publications(

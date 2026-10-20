@@ -148,24 +148,21 @@ def handle_preflight(args: argparse.Namespace) -> int:
     isolation_mgr = DisposableDbMemoryIsolationManager(args.db_url)
     baseline_mem = isolation_mgr.load_memory_context("taskboard")
 
-    as_of_arg = getattr(args, "as_of", None)
-    if as_of_arg:
-        raw_as_of = as_of_arg[:-1] + "+00:00" if as_of_arg.endswith("Z") else as_of_arg
-        effective_as_of = datetime.fromisoformat(raw_as_of)
-        if effective_as_of.tzinfo is None:
-            effective_as_of = effective_as_of.replace(tzinfo=UTC)
-    else:
-        effective_as_of = datetime.now(UTC) + timedelta(hours=24)
-
-    baseline_ids, baseline_report = extract_mutation_baseline_snapshot(args.db_url, effective_as_of)
-    if any(len(ids) > 0 for ids in baseline_ids.values()):
-        baseline_path = bundle_dir / "baseline_report.json"
-        baseline_path.write_text(render_json_report(baseline_report), encoding="utf-8")
-        total_baseline = sum(len(ids) for ids in baseline_ids.values())
-        print(f"Captured baseline report with {total_baseline} existing tasks")
-
     print(f"Running M29 mutation preflight checks against {args.db_url}...")
     try:
+        as_of_arg = getattr(args, "as_of", None)
+        if as_of_arg:
+            raw_as_of = as_of_arg[:-1] + "+00:00" if as_of_arg.endswith("Z") else as_of_arg
+            effective_as_of = datetime.fromisoformat(raw_as_of)
+            if effective_as_of.tzinfo is None:
+                effective_as_of = effective_as_of.replace(tzinfo=UTC)
+        else:
+            effective_as_of = datetime.now(UTC) + timedelta(hours=24)
+
+        baseline_ids, baseline_report = extract_mutation_baseline_snapshot(
+            args.db_url, effective_as_of
+        )
+
         snap = run_mutation_preflight_checks(
             db_url=args.db_url,
             workspace_root=workspace_root,
@@ -180,6 +177,14 @@ def handle_preflight(args: argparse.Namespace) -> int:
     except Exception as exc:
         sys.stderr.write(f"ERROR: Preflight check failed: {exc}\n")
         return 1
+
+    baseline_path = bundle_dir / "baseline_report.json"
+    if any(len(ids) > 0 for ids in baseline_ids.values()):
+        baseline_path.write_text(render_json_report(baseline_report), encoding="utf-8")
+        total_baseline = sum(len(ids) for ids in baseline_ids.values())
+        print(f"Captured baseline report with {total_baseline} existing tasks")
+    elif baseline_path.exists():
+        baseline_path.unlink()
 
     bundle_data["status"] = "preflight_passed"
     bundle_data["preflight_passed_at"] = datetime.now(UTC).isoformat()
@@ -235,6 +240,8 @@ def _save_run_results(
             "finished_at": datetime.now(UTC).isoformat(),
         }
     )
+    if res.snapshot is not None:
+        bundle_data.setdefault("task_cohort_snapshot", asdict(res.snapshot))
     _save_bundle(bundle_dir, bundle_data)
 
 
