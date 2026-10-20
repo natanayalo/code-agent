@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: implement hierarchical budget controls and compliance evaluator ([#425](https://github.com/natanayalo/code-agent/pull/425))
+
 - Feat: add concrete candidate dispatcher, neutral reviewer client, retention watchdog, and operator cli ([#424](https://github.com/natanayalo/code-agent/pull/424))
 
 - Feat: preserve execution identity on pre-dispatch and early failure paths ([#422](https://github.com/natanayalo/code-agent/pull/422))
