@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 from collections.abc import Mapping
+from datetime import UTC
 from typing import Any, Literal
 
 from pydantic import Field
@@ -300,7 +301,11 @@ def _compute_calls_used(state: OrchestratorState, repair_passes_used: int = 0) -
 
 
 def _compute_wall_seconds_used(state: OrchestratorState) -> float:
-    created_ats = [e.created_at for e in state.timeline_events if e.created_at is not None]
+    created_ats = [
+        (e.created_at if e.created_at.tzinfo is not None else e.created_at.replace(tzinfo=UTC))
+        for e in state.timeline_events
+        if e.created_at is not None
+    ]
     timeline_span = (
         (max(created_ats) - min(created_ats)).total_seconds() if len(created_ats) >= 2 else 0.0
     )

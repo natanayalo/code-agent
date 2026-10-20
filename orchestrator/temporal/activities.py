@@ -2068,8 +2068,12 @@ class TaskExecutionActivities:
                 )
                 if current is None:
                     raise ValueError(f"Outcome for node {node.node_id} was not found after merge.")
+                budget_spec = resolve_budget_spec(
+                    state.task.budget, constraints=state.task.constraints
+                )
+                allowed_attempts = min(contract.max_attempts, budget_spec.node.max_node_attempts)
                 if current.status == "blocked":
-                    if current.attempts >= contract.max_attempts:
+                    if current.attempts >= allowed_attempts:
                         ExecutionPlanRepository(session).update_node(
                             plan_id=plan.id,
                             node_id=node.node_id,
@@ -2087,10 +2091,6 @@ class TaskExecutionActivities:
                 if current.result.failure_kind == "read_only_violation":
                     state.fanout_disabled_for_remainder = True
                     return NodeWaveMergeResult(continuation="fail_task")
-                budget_spec = resolve_budget_spec(
-                    state.task.budget, constraints=state.task.constraints
-                )
-                allowed_attempts = min(contract.max_attempts, budget_spec.node.max_node_attempts)
                 node_ledger = compute_hierarchical_budget_ledger(state, active_slice="node")
                 if (
                     current.status == "failed"
