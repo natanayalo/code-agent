@@ -19,6 +19,8 @@ MAX_DECOMPOSED_NODES = 6
 def decompose_task_plan(
     task_plan: TaskPlan | None,
     parent_spec: TaskSpec | None,
+    *,
+    max_node_attempts: int | None = None,
 ) -> DecomposedTaskPlan:
     """Convert the existing ordered plan into a validated sequential DAG."""
     if task_plan is None or not task_plan.triggered or parent_spec is None:
@@ -64,6 +66,9 @@ def decompose_task_plan(
                 "acceptance_criteria": [step.expected_outcome],
             }
         )
+        node_max_attempts = (
+            max(1, min(max_node_attempts, 3)) if max_node_attempts is not None else 1
+        )
         nodes.append(
             DecomposedTaskNode(
                 node_id=step.step_id,
@@ -76,6 +81,7 @@ def decompose_task_plan(
                 aggregation_role=aggregation_role,
                 execution_mode=step.execution_mode,
                 parallel_safe=step.parallel_safe,
+                max_attempts=node_max_attempts,
             )
         )
     final_cycle_errors = _cycle_errors({node.node_id: set(node.depends_on) for node in nodes})
@@ -144,6 +150,8 @@ def is_read_only_fanout_eligible(
     completed_node_ids: set[str],
     has_unresolved_blocker: bool,
     fanout_disabled: bool,
+    max_concurrent_nodes: int = 2,
+    remaining_worker_calls: int = 2,
 ) -> bool:
     """Return whether one ready node satisfies the future M25 fan-out contract."""
     return (
@@ -155,4 +163,6 @@ def is_read_only_fanout_eligible(
         and all(dependency in completed_node_ids for dependency in node.depends_on)
         and not has_unresolved_blocker
         and not fanout_disabled
+        and max_concurrent_nodes >= 2
+        and remaining_worker_calls >= 2
     )

@@ -17,10 +17,11 @@ from apps.observability import (
     set_span_input_output,
     start_optional_span,
 )
+from orchestrator.hierarchical_budget import resolve_effective_review_repair_budget
 from orchestrator.review_completion import manual_review_handoff_update
 from orchestrator.state import OrchestratorState, is_task_read_only
 from tools import ToolPermissionLevel
-from tools.numeric import coerce_non_negative_int_like, coerce_positive_int_like
+from tools.numeric import coerce_positive_int_like
 from workers import Worker, WorkerRequest, WorkerRuntimeMode
 from workers.constants import DEFAULT_REVIEW_TIMEOUT_SECONDS
 from workers.prompt_review import build_review_prompt
@@ -234,15 +235,11 @@ def _session_state_for_review_context(state: OrchestratorState) -> Mapping[str, 
     }
 
 
-def _resolve_repair_handoff_budget(constraints: Mapping[str, Any]) -> tuple[int, int]:
+def _resolve_repair_handoff_budget(
+    constraints: Mapping[str, Any], *, state: OrchestratorState | None = None
+) -> tuple[int, int]:
     """Resolve bounded independent-review repair-loop settings."""
-    max_passes = coerce_non_negative_int_like(constraints.get(REPAIR_MAX_PASSES_CONSTRAINT))
-    if max_passes is None:
-        max_passes = DEFAULT_INDEPENDENT_REVIEW_MAX_REPAIR_PASSES
-    used_passes = coerce_non_negative_int_like(constraints.get(REPAIR_PASSES_USED_CONSTRAINT))
-    if used_passes is None:
-        used_passes = 0
-    return max_passes, used_passes
+    return resolve_effective_review_repair_budget(constraints, state=state)
 
 
 def _build_review_repair_task_text(*, task_text: str, findings: list[ReviewFinding]) -> str:
@@ -391,7 +388,7 @@ def _repair_handoff_update(
     if enable_handoff is not True and not has_high_severity:
         return None
 
-    max_passes, used_passes = _resolve_repair_handoff_budget(constraints)
+    max_passes, used_passes = _resolve_repair_handoff_budget(constraints, state=state)
     if used_passes >= max_passes:
         return None
 

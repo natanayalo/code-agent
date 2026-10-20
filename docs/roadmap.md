@@ -439,7 +439,10 @@ route decision
    gated on disposable stack launch (currently N=0).
 2. Persist authoritative configured/actual execution identity before dispatch so early failures do not create new `unknown_execution_identity` gaps; do not infer the three excluded Wave 4 Codex identities.
 3. Gather enough evidence in a historical 45-day cohort to assess longitudinal consistency; the current historical split contains zero included tasks.
-4. Evaluate hierarchical budget controls separately (task, node, repair, wall time, and concurrency limits).
+4. Evaluate hierarchical budget controls separately (implemented and validated: typed
+   `BudgetSpec` hierarchy covering whole-task wall time, worker calls, concurrent nodes,
+   slice clamping for primary/node/repair, pre-dispatch exhaustion gates, and deterministic
+   `evaluate_hierarchical_budget_compliance` telemetry).
 
 ## M30 — GitHub-Native Task and Delivery Control
 

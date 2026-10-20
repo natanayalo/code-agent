@@ -255,7 +255,10 @@ Temporal migration and rollback record is in the
       (`scripts/e2e/run_m29_mutation_wave.py`) are implemented and validated;
    e. gather evidence in a historical 45-day cohort before claiming
       longitudinal robustness;
-   f. evaluate hierarchical budget controls separately.
+   f. evaluate hierarchical budget controls separately (`orchestrator/hierarchical_budget.py`
+      implements typed whole-task, slice, and repair limits, pre-dispatch exhaustion gates,
+      concurrency clamping, and deterministic compliance reporting; validated via unit
+      and vertical-slice E2E suites).
 2. Use the M28 report as a scoped safety/effectiveness signal only; do not
    change routing or add semantic retrieval without further evidence.
 
