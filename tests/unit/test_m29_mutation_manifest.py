@@ -21,6 +21,7 @@ from evaluation.m29_mutation_manifest import (
     assert_sanitized_mutation_paired_report,
     build_mutation_paired_report,
     manifest_sha256,
+    render_mutation_paired_markdown,
 )
 from evaluation.m29_mutation_suite import (
     DEFAULT_FIXTURE_REVISION,
@@ -357,6 +358,15 @@ def test_paired_analysis_summary_and_report() -> None:
     assert report.manifest_sha256 == "f" * 64
     assert report.paired_summary == summary
     assert_sanitized_mutation_paired_report(report.model_dump(mode="json"))
+
+    rendered_md = render_mutation_paired_markdown(report)
+    assert "# M29 Feature/Mutation Paired Analysis" in rendered_md
+    assert f"- **Suite**: `{report.suite_name}`" in rendered_md
+    assert f"- **Build SHA**: `{report.build_sha}`" in rendered_md
+    assert f"- **Manifest SHA-256**: `{report.manifest_sha256}`" in rendered_md
+    assert "## Pre-Evaluation Task Completion" in rendered_md
+    assert "## Post-Terminal Independent Feature Quality" in rendered_md
+    assert "| 10 | 10 | 0 | 0 | 0 | 10 |" in rendered_md
 
     # Excluded case does not count toward identity_complete_pair_count
     excluded_cases = list(manifest.cases)

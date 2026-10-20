@@ -10,7 +10,7 @@ import os
 import sys
 from collections.abc import Mapping
 from dataclasses import asdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +25,10 @@ from evaluation.m29_mutation_fixture import (
 )
 from evaluation.m29_mutation_isolation import MAX_EVALUATION_RETENTION_SECONDS
 from evaluation.m29_mutation_oracles import compute_verifier_source_sha256
+from evaluation.m29_mutation_publication import (
+    extract_mutation_baseline_snapshot,
+    reconcile_and_publish_mutation_wave,
+)
 from evaluation.m29_mutation_reviewer_client import OpenRouterNeutralReviewerClient
 from evaluation.m29_mutation_runner import M29MutationRunner
 from evaluation.m29_mutation_runner_models import M29MutationRunnerResult
@@ -36,6 +40,7 @@ from evaluation.m29_mutation_suite import (
 )
 from evaluation.m29_mutation_verifier import ReadOnlyExternalEvaluator
 from evaluation.m29_mutation_watchdog import EvaluationRetentionWatchdog
+from evaluation.provider_reliability_report import render_json_report
 from orchestrator.state import MemoryContext
 from sandbox.workspace import WorkspaceManager
 
@@ -95,6 +100,21 @@ def handle_init(args: argparse.Namespace) -> int:
     verifier_sha = compute_verifier_source_sha256()
     bundle_dir.mkdir(parents=True, exist_ok=True)
 
+    explicit_build_sha = getattr(args, "build_sha", None)
+    if explicit_build_sha and explicit_build_sha.strip():
+        build_sha = explicit_build_sha.strip()
+    else:
+        try:
+            import subprocess
+
+            build_sha = (
+                subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL)
+                .decode("utf-8")
+                .strip()
+            )
+        except Exception:
+            build_sha = "0000000"
+
     bundle_data = {
         "suite_name": M29_MUTATION_SUITE_NAME,
         "status": "initialized",
@@ -102,11 +122,12 @@ def handle_init(args: argparse.Namespace) -> int:
         "fixture_repo_path": str(fixture_dir),
         "fixture_revision": PINNED_TASKBOARD_FIXTURE_REVISION,
         "verifier_source_sha256": verifier_sha,
+        "build_sha": build_sha,
     }
     _save_bundle(bundle_dir, bundle_data)
 
     EvaluationRetentionWatchdog(bundle_dir)
-    print(f"Successfully initialized M29 mutation wave bundle in {bundle_dir}")
+    print(f"Successfully initialized M29 mutation wave bundle in {bundle_dir} (build={build_sha})")
     return 0
 
 
@@ -127,6 +148,22 @@ def handle_preflight(args: argparse.Namespace) -> int:
     isolation_mgr = DisposableDbMemoryIsolationManager(args.db_url)
     baseline_mem = isolation_mgr.load_memory_context("taskboard")
 
+    as_of_arg = getattr(args, "as_of", None)
+    if as_of_arg:
+        raw_as_of = as_of_arg[:-1] + "+00:00" if as_of_arg.endswith("Z") else as_of_arg
+        effective_as_of = datetime.fromisoformat(raw_as_of)
+        if effective_as_of.tzinfo is None:
+            effective_as_of = effective_as_of.replace(tzinfo=UTC)
+    else:
+        effective_as_of = datetime.now(UTC) + timedelta(hours=24)
+
+    baseline_ids, baseline_report = extract_mutation_baseline_snapshot(args.db_url, effective_as_of)
+    if any(len(ids) > 0 for ids in baseline_ids.values()):
+        baseline_path = bundle_dir / "baseline_report.json"
+        baseline_path.write_text(render_json_report(baseline_report), encoding="utf-8")
+        total_baseline = sum(len(ids) for ids in baseline_ids.values())
+        print(f"Captured baseline report with {total_baseline} existing tasks")
+
     print(f"Running M29 mutation preflight checks against {args.db_url}...")
     try:
         snap = run_mutation_preflight_checks(
@@ -137,6 +174,8 @@ def handle_preflight(args: argparse.Namespace) -> int:
             baseline_memory_context=baseline_mem,
             fixture_repo_path=fixture_dir,
             expected_verifier_sha256=compute_verifier_source_sha256(),
+            as_of=effective_as_of,
+            baseline_ids_by_profile=baseline_ids,
         )
     except Exception as exc:
         sys.stderr.write(f"ERROR: Preflight check failed: {exc}\n")
@@ -295,6 +334,47 @@ def handle_sweep_retention(args: argparse.Namespace) -> int:
     return 0 if result.failed_count == 0 else 1
 
 
+def handle_publish(args: argparse.Namespace) -> int:
+    """Execute post-cutoff cohort reconciliation and publish sanitized M29 reports."""
+    if not args.ack_disposable_mutation_stack:
+        sys.stderr.write(
+            "ERROR: --ack-disposable-mutation-stack is required to operate on disposable stacks.\n"
+        )
+        return 2
+
+    bundle_dir = Path(args.bundle_dir).resolve()
+    bundle_data = _load_bundle(bundle_dir)
+    output_dir = Path(args.output_dir).resolve() if args.output_dir else (bundle_dir / "published")
+
+    print(f"Reconciling and publishing M29 mutation wave to {output_dir}...")
+    try:
+        artifacts = reconcile_and_publish_mutation_wave(
+            bundle_dir=bundle_dir,
+            db_url=args.db_url,
+            output_dir=output_dir,
+            build_sha=args.build_sha,
+            bootstrap_iterations=args.bootstrap_iterations,
+            bootstrap_seed=args.bootstrap_seed,
+        )
+    except Exception as exc:
+        LOGGER.exception("Failed to reconcile and publish mutation wave: %s", exc)
+        sys.stderr.write(f"ERROR: Publication failed: {exc}\n")
+        return 1
+
+    bundle_data["status"] = "published"
+    bundle_data["published_at"] = datetime.now(UTC).isoformat()
+    bundle_data["manifest_sha256"] = artifacts.manifest_sha256
+    bundle_data["published_output_dir"] = str(output_dir)
+    _save_bundle(bundle_dir, bundle_data)
+
+    print(f"Successfully published M29 mutation wave to {output_dir}")
+    print(f"Manifest SHA-256: {artifacts.manifest_sha256}")
+    print(f"Written files ({len(artifacts.written_files)}):")
+    for f in artifacts.written_files:
+        print(f"  - {f.name}")
+    return 0
+
+
 def handle_status(args: argparse.Namespace) -> int:
     """Print status of bundle and retention watchdog ledger."""
     bundle_dir = Path(args.bundle_dir).resolve()
@@ -326,17 +406,13 @@ def handle_status(args: argparse.Namespace) -> int:
     return 0
 
 
-def build_parser() -> argparse.ArgumentParser:
-    """Construct CLI argument parser for M29 mutation wave operations."""
-    parser = argparse.ArgumentParser(
-        description="Operator CLI for M29 feature/mutation disposable-stack evaluation."
-    )
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
+def _add_lifecycle_subparsers(subparsers: Any) -> None:
+    """Add init, preflight, run, and publish lifecycle parsers."""
     # init
     init_p = subparsers.add_parser("init", help="Initialize fixture repo and bundle")
     init_p.add_argument("--bundle-dir", required=True, help="Target evaluation bundle directory")
     init_p.add_argument("--fixture-repo-path", required=True, help="Fixture repo destination path")
+    init_p.add_argument("--build-sha", default=None, help="Explicit build SHA (defaults to HEAD)")
     init_p.add_argument(
         "--ack-disposable-mutation-stack",
         action="store_true",
@@ -352,6 +428,7 @@ def build_parser() -> argparse.ArgumentParser:
     pref_p.add_argument("--db-url", required=True, help="Disposable database URL")
     pref_p.add_argument("--workspace-root", required=True, help="Evaluation workspace root path")
     pref_p.add_argument("--fixture-repo-path", required=True, help="Fixture repo path")
+    pref_p.add_argument("--as-of", default=None, help="Frozen as-of cutoff (ISO-8601 UTC)")
     pref_p.add_argument(
         "--ack-disposable-mutation-stack",
         action="store_true",
@@ -377,6 +454,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="Acknowledge running on an isolated disposable stack",
     )
 
+    # publish
+    pub_p = subparsers.add_parser("publish", help="Reconcile and publish M29 mutation reports")
+    pub_p.add_argument("--bundle-dir", required=True, help="Evaluation bundle directory")
+    pub_p.add_argument("--db-url", required=True, help="Disposable database URL")
+    pub_p.add_argument(
+        "--output-dir", default=None, help="Output directory for published artifacts"
+    )
+    pub_p.add_argument("--build-sha", default=None, help="Explicit build SHA")
+    pub_p.add_argument(
+        "--bootstrap-iterations", type=int, default=10000, help="Robustness bootstrap iterations"
+    )
+    pub_p.add_argument(
+        "--bootstrap-seed", type=int, default=29, help="Deterministic bootstrap random seed"
+    )
+    pub_p.add_argument(
+        "--ack-disposable-mutation-stack",
+        action="store_true",
+        default=False,
+        help="Acknowledge running on an isolated disposable stack",
+    )
+
+
+def _add_maintenance_subparsers(subparsers: Any) -> None:
+    """Add sweep-retention and status maintenance parsers."""
     # sweep-retention
     swp_p = subparsers.add_parser("sweep-retention", help="Sweep expired evaluation workspaces")
     swp_p.add_argument("--bundle-dir", required=True, help="Evaluation bundle directory")
@@ -387,6 +488,15 @@ def build_parser() -> argparse.ArgumentParser:
     stat_p = subparsers.add_parser("status", help="Print bundle and retention ledger status")
     stat_p.add_argument("--bundle-dir", required=True, help="Evaluation bundle directory")
 
+
+def build_parser() -> argparse.ArgumentParser:
+    """Construct CLI argument parser for M29 mutation wave operations."""
+    parser = argparse.ArgumentParser(
+        description="Operator CLI for M29 feature/mutation disposable-stack evaluation."
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    _add_lifecycle_subparsers(subparsers)
+    _add_maintenance_subparsers(subparsers)
     return parser
 
 
@@ -399,6 +509,7 @@ def main(argv: list[str] | None = None) -> int:
         "init": handle_init,
         "preflight": handle_preflight,
         "run": handle_run,
+        "publish": handle_publish,
         "sweep-retention": handle_sweep_retention,
         "status": handle_status,
     }
