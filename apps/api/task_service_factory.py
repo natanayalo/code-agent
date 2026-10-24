@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Final
 from urllib.parse import quote
 
+from apps.api.config import resolve_retention_seconds
 from apps.api.progress import (
     CompositeProgressNotifier,
     OutboundHttpClients,
@@ -600,13 +601,10 @@ def build_task_service_from_env(
         container_manager=container_manager,
     )
 
-    enable_worker_profiles = True
     worker_profiles = _setup_worker_profiles(resolved_env, gemini_worker, openrouter_worker)
-    enable_orchestrator_brain = True
-    enable_improvement_llm_scoring = True
     brain_provider = _build_brain_provider(
-        enable_orchestrator_brain=enable_orchestrator_brain,
-        enable_improvement_llm_scoring=enable_improvement_llm_scoring,
+        enable_orchestrator_brain=True,
+        enable_improvement_llm_scoring=True,
         codex_worker=codex_worker,
         gemini_worker=gemini_worker,
         openrouter_worker=openrouter_worker,
@@ -628,12 +626,13 @@ def build_task_service_from_env(
     post_terminal_quality_evaluation_enabled = _is_enabled(
         resolved_env.get("CODE_AGENT_ENABLE_POST_TERMINAL_QUALITY_EVALUATION_MODE")
     )
+    retention_seconds = resolve_retention_seconds(resolved_env)
 
     return TaskExecutionService(
         session_factory=session_factory,
         worker=facade,
         worker_profiles=worker_profiles,
-        enable_worker_profiles=enable_worker_profiles,
+        enable_worker_profiles=True,
         enable_independent_verifier=not post_terminal_quality_evaluation_enabled,
         enable_post_terminal_quality_evaluation=post_terminal_quality_evaluation_enabled,
         orchestrator_brain=brain_provider,
@@ -645,6 +644,7 @@ def build_task_service_from_env(
             default=3,
         ),
         workspace_root=resolved_workspace_root,
+        retention_seconds=retention_seconds,
         decomposed_fanout_enabled=_is_enabled(
             resolved_env.get("CODE_AGENT_DECOMPOSED_FANOUT_ENABLED")
         ),

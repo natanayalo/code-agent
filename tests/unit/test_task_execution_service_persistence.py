@@ -298,6 +298,9 @@ def test_retention_cleanup_clears_workspace_files_and_persisted_artifacts(
     scratch_path = workspace_root / ".code-agent-scratch" / workspace_path.name
     (scratch_path / "node" / "stdout.log").parent.mkdir(parents=True)
     (scratch_path / "node" / "stdout.log").write_text("old scratch\n", encoding="utf-8")
+    git_path = workspace_root / ".code-agent-git" / workspace_path.name
+    git_path.mkdir(parents=True)
+    (git_path / "HEAD").write_text("ref: refs/heads/master\n", encoding="utf-8")
 
     service = execution_module.TaskExecutionService(
         session_factory=session_factory,
@@ -336,6 +339,7 @@ def test_retention_cleanup_clears_workspace_files_and_persisted_artifacts(
     assert pruned == 1
     assert not workspace_path.exists()
     assert not scratch_path.exists()
+    assert not git_path.exists()
 
     task_snapshot = service.get_task(persisted.task_id)
     assert task_snapshot is not None

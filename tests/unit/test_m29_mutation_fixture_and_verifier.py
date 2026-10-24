@@ -219,6 +219,12 @@ def test_fixture_repo_creation_and_deterministic_sha(fixture_repo: Path) -> None
     )
     assert rev_out.stdout.strip() == PINNED_TASKBOARD_FIXTURE_REVISION
 
+    for ref in ("refs/heads/master", "refs/heads/main"):
+        out = subprocess.run(
+            ["git", "rev-parse", ref], cwd=fixture_repo, capture_output=True, text=True, check=True
+        )
+        assert out.stdout.strip() == PINNED_TASKBOARD_FIXTURE_REVISION
+
 
 def test_fixture_repo_verification_catches_violations(tmp_path: Path, fixture_repo: Path) -> None:
     assert verify_taskboard_fixture_repo(tmp_path / "nonexistent") != []

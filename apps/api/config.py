@@ -16,6 +16,30 @@ DEFAULT_SCOUT_TASK_TEXT = (
     "expected impact, and suggested verification."
 )
 
+DEFAULT_RETENTION_SECONDS: int = 7 * 24 * 60 * 60
+MAX_EVALUATION_RETENTION_SECONDS: int = 259_200
+
+
+def resolve_retention_seconds(environ: Mapping[str, str]) -> int:
+    """Resolve retention seconds with evaluation-mode bounds enforcement."""
+    post_terminal_eval = is_enabled(
+        environ.get("CODE_AGENT_ENABLE_POST_TERMINAL_QUALITY_EVALUATION_MODE"),
+        default=False,
+    )
+    raw = environ.get("CODE_AGENT_RETENTION_SECONDS")
+    if raw is not None and raw.strip():
+        val = coerce_non_negative_int_env(raw, default=DEFAULT_RETENTION_SECONDS)
+        if post_terminal_eval and val > MAX_EVALUATION_RETENTION_SECONDS:
+            raise ValueError(
+                f"CODE_AGENT_RETENTION_SECONDS ({val}) cannot exceed "
+                f"{MAX_EVALUATION_RETENTION_SECONDS} (72 hours) when "
+                "CODE_AGENT_ENABLE_POST_TERMINAL_QUALITY_EVALUATION_MODE is enabled."
+            )
+        return val
+    if post_terminal_eval:
+        return MAX_EVALUATION_RETENTION_SECONDS
+    return DEFAULT_RETENTION_SECONDS
+
 
 def _parse_repo_map(repo_str: str) -> dict[str, str]:
     """Parse comma-separated key:url pairs into a repository registry."""
@@ -54,6 +78,7 @@ class SystemConfig:
     webhook_default_repo_key: str | None = None
     allowed_repos: dict[str, str] = field(default_factory=dict)
     scout_allowed_repos: dict[str, str] = field(default_factory=dict)
+    retention_seconds: int = DEFAULT_RETENTION_SECONDS
 
     @classmethod
     def load_from_env(cls, env: Mapping[str, str] | None = None) -> SystemConfig:
@@ -118,6 +143,7 @@ class SystemConfig:
             or None,
             allowed_repos=allowed_repos,
             scout_allowed_repos=scout_allowed_repos,
+            retention_seconds=resolve_retention_seconds(environ),
         )
 
     def resolve_repo_key(self, key: str | None) -> str | None:

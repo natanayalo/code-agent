@@ -14,6 +14,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import httpx
+
 from evaluation.m29_mutation_dispatcher import (
     DisposableDbMemoryIsolationManager,
     HttpStackCandidateDispatcher,
@@ -131,6 +133,53 @@ def handle_init(args: argparse.Namespace) -> int:
     return 0
 
 
+def check_api_readiness(api_base_url: str, *, client: httpx.Client | None = None) -> None:
+    """Verify disposable API stack /health and /ready endpoints."""
+    base = api_base_url.rstrip("/")
+    cli = client or httpx.Client(timeout=10.0)
+    try:
+        health_resp = cli.get(f"{base}/health")
+        if health_resp.status_code != 200:
+            raise RuntimeError(
+                f"API health check failed: status {health_resp.status_code} ({health_resp.text})"
+            )
+        try:
+            health_json = health_resp.json()
+        except Exception as exc:
+            raise RuntimeError(f"API health response is not valid JSON: {exc}") from exc
+        if health_json.get("status") != "ok":
+            raise RuntimeError(f"API health check returned non-ok status: {health_json}")
+
+        ready_resp = cli.get(f"{base}/ready")
+        if ready_resp.status_code != 200:
+            raise RuntimeError(
+                f"API readiness check failed: status {ready_resp.status_code} ({ready_resp.text})"
+            )
+        try:
+            ready_json = ready_resp.json()
+        except Exception as exc:
+            raise RuntimeError(f"API readiness response is not valid JSON: {exc}") from exc
+        if ready_json.get("status") != "ready":
+            raise RuntimeError(f"API readiness check returned non-ready status: {ready_json}")
+    finally:
+        if client is None:
+            cli.close()
+
+
+def _verify_pre_run_readiness(api_base_url: str | None) -> bool:
+    """Run readiness check before dispatching runs, logging any failure."""
+    if not api_base_url:
+        return True
+    print(f"Verifying API readiness at {api_base_url} before dispatch...")
+    try:
+        check_api_readiness(api_base_url)
+        print("API readiness verified (/health and /ready).")
+        return True
+    except Exception as exc:
+        sys.stderr.write(f"ERROR: API readiness check failed: {exc}\n")
+        return False
+
+
 def handle_preflight(args: argparse.Namespace) -> int:
     """Execute preflight checks and snapshot verification against disposable database."""
     if not args.ack_disposable_mutation_stack:
@@ -150,6 +199,11 @@ def handle_preflight(args: argparse.Namespace) -> int:
 
     print(f"Running M29 mutation preflight checks against {args.db_url}...")
     try:
+        if getattr(args, "api_base_url", None):
+            print(f"Checking API readiness at {args.api_base_url}...")
+            check_api_readiness(args.api_base_url)
+            print("API readiness verified (/health and /ready).")
+
         as_of_arg = getattr(args, "as_of", None)
         if as_of_arg:
             raw_as_of = as_of_arg[:-1] + "+00:00" if as_of_arg.endswith("Z") else as_of_arg
@@ -258,6 +312,9 @@ def handle_run(args: argparse.Namespace) -> int:
     fixture_dir = Path(args.fixture_repo_path).resolve()
     bundle_data = _load_bundle(bundle_dir)
 
+    if not _verify_pre_run_readiness(getattr(args, "api_base_url", None)):
+        return 1
+
     suite = build_m29_mutation_suite()
     watchdog = EvaluationRetentionWatchdog(bundle_dir, retention_seconds=args.retention_seconds)
     isolation_mgr = DisposableDbMemoryIsolationManager(args.db_url)
@@ -273,7 +330,7 @@ def handle_run(args: argparse.Namespace) -> int:
         db_url=args.db_url,
         workspace_root=workspace_root,
         repo_key="taskboard",
-        branch="main",
+        branch=getattr(args, "branch", "master"),
         auth_token=args.auth_token,
         retention_watchdog=watchdog,
         memory_isolation_manager=isolation_mgr,
@@ -437,6 +494,11 @@ def _add_lifecycle_subparsers(subparsers: Any) -> None:
     pref_p.add_argument("--fixture-repo-path", required=True, help="Fixture repo path")
     pref_p.add_argument("--as-of", default=None, help="Frozen as-of cutoff (ISO-8601 UTC)")
     pref_p.add_argument(
+        "--api-base-url",
+        default=None,
+        help="Optional API base URL to verify /health and /ready during preflight",
+    )
+    pref_p.add_argument(
         "--ack-disposable-mutation-stack",
         action="store_true",
         default=False,
@@ -449,6 +511,9 @@ def _add_lifecycle_subparsers(subparsers: Any) -> None:
     run_p.add_argument("--db-url", required=True, help="Disposable database URL")
     run_p.add_argument("--workspace-root", required=True, help="Evaluation workspace root path")
     run_p.add_argument("--fixture-repo-path", required=True, help="Fixture repo path")
+    run_p.add_argument(
+        "--branch", default="master", help="Target git branch to clone (default: master)"
+    )
     run_p.add_argument("--api-base-url", default="http://127.0.0.1:8000", help="API base URL")
     run_p.add_argument("--openrouter-api-key", default=os.environ.get("OPENROUTER_API_KEY", ""))
     run_p.add_argument("--openrouter-base-url", default="https://openrouter.ai/api/v1")

@@ -576,6 +576,7 @@ class TestHttpStackCandidateDispatcher:
             retention_watchdog=watchdog,
             httpx_client=client,
         )
+        assert dispatcher.branch == "master"
 
         with Session(create_engine(db_url)) as session:
             session.add(ProjectMemory(repo_url="taskboard", memory_key="pm-init", value={"v": 1}))

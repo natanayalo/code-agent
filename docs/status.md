@@ -198,9 +198,12 @@ Temporal migration and rollback record is in the
   builder (`evaluation/m29_mutation_fixture.py`), runner-owned read-only acceptance
   oracles (`evaluation/m29_mutation_oracles.py`), concrete `ReadOnlyExternalEvaluator`
   (`evaluation/m29_mutation_verifier.py`), pinned deterministic revision
-  `228071722c645e813af16053e56d007c25e9f127`, and the complete operator CLI
+  `228071722c645e813af16053e56d007c25e9f127`, the complete operator CLI
   with `init`, `preflight`, `run`, `publish`, and `sweep-retention`
-  (`scripts/e2e/run_m29_mutation_wave.py`) are implemented and validated.
+  (`scripts/e2e/run_m29_mutation_wave.py`), and disposable-stack readiness
+  integration fixes (branch alignment for master/main, <=259,200s retention
+  enforcement, .code-agent-git cleanup, and live API /health + /ready preflight
+  checks) are implemented and validated.
   Live cases remain gated, `feature/mutation` is N=0, and production routing
   remains static.
 

@@ -325,6 +325,13 @@ def _commit_fixture(repo_dir: Path) -> str:
         check=True,
         capture_output=True,
     )
+    subprocess.run(
+        ["git", "branch", "-f", "main", "HEAD"],
+        cwd=repo_dir,
+        env=env,
+        check=True,
+        capture_output=True,
+    )
     out = subprocess.run(
         ["git", "rev-parse", "HEAD"],
         cwd=repo_dir,

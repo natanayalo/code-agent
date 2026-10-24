@@ -48,11 +48,15 @@ def _delete_retained_workspace_path(self: Any, workspace_id: str | None) -> bool
             deleted = True
         scratch_root = workspace_scratch_root(workspace_path)
         scratch_parent = (self.workspace_root / ".code-agent-scratch").resolve()
-        if not scratch_root.is_relative_to(scratch_parent):
-            return deleted
-        if scratch_root.exists():
+        if scratch_root.is_relative_to(scratch_parent) and scratch_root.exists():
             shutil.rmtree(scratch_root)
             deleted = True
+        if workspace_id is not None:
+            git_parent = (self.workspace_root / ".code-agent-git").resolve()
+            git_root = (git_parent / workspace_id).resolve()
+            if git_root.is_relative_to(git_parent) and git_root.exists():
+                shutil.rmtree(git_root)
+                deleted = True
         return deleted
     except OSError as exc:
         logger.warning(
