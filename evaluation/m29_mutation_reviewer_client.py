@@ -288,6 +288,8 @@ def build_custom_neutral_evaluator(
     if provider and provider.strip():
         eff_provider = provider.strip()
         eff_model = stripped_model
+        if eff_model.startswith(f"{eff_provider}/"):
+            eff_model = eff_model[len(eff_provider) + 1 :]
     elif "/" in stripped_model:
         eff_provider, eff_model = stripped_model.split("/", 1)
     else:
