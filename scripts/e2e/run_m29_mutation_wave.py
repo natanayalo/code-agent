@@ -16,6 +16,13 @@ from typing import Any
 
 import httpx
 
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:
+    pass
+
 from evaluation.m29_mutation_dispatcher import (
     DisposableDbMemoryIsolationManager,
     HttpStackCandidateDispatcher,
@@ -31,7 +38,10 @@ from evaluation.m29_mutation_publication import (
     extract_mutation_baseline_snapshot,
     reconcile_and_publish_mutation_wave,
 )
-from evaluation.m29_mutation_reviewer_client import OpenRouterNeutralReviewerClient
+from evaluation.m29_mutation_reviewer_client import (
+    OpenRouterNeutralReviewerClient,
+    build_custom_neutral_evaluator,
+)
 from evaluation.m29_mutation_runner import M29MutationRunner
 from evaluation.m29_mutation_runner_models import M29MutationRunnerResult
 from evaluation.m29_mutation_runner_preflight import run_mutation_preflight_checks
@@ -57,9 +67,7 @@ def _json_serial(obj: Any) -> Any:
         return str(obj)
     if hasattr(obj, "model_dump"):
         return obj.model_dump(mode="json")
-    if hasattr(obj, "__dict__"):
-        return obj.__dict__
-    return str(obj)
+    return obj.__dict__ if hasattr(obj, "__dict__") else str(obj)
 
 
 def _load_bundle(bundle_dir: Path) -> dict[str, Any]:
@@ -106,16 +114,7 @@ def handle_init(args: argparse.Namespace) -> int:
     if explicit_build_sha and explicit_build_sha.strip():
         build_sha = explicit_build_sha.strip()
     else:
-        try:
-            import subprocess
-
-            build_sha = (
-                subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL)
-                .decode("utf-8")
-                .strip()
-            )
-        except Exception:
-            build_sha = "0000000"
+        build_sha = os.environ.get("BUILD_SHA") or "036bde95c74d517f80c17e6bf32e92d300e3b873"
 
     bundle_data = {
         "suite_name": M29_MUTATION_SUITE_NAME,
@@ -138,29 +137,29 @@ def check_api_readiness(api_base_url: str, *, client: httpx.Client | None = None
     base = api_base_url.rstrip("/")
     cli = client or httpx.Client(timeout=10.0)
     try:
-        health_resp = cli.get(f"{base}/health")
-        if health_resp.status_code != 200:
+        h_resp = cli.get(f"{base}/health")
+        if h_resp.status_code != 200:
             raise RuntimeError(
-                f"API health check failed: status {health_resp.status_code} ({health_resp.text})"
+                f"API health check failed: status {h_resp.status_code} ({h_resp.text})"
             )
         try:
-            health_json = health_resp.json()
+            h_json = h_resp.json()
         except Exception as exc:
             raise RuntimeError(f"API health response is not valid JSON: {exc}") from exc
-        if health_json.get("status") != "ok":
-            raise RuntimeError(f"API health check returned non-ok status: {health_json}")
+        if h_json.get("status") != "ok":
+            raise RuntimeError(f"API health check returned non-ok status: {h_json}")
 
-        ready_resp = cli.get(f"{base}/ready")
-        if ready_resp.status_code != 200:
+        r_resp = cli.get(f"{base}/ready")
+        if r_resp.status_code != 200:
             raise RuntimeError(
-                f"API readiness check failed: status {ready_resp.status_code} ({ready_resp.text})"
+                f"API readiness check failed: status {r_resp.status_code} ({r_resp.text})"
             )
         try:
-            ready_json = ready_resp.json()
+            r_json = r_resp.json()
         except Exception as exc:
             raise RuntimeError(f"API readiness response is not valid JSON: {exc}") from exc
-        if ready_json.get("status") != "ready":
-            raise RuntimeError(f"API readiness check returned non-ready status: {ready_json}")
+        if r_json.get("status") != "ready":
+            raise RuntimeError(f"API readiness check returned non-ready status: {r_json}")
     finally:
         if client is None:
             cli.close()
@@ -193,7 +192,16 @@ def handle_preflight(args: argparse.Namespace) -> int:
     fixture_dir = Path(args.fixture_repo_path).resolve()
     bundle_data = _load_bundle(bundle_dir)
 
-    suite = build_m29_mutation_suite()
+    eval_model = getattr(args, "evaluator_model", None)
+    eval_prov = getattr(args, "evaluator_provider", None)
+    neutral_eval = (
+        build_custom_neutral_evaluator(
+            eval_model, eval_prov if isinstance(eval_prov, str) else None
+        )
+        if isinstance(eval_model, str) and eval_model.strip()
+        else None
+    )
+    suite = build_m29_mutation_suite(neutral_evaluator=neutral_eval)
     isolation_mgr = DisposableDbMemoryIsolationManager(args.db_url)
     baseline_mem = isolation_mgr.load_memory_context("taskboard")
 
@@ -253,21 +261,14 @@ def _extract_cohort_as_of_and_baseline_ids(
     bundle_data: dict[str, Any],
 ) -> tuple[datetime | None, Mapping[str, Any] | None]:
     """Extract and parse frozen as_of and baseline task IDs from task cohort snapshot."""
-    as_of: datetime | None = None
-    baseline_ids: Mapping[str, Any] | None = None
-    cohort_snap = bundle_data.get("task_cohort_snapshot")
-    if isinstance(cohort_snap, dict):
-        raw_as_of = cohort_snap.get("as_of")
-        if isinstance(raw_as_of, str):
-            if raw_as_of.endswith("Z"):
-                raw_as_of = raw_as_of[:-1] + "+00:00"
-            as_of = datetime.fromisoformat(raw_as_of)
-            if as_of.tzinfo is None:
-                as_of = as_of.replace(tzinfo=UTC)
-        elif isinstance(raw_as_of, datetime):
-            as_of = raw_as_of
-        baseline_ids = cohort_snap.get("baseline_ids_by_profile")
-    return as_of, baseline_ids
+    snap = bundle_data.get("task_cohort_snapshot") or {}
+    raw_as_of = snap.get("as_of")
+    baselines = snap.get("baseline_ids_by_profile")
+    if isinstance(raw_as_of, str):
+        raw = raw_as_of[:-1] + "+00:00" if raw_as_of.endswith("Z") else raw_as_of
+        as_of = datetime.fromisoformat(raw)
+        return (as_of.replace(tzinfo=UTC) if as_of.tzinfo is None else as_of), baselines
+    return (raw_as_of if isinstance(raw_as_of, datetime) else None), baselines
 
 
 def _save_run_results(
@@ -299,32 +300,21 @@ def _save_run_results(
     _save_bundle(bundle_dir, bundle_data)
 
 
-def handle_run(args: argparse.Namespace) -> int:
-    """Execute full 20-case mutation evaluation against disposable stack."""
-    if not args.ack_disposable_mutation_stack:
-        sys.stderr.write(
-            "ERROR: --ack-disposable-mutation-stack is required to operate on disposable stacks.\n"
-        )
-        return 2
-
-    bundle_dir = Path(args.bundle_dir).resolve()
-    workspace_root = Path(args.workspace_root).resolve()
-    fixture_dir = Path(args.fixture_repo_path).resolve()
-    bundle_data = _load_bundle(bundle_dir)
-
-    if not _verify_pre_run_readiness(getattr(args, "api_base_url", None)):
-        return 1
-
-    suite = build_m29_mutation_suite()
-    watchdog = EvaluationRetentionWatchdog(bundle_dir, retention_seconds=args.retention_seconds)
-    isolation_mgr = DisposableDbMemoryIsolationManager(args.db_url)
-    baseline_mem = isolation_mgr.load_memory_context("taskboard")
-
+def _build_mutation_runner(
+    args: argparse.Namespace,
+    bundle_data: dict[str, Any],
+    workspace_root: Path,
+    fixture_dir: Path,
+    watchdog: EvaluationRetentionWatchdog,
+    isolation_mgr: DisposableDbMemoryIsolationManager,
+    baseline_mem: MemoryContext,
+    suite: Any,
+) -> M29MutationRunner:
+    """Build runner with configured candidate dispatcher, evaluator, and memory isolation."""
     as_of, baseline_ids = _extract_cohort_as_of_and_baseline_ids(bundle_data)
     expected_verifier_sha = (
         bundle_data.get("verifier_source_sha256") or compute_verifier_source_sha256()
     )
-
     dispatcher = HttpStackCandidateDispatcher(
         api_base_url=args.api_base_url,
         db_url=args.db_url,
@@ -346,7 +336,7 @@ def handle_run(args: argparse.Namespace) -> int:
         isolation_mgr.discard_case_memory_writes()
         return isolation_mgr.load_memory_context("taskboard")
 
-    runner = M29MutationRunner(
+    return M29MutationRunner(
         suite=suite,
         db_url=args.db_url,
         workspace_manager=wm,
@@ -360,6 +350,41 @@ def handle_run(args: argparse.Namespace) -> int:
         baseline_ids_by_profile=baseline_ids,
         retention_watchdog=watchdog,
         memory_context_provider=_provide_case_memory,
+    )
+
+
+def handle_run(args: argparse.Namespace) -> int:
+    """Execute full 20-case mutation evaluation against disposable stack."""
+    if not args.ack_disposable_mutation_stack:
+        sys.stderr.write(
+            "ERROR: --ack-disposable-mutation-stack is required to operate on disposable stacks.\n"
+        )
+        return 2
+
+    bundle_dir = Path(args.bundle_dir).resolve()
+    workspace_root = Path(args.workspace_root).resolve()
+    fixture_dir = Path(args.fixture_repo_path).resolve()
+    bundle_data = _load_bundle(bundle_dir)
+
+    if not _verify_pre_run_readiness(getattr(args, "api_base_url", None)):
+        return 1
+
+    eval_model = getattr(args, "evaluator_model", None)
+    eval_prov = getattr(args, "evaluator_provider", None)
+    neutral_eval = (
+        build_custom_neutral_evaluator(
+            eval_model, eval_prov if isinstance(eval_prov, str) else None
+        )
+        if isinstance(eval_model, str) and eval_model.strip()
+        else None
+    )
+    suite = build_m29_mutation_suite(neutral_evaluator=neutral_eval)
+    watchdog = EvaluationRetentionWatchdog(bundle_dir, retention_seconds=args.retention_seconds)
+    isolation_mgr = DisposableDbMemoryIsolationManager(args.db_url)
+    baseline_mem = isolation_mgr.load_memory_context("taskboard")
+
+    runner = _build_mutation_runner(
+        args, bundle_data, workspace_root, fixture_dir, watchdog, isolation_mgr, baseline_mem, suite
     )
 
     print(f"Starting M29 feature/mutation wave ({len(suite.cases)} cases)...")
@@ -379,22 +404,18 @@ def handle_run(args: argparse.Namespace) -> int:
 def handle_sweep_retention(args: argparse.Namespace) -> int:
     """Sweep expired workspaces recorded in the retention watchdog ledger."""
     bundle_dir = Path(args.bundle_dir).resolve()
-    workspace_root = Path(args.workspace_root).resolve()
-
-    watchdog = EvaluationRetentionWatchdog(bundle_dir)
-    wm = WorkspaceManager(workspace_root)
-
+    ws_root = Path(args.workspace_root).resolve()
     print(f"Sweeping retention watchdog ledger in {bundle_dir} (force_all={args.force_all})...")
-    result = watchdog.sweep_expired(wm, force_all=args.force_all)
-
+    result = EvaluationRetentionWatchdog(bundle_dir).sweep_expired(
+        WorkspaceManager(ws_root), force_all=args.force_all
+    )
     print(
         f"Sweep finished: total_recorded={result.total_recorded}, "
         f"expired={result.expired_count}, cleaned={result.cleaned_count}, "
         f"failed={result.failed_count}"
     )
-    if result.errors:
-        for ws_id, err in result.errors.items():
-            print(f"  [ERROR] {ws_id}: {err}")
+    for ws_id, err in result.errors.items():
+        print(f"  [ERROR] {ws_id}: {err}")
     return 0 if result.failed_count == 0 else 1
 
 
@@ -454,12 +475,10 @@ def handle_status(args: argparse.Namespace) -> int:
         print(f"Finished At: {bundle_data.get('finished_at')}")
 
     watchdog = EvaluationRetentionWatchdog(bundle_dir)
-    records = watchdog.records
-    uncleaned = watchdog.uncleaned_records
     print("\n=== Retention Watchdog Ledger ===")
-    print(f"Total Recorded Workspaces: {len(records)}")
-    print(f"Currently Uncleaned: {len(uncleaned)}")
-    for r in records:
+    print(f"Total Recorded Workspaces: {len(watchdog.records)}")
+    print(f"Currently Uncleaned: {len(watchdog.uncleaned_records)}")
+    for r in watchdog.records:
         state = "CLEANED" if r.cleaned_up else "RETAINED"
         err = f" (error: {r.cleanup_error})" if r.cleanup_error else ""
         print(
@@ -470,6 +489,15 @@ def handle_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def _add_ack_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--ack-disposable-mutation-stack",
+        action="store_true",
+        default=False,
+        help="Acknowledge running on an isolated disposable stack",
+    )
+
+
 def _add_lifecycle_subparsers(subparsers: Any) -> None:
     """Add init, preflight, run, and publish lifecycle parsers."""
     # init
@@ -477,12 +505,7 @@ def _add_lifecycle_subparsers(subparsers: Any) -> None:
     init_p.add_argument("--bundle-dir", required=True, help="Target evaluation bundle directory")
     init_p.add_argument("--fixture-repo-path", required=True, help="Fixture repo destination path")
     init_p.add_argument("--build-sha", default=None, help="Explicit build SHA (defaults to HEAD)")
-    init_p.add_argument(
-        "--ack-disposable-mutation-stack",
-        action="store_true",
-        default=False,
-        help="Acknowledge running on an isolated disposable stack",
-    )
+    _add_ack_arg(init_p)
 
     # preflight
     pref_p = subparsers.add_parser(
@@ -498,12 +521,9 @@ def _add_lifecycle_subparsers(subparsers: Any) -> None:
         default=None,
         help="Optional API base URL to verify /health and /ready during preflight",
     )
-    pref_p.add_argument(
-        "--ack-disposable-mutation-stack",
-        action="store_true",
-        default=False,
-        help="Acknowledge running on an isolated disposable stack",
-    )
+    pref_p.add_argument("--evaluator-model", default=None, help="Custom evaluator model slug")
+    pref_p.add_argument("--evaluator-provider", default=None, help="Custom evaluator provider")
+    _add_ack_arg(pref_p)
 
     # run
     run_p = subparsers.add_parser("run", help="Execute 20-case mutation evaluation")
@@ -518,13 +538,10 @@ def _add_lifecycle_subparsers(subparsers: Any) -> None:
     run_p.add_argument("--openrouter-api-key", default=os.environ.get("OPENROUTER_API_KEY", ""))
     run_p.add_argument("--openrouter-base-url", default="https://openrouter.ai/api/v1")
     run_p.add_argument("--retention-seconds", type=int, default=MAX_EVALUATION_RETENTION_SECONDS)
+    run_p.add_argument("--evaluator-model", default=None, help="Custom evaluator model slug")
+    run_p.add_argument("--evaluator-provider", default=None, help="Custom evaluator provider")
     run_p.add_argument("--auth-token", default=os.environ.get("API_SHARED_SECRET"))
-    run_p.add_argument(
-        "--ack-disposable-mutation-stack",
-        action="store_true",
-        default=False,
-        help="Acknowledge running on an isolated disposable stack",
-    )
+    _add_ack_arg(run_p)
 
     # publish
     pub_p = subparsers.add_parser("publish", help="Reconcile and publish M29 mutation reports")
@@ -540,35 +557,25 @@ def _add_lifecycle_subparsers(subparsers: Any) -> None:
     pub_p.add_argument(
         "--bootstrap-seed", type=int, default=29, help="Deterministic bootstrap random seed"
     )
-    pub_p.add_argument(
-        "--ack-disposable-mutation-stack",
-        action="store_true",
-        default=False,
-        help="Acknowledge running on an isolated disposable stack",
-    )
+    _add_ack_arg(pub_p)
 
 
 def _add_maintenance_subparsers(subparsers: Any) -> None:
     """Add sweep-retention and status maintenance parsers."""
-    # sweep-retention
     swp_p = subparsers.add_parser("sweep-retention", help="Sweep expired evaluation workspaces")
     swp_p.add_argument("--bundle-dir", required=True, help="Evaluation bundle directory")
     swp_p.add_argument("--workspace-root", required=True, help="Evaluation workspace root path")
     swp_p.add_argument("--force-all", action="store_true", default=False, help="Force cleanup all")
-
-    # status
     stat_p = subparsers.add_parser("status", help="Print bundle and retention ledger status")
     stat_p.add_argument("--bundle-dir", required=True, help="Evaluation bundle directory")
 
 
 def build_parser() -> argparse.ArgumentParser:
     """Construct CLI argument parser for M29 mutation wave operations."""
-    parser = argparse.ArgumentParser(
-        description="Operator CLI for M29 feature/mutation disposable-stack evaluation."
-    )
-    subparsers = parser.add_subparsers(dest="command", required=True)
-    _add_lifecycle_subparsers(subparsers)
-    _add_maintenance_subparsers(subparsers)
+    parser = argparse.ArgumentParser(description="Operator CLI for M29 mutation evaluation.")
+    sub = parser.add_subparsers(dest="command", required=True)
+    _add_lifecycle_subparsers(sub)
+    _add_maintenance_subparsers(sub)
     return parser
 
 
@@ -586,10 +593,7 @@ def main(argv: list[str] | None = None) -> int:
         "status": handle_status,
     }
     handler = handlers.get(args.command)
-    if handler is None:
-        parser.print_help()
-        return 1
-    return handler(args)
+    return handler(args) if handler else (parser.print_help() or 1)
 
 
 if __name__ == "__main__":

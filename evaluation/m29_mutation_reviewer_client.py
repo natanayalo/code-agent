@@ -12,6 +12,7 @@ import httpx
 
 from evaluation.m29_mutation_suite import (
     NEUTRAL_EVALUATOR_SYSTEM_PROMPT,
+    EvaluatorBudget,
     NeutralEvaluatorManifest,
 )
 from evaluation.m29_mutation_verifier import (
@@ -51,8 +52,10 @@ def _format_blinded_prompt(request: BlindedNeutralReviewRequest) -> str:
     )
 
 
-def _parse_json_verdict(raw_content: str) -> tuple[bool, tuple[str, ...], str | None]:
+def _parse_json_verdict(raw_content: str | None) -> tuple[bool, tuple[str, ...], str | None]:
     """Parse neutral reviewer JSON verdict safely."""
+    if not raw_content or not raw_content.strip():
+        return False, (), "empty_content_in_response"
     text = raw_content.strip()
     if text.startswith("```json"):
         text = text[7:]
@@ -88,7 +91,7 @@ class OpenRouterNeutralReviewerClient:
         timeout_seconds: float = 120.0,
         httpx_client: httpx.Client | None = None,
     ) -> None:
-        self.api_key = api_key or os.environ.get("OPENROUTER_API_KEY", "")
+        self.api_key = api_key if api_key is not None else os.environ.get("OPENROUTER_API_KEY", "")
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
         self._external_client = httpx_client
@@ -273,6 +276,37 @@ class OpenRouterNeutralReviewerClient:
         return self._process_completion_response(resp_json, manifest)
 
 
+def build_custom_neutral_evaluator(
+    raw_model: str,
+    provider: str | None = None,
+    *,
+    max_tokens: int = 2048,
+    timeout_seconds: int = 300,
+) -> NeutralEvaluatorManifest:
+    """Build a custom NeutralEvaluatorManifest from model/provider specifications."""
+    stripped_model = raw_model.strip()
+    if provider and provider.strip():
+        eff_provider = provider.strip()
+        eff_model = stripped_model
+    elif "/" in stripped_model:
+        eff_provider, eff_model = stripped_model.split("/", 1)
+    else:
+        eff_provider = "openrouter"
+        eff_model = stripped_model
+
+    return NeutralEvaluatorManifest(
+        provider=eff_provider,
+        model=eff_model,
+        reasoning_effort=None,
+        system_prompt_sha256=_expected_system_prompt_sha256(),
+        tools=("read_file", "list_dir"),
+        runtime="read_only",
+        fallback_policy="none",
+        budget=EvaluatorBudget(timeout_seconds=timeout_seconds, max_tokens=max_tokens),
+    )
+
+
 __all__ = [
     "OpenRouterNeutralReviewerClient",
+    "build_custom_neutral_evaluator",
 ]
