@@ -1175,7 +1175,9 @@ def test_codex_oauth_empty_auth_json(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert "malformed or unreadable" in res.detail
 
 
-def test_codex_oauth_preflight_uses_fallback_directory(tmp_path: Path, monkeypatch) -> None:
+def test_codex_oauth_preflight_rejects_missing_explicit_credentials(
+    tmp_path: Path, monkeypatch
+) -> None:
     configured = tmp_path / "configured" / ".codex"
     fallback = tmp_path / "fallback" / ".codex"
     configured.mkdir(parents=True)
@@ -1188,7 +1190,8 @@ def test_codex_oauth_preflight_uses_fallback_directory(tmp_path: Path, monkeypat
         _make_context(auth_mechanism="chatgpt_oauth")
     )
 
-    assert result.status == "ready"
+    assert result.status == "unready"
+    assert result.blocking
 
 
 def test_codex_preflight_uses_adapter_only_auth_home(tmp_path: Path, monkeypatch) -> None:
@@ -1222,7 +1225,9 @@ def test_antigravity_token_missing_no_oauth_creds(
     assert "Antigravity OAuth token not found" in res.detail
 
 
-def test_antigravity_preflight_uses_fallback_directory(tmp_path: Path, monkeypatch) -> None:
+def test_antigravity_preflight_rejects_missing_explicit_credentials(
+    tmp_path: Path, monkeypatch
+) -> None:
     configured = tmp_path / "configured" / ".gemini"
     fallback = tmp_path / "fallback" / ".gemini"
     configured.mkdir(parents=True)
@@ -1237,7 +1242,8 @@ def test_antigravity_preflight_uses_fallback_directory(tmp_path: Path, monkeypat
         _make_context(provider="antigravity", auth_mechanism="antigravity_oauth")
     )
 
-    assert result.status == "ready"
+    assert result.status == "unready"
+    assert result.blocking
 
 
 def test_antigravity_preflight_uses_adapter_only_auth_home(tmp_path: Path, monkeypatch) -> None:

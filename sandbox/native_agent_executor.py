@@ -186,6 +186,30 @@ def _sandbox_file_secret_mount(sandbox_secrets_dir: Path) -> str:
     )
 
 
+def _append_task_private_mounts(
+    command: list[str],
+    *,
+    artifact_root: Path,
+    agent_home: Path,
+    sandbox_secrets_dir: Path | None,
+    provider_auth_paths: tuple[Path, ...],
+) -> None:
+    command.extend(
+        [
+            "--mount",
+            f"type=bind,source={artifact_root},target={artifact_root}",
+            "--mount",
+            f"type=bind,source={agent_home},target={agent_home}",
+        ]
+    )
+    if sandbox_secrets_dir is not None:
+        command.extend(["--mount", _sandbox_file_secret_mount(sandbox_secrets_dir)])
+    for path in provider_auth_paths:
+        if not path.resolve().is_relative_to(agent_home.resolve()) or path.is_symlink():
+            raise NativeAgentExecutorError("Provider authentication mount escapes task home")
+        command.extend(["--mount", f"type=bind,source={path},target={path},readonly"])
+
+
 def stage_agent_home_shell_environment(
     agent_home: Path,
     repo_path: Path,
@@ -267,6 +291,7 @@ class DockerNativeAgentExecutor:
         resource_limits: Any,
         sandbox_secrets_dir: Path | None = None,
         network_name: str | None = None,
+        provider_auth_paths: tuple[Path, ...] = (),
     ) -> list[str]:
         workspace_path = workspace.workspace_path.resolve()
         ro = ",readonly" if read_only_workspace else ""
@@ -317,16 +342,13 @@ class DockerNativeAgentExecutor:
                     f"type=tmpfs,target={workspace_path / '.git' / 'hooks'},tmpfs-mode=0755,tmpfs-size=1m",  # noqa: E501
                 ]
             )
-        docker_command.extend(
-            [
-                "--mount",
-                f"type=bind,source={artifact_root},target={artifact_root}",
-                "--mount",
-                f"type=bind,source={agent_home},target={agent_home}",
-            ]
+        _append_task_private_mounts(
+            docker_command,
+            artifact_root=artifact_root,
+            agent_home=agent_home,
+            sandbox_secrets_dir=sandbox_secrets_dir,
+            provider_auth_paths=provider_auth_paths,
         )
-        if sandbox_secrets_dir is not None:
-            docker_command.extend(["--mount", _sandbox_file_secret_mount(sandbox_secrets_dir)])
         docker_command.extend(["--workdir", str(workspace.repo_path.resolve())])
         for key, value in sorted(environment.items()):
             docker_command.extend(["--env", f"{key}={value}"])
@@ -377,7 +399,11 @@ class DockerNativeAgentExecutor:
         allowed_hosts: list[str],
     ) -> str:
         proxy_name = f"native-egress-{uuid4().hex[:20]}"
-        created = self._docker(["network", "create", "--internal", network_name])
+        try:
+            created = self._docker(["network", "create", "--internal", network_name])
+        except BaseException:
+            self._cleanup_network(network_name=network_name, proxy_name=None)
+            raise
         if created.returncode != 0:
             raise NativeAgentExecutorError(
                 created.stderr.strip() or "failed to create executor network"
@@ -429,18 +455,16 @@ class DockerNativeAgentExecutor:
             ]
         )
 
-        proxy = self._docker(docker_args)
-        if proxy.returncode != 0:
-            self._docker(["network", "rm", network_name])
-            message = proxy.stderr.strip() or "failed to start egress proxy"
-            raise NativeAgentExecutorError(message)
-        connected = self._docker(["network", "connect", "bridge", proxy_name])
-        if connected.returncode != 0:
-            self._remove(proxy_name)
-            self._docker(["network", "rm", network_name])
-            raise NativeAgentExecutorError(
-                connected.stderr.strip() or "failed to attach egress proxy"
-            )
+        try:
+            proxy = self._docker(docker_args)
+            if proxy.returncode != 0:
+                raise NativeAgentExecutorError("Failed to start egress proxy")
+            connected = self._docker(["network", "connect", "bridge", proxy_name])
+            if connected.returncode != 0:
+                raise NativeAgentExecutorError("Failed to attach egress proxy")
+        except BaseException:
+            self._cleanup_network(network_name=network_name, proxy_name=proxy_name)
+            raise
         return proxy_name
 
     def _cleanup_network(self, *, network_name: str | None, proxy_name: str | None) -> str:
@@ -542,6 +566,11 @@ class DockerNativeAgentExecutor:
                 destination_by_ref=context.provider_bootstrap.destination_by_ref,
                 task_home=agent_home,
             )
+            provider_auth_paths = tuple(
+                agent_home / context.provider_bootstrap.destination_by_ref[secret.name]
+                for secret in provider_resolved_secrets
+                if secret.name in context.provider_bootstrap.destination_by_ref
+            )
             env_script = stage_agent_home_shell_environment(agent_home, workspace.repo_path)
             scoped_env["BASH_ENV"] = str(env_script)
 
@@ -607,8 +636,9 @@ class DockerNativeAgentExecutor:
                 read_only_workspace=read_only_workspace,
                 resource_limits=context.grant.resource_limits,
                 network_name=network_name,
+                provider_auth_paths=provider_auth_paths,
             )
-        except (OSError, subprocess.SubprocessError, NativeAgentExecutorError) as exc:
+        except (OSError, ValueError, subprocess.SubprocessError, NativeAgentExecutorError) as exc:
             cleanup = self._cleanup_network(network_name=network_name, proxy_name=proxy_name)
             shutil.rmtree(agent_home, ignore_errors=True)
             shutil.rmtree(sandbox_secrets_dir, ignore_errors=True)

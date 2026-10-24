@@ -40,8 +40,16 @@ def workspace_handle():
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    "read_only,constraints", [(False, {}), (True, {}), (False, {"read_only": True})]
+)
 async def test_shell_worker_run_success(
-    shell_worker, mock_workspace_manager, mock_container_manager, workspace_handle
+    shell_worker,
+    mock_workspace_manager,
+    mock_container_manager,
+    workspace_handle,
+    read_only,
+    constraints,
 ):
     request = WorkerRequest(
         session_id="test-session",
@@ -50,6 +58,9 @@ async def test_shell_worker_run_success(
         task_text="echo hello",
         runtime_mode=WorkerRuntimeMode.SHELL,
         budget={"worker_timeout_seconds": 60},
+        read_only=read_only,
+        constraints=constraints,
+        scratch_namespace="m2-node",
     )
 
     mock_workspace_manager.create_workspace.return_value = workspace_handle
@@ -73,6 +84,11 @@ async def test_shell_worker_run_success(
 
         assert result.status == "success"
         assert result.summary == "Command passed."
+        container_request = mock_container_manager.start.call_args.args[0]
+        assert container_request.read_only_workspace == (
+            read_only or bool(constraints.get("read_only"))
+        )
+        assert container_request.scratch_namespace == "m2-node"
         mock_run.assert_called_once()
         args, _ = mock_run.call_args
         assert args[0].command == [

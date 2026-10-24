@@ -21,6 +21,7 @@ from apps.api.auth import (
     decode_dashboard_token,
 )
 from apps.api.config import SystemConfig
+from apps.api.telegram_security import SECRET_PATTERN
 from orchestrator.execution import TaskExecutionService
 
 logger = logging.getLogger(__name__)
@@ -196,18 +197,20 @@ def require_any_valid_auth(request: Request) -> None:
 
 
 def require_telegram_webhook_auth(request: Request) -> None:
-    """Require Telegram's secret-token header when that verification is configured."""
+    """Require explicit enablement and one well-formed authenticated header."""
     auth_config = get_api_auth_config(request)
-    if auth_config.telegram_webhook_secret is None:
-        return
-
-    _ensure_secret_matches(
-        request=request,
-        expected_secret=auth_config.telegram_webhook_secret,
-        header_name=TELEGRAM_WEBHOOK_SECRET_HEADER,
-        missing_detail=f"Missing {TELEGRAM_WEBHOOK_SECRET_HEADER} header.",
-        invalid_detail="Invalid Telegram webhook secret.",
-    )
+    if not auth_config.telegram_webhook_enabled:
+        raise HTTPException(status_code=404, detail="Not found")
+    expected = auth_config.telegram_webhook_secret
+    if not expected:
+        raise HTTPException(status_code=503, detail="Telegram authentication is not configured")
+    values = request.headers.getlist(TELEGRAM_WEBHOOK_SECRET_HEADER)
+    if not values:
+        raise HTTPException(status_code=401, detail="Missing Telegram webhook authentication")
+    if len(values) != 1 or not SECRET_PATTERN.fullmatch(values[0]):
+        raise HTTPException(status_code=403, detail="Invalid Telegram webhook authentication")
+    if not hmac.compare_digest(values[0].encode("ascii"), expected.encode("ascii")):
+        raise HTTPException(status_code=403, detail="Invalid Telegram webhook authentication")
 
 
 def _check_no_raw_secrets(raw_body: Any) -> None:

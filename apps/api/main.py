@@ -34,6 +34,7 @@ from apps.api.routes.telegram import router as telegram_router  # noqa: E402
 from apps.api.routes.webhook import router as webhook_router  # noqa: E402
 from apps.api.scheduler import ScoutScheduler  # noqa: E402
 from apps.api.task_service_factory import build_task_service_from_env  # noqa: E402
+from apps.api.telegram_body import TelegramBodyLimitMiddleware
 from apps.observability import configure_tracing_from_env  # noqa: E402
 from apps.runtime import (  # noqa: E402
     RUN_API_ENV_VAR,
@@ -248,6 +249,7 @@ def create_app(
         lifespan=_build_lifespan(task_service, auth_config),
     )
     _register_routers(app)
+    app.add_middleware(TelegramBodyLimitMiddleware)
     _register_exception_handlers(app)
     return app
 

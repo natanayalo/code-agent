@@ -14,4 +14,14 @@ docker-compose.yml
 .env.example
 docs/
 tests/
-.env
+.env*
+**/.env*
+**/auth.json
+**/oauth_creds.json
+**/antigravity-oauth-token
+**/*.pem
+**/*.key
+artifacts/
+.codex/
+.gemini/
+!cert.pem

@@ -33,8 +33,8 @@ set -a
 source "$ENV_FILE"
 set +a
 
-export CODE_AGENT_CODEX_AUTH_DIR="${CODE_AGENT_CODEX_AUTH_DIR:-$HOME/.codex}"
-export CODE_AGENT_ANTIGRAVITY_AUTH_DIR="${CODE_AGENT_ANTIGRAVITY_AUTH_DIR:-$HOME/.gemini}"
+export CODE_AGENT_CODEX_AUTH_DIR="${CODE_AGENT_CODEX_AUTH_DIR:?Set the explicit Codex auth source directory}"
+export CODE_AGENT_ANTIGRAVITY_AUTH_DIR="${CODE_AGENT_ANTIGRAVITY_AUTH_DIR:?Set the explicit Antigravity auth source directory}"
 # Antigravity ignores workspace URIs beneath hidden path components. Keep the
 # default root visible while allowing an explicit deployment-specific override.
 export CODE_AGENT_WORKSPACE_ROOT="${CODE_AGENT_WORKSPACE_ROOT:-$HOME/code-agent-workspaces}"
@@ -46,40 +46,15 @@ export CODE_AGENT_ANTIGRAVITY_REASONING_EFFORT="${CODE_AGENT_ANTIGRAVITY_REASONI
 export BUILD_SHA="${BUILD_SHA:-$(git rev-parse HEAD 2>/dev/null || echo "")}"
 export CODE_AGENT_ENV="${CODE_AGENT_ENV:-local}"
 ALLOW_READ_ONLY_SANDBOX="${CODE_AGENT_ALLOW_READ_ONLY_SANDBOX:-0}"
-EXPECTED_HOME="$(eval echo "~$(id -un)")"
-if [ -z "$EXPECTED_HOME" ] || [ "$EXPECTED_HOME" = "~$(id -un)" ]; then
-  EXPECTED_HOME="$HOME"
-fi
-FALLBACK_CODEX_AUTH_DIR="$EXPECTED_HOME/.codex"
-FALLBACK_ANTIGRAVITY_AUTH_DIR="$EXPECTED_HOME/.gemini"
-
-if [ ! -f "$CODE_AGENT_CODEX_AUTH_DIR/auth.json" ] && [ -f "$FALLBACK_CODEX_AUTH_DIR/auth.json" ]; then
-  echo "[run-production-like][warn] CODE_AGENT_CODEX_AUTH_DIR points to a path missing the token." >&2
-  echo "[run-production-like][warn] Falling back to detected path." >&2
-  export CODE_AGENT_CODEX_AUTH_DIR="$FALLBACK_CODEX_AUTH_DIR"
-fi
-
-if [ ! -f "$CODE_AGENT_ANTIGRAVITY_AUTH_DIR/antigravity-cli/antigravity-oauth-token" ] && [ -f "$FALLBACK_ANTIGRAVITY_AUTH_DIR/antigravity-cli/antigravity-oauth-token" ]; then
-  echo "[run-production-like][warn] CODE_AGENT_ANTIGRAVITY_AUTH_DIR points to a path missing the token." >&2
-  echo "[run-production-like][warn] Falling back to detected path." >&2
-  export CODE_AGENT_ANTIGRAVITY_AUTH_DIR="$FALLBACK_ANTIGRAVITY_AUTH_DIR"
-fi
-
-if [ ! -d "$CODE_AGENT_ANTIGRAVITY_AUTH_DIR" ]; then
-  mkdir -p "$CODE_AGENT_ANTIGRAVITY_AUTH_DIR"
-fi
-
 if [ ! -f "$CODE_AGENT_CODEX_AUTH_DIR/auth.json" ]; then
   echo "[run-production-like][error] Codex auth was not found." >&2
-  echo "[run-production-like][error] Run one-time login in worker container:" >&2
-  echo "[run-production-like][error]   docker compose run --rm --no-deps worker codex login" >&2
-  echo "[run-production-like][error] Or set CODE_AGENT_CODEX_AUTH_DIR to the directory containing auth.json." >&2
+  echo "[run-production-like][error] Authenticate separately and select the directory containing auth.json." >&2
   exit 1
 fi
 
 if [ ! -f "$CODE_AGENT_ANTIGRAVITY_AUTH_DIR/antigravity-cli/antigravity-oauth-token" ]; then
-  echo "[run-production-like][warn] Antigravity auth token was not found." >&2
-  echo "[run-production-like][warn] Antigravity worker may fail until you run scripts/bootstrap_antigravity_auth.sh with CODE_AGENT_ANTIGRAVITY_AUTH_DIR set and complete its OAuth flow." >&2
+  echo "[run-production-like][error] Antigravity auth token was not found in the explicit source." >&2
+  exit 1
 fi
 
 if [ "$CODE_AGENT_CODEX_SANDBOX" = "read-only" ] && [ "$ALLOW_READ_ONLY_SANDBOX" != "1" ]; then
