@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
-import shlex
 import subprocess
 from pathlib import Path
 from typing import Protocol
@@ -14,8 +13,14 @@ from urllib.request import url2pathname
 
 from pydantic import Field
 
+from sandbox.legacy_egress import LegacyEgress, legacy_proxy_environment
+from sandbox.legacy_security import (
+    append_legacy_security,
+    legacy_identity,
+    prepare_legacy_workspace,
+)
+from sandbox.native_agent_executor import DockerNativeAgentExecutor
 from sandbox.policy import LocalRepoPolicyError, validate_local_repo_path
-from sandbox.redact import mask_url_credentials as _mask_url_credentials
 from sandbox.scratch import node_agent_home, node_artifacts_root, node_run_root
 from sandbox.workspace import SandboxModel, WorkspaceHandle
 
@@ -60,6 +65,8 @@ class DockerSandboxContainer(SandboxModel):
     network_enabled: bool = False
     memory_limit: str | None = "1g"
     cpu_limit: float | None = 1.0
+    egress_network: str | None = None
+    egress_proxy: str | None = None
 
 
 class DockerSandboxContainerError(RuntimeError):
@@ -181,19 +188,14 @@ def _append_local_repo_mount(
             "Local repo path contains a comma which is incompatible with "
             f"the --mount syntax: {local_repo_path}"
         )
-    ro_flag = ",readonly" if request.read_only_workspace else ""
     command.extend(
-        ["--mount", f"type=bind,source={local_repo_path},target={local_repo_path}{ro_flag}"]
+        ["--mount", f"type=bind,source={local_repo_path},target={local_repo_path},readonly"]
     )
 
 
 def _append_user_options(command: list[str]) -> None:
-    try:
-        uid = os.getuid()
-        gid = os.getgid()
-        command.extend(["--user", f"{uid}:{gid}"])
-    except AttributeError:
-        pass
+    uid, gid = legacy_identity()
+    command.extend(["--user", f"{uid}:{gid}"])
 
 
 def _append_environment_options(
@@ -202,7 +204,9 @@ def _append_environment_options(
     # T-182: Ensure a writable HOME for tools like poetry/npm
     effective_env = dict(request.environment)
     if "HOME" not in effective_env:
-        effective_env["HOME"] = working_dir
+        effective_env["HOME"] = (
+            f"{working_dir}/.agent_home" if request.read_only_workspace else working_dir
+        )
 
     for key, value in sorted(effective_env.items()):
         command.extend(["--env", f"{key}={value}"])
@@ -213,6 +217,7 @@ def _build_docker_container_run_command(
     *,
     image: str,
     docker_binary: str = "docker",
+    network_name: str | None = None,
 ) -> list[str]:
     """Build the `docker run -d` command for a persistent sandbox container."""
     container_name = build_container_name(request.workspace, request.scratch_namespace)
@@ -225,12 +230,14 @@ def _build_docker_container_run_command(
         container_name,
     ]
     _append_resource_limits(command, request)
+    append_legacy_security(command)
 
     workspace_path, working_dir = _append_workspace_mount(command, request)
     _append_local_repo_mount(command, request, workspace_path)
     _append_user_options(command)
-    if not request.network_enabled:
-        command.extend(["--network", "none"])
+    if request.network_enabled and not network_name:
+        raise DockerSandboxContainerError("Networked sandbox requires a task-private egress proxy")
+    command.extend(["--network", network_name or "none"])
 
     _append_environment_options(command, request, working_dir)
     command.append(image)
@@ -272,15 +279,13 @@ def _run_docker_command(
             timeout=timeout,
         )
     except OSError as exc:
-        cmd_str = _mask_url_credentials(shlex.join(command))
         raise DockerSandboxContainerError(
-            f"Failed to start Docker container command ({cmd_str}): {exc}"
-        ) from exc
-    except subprocess.TimeoutExpired as exc:
-        cmd_str = _mask_url_credentials(shlex.join(command))
+            f"Failed to start Docker container command ({type(exc).__name__}, errno={exc.errno})"
+        ) from None
+    except subprocess.TimeoutExpired:
         raise DockerSandboxContainerError(
-            f"Docker container command timed out after {timeout}s ({cmd_str})"
-        ) from exc
+            f"Docker container command timed out after {timeout}s"
+        ) from None
 
 
 class DockerSandboxContainerManager:
@@ -304,10 +309,39 @@ class DockerSandboxContainerManager:
     def start(self, request: DockerSandboxContainerRequest) -> DockerSandboxContainer:
         """Start a named long-lived Docker container for a sandbox workspace."""
         image = request.image or self.default_image
+        egress = None
+        if request.network_enabled:
+            egress = LegacyEgress.start(
+                environment=request.environment,
+                artifact_root=node_artifacts_root(
+                    request.workspace.workspace_path, request.scratch_namespace
+                ),
+                task_id=request.workspace.task_id,
+                docker_binary=self.docker_binary,
+            )
+            request = request.model_copy(
+                update={"environment": legacy_proxy_environment(request.environment)}
+            )
+        try:
+            return self._start_container(request, image=image, egress=egress)
+        except Exception:
+            if egress:
+                egress.close()
+            raise
+
+    def _start_container(
+        self, request: DockerSandboxContainerRequest, *, image: str, egress: LegacyEgress | None
+    ) -> DockerSandboxContainer:
         docker_command = _build_docker_container_run_command(
             request,
             image=image,
             docker_binary=self.docker_binary,
+            network_name=egress.network if egress else None,
+        )
+        prepare_legacy_workspace(
+            request.workspace.workspace_path,
+            read_only=request.read_only_workspace,
+            namespace=request.scratch_namespace,
         )
 
         logger.info(
@@ -315,7 +349,9 @@ class DockerSandboxContainerManager:
             extra={
                 "workspace_id": request.workspace.workspace_id,
                 "task_id": request.workspace.task_id,
-                "container_name": build_container_name(request.workspace),
+                "container_name": build_container_name(
+                    request.workspace, request.scratch_namespace
+                ),
                 "image": image,
             },
         )
@@ -329,7 +365,7 @@ class DockerSandboxContainerManager:
             message = stderr or stdout or "docker run failed without output"
             raise DockerSandboxContainerError(
                 f"Failed to start persistent sandbox container "
-                f"({build_container_name(request.workspace)}): {message}"
+                f"({build_container_name(request.workspace, request.scratch_namespace)}): {message}"
             )
 
         working_dir = request.working_dir
@@ -338,13 +374,15 @@ class DockerSandboxContainerManager:
 
         return DockerSandboxContainer(
             workspace=request.workspace,
-            container_name=build_container_name(request.workspace),
+            container_name=build_container_name(request.workspace, request.scratch_namespace),
             image=image,
             working_dir=working_dir,
             environment=dict(request.environment),
             network_enabled=request.network_enabled,
             memory_limit=request.memory_limit,
             cpu_limit=request.cpu_limit,
+            egress_network=egress.network if egress else None,
+            egress_proxy=egress.proxy if egress else None,
         )
 
     def reconnect(self, container: DockerSandboxContainer) -> DockerSandboxContainer:
@@ -380,10 +418,18 @@ class DockerSandboxContainerManager:
                 "container_name": container.container_name,
             },
         )
-        completed = self._command_runner(
-            remove_command,
-            timeout=self.stop_timeout_seconds,
-        )
+        try:
+            completed = self._command_runner(
+                remove_command,
+                timeout=self.stop_timeout_seconds,
+            )
+        finally:
+            if container.egress_network and container.egress_proxy:
+                LegacyEgress(
+                    DockerNativeAgentExecutor(docker_binary=self.docker_binary),
+                    container.egress_network,
+                    container.egress_proxy,
+                ).close()
         if completed.returncode == 0:
             return
 

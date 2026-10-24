@@ -212,6 +212,19 @@ def _run_shell_script(
     return _build_shell_worker_result(native_result, setup_commands, cancel_requested)
 
 
+def _shell_container_request(
+    request: WorkerRequest, workspace: WorkspaceHandle
+) -> DockerSandboxContainerRequest:
+    return DockerSandboxContainerRequest(
+        workspace=workspace,
+        image=request.image,
+        environment=request.secrets,
+        network_enabled=request.network_enabled,
+        read_only_workspace=request.read_only or bool(request.constraints.get("read_only")),
+        scratch_namespace=request.scratch_namespace,
+    )
+
+
 class ShellWorker(Worker):
     """Executes deterministic shell commands in a sandbox."""
 
@@ -279,12 +292,7 @@ class ShellWorker(Worker):
 
             try:
                 container = self.container_manager.start(
-                    DockerSandboxContainerRequest(
-                        workspace=workspace,
-                        image=request.image,
-                        environment=request.secrets,
-                        network_enabled=request.network_enabled,
-                    )
+                    _shell_container_request(request, workspace)
                 )
 
                 try:
