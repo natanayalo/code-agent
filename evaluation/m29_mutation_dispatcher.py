@@ -219,11 +219,14 @@ class DisposableDbMemoryIsolationManager:
     def discard_case_memory_writes(self, repo_url: str | None = None) -> None:
         """Purge case-scoped episodic/proposed memory and restore ProjectMemory/SessionState."""
         with self.session_factory() as session:
-            session.execute(delete(MemoryObservation))
-            session.execute(delete(MemoryProposal))
-            session.execute(delete(MemoryAdmissionDecision))
-            session.execute(delete(PersonalMemory))
-            session.execute(delete(SessionState))
+            for model in (
+                MemoryObservation,
+                MemoryProposal,
+                MemoryAdmissionDecision,
+                PersonalMemory,
+                SessionState,
+            ):
+                session.execute(delete(model))
 
             if self._baseline_project_memory is not None:
                 current_rows = session.scalars(select(ProjectMemory)).all()
@@ -234,13 +237,7 @@ class DisposableDbMemoryIsolationManager:
                         for field, val in base_data.items():
                             setattr(row, field, val)
                     else:
-                        session.add(
-                            ProjectMemory(
-                                repo_url=key[0],
-                                memory_key=key[1],
-                                **base_data,
-                            )
-                        )
+                        session.add(ProjectMemory(repo_url=key[0], memory_key=key[1], **base_data))
                 for key, row in current_map.items():
                     if key not in self._baseline_project_memory:
                         session.delete(row)
@@ -269,28 +266,32 @@ def _extract_candidate_evidence(terminal_snap: TaskSnapshot) -> dict[str, Any]:
     if terminal_snap.latest_run is not None:
         for a in terminal_snap.latest_run.artifact_index or ():
             artifacts.append(dict(a))
-        for a in terminal_snap.latest_run.artifacts or ():
-            artifacts.append(a.model_dump(mode="json") if hasattr(a, "model_dump") else dict(a))
+        artifacts.extend(
+            a.model_dump(mode="json") if hasattr(a, "model_dump") else dict(a)
+            for a in terminal_snap.latest_run.artifacts or ()
+        )
     if terminal_snap.execution_plan:
         for node in terminal_snap.execution_plan.nodes:
-            for a in node.output_artifacts or ():
-                artifacts.append(dict(a))
+            artifacts.extend(dict(a) for a in node.output_artifacts or ())
 
     in_task_repairs = sum(
         max(node.retry_count, max(0, len(node.attempts) - 1))
         for node in (terminal_snap.execution_plan.nodes if terminal_snap.execution_plan else ())
     ) + sum(1 for ev in timeline_events if "repair" in getattr(ev, "event_type", "").lower())
 
+    v_keys = {"status", "summary", "deterministic_verifier_outcome", "independent_verifier_outcome"}
     verification_events: list[str] = [
         getattr(ev, "event_type", "")
         for ev in timeline_events
         if any(k in getattr(ev, "event_type", "").lower() for k in ("verification", "verifier"))
     ]
-    if terminal_snap.latest_run and terminal_snap.latest_run.verifier_outcome:
+    if terminal_snap.latest_run and v_keys.intersection(
+        terminal_snap.latest_run.verifier_outcome or ()
+    ):
         verification_events.append("verifier_outcome_recorded")
     if terminal_snap.execution_plan:
         for node in terminal_snap.execution_plan.nodes:
-            if node.verification_outcome:
+            if v_keys.intersection(node.verification_outcome or ()):
                 verification_events.append("node_verification_outcome_recorded")
 
     review_artifacts: list[str] = []
