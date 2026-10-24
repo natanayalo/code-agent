@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: add m29 mutation cohort reconciliation and publication cli ([#426](https://github.com/natanayalo/code-agent/pull/426))
+
 - Feat: implement hierarchical budget controls and compliance evaluator ([#425](https://github.com/natanayalo/code-agent/pull/425))
 
 - Feat: add concrete candidate dispatcher, neutral reviewer client, retention watchdog, and operator cli ([#424](https://github.com/natanayalo/code-agent/pull/424))
