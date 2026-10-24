@@ -771,3 +771,13 @@ def test_reconcile_m29_publication_gate_delegates(monkeypatch: pytest.MonkeyPatc
     )
     assert res is True
     mock_assert.assert_called_once()
+
+
+def test_run_m29_extractor_stage_smokes_default_isolated_db() -> None:
+    """Invoking extractor stage smokes without explicit DB creates an isolated DB."""
+    from evaluation.m29_mutation_smokes import run_m29_extractor_stage_smokes
+
+    res = run_m29_extractor_stage_smokes()
+    assert res.is_valid is True
+    assert res.violations == []
+    assert res.total_smoke_tasks == 20
