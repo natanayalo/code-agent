@@ -512,6 +512,23 @@ def test_check_pending_interaction_stop_condition() -> None:
         == "human_interaction_event_detected"
     )
 
+    # Approval checked but not required should not trigger stop condition
+    event_not_required = TaskTimelineEvent(
+        attempt_number=0,
+        sequence_number=4,
+        event_type=TimelineEventType.APPROVAL_REQUESTED,
+        message="Approval not required.",
+        payload=None,
+        created_at=NOW,
+    )
+    assert check_pending_interaction_stop_condition([], [event_not_required]) is None
+
+    event_payload_false = {
+        "event_type": "approval_requested",
+        "payload": {"required": False},
+    }
+    assert check_pending_interaction_stop_condition([], [event_payload_false]) is None
+
 
 def test_check_delivery_stop_condition() -> None:
     """Test detection of delivery attempts in TaskSpec, timeline events, or artifacts."""

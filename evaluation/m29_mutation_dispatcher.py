@@ -458,7 +458,7 @@ class HttpStackCandidateDispatcher(CandidateDispatcher):
                     runs = session.scalars(
                         select(WorkerRun)
                         .where(WorkerRun.task_id == task_id)
-                        .order_by(WorkerRun.created_at)
+                        .order_by(WorkerRun.started_at)
                     ).all()
                     identity, status = resolve_task_execution_identity(task, list(runs))
                     return identity, status
