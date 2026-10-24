@@ -219,6 +219,12 @@ def test_fixture_repo_creation_and_deterministic_sha(fixture_repo: Path) -> None
     )
     assert rev_out.stdout.strip() == PINNED_TASKBOARD_FIXTURE_REVISION
 
+    for ref in ("refs/heads/master", "refs/heads/main"):
+        out = subprocess.run(
+            ["git", "rev-parse", ref], cwd=fixture_repo, capture_output=True, text=True, check=True
+        )
+        assert out.stdout.strip() == PINNED_TASKBOARD_FIXTURE_REVISION
+
 
 def test_fixture_repo_verification_catches_violations(tmp_path: Path, fixture_repo: Path) -> None:
     assert verify_taskboard_fixture_repo(tmp_path / "nonexistent") != []
@@ -233,6 +239,19 @@ def test_fixture_repo_verification_catches_violations(tmp_path: Path, fixture_re
     dirty_file.write_text("dirty", encoding="utf-8")
     assert verify_taskboard_fixture_repo(fixture_repo) != []
     dirty_file.unlink()
+
+    # Missing or mismatched branch refs trigger violations
+    main_ref = fixture_repo / ".git" / "refs" / "heads" / "main"
+    main_content = main_ref.read_text(encoding="utf-8")
+    main_ref.unlink()
+    violations = verify_taskboard_fixture_repo(fixture_repo)
+    assert any("failed to resolve branch ref refs/heads/main" in v for v in violations)
+
+    main_ref.write_text("0" * 40 + "\n", encoding="utf-8")
+    violations = verify_taskboard_fixture_repo(fixture_repo)
+    assert any("fixture branch refs/heads/main mismatch" in v for v in violations)
+    main_ref.write_text(main_content, encoding="utf-8")
+    assert verify_taskboard_fixture_repo(fixture_repo) == []
 
 
 def test_clone_case_workspace_from_fixture(tmp_path: Path, fixture_repo: Path) -> None:

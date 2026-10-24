@@ -298,6 +298,9 @@ def test_retention_cleanup_clears_workspace_files_and_persisted_artifacts(
     scratch_path = workspace_root / ".code-agent-scratch" / workspace_path.name
     (scratch_path / "node" / "stdout.log").parent.mkdir(parents=True)
     (scratch_path / "node" / "stdout.log").write_text("old scratch\n", encoding="utf-8")
+    git_path = workspace_root / ".code-agent-git" / workspace_path.name
+    git_path.mkdir(parents=True)
+    (git_path / "HEAD").write_text("ref: refs/heads/master\n", encoding="utf-8")
 
     service = execution_module.TaskExecutionService(
         session_factory=session_factory,
@@ -336,6 +339,7 @@ def test_retention_cleanup_clears_workspace_files_and_persisted_artifacts(
     assert pruned == 1
     assert not workspace_path.exists()
     assert not scratch_path.exists()
+    assert not git_path.exists()
 
     task_snapshot = service.get_task(persisted.task_id)
     assert task_snapshot is not None
@@ -352,6 +356,38 @@ def test_retention_cleanup_clears_workspace_files_and_persisted_artifacts(
         assert worker_runs[0].artifact_index == []
         assert worker_runs[0].retention_expires_at is None
         assert artifact_repo.list_by_run(worker_runs[0].id) == []
+
+
+def test_retention_cleanup_guards_against_blank_or_root_workspace_ids(tmp_path: Path) -> None:
+    """Retention cleanup must refuse to delete root, .code-agent-git, or .code-agent-scratch."""
+    session_factory = _setup_persistence_test_db()
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir(parents=True)
+
+    git_parent = workspace_root / ".code-agent-git"
+    git_parent.mkdir(parents=True)
+    (git_parent / "keep.txt").write_text("keep\n", encoding="utf-8")
+
+    scratch_parent = workspace_root / ".code-agent-scratch"
+    scratch_parent.mkdir(parents=True)
+    (scratch_parent / "keep.txt").write_text("keep\n", encoding="utf-8")
+
+    service = execution_module.TaskExecutionService(
+        session_factory=session_factory,
+        worker=_StaticWorker(),
+        workspace_root=workspace_root,
+        retention_seconds=60,
+    )
+
+    for bad_id in (None, "", "   ", ".", "..", "/", "/etc"):
+        assert service._workspace_path_for_run(bad_id) is None
+        assert service._delete_retained_workspace_path(bad_id) is False
+
+    assert workspace_root.exists()
+    assert git_parent.exists()
+    assert scratch_parent.exists()
+    assert (git_parent / "keep.txt").exists()
+    assert (scratch_parent / "keep.txt").exists()
 
 
 def test_persist_execution_outcome_falls_back_to_route_worker_when_dispatch_missing() -> None:

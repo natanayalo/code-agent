@@ -330,7 +330,7 @@ class HttpStackCandidateDispatcher(CandidateDispatcher):
         db_url: str,
         workspace_root: Path,
         repo_key: str = "taskboard",
-        branch: str = "main",
+        branch: str = "master",
         auth_token: str | None = None,
         poll_interval_seconds: float = 1.0,
         max_poll_seconds: float = 1200.0,
