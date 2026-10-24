@@ -179,6 +179,25 @@ def _verify_pre_run_readiness(api_base_url: str | None) -> bool:
         return False
 
 
+def _prepare_suite_and_baseline_memory(
+    args: argparse.Namespace,
+) -> tuple[Any, DisposableDbMemoryIsolationManager, MemoryContext]:
+    """Build suite and load isolated baseline memory after discarding uncommitted writes."""
+    eval_model = getattr(args, "evaluator_model", None)
+    eval_prov = getattr(args, "evaluator_provider", None)
+    neutral_eval = (
+        build_custom_neutral_evaluator(
+            eval_model, eval_prov if isinstance(eval_prov, str) else None
+        )
+        if isinstance(eval_model, str) and eval_model.strip()
+        else None
+    )
+    suite = build_m29_mutation_suite(neutral_evaluator=neutral_eval)
+    isolation_mgr = DisposableDbMemoryIsolationManager(args.db_url)
+    isolation_mgr.discard_case_memory_writes()
+    return suite, isolation_mgr, isolation_mgr.load_memory_context("taskboard")
+
+
 def handle_preflight(args: argparse.Namespace) -> int:
     """Execute preflight checks and snapshot verification against disposable database."""
     if not args.ack_disposable_mutation_stack:
@@ -192,18 +211,7 @@ def handle_preflight(args: argparse.Namespace) -> int:
     fixture_dir = Path(args.fixture_repo_path).resolve()
     bundle_data = _load_bundle(bundle_dir)
 
-    eval_model = getattr(args, "evaluator_model", None)
-    eval_prov = getattr(args, "evaluator_provider", None)
-    neutral_eval = (
-        build_custom_neutral_evaluator(
-            eval_model, eval_prov if isinstance(eval_prov, str) else None
-        )
-        if isinstance(eval_model, str) and eval_model.strip()
-        else None
-    )
-    suite = build_m29_mutation_suite(neutral_evaluator=neutral_eval)
-    isolation_mgr = DisposableDbMemoryIsolationManager(args.db_url)
-    baseline_mem = isolation_mgr.load_memory_context("taskboard")
+    suite, isolation_mgr, baseline_mem = _prepare_suite_and_baseline_memory(args)
 
     print(f"Running M29 mutation preflight checks against {args.db_url}...")
     try:
@@ -369,19 +377,8 @@ def handle_run(args: argparse.Namespace) -> int:
     if not _verify_pre_run_readiness(getattr(args, "api_base_url", None)):
         return 1
 
-    eval_model = getattr(args, "evaluator_model", None)
-    eval_prov = getattr(args, "evaluator_provider", None)
-    neutral_eval = (
-        build_custom_neutral_evaluator(
-            eval_model, eval_prov if isinstance(eval_prov, str) else None
-        )
-        if isinstance(eval_model, str) and eval_model.strip()
-        else None
-    )
-    suite = build_m29_mutation_suite(neutral_evaluator=neutral_eval)
+    suite, isolation_mgr, baseline_mem = _prepare_suite_and_baseline_memory(args)
     watchdog = EvaluationRetentionWatchdog(bundle_dir, retention_seconds=args.retention_seconds)
-    isolation_mgr = DisposableDbMemoryIsolationManager(args.db_url)
-    baseline_mem = isolation_mgr.load_memory_context("taskboard")
 
     runner = _build_mutation_runner(
         args, bundle_data, workspace_root, fixture_dir, watchdog, isolation_mgr, baseline_mem, suite
