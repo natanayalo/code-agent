@@ -6,7 +6,7 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
-from apps.runtime import coerce_non_negative_int_env, is_enabled
+from apps.runtime import coerce_non_negative_int_env, coerce_positive_int_env, is_enabled
 from sandbox.container import DEFAULT_SANDBOX_IMAGE
 from sandbox.workspace import default_workspace_root
 
@@ -28,14 +28,22 @@ def resolve_retention_seconds(environ: Mapping[str, str]) -> int:
     )
     raw = environ.get("CODE_AGENT_RETENTION_SECONDS")
     if raw is not None and raw.strip():
-        val = coerce_non_negative_int_env(raw, default=DEFAULT_RETENTION_SECONDS)
-        if post_terminal_eval and val > MAX_EVALUATION_RETENTION_SECONDS:
-            raise ValueError(
-                f"CODE_AGENT_RETENTION_SECONDS ({val}) cannot exceed "
-                f"{MAX_EVALUATION_RETENTION_SECONDS} (72 hours) when "
-                "CODE_AGENT_ENABLE_POST_TERMINAL_QUALITY_EVALUATION_MODE is enabled."
-            )
-        return val
+        stripped = raw.strip()
+        if post_terminal_eval:
+            try:
+                val = int(stripped)
+            except ValueError as exc:
+                raise ValueError(
+                    f"CODE_AGENT_RETENTION_SECONDS must be a valid integer, got {stripped!r}"
+                ) from exc
+            if val < 1 or val > MAX_EVALUATION_RETENTION_SECONDS:
+                raise ValueError(
+                    f"CODE_AGENT_RETENTION_SECONDS ({val}) must be between 1 and "
+                    f"{MAX_EVALUATION_RETENTION_SECONDS} (72 hours) when "
+                    "CODE_AGENT_ENABLE_POST_TERMINAL_QUALITY_EVALUATION_MODE is enabled."
+                )
+            return val
+        return coerce_positive_int_env(stripped, default=DEFAULT_RETENTION_SECONDS)
     if post_terminal_eval:
         return MAX_EVALUATION_RETENTION_SECONDS
     return DEFAULT_RETENTION_SECONDS

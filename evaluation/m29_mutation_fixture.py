@@ -398,6 +398,21 @@ def verify_taskboard_fixture_repo(
             violations.append(
                 f"fixture HEAD revision mismatch: expected {expected_revision}, got {head_sha}"
             )
+        for branch_ref in ("refs/heads/master", "refs/heads/main"):
+            b_out = subprocess.run(
+                ["git", "rev-parse", branch_ref],
+                cwd=repo_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if b_out.returncode != 0:
+                violations.append(f"failed to resolve branch ref {branch_ref}")
+            elif b_out.stdout.strip() != head_sha:
+                violations.append(
+                    f"fixture branch {branch_ref} mismatch: expected {head_sha}, "
+                    f"got {b_out.stdout.strip()}"
+                )
 
     for rel_path in TASKBOARD_BASE_FILES:
         if not (repo_dir / rel_path).is_file():

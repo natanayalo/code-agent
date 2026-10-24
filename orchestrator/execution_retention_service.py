@@ -16,12 +16,13 @@ logger = logging.getLogger("orchestrator.execution")
 
 def _workspace_path_for_run(self: Any, workspace_id: str | None) -> Path | None:
     """Resolve the on-disk workspace path for a retained run, if configured."""
-    if workspace_id is None or self.workspace_root is None:
+    if not workspace_id or not workspace_id.strip() or self.workspace_root is None:
         return None
 
-    workspace_path = (self.workspace_root / workspace_id).resolve()
+    root = self.workspace_root.resolve()
+    workspace_path = (root / workspace_id.strip()).resolve()
     try:
-        if not workspace_path.is_relative_to(self.workspace_root):
+        if not workspace_path.is_relative_to(root) or workspace_path == root:
             logger.warning(
                 "Skipping retention cleanup outside the configured workspace root.",
                 extra={
@@ -37,6 +38,9 @@ def _workspace_path_for_run(self: Any, workspace_id: str | None) -> Path | None:
 
 def _delete_retained_workspace_path(self: Any, workspace_id: str | None) -> bool:
     """Delete a retained workspace directory from disk, if configured."""
+    if not workspace_id or not workspace_id.strip() or self.workspace_root is None:
+        return False
+
     workspace_path = self._workspace_path_for_run(workspace_id)
     if workspace_path is None:
         return False
@@ -48,15 +52,18 @@ def _delete_retained_workspace_path(self: Any, workspace_id: str | None) -> bool
             deleted = True
         scratch_root = workspace_scratch_root(workspace_path)
         scratch_parent = (self.workspace_root / ".code-agent-scratch").resolve()
-        if scratch_root.is_relative_to(scratch_parent) and scratch_root.exists():
+        if (
+            scratch_root.is_relative_to(scratch_parent)
+            and scratch_root != scratch_parent
+            and scratch_root.exists()
+        ):
             shutil.rmtree(scratch_root)
             deleted = True
-        if workspace_id is not None:
-            git_parent = (self.workspace_root / ".code-agent-git").resolve()
-            git_root = (git_parent / workspace_id).resolve()
-            if git_root.is_relative_to(git_parent) and git_root.exists():
-                shutil.rmtree(git_root)
-                deleted = True
+        git_parent = (self.workspace_root / ".code-agent-git").resolve()
+        git_root = (git_parent / workspace_id.strip()).resolve()
+        if git_root.is_relative_to(git_parent) and git_root != git_parent and git_root.exists():
+            shutil.rmtree(git_root)
+            deleted = True
         return deleted
     except OSError as exc:
         logger.warning(

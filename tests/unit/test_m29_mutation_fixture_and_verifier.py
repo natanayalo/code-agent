@@ -240,6 +240,19 @@ def test_fixture_repo_verification_catches_violations(tmp_path: Path, fixture_re
     assert verify_taskboard_fixture_repo(fixture_repo) != []
     dirty_file.unlink()
 
+    # Missing or mismatched branch refs trigger violations
+    main_ref = fixture_repo / ".git" / "refs" / "heads" / "main"
+    main_content = main_ref.read_text(encoding="utf-8")
+    main_ref.unlink()
+    violations = verify_taskboard_fixture_repo(fixture_repo)
+    assert any("failed to resolve branch ref refs/heads/main" in v for v in violations)
+
+    main_ref.write_text("0" * 40 + "\n", encoding="utf-8")
+    violations = verify_taskboard_fixture_repo(fixture_repo)
+    assert any("fixture branch refs/heads/main mismatch" in v for v in violations)
+    main_ref.write_text(main_content, encoding="utf-8")
+    assert verify_taskboard_fixture_repo(fixture_repo) == []
+
 
 def test_clone_case_workspace_from_fixture(tmp_path: Path, fixture_repo: Path) -> None:
     ws_dir = tmp_path / "case_ws"
