@@ -259,6 +259,7 @@ def handle_preflight(args: argparse.Namespace) -> int:
     bundle_data["status"] = "preflight_passed"
     bundle_data["preflight_passed_at"] = datetime.now(UTC).isoformat()
     bundle_data["task_cohort_snapshot"] = asdict(snap)
+    bundle_data["verifier_source_sha256"] = snap.verifier_source_sha256
     _save_bundle(bundle_dir, bundle_data)
 
     print(f"Preflight checks passed! Baseline hash: {snap.baseline_memory_context_hash}")
