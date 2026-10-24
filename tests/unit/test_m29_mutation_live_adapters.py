@@ -771,6 +771,8 @@ class TestOperatorCliSubcommands:
         )
         assert rc_init == 0
         assert (bundle_dir / "bundle.json").exists()
+        bundle_data = json.loads((bundle_dir / "bundle.json").read_text(encoding="utf-8"))
+        assert "build_sha" in bundle_data
 
         # status subcommand succeeds
         rc_status = cli_main(["status", "--bundle-dir", str(bundle_dir)])
