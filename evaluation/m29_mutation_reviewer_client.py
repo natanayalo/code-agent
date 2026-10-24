@@ -81,6 +81,32 @@ def _parse_json_verdict(raw_content: str | None) -> tuple[bool, tuple[str, ...],
         return False, (f"Failed to parse verdict JSON: {exc}",), f"json_parse_error:{exc}"
 
 
+def _build_completion_payload(model_name: str, user_prompt: str, max_tokens: int) -> dict[str, Any]:
+    return {
+        "model": model_name,
+        "messages": [
+            {"role": "system", "content": NEUTRAL_EVALUATOR_SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": 0.0,
+        "max_tokens": max_tokens,
+        "provider": {"allow_fallbacks": False},
+        "response_format": {"type": "json_object"},
+    }
+
+
+def _parse_completion_data(response: httpx.Response) -> tuple[dict[str, Any] | None, str | None]:
+    try:
+        data = response.json()
+    except Exception as exc:
+        return None, f"json_decode_error:{exc}"
+    if isinstance(data, dict) and data.get("error"):
+        return None, f"openrouter_error:{data.get('error')}"
+    if isinstance(data, dict) and not data.get("model"):
+        return None, "missing_or_invalid_response_model_identity"
+    return data, None
+
+
 class OpenRouterNeutralReviewerClient:
     """Blinded third-party neutral reviewer client calling an OpenAI-compatible / OpenRouter API."""
 
@@ -148,18 +174,8 @@ class OpenRouterNeutralReviewerClient:
             "HTTP-Referer": "https://github.com/natanayalo/code-agent",
             "X-Title": "code-agent-m29-evaluation",
         }
-        payload = {
-            "model": model_name,
-            "messages": [
-                {"role": "system", "content": NEUTRAL_EVALUATOR_SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-            "temperature": 0.0,
-            "max_tokens": manifest.budget.max_tokens,
-            "provider": {"allow_fallbacks": False},
-            "response_format": {"type": "json_object"},
-        }
-        max_retries = 3
+        payload = _build_completion_payload(model_name, user_prompt, manifest.budget.max_tokens)
+        max_retries = 5
         last_error = None
         for attempt in range(max_retries + 1):
             try:
@@ -170,36 +186,36 @@ class OpenRouterNeutralReviewerClient:
                     json=payload,
                 )
             except Exception as exc:
-                LOGGER.warning(
-                    "OpenRouter attempt %d/%d request failed: %s",
-                    attempt + 1,
-                    max_retries + 1,
-                    exc,
-                )
+                LOGGER.warning("OpenRouter req failed (attempt %d): %s", attempt + 1, exc)
                 last_error = f"http_error:{exc}"
                 if attempt < max_retries:
-                    time.sleep(2 ** (attempt + 1))
+                    time.sleep(3 * (attempt + 1))
                     continue
                 return None, last_error
 
             if response.status_code == 200:
-                return response.json(), None
+                data, parse_err = _parse_completion_data(response)
+                if parse_err:
+                    LOGGER.warning(
+                        "OpenRouter error response (attempt %d): %s", attempt + 1, parse_err
+                    )
+                    last_error = parse_err
+                    if attempt < max_retries:
+                        time.sleep(3 * (attempt + 1))
+                        continue
+                    return None, last_error
+                return data, None
 
             if response.status_code in {429, 500, 502, 503, 504} and attempt < max_retries:
                 LOGGER.warning(
-                    "OpenRouter attempt %d/%d returned transient HTTP %d; retrying...",
-                    attempt + 1,
-                    max_retries + 1,
+                    "OpenRouter transient HTTP %d (attempt %d); retrying...",
                     response.status_code,
+                    attempt + 1,
                 )
-                time.sleep(2 ** (attempt + 1))
+                time.sleep(3 * (attempt + 1))
                 continue
 
-            LOGGER.error(
-                "OpenRouter neutral reviewer returned HTTP %d: %s",
-                response.status_code,
-                response.text[:200],
-            )
+            LOGGER.error("OpenRouter HTTP %d: %s", response.status_code, response.text[:200])
             return None, f"http_status_{response.status_code}:{response.text[:200]}"
 
         return None, last_error or "max_retries_exhausted"
