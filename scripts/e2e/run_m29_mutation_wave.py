@@ -537,7 +537,8 @@ def _add_lifecycle_subparsers(subparsers: Any) -> None:
     run_p.add_argument("--retention-seconds", type=int, default=MAX_EVALUATION_RETENTION_SECONDS)
     run_p.add_argument("--evaluator-model", default=None, help="Custom evaluator model slug")
     run_p.add_argument("--evaluator-provider", default=None, help="Custom evaluator provider")
-    run_p.add_argument("--auth-token", default=os.environ.get("API_SHARED_SECRET"))
+    token_default = os.getenv("CODE_AGENT_API_SHARED_SECRET") or os.getenv("API_SHARED_SECRET")
+    run_p.add_argument("--auth-token", default=token_default)
     _add_ack_arg(run_p)
 
     # publish
