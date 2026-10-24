@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from copy import deepcopy
 from dataclasses import replace
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import func, select
 from sqlalchemy.pool import StaticPool
 
 from apps.api.auth import ApiAuthConfig
 from apps.api.main import create_app
 from db.base import Base
 from db.enums import TaskStatus
+from db.models import InboundDelivery, Session, Task, TemporalCommand, User
 from orchestrator.execution import TaskExecutionService
 from repositories import (
     TaskRepository,
@@ -79,11 +82,18 @@ def client(session_factory) -> Iterator[TestClient]:
             worker=worker,
             progress_notifier=notifier,
         ),
-        auth_config=ApiAuthConfig(shared_secret=("a" * 32)),  # gitleaks:allow
+        auth_config=ApiAuthConfig(
+            shared_secret="a" * 32,  # gitleaks:allow
+            telegram_webhook_enabled=True,
+            telegram_webhook_secret="a" * 32,  # gitleaks:allow
+            telegram_allowed_user_ids=frozenset({1, 5, 6, 42}),
+            telegram_allowed_chat_ids=frozenset({1, 2, 100, 200}),
+        ),
     )
     app.state.test_worker = worker
     app.state.test_notifier = notifier
     with TestClient(app) as test_client:
+        test_client.headers["X-Telegram-Bot-Api-Secret-Token"] = "a" * 32  # gitleaks:allow
         test_client.headers["X-Webhook-Token"] = (
             "a" * 32  # gitleaks:allow
         )
@@ -100,7 +110,7 @@ def _text_update(text: str, update_id: int = 1, user_id: int = 42, chat_id: int 
         "update_id": update_id,
         "message": {
             "message_id": update_id,
-            "chat": {"id": chat_id},
+            "chat": {"id": chat_id, "type": "private"},
             "from": {"id": user_id, "first_name": "Alice"},
             "text": text,
         },
@@ -218,7 +228,7 @@ def test_telegram_display_name_from_first_last(client: TestClient) -> None:
         "update_id": 10,
         "message": {
             "message_id": 10,
-            "chat": {"id": 1},
+            "chat": {"id": 1, "type": "private"},
             "from": {"id": 5, "first_name": "John", "last_name": "Doe"},
             "text": "hello",
         },
@@ -234,7 +244,7 @@ def test_telegram_update_with_username_only(client: TestClient) -> None:
         "update_id": 11,
         "message": {
             "message_id": 11,
-            "chat": {"id": 2},
+            "chat": {"id": 2, "type": "private"},
             "from": {"id": 6, "username": "bot_user"},
             "text": "deploy",
         },
@@ -245,7 +255,7 @@ def test_telegram_update_with_username_only(client: TestClient) -> None:
 
 
 def test_telegram_channel_post_no_sender(client: TestClient) -> None:
-    """Channel posts (no 'from' field) should still create a task."""
+    """Channel posts never create a task, including authenticated deliveries."""
     update = {
         "update_id": 12,
         "channel_post": {
@@ -256,7 +266,7 @@ def test_telegram_channel_post_no_sender(client: TestClient) -> None:
     }
     response = client.post("/telegram/webhook", json=update)
     assert response.status_code == 200
-    assert response.json()["task_id"] is not None
+    assert response.json()["task_id"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -283,7 +293,7 @@ def test_telegram_message_without_text_returns_ok(client: TestClient) -> None:
         "update_id": 50,
         "message": {
             "message_id": 50,
-            "chat": {"id": 1},
+            "chat": {"id": 1, "type": "private"},
             "from": {"id": 1},
         },
     }
@@ -326,7 +336,7 @@ def test_telegram_unconfigured_service_returns_503(client: TestClient) -> None:
     app = create_app()
     with TestClient(app) as bare:
         response = bare.post("/telegram/webhook", json=_text_update("hello"))
-    assert response.status_code == 503
+    assert response.status_code == 404
 
 
 # ---------------------------------------------------------------------------
@@ -363,7 +373,10 @@ def test_telegram_webhook_rejects_missing_secret_header_when_configured(
     app = create_app(
         task_service=TaskExecutionService(session_factory=session_factory, worker=worker),
         auth_config=ApiAuthConfig(
-            telegram_webhook_secret=("a" * 32)  # gitleaks:allow
+            telegram_webhook_enabled=True,
+            telegram_allowed_user_ids=frozenset({42}),
+            telegram_allowed_chat_ids=frozenset({100}),
+            telegram_webhook_secret=("a" * 32),  # gitleaks:allow
         ),
     )
 
@@ -371,7 +384,7 @@ def test_telegram_webhook_rejects_missing_secret_header_when_configured(
         response = client.post("/telegram/webhook", json=_text_update("Run the linter"))
 
     assert response.status_code == 401
-    assert response.json() == {"detail": "Missing X-Telegram-Bot-Api-Secret-Token header."}
+    assert response.json() == {"detail": "Missing Telegram webhook authentication"}
     assert worker.requests == []
 
 
@@ -393,7 +406,10 @@ def test_telegram_webhook_accepts_matching_secret_header_when_configured(
     app = create_app(
         task_service=TaskExecutionService(session_factory=session_factory, worker=worker),
         auth_config=ApiAuthConfig(
-            telegram_webhook_secret=("a" * 32)  # gitleaks:allow
+            telegram_webhook_enabled=True,
+            telegram_allowed_user_ids=frozenset({42}),
+            telegram_allowed_chat_ids=frozenset({100}),
+            telegram_webhook_secret=("a" * 32),  # gitleaks:allow
         ),
     )
 
@@ -410,3 +426,121 @@ def test_telegram_webhook_accepts_matching_secret_header_when_configured(
     assert response.status_code == 200
     assert response.json()["task_id"] is not None
     assert len(worker.requests) == 1
+
+
+def assert_no_side_effects(client):
+    service = client.app.state.task_service
+    with service.session_factory() as session:
+        for model in (Task, Session, User, InboundDelivery, TemporalCommand):
+            assert session.scalar(select(func.count()).select_from(model)) == 0
+    assert client.app.state.test_worker.requests == []
+    assert client.app.state.test_notifier.events == []
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"from": {"id": 999}},
+        {"chat": {"id": 999, "type": "private"}},
+        {"from": None},
+        {"from": {"id": 42, "is_bot": True}},
+        {"chat": {"id": 100, "type": "group"}},
+        {"chat": {"id": 100}},
+        {"forward_origin": {"type": "hidden_user", "date": 1}},
+        {"forward_date": 1},
+        {"forward_from": {"id": 999}},
+        {"forward_from_chat": {"id": 999}},
+        {"sender_chat": {"id": 100}},
+        {"is_automatic_forward": True},
+    ],
+)
+def test_disallowed_identity_or_message_has_no_effect(client, change):
+    update = deepcopy(_text_update("synthetic task"))
+    update["message"].update(change)
+    response = client.post("/telegram/webhook", json=update)
+    assert response.status_code == 200
+    assert response.json()["task_id"] is None
+    assert_no_side_effects(client)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"update_id": 1},
+        {"update_id": 1, "channel_post": {"message_id": 1, "chat": {"id": 100}, "text": "task"}},
+        {"update_id": 1, "edited_message": {"text": "task"}},
+    ],
+)
+def test_unsupported_updates_have_no_effect(client, payload):
+    assert client.post("/telegram/webhook", json=payload).status_code == 200
+    assert_no_side_effects(client)
+
+
+@pytest.mark.parametrize("body,code", [(b"{", 422), (b"x" * (256 * 1024 + 1), 413)])
+def test_malformed_and_oversized_have_no_effect(client, body, code):
+    response = client.post(
+        "/telegram/webhook", content=body, headers={"Content-Type": "application/json"}
+    )
+    assert response.status_code == code
+    assert_no_side_effects(client)
+
+
+def test_disabled_cannot_submit_with_other_api_credentials(client):
+    client.app.state.api_auth_config = replace(
+        client.app.state.api_auth_config, telegram_webhook_enabled=False
+    )
+    assert client.post("/telegram/webhook", json=_text_update("task")).status_code == 404
+    assert_no_side_effects(client)
+
+
+@pytest.mark.parametrize(
+    "path", ["/telegram/webhook/", "/telegram/%77ebhook", "/telegram/webhook?x=1"]
+)
+def test_canonical_path_required(client, path):
+    assert client.post(path, json=_text_update("task"), follow_redirects=False).status_code == 404
+    assert_no_side_effects(client)
+
+
+def test_durable_duplicate_after_app_restart(client):
+    update = _text_update("synthetic task", update_id=808)
+    first = client.post("/telegram/webhook", json=update)
+    assert first.status_code == 200
+    app = client.app
+    # A new client lifespan with the same DB/service must not enqueue another task.
+    with TestClient(app) as restarted:
+        second = restarted.post("/telegram/webhook", json=update, headers=client.headers)
+    assert second.json()["task_id"] == first.json()["task_id"]
+    assert second.json()["detail"] == "duplicate_delivery"
+    with app.state.task_service.session_factory() as session:
+        assert session.scalar(select(func.count()).select_from(Task)) == 1
+        assert session.scalar(select(func.count()).select_from(TemporalCommand)) == 1
+
+
+@pytest.mark.parametrize(
+    "member,value",
+    [
+        ("update_id", False),
+        ("update_id", "1"),
+        ("from", "42"),
+        ("chat", True),
+    ],
+)
+def test_malformed_numeric_identity_has_no_effect(client, member, value):
+    update = _text_update("synthetic task")
+    if member == "update_id":
+        update[member] = value
+    else:
+        update["message"][member]["id"] = value
+    assert client.post("/telegram/webhook", json=update).status_code == 422
+    assert_no_side_effects(client)
+
+
+@pytest.mark.parametrize("value,code", [(None, 401), ("wrong", 403), ("b" * 32, 403)])
+def test_authentication_failure_has_no_effect(client, value, code):
+    del client.headers["X-Telegram-Bot-Api-Secret-Token"]
+    headers = {} if value is None else {"X-Telegram-Bot-Api-Secret-Token": value}
+    assert (
+        client.post("/telegram/webhook", json=_text_update("task"), headers=headers).status_code
+        == code
+    )
+    assert_no_side_effects(client)
