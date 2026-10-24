@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import os
+import time
 from typing import Any
 
 import httpx
@@ -158,18 +159,42 @@ class OpenRouterNeutralReviewerClient:
             "provider": {"allow_fallbacks": False},
             "response_format": {"type": "json_object"},
         }
-        try:
-            client = self._get_client()
-            response = client.post(
-                f"{self.base_url}/chat/completions",
-                headers=headers,
-                json=payload,
-            )
-        except Exception as exc:
-            LOGGER.error("OpenRouter neutral reviewer HTTP request failed: %s", exc)
-            return None, f"http_error:{exc}"
+        max_retries = 3
+        last_error = None
+        for attempt in range(max_retries + 1):
+            try:
+                client = self._get_client()
+                response = client.post(
+                    f"{self.base_url}/chat/completions",
+                    headers=headers,
+                    json=payload,
+                )
+            except Exception as exc:
+                LOGGER.warning(
+                    "OpenRouter attempt %d/%d request failed: %s",
+                    attempt + 1,
+                    max_retries + 1,
+                    exc,
+                )
+                last_error = f"http_error:{exc}"
+                if attempt < max_retries:
+                    time.sleep(2 ** (attempt + 1))
+                    continue
+                return None, last_error
 
-        if response.status_code != 200:
+            if response.status_code == 200:
+                return response.json(), None
+
+            if response.status_code in {429, 500, 502, 503, 504} and attempt < max_retries:
+                LOGGER.warning(
+                    "OpenRouter attempt %d/%d returned transient HTTP %d; retrying...",
+                    attempt + 1,
+                    max_retries + 1,
+                    response.status_code,
+                )
+                time.sleep(2 ** (attempt + 1))
+                continue
+
             LOGGER.error(
                 "OpenRouter neutral reviewer returned HTTP %d: %s",
                 response.status_code,
@@ -177,7 +202,7 @@ class OpenRouterNeutralReviewerClient:
             )
             return None, f"http_status_{response.status_code}:{response.text[:200]}"
 
-        return response.json(), None
+        return None, last_error or "max_retries_exhausted"
 
     def _process_completion_response(
         self, resp_json: dict[str, Any], manifest: NeutralEvaluatorManifest
