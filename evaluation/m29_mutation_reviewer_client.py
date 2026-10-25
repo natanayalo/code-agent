@@ -162,18 +162,25 @@ class OpenRouterNeutralReviewerClient:
             reasoning_effort=manifest.reasoning_effort,
         )
 
+    def _is_local_endpoint(self) -> bool:
+        return any(
+            h in self.base_url for h in ("127.0.0.1", "localhost", "host.docker.internal", "ollama")
+        )
+
     def _execute_completion_request(
         self, user_prompt: str, manifest: NeutralEvaluatorManifest
     ) -> tuple[dict[str, Any] | None, str | None]:
-        model_name = (
-            manifest.model if "/" in manifest.model else f"{manifest.provider}/{manifest.model}"
-        )
+        if "/" in manifest.model or self._is_local_endpoint():
+            model_name = manifest.model
+        else:
+            model_name = f"{manifest.provider}/{manifest.model}"
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
             "HTTP-Referer": "https://github.com/natanayalo/code-agent",
             "X-Title": "code-agent-m29-evaluation",
         }
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
         payload = _build_completion_payload(model_name, user_prompt, manifest.budget.max_tokens)
         max_retries = 5
         last_error = None
@@ -294,7 +301,7 @@ class OpenRouterNeutralReviewerClient:
                 reason=pre_err,
             )
 
-        if not self.api_key:
+        if not self.api_key and not self._is_local_endpoint():
             return NeutralReviewOutcome(
                 passed=False,
                 evaluator_identity=None,
