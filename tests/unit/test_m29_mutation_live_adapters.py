@@ -6,7 +6,7 @@ import json
 import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import httpx
 import pytest
@@ -56,6 +56,9 @@ def _make_sample_case() -> M29MutationCase:
 
 
 _PASS_VERDICT = json.dumps({"passed": True, "blocking_findings": []})
+_EVAL_MODEL: Final[str] = (
+    f"{DEFAULT_M29_NEUTRAL_EVALUATOR.provider}/{DEFAULT_M29_NEUTRAL_EVALUATOR.model}"
+)
 
 
 def _make_handle(ws_id: str, ws_path: Path, task_id: str | None = None) -> WorkspaceHandle:
@@ -206,7 +209,7 @@ class TestOpenRouterNeutralReviewerClient:
             return httpx.Response(
                 status_code=200,
                 json={
-                    "model": "anthropic/claude-3-7-sonnet",
+                    "model": _EVAL_MODEL,
                     "choices": [{"message": {"content": _PASS_VERDICT}}],
                 },
             )
@@ -316,7 +319,7 @@ class TestOpenRouterNeutralReviewerClient:
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(
                 status_code=200,
-                json={"model": "anthropic/claude-3-7-sonnet", "choices": []},
+                json={"model": _EVAL_MODEL, "choices": []},
             )
 
         client = OpenRouterNeutralReviewerClient(
@@ -340,7 +343,7 @@ class TestOpenRouterNeutralReviewerClient:
             return httpx.Response(
                 status_code=200,
                 json={
-                    "model": "anthropic/claude-3-7-sonnet",
+                    "model": _EVAL_MODEL,
                     "choices": [{"message": {"content": json.dumps({"status": "ok"})}}],
                 },
             )

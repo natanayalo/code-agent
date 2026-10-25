@@ -93,14 +93,14 @@ def _hash_text(text: str) -> str:
 
 
 DEFAULT_M29_NEUTRAL_EVALUATOR = NeutralEvaluatorManifest(
-    provider="anthropic",
-    model="claude-3-7-sonnet",
+    provider="qwen",
+    model="qwen2.5-coder:7b",
     reasoning_effort=None,
     system_prompt_sha256=_hash_text(NEUTRAL_EVALUATOR_SYSTEM_PROMPT),
     tools=("read_file", "list_dir"),
     runtime="read_only",
     fallback_policy="none",
-    budget=EvaluatorBudget(timeout_seconds=300, max_tokens=8192),
+    budget=EvaluatorBudget(timeout_seconds=300, max_tokens=2048),
 )
 
 
