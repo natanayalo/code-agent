@@ -324,3 +324,26 @@ def test_github_check_run_sync_and_snapshot_inspection(webhook_client, session_f
     assert snapshot["constraints"]["github"]["issue_number"] == 42
     assert snapshot["latest_run"]["delivery_metadata"]["ci_status"] == "passed"
     assert snapshot["latest_run"]["delivery_metadata"]["source_issue_number"] == 42
+    assert snapshot["delivery_metadata"]["ci_status"] == "passed"
+    assert snapshot["delivery_metadata"]["source_issue_number"] == 42
+
+
+def test_task_summary_snapshot_projects_delivery_metadata(webhook_client, session_factory):
+    """GET /tasks must project delivery_metadata including source issue and CI status."""
+    client, _, _ = webhook_client
+    _, data = _post_issue_labeled(
+        client, "test-webhook-secret", "del-issue-summary-test", issue_num=55
+    )
+    task_id = data["task_id"]
+    _create_delivered_worker_run(session_factory, task_id)
+
+    resp_list = client.get(
+        "/tasks",
+        headers={"X-Webhook-Token": "a" * 32},  # gitleaks:allow
+    )
+    assert resp_list.status_code == 200
+    matching = [t for t in resp_list.json() if t["task_id"] == task_id]
+    assert len(matching) == 1
+    assert matching[0]["delivery_metadata"] is not None
+    assert matching[0]["delivery_metadata"]["source_issue_number"] == 42
+    assert matching[0]["delivery_metadata"]["branch_name"] == "github/issue-42"

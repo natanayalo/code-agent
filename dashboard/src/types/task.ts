@@ -69,6 +69,18 @@ export interface TaskSummarySnapshot {
   approval_reason?: string | null;
   trace_id?: string | null;
   trace_url?: string | null;
+  delivery_metadata?: DeliveryMetadataSnapshot | null;
+  constraints?: Record<string, unknown>;
+}
+
+export interface CheckRunSnapshot {
+  id: number | string;
+  name: string;
+  status?: string | null;
+  conclusion?: string | null;
+  html_url?: string | null;
+  head_sha?: string | null;
+  [key: string]: unknown;
 }
 
 export interface ReviewCommentSnapshot {
@@ -83,13 +95,22 @@ export interface ReviewCommentSnapshot {
 }
 
 export interface DeliveryMetadataSnapshot {
+  delivery_mode?: string | null;
+  base_branch?: string | null;
   branch_name?: string | null;
   pr_title?: string | null;
   pr_url?: string | null;
   pr_number?: number | null;
+  pr_node_id?: string | null;
+  pr_state?: string | null;
+  pr_draft?: boolean | null;
   head_sha?: string | null;
   ci_status?: string | null;
   ci_failed_jobs?: string[] | null;
+  ci_last_checked_at?: string | null;
+  check_runs?: CheckRunSnapshot[] | null;
+  source_issue_number?: number | null;
+  source_issue_url?: string | null;
   review_comments?: ReviewCommentSnapshot[] | null;
   review_comments_last_checked_at?: string | null;
   review_comments_replied_at?: string | null;
@@ -189,6 +210,7 @@ export interface InteractionInboxCard {
   repo_url?: string | null;
   branch?: string | null;
   priority: number;
+  delivery_metadata?: DeliveryMetadataSnapshot | null;
 }
 
 export enum ExecutionPlanNodeStatus {

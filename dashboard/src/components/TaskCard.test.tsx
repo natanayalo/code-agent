@@ -380,4 +380,24 @@ describe('TaskCard', () => {
       expect(onCardClick).not.toHaveBeenCalled();
     });
   });
+
+  describe('Delivery Metadata Lineage', () => {
+    it('renders issue, PR, and CI status chips when delivery_metadata is present', () => {
+      const taskWithDelivery: TaskSummarySnapshot = {
+        ...mockTask,
+        delivery_metadata: {
+          source_issue_number: 42,
+          pr_number: 105,
+          pr_draft: true,
+          ci_status: 'passed',
+        },
+      };
+
+      render(<TaskCard task={taskWithDelivery} />);
+
+      expect(screen.getByText('Issue #42')).toBeInTheDocument();
+      expect(screen.getByText('Draft PR #105')).toBeInTheDocument();
+      expect(screen.getByText('CI: passed')).toBeInTheDocument();
+    });
+  });
 });

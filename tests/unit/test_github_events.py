@@ -559,3 +559,76 @@ def test_find_matching_delivery_run_matches():
         branch_name="target-branch",
     )
     assert run == mock_run
+
+
+def test_apply_worker_run_delivery_update_backfills_source_issue():
+    from orchestrator.github_delivery_sync import _apply_worker_run_delivery_update
+
+    mock_run = MagicMock()
+    mock_run.delivery_metadata = {"pr_number": 42}
+    mock_task = MagicMock()
+    mock_task.constraints = {
+        "github": {
+            "issue_number": 101,
+            "issue_url": "https://github.com/octocat/code-agent/issues/101",
+        }
+    }
+
+    _apply_worker_run_delivery_update(
+        worker_run=mock_run,
+        event="pull_request",
+        payload={"pull_request": {"number": 42, "state": "open", "draft": True}},
+        head_sha="abc1234",
+        task=mock_task,
+    )
+
+    assert mock_run.delivery_metadata["source_issue_number"] == 101
+    assert (
+        mock_run.delivery_metadata["source_issue_url"]
+        == "https://github.com/octocat/code-agent/issues/101"
+    )
+    assert mock_run.delivery_metadata["pr_draft"] is True
+
+
+def test_record_delivery_timeline_event_includes_source_issue_lineage():
+    from orchestrator.github_delivery_sync import record_delivery_timeline_event
+
+    mock_session = MagicMock()
+    mock_task = MagicMock()
+    mock_task.id = "task-1"
+    mock_task.attempt_count = 1
+    mock_task.constraints = {
+        "github": {
+            "issue_number": 99,
+            "issue_url": "https://github.com/octocat/code-agent/issues/99",
+        }
+    }
+    mock_run = MagicMock()
+    mock_run.delivery_metadata = {"source_issue_number": 99}
+
+    from unittest.mock import patch
+
+    with patch("orchestrator.github_delivery_sync.TaskTimelineRepository") as mock_repo_cls:
+        mock_repo = MagicMock()
+        mock_repo_cls.return_value = mock_repo
+
+        record_delivery_timeline_event(
+            session=mock_session,
+            task=mock_task,
+            event="pull_request",
+            action="opened",
+            delivery_id="del-123",
+            pr_number=50,
+            head_sha="head123",
+            branch_name="feat/branch",
+            worker_run=mock_run,
+            check_entry=None,
+            pr_payload={"html_url": "https://github.com/octocat/code-agent/pull/50"},
+        )
+
+        mock_repo.create_next_for_attempt.assert_called_once()
+        _, kwargs = mock_repo.create_next_for_attempt.call_args
+        payload = kwargs["payload"]
+        assert payload["source_issue_number"] == 99
+        assert payload["source_issue_url"] == "https://github.com/octocat/code-agent/issues/99"
+        assert payload["pr_number"] == 50

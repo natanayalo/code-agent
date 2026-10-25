@@ -88,6 +88,8 @@ function DashboardContent() {
         interactions={inboxInteractions}
         selectedTaskId={selectedTaskId}
         onOpenTask={setSelectedTaskId}
+        tasks={tasks}
+        onRefresh={refetch}
       />
 
       <main className={`dashboard-content ${selectedTaskId ? 'dashboard-content-with-panel' : ''}`}>

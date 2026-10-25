@@ -120,12 +120,14 @@ class TaskRepository:
         latest_run_worker: Any,
         latest_run_requested_permission: Any,
         pending_interaction_count: Any,
+        latest_run_delivery_metadata: Any = None,
     ) -> None:
         setattr(task, "_latest_run_id", latest_run_id)
         setattr(task, "_latest_run_status", latest_run_status)
         setattr(task, "_latest_run_worker", latest_run_worker)
         setattr(task, "_latest_run_requested_permission", latest_run_requested_permission)
         setattr(task, "_pending_interaction_count", int(pending_interaction_count or 0))
+        setattr(task, "_latest_run_delivery_metadata", latest_run_delivery_metadata)
 
     def list_all(
         self,
@@ -159,6 +161,9 @@ class TaskRepository:
         latest_run_requested_permission_sq = self._latest_run_scalar_subquery(
             WorkerRun.requested_permission
         )
+        latest_run_delivery_metadata_sq = self._latest_run_scalar_subquery(
+            WorkerRun.delivery_metadata
+        )
         pending_interaction_count_sq = (
             select(func.count(HumanInteraction.id))
             .where(
@@ -175,6 +180,7 @@ class TaskRepository:
             latest_run_worker_sq.label("latest_run_worker"),
             latest_run_requested_permission_sq.label("latest_run_requested_permission"),
             pending_interaction_count_sq.label("pending_interaction_count"),
+            latest_run_delivery_metadata_sq.label("latest_run_delivery_metadata"),
         ).order_by(Task.created_at.desc())
 
         if session_id:
@@ -196,6 +202,7 @@ class TaskRepository:
                 latest_run_worker=row._mapping["latest_run_worker"],
                 latest_run_requested_permission=row._mapping["latest_run_requested_permission"],
                 pending_interaction_count=row._mapping["pending_interaction_count"],
+                latest_run_delivery_metadata=row._mapping.get("latest_run_delivery_metadata"),
             )
             tasks.append(task)
         return tasks

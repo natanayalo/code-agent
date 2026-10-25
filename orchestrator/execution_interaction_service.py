@@ -162,7 +162,10 @@ def _persist_resolved_interaction(
 
 def list_pending_interactions(self: Any) -> list[InteractionInboxCard]:
     """Retrieve all pending interactions across all tasks, enriched for the inbox."""
-    from orchestrator.execution_snapshot_service import _map_human_interaction_snapshot
+    from orchestrator.execution_snapshot_service import (
+        _map_human_interaction_snapshot,
+        _resolve_task_delivery_metadata,
+    )
 
     with session_scope(self.session_factory) as session:
         repo = HumanInteractionRepository(session)
@@ -171,6 +174,7 @@ def list_pending_interactions(self: Any) -> list[InteractionInboxCard]:
         cards = []
         for interaction_row, task_row in rows:
             interaction_snapshot = _map_human_interaction_snapshot(interaction_row)
+            delivery_metadata = _resolve_task_delivery_metadata(task_row)
             cards.append(
                 InteractionInboxCard(
                     interaction=interaction_snapshot,
@@ -180,6 +184,7 @@ def list_pending_interactions(self: Any) -> list[InteractionInboxCard]:
                     repo_url=task_row.repo_url,
                     branch=task_row.branch,
                     priority=task_row.priority,
+                    delivery_metadata=delivery_metadata,
                 )
             )
         return cards
