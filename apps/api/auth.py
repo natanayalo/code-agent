@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 API_SHARED_SECRET_ENV_VAR: Final[str] = "CODE_AGENT_API_SHARED_SECRET"
 TELEGRAM_WEBHOOK_SECRET_ENV_VAR: Final[str] = "CODE_AGENT_TELEGRAM_WEBHOOK_SECRET_TOKEN"
+GITHUB_WEBHOOK_SECRET_ENV_VAR: Final[str] = "CODE_AGENT_GITHUB_WEBHOOK_SECRET"
 ALLOWED_ORIGINS_ENV_VAR: Final[str] = "CODE_AGENT_ALLOWED_ORIGINS"
 
 # Security override constants
@@ -34,6 +35,7 @@ API_FORCE_HTTPS_ENV_VAR: Final[str] = "CODE_AGENT_API_FORCE_HTTPS"
 
 API_SHARED_SECRET_HEADER: Final[str] = "X-Webhook-Token"
 TELEGRAM_WEBHOOK_SECRET_HEADER: Final[str] = "X-Telegram-Bot-Api-Secret-Token"
+GITHUB_WEBHOOK_SIGNATURE_HEADER: Final[str] = "X-Hub-Signature-256"
 DASHBOARD_COOKIE_NAME: Final[str] = "agent_session"
 
 JWT_ALGORITHM: Final[str] = "HS256"
@@ -54,6 +56,7 @@ class ApiAuthConfig:
 
     shared_secret: str | None = None
     telegram_webhook_secret: str | None = None
+    github_webhook_secret: str | None = None
     allowed_origins: list[str] = field(default_factory=list)
     cookie_secure_override: bool | None = None
     force_https: bool = False
@@ -108,6 +111,7 @@ def build_api_auth_config_from_env(environ: Mapping[str, str] | None = None) -> 
     return ApiAuthConfig(
         shared_secret=_clean_secret(env.get(API_SHARED_SECRET_ENV_VAR)),
         telegram_webhook_secret=_clean_secret(env.get(TELEGRAM_WEBHOOK_SECRET_ENV_VAR)),
+        github_webhook_secret=_clean_secret(env.get(GITHUB_WEBHOOK_SECRET_ENV_VAR)),
         allowed_origins=allowed_origins,
         cookie_secure_override=cookie_secure_override,
         force_https=force_https,

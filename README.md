@@ -10,7 +10,7 @@ The platform is built for one operator-first use case: reliable coding execution
 
 ## What Exists Today
 
-- FastAPI ingress for `/tasks`, `/webhook`, and Telegram updates
+- FastAPI ingress for `/tasks`, `/webhook`, `/github/webhook`, and Telegram updates
 - API authentication for task-ingress endpoints via shared secret
 - durable task/session/run persistence in Postgres
 - split API/Temporal worker runtime with durable command outbox submission

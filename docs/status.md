@@ -12,7 +12,7 @@ qualified; production routing remains static and M27 deferred.
 
 ## Current capabilities
 
-- authenticated API, generic webhook, and Telegram task intake
+- authenticated API, generic webhook, Telegram, and GitHub-native webhook task intake
 - durable Postgres persistence for users, sessions, tasks, worker runs,
   interactions, timelines, artifacts, memory, and delivery metadata
 - transactional Temporal command outbox with idempotent start, signal, and
@@ -227,12 +227,9 @@ Temporal migration and rollback record is in the
 
 ## Next slices only
 
-1. Begin **M30 — GitHub-Native Task and Delivery Control**:
-   a. add authenticated, idempotent GitHub event intake for selected issue and delivery events;
-   b. persist external issue, branch, commit, pull-request, and check-run identity on the existing task and delivery timeline;
-   c. allow starting or replaying a task from an eligible issue event without generic webhook payload translation;
-   d. synchronize pull-request and CI state into the dashboard operator inbox with direct links and safe next actions;
-   e. preserve one traceable chain from source issue through task, worker evidence, validation, branch, and draft PR.
+1. Continue **M30 — GitHub-Native Task and Delivery Control**:
+   a. synchronize pull-request and CI state into the dashboard operator inbox with direct links and safe next actions;
+   b. evaluate Temporal-native interaction primitives where they simplify real M30 requirements (Queries for status/current plan/pending decision, Updates for operator actions, Signals for asynchronous external events).
 2. Maintain completed M29 advisory report contracts and static production routing:
    a. all four canonical task-class/mode cells are qualified (`docs/read_only`, `feature/read_only`, `investigation/read_only`, `feature/mutation`);
    b. longitudinal 45-day split robustness remains calendar-gated on model-aware task age (expected ~2026-11-02 for Wave 2/3 tasks and ~2026-12-08 for `gpt-6-luna`);

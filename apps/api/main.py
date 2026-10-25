@@ -23,6 +23,7 @@ from apps.api.ci_polling import CIPollingScheduler  # noqa: E402
 from apps.api.config import SystemConfig  # noqa: E402
 from apps.api.progress import create_outbound_http_clients  # noqa: E402
 from apps.api.routes.auth import router as auth_router  # noqa: E402
+from apps.api.routes.github import router as github_router  # noqa: E402
 from apps.api.routes.health import router as health_router  # noqa: E402
 from apps.api.routes.knowledge_base import router as knowledge_base_router  # noqa: E402
 from apps.api.routes.metrics import router as metrics_router  # noqa: E402
@@ -170,6 +171,7 @@ def _register_routers(app: FastAPI) -> None:
     app.include_router(system_router)
     app.include_router(knowledge_base_router)
     app.include_router(webhook_router)
+    app.include_router(github_router)
     app.include_router(telegram_router)
 
 

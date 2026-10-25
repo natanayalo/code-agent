@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import logging
 from collections.abc import Mapping
@@ -16,6 +17,7 @@ from fastapi import HTTPException, Request, status
 from apps.api.auth import (
     API_SHARED_SECRET_HEADER,
     DASHBOARD_COOKIE_NAME,
+    GITHUB_WEBHOOK_SIGNATURE_HEADER,
     TELEGRAM_WEBHOOK_SECRET_HEADER,
     ApiAuthConfig,
     decode_dashboard_token,
@@ -208,6 +210,35 @@ def require_telegram_webhook_auth(request: Request) -> None:
         missing_detail=f"Missing {TELEGRAM_WEBHOOK_SECRET_HEADER} header.",
         invalid_detail="Invalid Telegram webhook secret.",
     )
+
+
+async def require_github_webhook_auth(request: Request) -> bytes:
+    """Validate GitHub webhook HMAC-SHA256 signature against request body."""
+    auth_config = get_api_auth_config(request)
+    if not auth_config.github_webhook_secret:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="GitHub webhook authentication is not configured for this app instance.",
+        )
+    signature_header = request.headers.get(GITHUB_WEBHOOK_SIGNATURE_HEADER)
+    if not signature_header:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Missing {GITHUB_WEBHOOK_SIGNATURE_HEADER} header.",
+        )
+    body = await request.body()
+    expected_mac = hmac.new(
+        auth_config.github_webhook_secret.encode("utf-8"),
+        body,
+        hashlib.sha256,
+    ).hexdigest()
+    expected_header = f"sha256={expected_mac}"
+    if not hmac.compare_digest(signature_header, expected_header):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid GitHub webhook signature.",
+        )
+    return body
 
 
 def _check_no_raw_secrets(raw_body: Any) -> None:
