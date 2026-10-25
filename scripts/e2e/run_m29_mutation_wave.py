@@ -7,6 +7,8 @@ import argparse
 import json
 import logging
 import os
+import re
+import subprocess
 import sys
 from collections.abc import Mapping
 from dataclasses import asdict
@@ -110,11 +112,20 @@ def handle_init(args: argparse.Namespace) -> int:
     verifier_sha = compute_verifier_source_sha256()
     bundle_dir.mkdir(parents=True, exist_ok=True)
 
-    explicit_build_sha = getattr(args, "build_sha", None)
-    if explicit_build_sha and explicit_build_sha.strip():
-        build_sha = explicit_build_sha.strip()
-    else:
-        build_sha = os.environ.get("BUILD_SHA") or "036bde95c74d517f80c17e6bf32e92d300e3b873"
+    exp_sha = getattr(args, "build_sha", None)
+    build_sha = (exp_sha.strip() if exp_sha else "") or os.environ.get("BUILD_SHA", "")
+    if not build_sha:
+        try:
+            build_sha = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL, text=True
+            ).strip()
+        except Exception:
+            build_sha = ""
+    if not build_sha or not re.match(r"^[0-9a-f]{7,64}$", build_sha):
+        sys.stderr.write(
+            "ERROR: Could not resolve valid build SHA from args, BUILD_SHA, or git HEAD\n"
+        )
+        return 1
 
     bundle_data = {
         "suite_name": M29_MUTATION_SUITE_NAME,
@@ -137,29 +148,16 @@ def check_api_readiness(api_base_url: str, *, client: httpx.Client | None = None
     base = api_base_url.rstrip("/")
     cli = client or httpx.Client(timeout=10.0)
     try:
-        h_resp = cli.get(f"{base}/health")
-        if h_resp.status_code != 200:
-            raise RuntimeError(
-                f"API health check failed: status {h_resp.status_code} ({h_resp.text})"
-            )
-        try:
-            h_json = h_resp.json()
-        except Exception as exc:
-            raise RuntimeError(f"API health response is not valid JSON: {exc}") from exc
-        if h_json.get("status") != "ok":
-            raise RuntimeError(f"API health check returned non-ok status: {h_json}")
-
-        r_resp = cli.get(f"{base}/ready")
-        if r_resp.status_code != 200:
-            raise RuntimeError(
-                f"API readiness check failed: status {r_resp.status_code} ({r_resp.text})"
-            )
-        try:
-            r_json = r_resp.json()
-        except Exception as exc:
-            raise RuntimeError(f"API readiness response is not valid JSON: {exc}") from exc
-        if r_json.get("status") != "ready":
-            raise RuntimeError(f"API readiness check returned non-ready status: {r_json}")
+        for ep, exp in [("/health", "ok"), ("/ready", "ready")]:
+            resp = cli.get(f"{base}{ep}")
+            if resp.status_code != 200:
+                raise RuntimeError(f"API {ep} failed: status {resp.status_code} ({resp.text})")
+            try:
+                data = resp.json()
+            except Exception as exc:
+                raise RuntimeError(f"API {ep} response is not valid JSON: {exc}") from exc
+            if data.get("status") != exp:
+                raise RuntimeError(f"API {ep} returned non-{exp} status: {data}")
     finally:
         if client is None:
             cli.close()
@@ -221,13 +219,15 @@ def handle_preflight(args: argparse.Namespace) -> int:
             print("API readiness verified (/health and /ready).")
 
         as_of_arg = getattr(args, "as_of", None)
+        horizon_min = getattr(args, "as_of_horizon_minutes", None)
         if as_of_arg:
             raw_as_of = as_of_arg[:-1] + "+00:00" if as_of_arg.endswith("Z") else as_of_arg
             effective_as_of = datetime.fromisoformat(raw_as_of)
             if effective_as_of.tzinfo is None:
                 effective_as_of = effective_as_of.replace(tzinfo=UTC)
         else:
-            effective_as_of = datetime.now(UTC) + timedelta(hours=24)
+            horizon = horizon_min if horizon_min is not None else 75
+            effective_as_of = datetime.now(UTC) + timedelta(minutes=horizon)
 
         baseline_ids, baseline_report = extract_mutation_baseline_snapshot(
             args.db_url, effective_as_of
@@ -260,6 +260,7 @@ def handle_preflight(args: argparse.Namespace) -> int:
     bundle_data["preflight_passed_at"] = datetime.now(UTC).isoformat()
     bundle_data["task_cohort_snapshot"] = asdict(snap)
     bundle_data["verifier_source_sha256"] = snap.verifier_source_sha256
+    bundle_data["neutral_evaluator"] = suite.neutral_evaluator.model_dump(mode="json")
     _save_bundle(bundle_dir, bundle_data)
 
     print(f"Preflight checks passed! Baseline hash: {snap.baseline_memory_context_hash}")
@@ -388,6 +389,7 @@ def handle_run(args: argparse.Namespace) -> int:
     print(f"Starting M29 feature/mutation wave ({len(suite.cases)} cases)...")
     res: M29MutationRunnerResult = runner.run()
 
+    bundle_data["neutral_evaluator"] = suite.neutral_evaluator.model_dump(mode="json")
     _save_run_results(bundle_dir, bundle_data, res)
 
     print(
@@ -438,7 +440,6 @@ def handle_publish(args: argparse.Namespace) -> int:
             build_sha=args.build_sha,
             bootstrap_iterations=args.bootstrap_iterations,
             bootstrap_seed=args.bootstrap_seed,
-            now=getattr(args, "now", None),
         )
     except Exception as exc:
         LOGGER.exception("Failed to reconcile and publish mutation wave: %s", exc)
@@ -465,13 +466,9 @@ def handle_status(args: argparse.Namespace) -> int:
     bundle_data = _load_bundle(bundle_dir)
 
     print("=== M29 Mutation Wave Bundle Status ===")
-    print(f"Suite: {bundle_data.get('suite_name')}")
-    print(f"Status: {bundle_data.get('status')}")
-    if bundle_data.get("stop_reason"):
-        print(f"Stop Reason: {bundle_data.get('stop_reason')}")
-    print(f"Initialized At: {bundle_data.get('initialized_at')}")
-    if bundle_data.get("finished_at"):
-        print(f"Finished At: {bundle_data.get('finished_at')}")
+    for k in ("suite_name", "status", "stop_reason", "initialized_at", "finished_at"):
+        if bundle_data.get(k):
+            print(f"{k.replace('_', ' ').title()}: {bundle_data.get(k)}")
 
     watchdog = EvaluationRetentionWatchdog(bundle_dir)
     print("\n=== Retention Watchdog Ledger ===")
@@ -516,6 +513,12 @@ def _add_lifecycle_subparsers(subparsers: Any) -> None:
     pref_p.add_argument("--fixture-repo-path", required=True, help="Fixture repo path")
     pref_p.add_argument("--as-of", default=None, help="Frozen as-of cutoff (ISO-8601 UTC)")
     pref_p.add_argument(
+        "--as-of-horizon-minutes",
+        type=int,
+        default=75,
+        help="Minutes from now for as_of cutoff when --as-of is omitted (default: 75)",
+    )
+    pref_p.add_argument(
         "--api-base-url",
         default=None,
         help="Optional API base URL to verify /health and /ready during preflight",
@@ -549,7 +552,6 @@ def _add_lifecycle_subparsers(subparsers: Any) -> None:
     pub_p.add_argument("--db-url", required=True, help="Disposable database URL")
     pub_p.add_argument("--output-dir", default=None, help="Published output dir")
     pub_p.add_argument("--build-sha", default=None, help="Explicit build SHA")
-    pub_p.add_argument("--now", default=None, help="Effective publication time")
     pub_p.add_argument("--bootstrap-iterations", type=int, default=10000)
     pub_p.add_argument("--bootstrap-seed", type=int, default=29)
     _add_ack_arg(pub_p)

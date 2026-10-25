@@ -84,6 +84,12 @@ def _validate_manifest_suite_cases(
                 f"case '{m_case.case_id}' worker_profile mismatch: '{m_case.worker_profile}' != "
                 f"'{getattr(s_case, 'worker_profile')}'"
             )
+        s_eval = getattr(s_case, "neutral_evaluator", None)
+        if s_eval is not None and m_case.evaluator_identity_status == "verified":
+            if not m_case.evaluator_identity_matches:
+                raise ValueError(
+                    f"case '{m_case.case_id}' evaluator identity did not match suite evaluator"
+                )
 
 
 def assert_quality_separation_integrity(manifest: M29MutationManifest) -> None:
@@ -187,18 +193,44 @@ def _validate_mutation_cell(
             f"canonical report sample size ({cell.sample_size}) does not match "
             f"cohort reconciliation ({recon_profile.current_count}) for {profile}"
         )
-    if cell.stage_outcome_rates.verification_pass_rate is not None and (
-        baseline_cell is None or baseline_cell.stage_outcome_rates.verification_pass_rate is None
-    ):
+    exp_total_rep = baseline_cell.repairs.total_repaired_tasks if baseline_cell else 0
+    exp_verifier_rep = baseline_cell.repairs.verifier_repairs_count if baseline_cell else 0
+    exp_review_rep = baseline_cell.repairs.review_repairs_count if baseline_cell else 0
+
+    act_rep = cell.repairs
+    if act_rep.total_repaired_tasks != exp_total_rep:
         raise ValueError(
-            f"canonical report feature/{profile}/mutation has verification_pass_rate; "
+            f"canonical report feature/{profile}/mutation repaired tasks "
+            f"({act_rep.total_repaired_tasks}) != baseline ({exp_total_rep}); "
+            "suite tasks must not record in-task repairs"
+        )
+    if act_rep.verifier_repairs_count != exp_verifier_rep:
+        raise ValueError(
+            f"canonical report feature/{profile}/mutation verifier repairs "
+            f"({act_rep.verifier_repairs_count}) != baseline ({exp_verifier_rep}); "
+            "suite tasks must not record in-task verifier repairs"
+        )
+    if act_rep.review_repairs_count != exp_review_rep:
+        raise ValueError(
+            f"canonical report feature/{profile}/mutation review repairs "
+            f"({act_rep.review_repairs_count}) != baseline ({exp_review_rep}); "
+            "suite tasks must not record in-task review repairs"
+        )
+
+    base_v_rate = (
+        baseline_cell.stage_outcome_rates.verification_pass_rate if baseline_cell else None
+    )
+    if cell.stage_outcome_rates.verification_pass_rate != base_v_rate:
+        raise ValueError(
+            f"canonical report feature/{profile}/mutation has verification_pass_rate "
+            f"({cell.stage_outcome_rates.verification_pass_rate}) != baseline ({base_v_rate}); "
             "external quality must not be backfilled into in-task stages"
         )
-    if cell.stage_outcome_rates.review_pass_rate is not None and (
-        baseline_cell is None or baseline_cell.stage_outcome_rates.review_pass_rate is None
-    ):
+    base_r_rate = baseline_cell.stage_outcome_rates.review_pass_rate if baseline_cell else None
+    if cell.stage_outcome_rates.review_pass_rate != base_r_rate:
         raise ValueError(
-            f"canonical report feature/{profile}/mutation has review_pass_rate; "
+            f"canonical report feature/{profile}/mutation has review_pass_rate "
+            f"({cell.stage_outcome_rates.review_pass_rate}) != baseline ({base_r_rate}); "
             "external quality must not be backfilled into in-task stages"
         )
 
