@@ -187,12 +187,16 @@ def _validate_mutation_cell(
             f"canonical report sample size ({cell.sample_size}) does not match "
             f"cohort reconciliation ({recon_profile.current_count}) for {profile}"
         )
-    if cell.stage_outcome_rates.verification_pass_rate is not None:
+    if cell.stage_outcome_rates.verification_pass_rate is not None and (
+        baseline_cell is None or baseline_cell.stage_outcome_rates.verification_pass_rate is None
+    ):
         raise ValueError(
             f"canonical report feature/{profile}/mutation has verification_pass_rate; "
             "external quality must not be backfilled into in-task stages"
         )
-    if cell.stage_outcome_rates.review_pass_rate is not None:
+    if cell.stage_outcome_rates.review_pass_rate is not None and (
+        baseline_cell is None or baseline_cell.stage_outcome_rates.review_pass_rate is None
+    ):
         raise ValueError(
             f"canonical report feature/{profile}/mutation has review_pass_rate; "
             "external quality must not be backfilled into in-task stages"

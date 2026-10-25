@@ -42,6 +42,7 @@ from evaluation.provider_reliability_identity import (
     resolve_task_execution_identity,
 )
 from evaluation.provider_reliability_models import ExecutionIdentity
+from evaluation.provider_reliability_stages import resolve_failure_kind
 from orchestrator.execution_types import TaskSnapshot
 from orchestrator.state import MemoryContext, MemoryEntry, ObservationContextEntry
 from sandbox.audit import _should_ignore_path
@@ -57,6 +58,10 @@ def _build_git_cmd(workspace_path: Path, trusted_git_dir: Path | None = None) ->
     return [*cmd, "-C", str(workspace_path)]
 
 
+def _run_git(git_cmd: list[str], args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run([*git_cmd, *args], cwd=cwd, capture_output=True, text=True, check=False)
+
+
 def _extract_workspace_diff(
     workspace_path: Path,
     target_revision: str | None = None,
@@ -67,16 +72,8 @@ def _extract_workspace_diff(
         return ""
     try:
         git_cmd = _build_git_cmd(workspace_path, trusted_git_dir)
-        target = target_revision or "HEAD"
-        proc = subprocess.run(
-            [*git_cmd, "diff", target],
-            cwd=workspace_path,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if proc.returncode == 0:
-            return proc.stdout
+        p = _run_git(git_cmd, ["diff", target_revision or "HEAD"], workspace_path)
+        return p.stdout if p.returncode == 0 else ""
     except Exception as exc:
         LOGGER.warning("Failed to extract git diff from %s: %s", workspace_path, exc)
     return ""
@@ -94,25 +91,15 @@ def _extract_changed_files(
     git_cmd = _build_git_cmd(workspace_path, trusted_git_dir)
     target = target_revision or "HEAD"
     try:
-        proc_diff = subprocess.run(
-            [*git_cmd, "diff", "--name-only", target],
-            cwd=workspace_path,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        proc_diff = _run_git(git_cmd, ["diff", "--name-only", target], workspace_path)
         if proc_diff.returncode == 0:
             for line in proc_diff.stdout.splitlines():
                 path = line.strip().rstrip("/")
                 if path and not _should_ignore_path(path):
                     files.add(path)
 
-        proc_status = subprocess.run(
-            [*git_cmd, "status", "--porcelain", "--untracked-files=all"],
-            cwd=workspace_path,
-            capture_output=True,
-            text=True,
-            check=False,
+        proc_status = _run_git(
+            git_cmd, ["status", "--porcelain", "--untracked-files=all"], workspace_path
         )
         if proc_status.returncode == 0:
             for line in proc_status.stdout.splitlines():
@@ -526,6 +513,14 @@ class HttpStackCandidateDispatcher(CandidateDispatcher):
                 terminal_snap, finish_time, pending_interaction
             )
             failure_kind = _extract_failure_kind(terminal_snap)
+            if failure_kind is None and terminal_snap.status == "failed" and self._session_factory:
+                with self._session_factory() as s_sess:
+                    t_row = s_sess.scalar(select(Task).where(Task.id == task_id))
+                    runs = list(
+                        s_sess.scalars(select(WorkerRun).where(WorkerRun.task_id == task_id))
+                    )
+                    if t_row:
+                        failure_kind = resolve_failure_kind(t_row, False, runs)
             evidence = _extract_candidate_evidence(terminal_snap)
 
             return CandidateTaskExecutionResult(
@@ -567,7 +562,7 @@ class HttpStackCandidateDispatcher(CandidateDispatcher):
             raise RuntimeError(msg)
         snap = TaskSnapshot.model_validate(resp.json())
         task_status = snap.status
-        failure_kind = _extract_failure_kind(snap)
+        failure_kind = cand_res.failure_kind or _extract_failure_kind(snap)
         terminal_event_type, terminal_ts = _derive_terminal_event_and_ts(
             snap, cand_res.terminal_timestamp, cand_res.pending_interaction
         )

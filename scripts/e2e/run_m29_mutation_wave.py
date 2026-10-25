@@ -438,6 +438,7 @@ def handle_publish(args: argparse.Namespace) -> int:
             build_sha=args.build_sha,
             bootstrap_iterations=args.bootstrap_iterations,
             bootstrap_seed=args.bootstrap_seed,
+            now=getattr(args, "now", None),
         )
     except Exception as exc:
         LOGGER.exception("Failed to reconcile and publish mutation wave: %s", exc)
@@ -546,16 +547,11 @@ def _add_lifecycle_subparsers(subparsers: Any) -> None:
     pub_p = subparsers.add_parser("publish", help="Reconcile and publish M29 mutation reports")
     pub_p.add_argument("--bundle-dir", required=True, help="Evaluation bundle directory")
     pub_p.add_argument("--db-url", required=True, help="Disposable database URL")
-    pub_p.add_argument(
-        "--output-dir", default=None, help="Output directory for published artifacts"
-    )
+    pub_p.add_argument("--output-dir", default=None, help="Published output dir")
     pub_p.add_argument("--build-sha", default=None, help="Explicit build SHA")
-    pub_p.add_argument(
-        "--bootstrap-iterations", type=int, default=10000, help="Robustness bootstrap iterations"
-    )
-    pub_p.add_argument(
-        "--bootstrap-seed", type=int, default=29, help="Deterministic bootstrap random seed"
-    )
+    pub_p.add_argument("--now", default=None, help="Effective publication time")
+    pub_p.add_argument("--bootstrap-iterations", type=int, default=10000)
+    pub_p.add_argument("--bootstrap-seed", type=int, default=29)
     _add_ack_arg(pub_p)
 
 
