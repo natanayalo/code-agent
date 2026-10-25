@@ -55,3 +55,63 @@ def test_execution_plan_snapshot_defaults_legacy_fanout_metadata() -> None:
     assert snapshot.nodes[0].aggregation_role == "mutation"
     assert snapshot.nodes[0].execution_mode == "mutable"
     assert snapshot.nodes[0].parallel_safe is False
+
+
+def test_resolve_task_delivery_metadata_merges_github_constraints() -> None:
+    from orchestrator.execution_snapshot_service import _resolve_task_delivery_metadata
+
+    task = SimpleNamespace(
+        constraints={
+            "github": {
+                "issue_number": 42,
+                "issue_url": "https://github.com/octocat/code-agent/issues/42",
+            },
+            "delivery_branch": "agent/task-42",
+        },
+        worker_runs=[],
+    )
+    run = SimpleNamespace(
+        id="run-1",
+        started_at=datetime.now(UTC),
+        delivery_metadata={
+            "pr_number": 105,
+            "pr_url": "https://github.com/octocat/code-agent/pull/105",
+            "ci_status": "failed",
+            "ci_failed_jobs": ["lint", "test"],
+        },
+    )
+
+    resolved = _resolve_task_delivery_metadata(task, latest_run=run)
+    assert resolved is not None
+    assert resolved.pr_number == 105
+    assert resolved.source_issue_number == 42
+    assert resolved.source_issue_url == "https://github.com/octocat/code-agent/issues/42"
+    assert resolved.branch_name == "agent/task-42"
+    assert resolved.ci_status == "failed"
+    assert resolved.ci_failed_jobs == ["lint", "test"]
+
+
+def test_resolve_task_delivery_metadata_from_attached_listing_metadata() -> None:
+    from orchestrator.execution_snapshot_service import _resolve_task_delivery_metadata
+
+    task = SimpleNamespace(
+        constraints={},
+        worker_runs=[],
+        _latest_run_delivery_metadata={
+            "pr_number": 77,
+            "ci_status": "passed",
+        },
+    )
+
+    resolved = _resolve_task_delivery_metadata(task)
+    assert resolved is not None
+    assert resolved.pr_number == 77
+    assert resolved.ci_status == "passed"
+
+
+def test_resolve_task_delivery_metadata_returns_none_when_empty() -> None:
+    from orchestrator.execution_snapshot_service import _resolve_task_delivery_metadata
+
+    task = SimpleNamespace(constraints={}, worker_runs=[])
+    resolved = _resolve_task_delivery_metadata(task)
+    assert resolved is None

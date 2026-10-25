@@ -1,5 +1,5 @@
 import React from 'react';
-import { X } from 'lucide-react';
+import { X, ExternalLink, RotateCcw } from 'lucide-react';
 import {
   MemoryAdmissionDecisionSnapshot,
   MemoryObservationSnapshot,
@@ -12,7 +12,7 @@ import {
 } from '../types/task';
 import { TaskApprovalSection } from './TaskApprovalSection';
 import { ContextEnvelopeSection } from './ContextEnvelopeSection';
-import { formatLabel } from '../utils/formatters';
+import { formatLabel, isValidHttpUrl } from '../utils/formatters';
 import { api } from '../services/api';
 
 interface TaskDetailPanelProps {
@@ -480,12 +480,29 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
   >([]);
   const [memoryTraceLoading, setMemoryTraceLoading] = React.useState(false);
   const [memoryTraceError, setMemoryTraceError] = React.useState<string | null>(null);
+  const [isReplaying, setIsReplaying] = React.useState(false);
+  const [replayError, setReplayError] = React.useState<string | null>(null);
+
+  const handleReplay = async () => {
+    if (!task?.task_id || isReplaying) return;
+    setIsReplaying(true);
+    setReplayError(null);
+    try {
+      await api.replayTask(task.task_id);
+      onRefresh?.();
+    } catch (err) {
+      setReplayError(err instanceof Error ? err.message : 'Failed to replay task');
+    } finally {
+      setIsReplaying(false);
+    }
+  };
 
   React.useEffect(() => {
     setCancelError(null);
     setInteractionError(null);
     setResolvingInteractionId(null);
     setInteractionResponses({});
+    setReplayError(null);
   }, [task?.task_id]);
   const run = task?.latest_run ?? null;
   const runCommands = React.useMemo(() => run?.commands_run ?? [], [run]);
@@ -888,55 +905,188 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
 
           <section className="task-detail-section">
             <h4>Delivery Metadata</h4>
-            {run?.delivery_metadata ? (
-              <>
-                <div className="task-detail-grid">
-                  <p>
-                    <strong>PR URL:</strong>{' '}
-                    {run.delivery_metadata.pr_url ? (
-                      <a href={run.delivery_metadata.pr_url as string} target="_blank" rel="noopener noreferrer">
-                        {run.delivery_metadata.pr_url as string}
-                      </a>
-                    ) : (
-                      'N/A'
-                    )}
-                  </p>
-                  <p>
-                    <strong>Branch:</strong> {run.delivery_metadata.branch_name as string || 'N/A'}
-                  </p>
-                  <p>
-                    <strong>Head SHA:</strong> {run.delivery_metadata.head_sha as string || 'N/A'}
-                  </p>
-                  <p>
-                    <strong>CI Status:</strong> {formatLabel((run.delivery_metadata.ci_status as string) || 'unknown')}
-                  </p>
-                </div>
-                {Array.isArray(run.delivery_metadata.ci_failed_jobs) && run.delivery_metadata.ci_failed_jobs.length > 0 && (
-                  renderStringList('Failed CI Jobs', run.delivery_metadata.ci_failed_jobs as string[])
-                )}
-                {Array.isArray(run.delivery_metadata.review_comments) &&
-                run.delivery_metadata.review_comments.length > 0 ? (
-                  <div className="task-detail-group">
-                    <h5>Review Comments</h5>
-                    <ul>
-                      {run.delivery_metadata.review_comments.map((comment) => (
-                        <li key={comment.id}>
-                          <strong>{comment.path}</strong>
-                          {comment.line != null ? `:${comment.line}` : ''}{' '}
-                          <span className="task-detail-muted">
-                            (by @{comment.user_login}
-                            {comment.replied ? ' · replied' : ''})
-                          </span>
-                          <p>{comment.body}</p>
-                        </li>
-                      ))}
-                    </ul>
+            {(() => {
+              const deliveryMeta = run?.delivery_metadata || task?.delivery_metadata || null;
+              if (!deliveryMeta) {
+                return <p className="task-detail-muted">No delivery metadata available.</p>;
+              }
+
+              const isTerminal =
+                task?.status === TaskStatus.COMPLETED ||
+                task?.status === TaskStatus.FAILED ||
+                task?.status === TaskStatus.CANCELLED;
+
+              const checkRuns = Array.isArray(deliveryMeta.check_runs)
+                ? deliveryMeta.check_runs
+                : [];
+
+              return (
+                <>
+                  <div className="task-detail-grid">
+                    <p>
+                      <strong>Source Issue:</strong>{' '}
+                      {deliveryMeta.source_issue_number != null ? (
+                        deliveryMeta.source_issue_url && isValidHttpUrl(deliveryMeta.source_issue_url) ? (
+                          <a
+                            href={deliveryMeta.source_issue_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            #{deliveryMeta.source_issue_number}{' '}
+                            <ExternalLink size={12} />
+                          </a>
+                        ) : (
+                          `#${deliveryMeta.source_issue_number}`
+                        )
+                      ) : (
+                        'N/A'
+                      )}
+                    </p>
+                    <p>
+                      <strong>PR:</strong>{' '}
+                      {deliveryMeta.pr_number != null ? (
+                        deliveryMeta.pr_url && isValidHttpUrl(deliveryMeta.pr_url) ? (
+                          <a
+                            href={deliveryMeta.pr_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            #{deliveryMeta.pr_number} ·{' '}
+                            {deliveryMeta.pr_draft ? 'Draft' : 'Ready'}
+                            {deliveryMeta.pr_state ? ` (${deliveryMeta.pr_state})` : ''}{' '}
+                            <ExternalLink size={12} />
+                          </a>
+                        ) : (
+                          `#${deliveryMeta.pr_number} · ${deliveryMeta.pr_draft ? 'Draft' : 'Ready'}`
+                        )
+                      ) : deliveryMeta.pr_url && isValidHttpUrl(deliveryMeta.pr_url) ? (
+                        <a
+                          href={deliveryMeta.pr_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          {deliveryMeta.pr_url} <ExternalLink size={12} />
+                        </a>
+                      ) : (
+                        'N/A'
+                      )}
+                    </p>
+                    <p>
+                      <strong>Base Branch:</strong>{' '}
+                      {(deliveryMeta.base_branch as string) || 'N/A'}
+                    </p>
+                    <p>
+                      <strong>Branch:</strong>{' '}
+                      {(deliveryMeta.branch_name as string) || 'N/A'}
+                    </p>
+                    <p>
+                      <strong>Head SHA:</strong>{' '}
+                      {(deliveryMeta.head_sha as string) || 'N/A'}
+                    </p>
+                    <p>
+                      <strong>CI Status:</strong>{' '}
+                      {formatLabel((deliveryMeta.ci_status as string) || 'unknown')}
+                    </p>
                   </div>
-                ) : null}
-              </>
-            ) : (
-              <p className="task-detail-muted">No delivery metadata available.</p>
-            )}
+
+                  <div className="task-detail-delivery-next-action">
+                    <div className="task-detail-action-text">
+                      <strong>Safe Next Action:</strong>{' '}
+                      {deliveryMeta.ci_status === 'failed' ? (
+                        <span>
+                          CI failed on GitHub — inspect check logs or replay task.
+                        </span>
+                      ) : deliveryMeta.ci_status === 'pending' ? (
+                        <span>
+                          CI checks in progress — monitor draft PR checks.
+                        </span>
+                      ) : deliveryMeta.ci_status === 'passed' && deliveryMeta.pr_draft ? (
+                        <span>
+                          CI passed — review draft PR on GitHub when ready.
+                        </span>
+                      ) : deliveryMeta.ci_status === 'passed' ? (
+                        <span>
+                          CI passed — ready for operator review on GitHub.
+                        </span>
+                      ) : deliveryMeta.pr_state === 'merged' ? (
+                        <span>Pull request merged.</span>
+                      ) : (
+                        <span>Review pull request or check status on GitHub.</span>
+                      )}
+                    </div>
+                    {isTerminal && deliveryMeta.ci_status === 'failed' && (
+                      <button
+                        type="button"
+                        onClick={handleReplay}
+                        disabled={isReplaying}
+                        className="btn-secondary-sm btn-replay"
+                      >
+                        <RotateCcw size={12} className={isReplaying ? 'spin' : ''} />
+                        Replay Task
+                      </button>
+                    )}
+                  </div>
+                  {replayError && <p className="task-detail-error">{replayError}</p>}
+
+                  {Array.isArray(deliveryMeta.ci_failed_jobs) &&
+                    deliveryMeta.ci_failed_jobs.length > 0 &&
+                    renderStringList(
+                      'Failed CI Jobs',
+                      deliveryMeta.ci_failed_jobs as string[]
+                    )}
+
+                  {checkRuns.length > 0 && (
+                    <div className="task-detail-group">
+                      <h5>Check Runs</h5>
+                      <ul className="task-detail-check-runs">
+                        {checkRuns.map((check) => (
+                          <li key={check.id} className="task-detail-check-run-item">
+                            <span className="check-run-name">
+                              <strong>{check.name}</strong>
+                            </span>
+                            <span
+                              className={`check-run-status check-run-${check.conclusion || check.status || 'unknown'}`}
+                            >
+                              {check.conclusion || check.status || 'unknown'}
+                            </span>
+                            {check.html_url && isValidHttpUrl(check.html_url) && (
+                              <a
+                                href={check.html_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="btn-link"
+                              >
+                                View Check <ExternalLink size={11} />
+                              </a>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {Array.isArray(deliveryMeta.review_comments) &&
+                  deliveryMeta.review_comments.length > 0 ? (
+                    <div className="task-detail-group">
+                      <h5>Review Comments</h5>
+                      <ul>
+                        {deliveryMeta.review_comments.map((comment) => (
+                          <li key={comment.id}>
+                            <strong>{comment.path}</strong>
+                            {comment.line != null ? `:${comment.line}` : ''}{' '}
+                            <span className="task-detail-muted">
+                              (by @{comment.user_login}
+                              {comment.replied ? ' · replied' : ''})
+                            </span>
+                            <p>{comment.body}</p>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                </>
+              );
+            })()}
           </section>
 
           <section className="task-detail-section">

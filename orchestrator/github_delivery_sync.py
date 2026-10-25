@@ -255,6 +255,24 @@ def record_delivery_timeline_event(
         if head_sha is not None:
             timeline_payload["head_sha"] = head_sha
 
+    source_issue_number = meta.get("source_issue_number")
+    source_issue_url = meta.get("source_issue_url")
+    if (
+        (source_issue_number is None or not source_issue_url)
+        and isinstance(task.constraints, dict)
+        and isinstance(task.constraints.get("github"), dict)
+    ):
+        gh_constraints = task.constraints["github"]
+        if source_issue_number is None:
+            source_issue_number = gh_constraints.get("issue_number")
+        if not source_issue_url:
+            source_issue_url = gh_constraints.get("issue_url")
+
+    if source_issue_number is not None:
+        timeline_payload["source_issue_number"] = source_issue_number
+    if source_issue_url:
+        timeline_payload["source_issue_url"] = source_issue_url
+
     timeline_repo = TaskTimelineRepository(session)
     timeline_repo.create_next_for_attempt(
         task_id=task.id,
@@ -271,11 +289,22 @@ def _apply_worker_run_delivery_update(
     event: str,
     payload: dict[str, Any],
     head_sha: str | None,
+    task: Task | None = None,
 ) -> dict[str, Any] | None:
     """Update worker_run delivery metadata and return check_entry if applicable."""
     if worker_run is None:
         return None
     meta = dict(worker_run.delivery_metadata or {})
+    target_task = task or getattr(worker_run, "task", None)
+    if target_task and isinstance(target_task.constraints, dict):
+        gh_constraints = target_task.constraints.get("github")
+        if isinstance(gh_constraints, dict):
+            issue_num = gh_constraints.get("issue_number")
+            if issue_num is not None and not meta.get("source_issue_number"):
+                meta["source_issue_number"] = issue_num
+            issue_url = gh_constraints.get("issue_url")
+            if issue_url and not meta.get("source_issue_url"):
+                meta["source_issue_url"] = issue_url
     check_entry: dict[str, Any] | None = None
     if event == "pull_request":
         sync_pr_metadata(meta, payload.get("pull_request") or {})
@@ -331,7 +360,13 @@ def handle_delivery_sync(
                 pass
             return True, "ignored", False, None, None, "No matching code-agent task found."
 
-        check_entry = _apply_worker_run_delivery_update(worker_run, event, payload, head_sha)
+        check_entry = _apply_worker_run_delivery_update(
+            worker_run,
+            event,
+            payload,
+            head_sha,
+            task=task,
+        )
 
         record_delivery_timeline_event(
             session=session,

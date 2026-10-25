@@ -4,6 +4,7 @@ import {
   Terminal,
   Github,
   GitBranch,
+  GitPullRequest,
   RotateCcw,
   SlidersHorizontal,
 } from 'lucide-react';
@@ -150,6 +151,24 @@ export function TaskCard({
             <div className="detail-item">
               <GitBranch size={14} />
               <span>{task.branch}</span>
+            </div>
+          )}
+          {task.delivery_metadata?.source_issue_number != null && (
+            <div className="detail-item delivery-chip">
+              <span>Issue #{task.delivery_metadata.source_issue_number}</span>
+            </div>
+          )}
+          {task.delivery_metadata?.pr_number != null && (
+            <div className="detail-item delivery-chip">
+              <GitPullRequest size={13} />
+              <span>
+                {task.delivery_metadata.pr_draft ? 'Draft PR' : 'PR'} #{task.delivery_metadata.pr_number}
+              </span>
+            </div>
+          )}
+          {task.delivery_metadata?.ci_status && (
+            <div className={`detail-item delivery-chip ci-status-${task.delivery_metadata.ci_status}`}>
+              <span>CI: {task.delivery_metadata.ci_status}</span>
             </div>
           )}
         </div>

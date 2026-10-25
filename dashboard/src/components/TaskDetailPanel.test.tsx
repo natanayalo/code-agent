@@ -12,6 +12,7 @@ vi.mock('../services/api', () => ({
     listMemoryAdmissionDecisions: vi.fn(),
     listMemoryObservations: vi.fn(),
     recordInteractionResponse: vi.fn(),
+    replayTask: vi.fn(),
   },
 }));
 
@@ -1294,5 +1295,132 @@ describe('TaskDetailPanel', () => {
     expect(screen.getByText('Improve error handling')).toBeInTheDocument();
     expect(screen.getByText(/@reviewer1/)).toBeInTheDocument();
     expect(screen.getByText(/replied/)).toBeInTheDocument();
+  });
+
+  it('renders full delivery lineage with linked source issue, PR state, check runs and replay action', async () => {
+    const onRefresh = vi.fn();
+    (api.replayTask as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      task_id: 'task-1',
+      status: TaskStatus.PENDING,
+    });
+
+    const task = buildTask({
+      status: TaskStatus.FAILED,
+      latest_run: buildLatestRun({
+        delivery_metadata: {
+          source_issue_number: 42,
+          source_issue_url: 'https://github.com/octocat/code-agent/issues/42',
+          pr_number: 105,
+          pr_url: 'https://github.com/octocat/code-agent/pull/105',
+          pr_state: 'open',
+          pr_draft: true,
+          base_branch: 'master',
+          branch_name: 'feat/fix-parser',
+          head_sha: 'head12345',
+          ci_status: 'failed',
+          ci_failed_jobs: ['unit-tests'],
+          check_runs: [
+            {
+              id: 9001,
+              name: 'unit-tests',
+              status: 'completed',
+              conclusion: 'failure',
+              html_url: 'https://github.com/octocat/code-agent/runs/9001',
+            },
+          ],
+        },
+      }),
+    });
+
+    render(
+      <TaskDetailPanel
+        task={task}
+        loading={false}
+        error={null}
+        onClose={vi.fn()}
+        onRefresh={onRefresh}
+      />
+    );
+
+    // Source issue link
+    const issueLink = screen.getByRole('link', { name: /#42/ });
+    expect(issueLink).toHaveAttribute('href', 'https://github.com/octocat/code-agent/issues/42');
+
+    // PR link
+    const prLink = screen.getByRole('link', { name: /#105 · Draft \(open\)/ });
+    expect(prLink).toHaveAttribute('href', 'https://github.com/octocat/code-agent/pull/105');
+
+    // Base branch and head sha
+    expect(screen.getByText('master')).toBeInTheDocument();
+    expect(screen.getByText('head12345')).toBeInTheDocument();
+
+    // Check runs list
+    expect(screen.getByText('Check Runs')).toBeInTheDocument();
+    const checkLink = screen.getByRole('link', { name: /View Check/ });
+    expect(checkLink).toHaveAttribute('href', 'https://github.com/octocat/code-agent/runs/9001');
+
+    // Safe next action guidance banner
+    expect(
+      screen.getByText('CI failed on GitHub — inspect check logs or replay task.')
+    ).toBeInTheDocument();
+
+    // Replay Task button triggers replayTask
+    const replayBtn = screen.getByRole('button', { name: /Replay Task/ });
+    fireEvent.click(replayBtn);
+    expect(api.replayTask).toHaveBeenCalledWith(task.task_id);
+    await waitFor(() => {
+      expect(onRefresh).toHaveBeenCalled();
+    });
+  });
+
+  it('renders safe next actions for pending CI, passed draft, merged, and unlinked delivery URLs', () => {
+    // 1. Pending CI and unlinked non-http URLs
+    const pendingTask = buildTask({
+      latest_run: buildLatestRun({
+        delivery_metadata: {
+          source_issue_number: 99,
+          source_issue_url: 'javascript:void(0)',
+          pr_number: 88,
+          pr_url: 'ftp://ftp.example.com/pr/88',
+          pr_draft: false,
+          ci_status: 'pending',
+        },
+      }),
+    });
+
+    const { rerender } = render(
+      <TaskDetailPanel task={pendingTask} loading={false} error={null} onClose={vi.fn()} />
+    );
+
+    expect(screen.getByText('CI checks in progress — monitor draft PR checks.')).toBeInTheDocument();
+    expect(screen.getByText('#99')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /#99/ })).toBeNull();
+    expect(screen.getByText(/#88 · Ready/)).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /#88/ })).toBeNull();
+
+    // 2. Passed draft PR
+    const passedDraftTask = buildTask({
+      latest_run: buildLatestRun({
+        delivery_metadata: {
+          pr_number: 110,
+          pr_draft: true,
+          ci_status: 'passed',
+        },
+      }),
+    });
+    rerender(<TaskDetailPanel task={passedDraftTask} loading={false} error={null} onClose={vi.fn()} />);
+    expect(screen.getByText('CI passed — review draft PR on GitHub when ready.')).toBeInTheDocument();
+
+    // 3. Merged PR
+    const mergedTask = buildTask({
+      latest_run: buildLatestRun({
+        delivery_metadata: {
+          pr_number: 111,
+          pr_state: 'merged',
+        },
+      }),
+    });
+    rerender(<TaskDetailPanel task={mergedTask} loading={false} error={null} onClose={vi.fn()} />);
+    expect(screen.getByText('Pull request merged.')).toBeInTheDocument();
   });
 });

@@ -63,6 +63,10 @@ qualified; production routing remains static and M27 deferred.
   qualifying `feature/mutation` (Codex $N=31$, Antigravity $N=26$) with advisory
   recommendation `codex-native-executor`; production routing remains static
 
+- synchronized pull-request and CI check-run state projected into dashboard
+  task summaries and operator inbox with direct links, issue-to-PR lineage, and
+  explicit safe next actions (M30 slice 1a)
+
 Completed work remains in [`CHANGELOG.md`](../CHANGELOG.md). The historical
 Temporal migration and rollback record is in the
 [cutover archive](archive/temporal_cutover.md).
@@ -228,8 +232,7 @@ Temporal migration and rollback record is in the
 ## Next slices only
 
 1. Continue **M30 — GitHub-Native Task and Delivery Control**:
-   a. synchronize pull-request and CI state into the dashboard operator inbox with direct links and safe next actions;
-   b. evaluate Temporal-native interaction primitives where they simplify real M30 requirements (Queries for status/current plan/pending decision, Updates for operator actions, Signals for asynchronous external events).
+   a. evaluate Temporal-native interaction primitives where they simplify real M30 requirements (Queries for status/current plan/pending decision, Updates for operator actions, Signals for asynchronous external events).
 2. Maintain completed M29 advisory report contracts and static production routing:
    a. all four canonical task-class/mode cells are qualified (`docs/read_only`, `feature/read_only`, `investigation/read_only`, `feature/mutation`);
    b. longitudinal 45-day split robustness remains calendar-gated on model-aware task age (expected ~2026-11-02 for Wave 2/3 tasks and ~2026-12-08 for `gpt-6-luna`);

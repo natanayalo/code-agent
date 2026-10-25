@@ -35,6 +35,7 @@ from orchestrator.execution_serialization import _enum_value, _get_trace_id_from
 from orchestrator.execution_tracing import _get_phoenix_url
 from orchestrator.execution_types import (
     ArtifactSnapshot,
+    DeliveryMetadataSnapshot,
     ExecutionPlanNodeAttemptSnapshot,
     ExecutionPlanNodeSnapshot,
     ExecutionPlanSnapshot,
@@ -655,6 +656,56 @@ def _map_task_to_snapshot(self: Any, task: Task) -> TaskSnapshot:
     )
 
 
+def _resolve_task_delivery_metadata(
+    task: Task,
+    latest_run: WorkerRun | None = None,
+) -> DeliveryMetadataSnapshot | None:
+    raw_meta: dict[str, Any] | None = None
+    if latest_run and latest_run.delivery_metadata:
+        raw_meta = dict(latest_run.delivery_metadata)
+    elif getattr(task, "_latest_run_delivery_metadata", None):
+        raw_meta = dict(getattr(task, "_latest_run_delivery_metadata"))
+    elif "worker_runs" in task.__dict__ and task.worker_runs:
+        run = max(task.worker_runs, key=lambda r: (r.started_at, r.id))
+        if run.delivery_metadata:
+            raw_meta = dict(run.delivery_metadata)
+
+    if raw_meta is None:
+        raw_meta = {}
+
+    if isinstance(task.constraints, dict):
+        gh_constraints = task.constraints.get("github")
+        if isinstance(gh_constraints, dict):
+            issue_num = gh_constraints.get("issue_number")
+            if issue_num is not None and not raw_meta.get("source_issue_number"):
+                raw_meta["source_issue_number"] = issue_num
+            issue_url = gh_constraints.get("issue_url")
+            if issue_url and not raw_meta.get("source_issue_url"):
+                raw_meta["source_issue_url"] = issue_url
+        delivery_branch = task.constraints.get("delivery_branch")
+        if delivery_branch and not raw_meta.get("branch_name"):
+            raw_meta["branch_name"] = delivery_branch
+
+    has_content = any(
+        raw_meta.get(k) is not None
+        for k in (
+            "delivery_mode",
+            "branch_name",
+            "pr_url",
+            "pr_number",
+            "head_sha",
+            "ci_status",
+            "source_issue_number",
+            "source_issue_url",
+        )
+    ) or bool(raw_meta.get("check_runs"))
+
+    if not has_content:
+        return None
+
+    return DeliveryMetadataSnapshot.model_validate(raw_meta)
+
+
 def _map_task_to_summary(
     self: Any,
     task: Task,
@@ -696,6 +747,7 @@ def _map_task_to_summary(
         approval_reason = approval_checkpoint.get("reason")
 
     trace_id = _get_trace_id_from_context(task.trace_context)
+    delivery_metadata = _resolve_task_delivery_metadata(task, latest_run=latest_run)
     return TaskSummarySnapshot(
         task_id=task.id,
         session_id=task.session_id,
@@ -724,6 +776,7 @@ def _map_task_to_summary(
         trace_id=trace_id,
         trace_url=_get_phoenix_url(trace_id),
         repair_for_task_id=task.repair_for_task_id,
+        delivery_metadata=delivery_metadata,
     )
 
 

@@ -15,7 +15,7 @@ from db.enums import (
     HumanInteractionType,
     TaskStatus,
 )
-from db.models import HumanInteraction, InboundDelivery, Task
+from db.models import HumanInteraction, InboundDelivery, Task, WorkerRun
 from db.utils import compute_interaction_content_hash
 
 
@@ -50,8 +50,19 @@ class HumanInteractionRepository:
         return list(self.session.scalars(statement))
 
     def list_pending_with_task_context(self) -> list[tuple[HumanInteraction, Task]]:
+        latest_run_delivery_metadata_sq = (
+            select(WorkerRun.delivery_metadata)
+            .where(WorkerRun.task_id == Task.id)
+            .order_by(WorkerRun.started_at.desc(), WorkerRun.id.desc())
+            .limit(1)
+            .scalar_subquery()
+        )
         statement = (
-            select(HumanInteraction, Task)
+            select(
+                HumanInteraction,
+                Task,
+                latest_run_delivery_metadata_sq.label("latest_run_delivery_metadata"),
+            )
             .join(Task, Task.id == HumanInteraction.task_id)
             .where(HumanInteraction.status == HumanInteractionStatus.PENDING)
             .where(
@@ -59,7 +70,14 @@ class HumanInteractionRepository:
             )
             .order_by(HumanInteraction.created_at.desc())
         )
-        return [(row[0], row[1]) for row in self.session.execute(statement)]
+        results: list[tuple[HumanInteraction, Task]] = []
+        for row in self.session.execute(statement):
+            interaction = row[0]
+            task = row[1]
+            delivery_meta = row._mapping.get("latest_run_delivery_metadata")
+            setattr(task, "_latest_run_delivery_metadata", delivery_meta)
+            results.append((interaction, task))
+        return results
 
     def record_response(
         self,

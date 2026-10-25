@@ -469,6 +469,7 @@ class TaskSummarySnapshot(ExecutionModel):
     trace_id: str | None = None
     trace_url: str | None = None
     repair_for_task_id: str | None = None
+    delivery_metadata: DeliveryMetadataSnapshot | None = None
 
 
 class HumanInteractionSnapshot(ExecutionModel):
@@ -496,6 +497,7 @@ class InteractionInboxCard(ExecutionModel):
     repo_url: str | None = None
     branch: str | None = None
     priority: int = 0
+    delivery_metadata: DeliveryMetadataSnapshot | None = None
 
 
 class ProposalSnapshot(ExecutionModel):
