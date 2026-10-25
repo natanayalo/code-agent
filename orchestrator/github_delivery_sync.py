@@ -59,6 +59,12 @@ def sync_pr_metadata(meta: dict[str, Any], pr: dict[str, Any]) -> None:
     meta["pr_state"] = "merged" if pr.get("merged") else pr.get("state")
     meta["pr_draft"] = pr.get("draft", False)
     if head_sha := (pr.get("head") or {}).get("sha"):
+        if meta.get("head_sha") and meta["head_sha"] != head_sha:
+            meta["check_runs"] = [
+                c
+                for c in (meta.get("check_runs") or [])
+                if not c.get("head_sha") or c.get("head_sha") == head_sha
+            ]
         meta["head_sha"] = head_sha
     if branch_name := (pr.get("head") or {}).get("ref"):
         meta["branch_name"] = branch_name
@@ -91,12 +97,22 @@ def build_check_entry(payload: dict[str, Any], event: str, head_sha: str | None)
 
 def upsert_check_run(meta: dict[str, Any], check_entry: dict[str, Any]) -> None:
     """Upsert a check run into delivery_metadata and update aggregate CI status."""
-    check_runs = list(meta.get("check_runs") or [])
+    head_sha = check_entry.get("head_sha") or meta.get("head_sha")
+    if head_sha and meta.get("head_sha") != head_sha:
+        meta["head_sha"] = head_sha
+
+    raw_check_runs = list(meta.get("check_runs") or [])
+    if head_sha:
+        raw_check_runs = [
+            c for c in raw_check_runs if not c.get("head_sha") or c.get("head_sha") == head_sha
+        ]
+
+    check_runs = raw_check_runs
     updated = False
     for i, existing in enumerate(check_runs):
-        if existing.get("id") == check_entry.get("id") or (
-            existing.get("name") == check_entry.get("name") and check_entry.get("id") is None
-        ):
+        same_id = existing.get("id") is not None and existing.get("id") == check_entry.get("id")
+        same_name = bool(existing.get("name") and existing.get("name") == check_entry.get("name"))
+        if same_id or same_name:
             check_runs[i] = check_entry
             updated = True
             break
@@ -143,8 +159,12 @@ def find_matching_delivery_run(
         select(WorkerRun)
         .join(WorkerRun.task)
         .options(selectinload(WorkerRun.task))
-        .where(WorkerRun.delivery_metadata.is_not(None))
+        .where(
+            WorkerRun.delivery_metadata.is_not(None),
+            Task.repo_url.ilike(f"%{repo_spec}%"),
+        )
         .order_by(WorkerRun.started_at.desc(), WorkerRun.id.desc())
+        .limit(100)
     )
     branch_matches: list[WorkerRun] = []
     for run in session.scalars(run_stmt):
@@ -164,20 +184,22 @@ def find_matching_delivery_run(
     task_stmt = (
         select(Task)
         .options(selectinload(Task.worker_runs))
+        .where(Task.repo_url.ilike(f"%{repo_spec}%"))
         .order_by(Task.created_at.desc(), Task.id.desc())
+        .limit(50)
     )
     for task in session.scalars(task_stmt):
         if github_repo_spec_from_url(task.repo_url) != repo_spec:
             continue
-        gh_meta = (task.constraints or {}).get("github") or {}
         delivery_branch = (task.constraints or {}).get("delivery_branch")
-        if pr_number is not None and gh_meta.get("issue_number") == pr_number:
-            latest_run = task.worker_runs[-1] if task.worker_runs else None
-            return latest_run, task
         if branch_name is not None and (
             task.branch == branch_name or delivery_branch == branch_name
         ):
-            latest_run = task.worker_runs[-1] if task.worker_runs else None
+            latest_run = (
+                max(task.worker_runs, key=lambda r: (r.started_at, r.id))
+                if task.worker_runs
+                else None
+            )
             return latest_run, task
 
     return None, None

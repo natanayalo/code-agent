@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -15,7 +15,8 @@ from apps.api.auth import ApiAuthConfig
 from apps.api.config import SystemConfig
 from apps.api.dependencies import require_github_webhook_auth
 from apps.api.main import create_app
-from orchestrator.execution import TaskExecutionService
+from orchestrator.execution import TaskExecutionService, TemporalUnavailableError
+from orchestrator.execution_types import TaskSubmissionValidationError
 
 
 def _sign(body: bytes, secret: str) -> str:
@@ -214,3 +215,54 @@ def test_api_github_webhook_ping_and_rejections():
         data = resp.json()
         assert data["ok"] is False
         assert data["status"] == "unauthorized"
+
+
+def test_api_github_webhook_non_object_payload():
+    app, system_config, secret = _make_test_client()
+    with TestClient(app) as client:
+        client.app.state.system_config = system_config
+        for non_dict in [[1, 2, 3], "plain string", 12345]:
+            body = json.dumps(non_dict).encode()
+            resp = client.post(
+                "/github/webhook",
+                content=body,
+                headers={
+                    "X-Hub-Signature-256": _sign(body, secret),
+                    "X-GitHub-Event": "ping",
+                    "X-GitHub-Delivery": "d-nondict",
+                },
+            )
+            assert resp.status_code == 400
+            assert "Invalid JSON payload" in resp.json()["detail"]
+
+
+def test_api_github_webhook_error_translation():
+    app, system_config, secret = _make_test_client()
+    with TestClient(app) as client:
+        client.app.state.system_config = system_config
+        body = json.dumps(
+            {"action": "opened", "repository": {"full_name": "org/code-agent"}}
+        ).encode()
+        headers = {
+            "X-Hub-Signature-256": _sign(body, secret),
+            "X-GitHub-Event": "issues",
+            "X-GitHub-Delivery": "d-err",
+        }
+
+        # 1. TaskSubmissionValidationError -> 422
+        with patch(
+            "apps.api.routes.github.process_github_webhook_event",
+            side_effect=TaskSubmissionValidationError("Validation failed"),
+        ):
+            resp = client.post("/github/webhook", content=body, headers=headers)
+            assert resp.status_code == 422
+            assert "Validation failed" in resp.json()["detail"]
+
+        # 2. TemporalUnavailableError -> 503
+        with patch(
+            "apps.api.routes.github.process_github_webhook_event",
+            side_effect=TemporalUnavailableError("Temporal down"),
+        ):
+            resp = client.post("/github/webhook", content=body, headers=headers)
+            assert resp.status_code == 503
+            assert "Temporal down" in resp.json()["detail"]

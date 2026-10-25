@@ -6,7 +6,9 @@ import re
 from typing import Any
 
 PRIVATE_TAG_REPLACEMENT = "[redacted-private]"
-_PRIVATE_TAG_PATTERN = re.compile(r"<private>(.*?)</private>", re.DOTALL | re.IGNORECASE)
+_PRIVATE_TAG_PATTERN = re.compile(
+    r"<private>((?:(?!</?private>).)*)</private>", re.DOTALL | re.IGNORECASE
+)
 _CONTAINER_TYPES = (dict, list, tuple, set, frozenset)
 _REDACTABLE_TYPES = (*_CONTAINER_TYPES, str)
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from apps.api.config import SystemConfig
@@ -19,13 +20,17 @@ from repositories import TaskTimelineRepository, session_scope
 logger = logging.getLogger(__name__)
 
 
+_CODE_AGENT_CMD_PATTERN = re.compile(r"(?:^|\s)/code-agent(?=$|\s)", re.IGNORECASE)
+
+
 def extract_code_agent_command(text: str) -> tuple[bool, str]:
-    """Check if /code-agent is in text and extract any following instruction."""
-    lower = text.lower()
-    idx = lower.find("/code-agent")
-    if idx == -1:
+    """Check if /code-agent is present as a standalone command token and extract instruction."""
+    if not text:
         return False, ""
-    instruction = text[idx + len("/code-agent") :].strip()
+    match = _CODE_AGENT_CMD_PATTERN.search(text)
+    if not match:
+        return False, ""
+    instruction = text[match.end() :].strip()
     return True, instruction
 
 

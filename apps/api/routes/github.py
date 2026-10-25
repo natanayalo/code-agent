@@ -24,7 +24,8 @@ from apps.observability import (
     start_optional_span,
     with_span_kind,
 )
-from orchestrator.execution import TaskExecutionService
+from orchestrator.execution import TaskExecutionService, TemporalUnavailableError
+from orchestrator.execution_types import TaskSubmissionValidationError
 from orchestrator.github_events import process_github_webhook_event
 
 router = APIRouter(prefix="/github", tags=["github"])
@@ -70,13 +71,20 @@ async def receive_github_webhook(
         )
 
     try:
-        payload: dict[str, Any] = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+        raw_json = json.loads(raw_body.decode("utf-8")) if raw_body else {}
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid JSON payload.",
         ) from exc
 
+    if not isinstance(raw_json, dict):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid JSON payload.",
+        )
+
+    payload: dict[str, Any] = raw_json
     _check_no_raw_secrets(payload)
 
     span_cm = start_optional_span(
@@ -88,13 +96,25 @@ async def receive_github_webhook(
         set_span_input_output(
             input_data={"event": x_github_event, "delivery_id": x_github_delivery}
         )
-        result = process_github_webhook_event(
-            payload=payload,
-            event=x_github_event,
-            delivery_id=x_github_delivery,
-            config=config,
-            task_service=task_service,
-        )
+        try:
+            result = process_github_webhook_event(
+                payload=payload,
+                event=x_github_event,
+                delivery_id=x_github_delivery,
+                config=config,
+                task_service=task_service,
+            )
+        except TaskSubmissionValidationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
+        except TemporalUnavailableError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=str(exc),
+            ) from exc
+
         if result.task_id:
             set_current_span_attribute(TASK_ID_ATTRIBUTE, result.task_id)
         if result.session_id:

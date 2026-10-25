@@ -38,6 +38,23 @@ def test_extract_code_agent_command():
     assert has_cmd is False
     assert inst == ""
 
+    # Embedded in URL must NOT trigger
+    has_cmd, inst = extract_code_agent_command(
+        "See issue at https://github.com/natanayalo/code-agent/issues/42 for context."
+    )
+    assert has_cmd is False
+    assert inst == ""
+
+    # Embedded in file path must NOT trigger
+    has_cmd, inst = extract_code_agent_command("Look at /workspace/code-agent/app.py")
+    assert has_cmd is False
+    assert inst == ""
+
+    # Token boundary prefix/suffix checks
+    assert extract_code_agent_command("my/code-agent do this")[0] is False
+    assert extract_code_agent_command("/code-agent-run do this")[0] is False
+    assert extract_code_agent_command("")[0] is False
+
 
 def test_is_authorized_operator():
     # When config_owner_login is set, only that login is authorized
@@ -266,6 +283,81 @@ def test_upsert_check_run():
     upsert_check_run(meta, check2_rerun)
     assert meta["ci_status"] == "passed"
     assert meta["ci_failed_jobs"] == []
+
+
+def test_upsert_check_run_rerun_with_new_id():
+    # Job re-runs on GitHub Actions generate a new check run ID for the same job name
+    meta: dict = {}
+    upsert_check_run(
+        meta,
+        {
+            "id": 1001,
+            "name": "test-suite",
+            "status": "completed",
+            "conclusion": "failure",
+            "head_sha": "sha-v1",
+        },
+    )
+    assert meta["ci_status"] == "failed"
+    assert meta["ci_failed_jobs"] == ["test-suite"]
+    assert len(meta["check_runs"]) == 1
+
+    # Re-run arrives with new ID 1002, same name
+    upsert_check_run(
+        meta,
+        {
+            "id": 1002,
+            "name": "test-suite",
+            "status": "completed",
+            "conclusion": "success",
+            "head_sha": "sha-v1",
+        },
+    )
+    assert meta["ci_status"] == "passed"
+    assert meta["ci_failed_jobs"] == []
+    assert len(meta["check_runs"]) == 1
+    assert meta["check_runs"][0]["id"] == 1002
+
+
+def test_upsert_check_run_prunes_stale_sha():
+    meta: dict = {}
+    upsert_check_run(
+        meta,
+        {
+            "id": 1001,
+            "name": "test-suite",
+            "status": "completed",
+            "conclusion": "failure",
+            "head_sha": "sha-v1",
+        },
+    )
+    assert meta["ci_status"] == "failed"
+
+    # New commit pushed: sha-v2 check run arrives
+    upsert_check_run(
+        meta,
+        {
+            "id": 2001,
+            "name": "test-suite",
+            "status": "completed",
+            "conclusion": "success",
+            "head_sha": "sha-v2",
+        },
+    )
+    assert meta["head_sha"] == "sha-v2"
+    assert meta["ci_status"] == "passed"
+    assert meta["ci_failed_jobs"] == []
+    # Older sha-v1 check is pruned
+    assert len(meta["check_runs"]) == 1
+    assert meta["check_runs"][0]["id"] == 2001
+
+    # sync_pr_metadata also prunes older sha
+    sync_pr_metadata(
+        meta,
+        {"head": {"sha": "sha-v3", "ref": "feat"}, "number": 10},
+    )
+    assert meta["head_sha"] == "sha-v3"
+    assert meta["check_runs"] == []
 
 
 def test_extract_delivery_identifiers():

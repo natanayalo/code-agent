@@ -291,7 +291,8 @@ def test_github_check_run_sync_and_snapshot_inspection(webhook_client, session_f
         assert run.delivery_metadata["ci_status"] == "failed"
         assert run.delivery_metadata["ci_failed_jobs"] == ["unit-tests"]
 
-    # 2. Post passing re-run
+    # 2. Post passing re-run with a new check run ID (as GitHub Actions emits on re-runs)
+    check_payload["check_run"]["id"] = 9002
     check_payload["check_run"]["conclusion"] = "success"
     body_pass = json.dumps(check_payload).encode()
     resp_pass = client.post(
@@ -304,6 +305,13 @@ def test_github_check_run_sync_and_snapshot_inspection(webhook_client, session_f
         },
     )
     assert resp_pass.status_code == 200
+
+    with session_scope(session_factory) as session:
+        run = session.get(WorkerRun, run_id)
+        assert run.delivery_metadata["ci_status"] == "passed"
+        assert run.delivery_metadata["ci_failed_jobs"] == []
+        assert len(run.delivery_metadata["check_runs"]) == 1
+        assert run.delivery_metadata["check_runs"][0]["id"] == 9002
 
     # 3. Query task snapshot via API
     resp_task = client.get(
