@@ -33,6 +33,7 @@ from evaluation.m29_mutation_runner_archive import (
 from evaluation.m29_mutation_suite import (
     M29_FROZEN_MUTATION_CANDIDATE_IDENTITIES,
     M29MutationSuite,
+    NeutralEvaluatorManifest,
     build_m29_mutation_suite,
 )
 from evaluation.provider_reliability_extractor import (
@@ -293,6 +294,7 @@ def _cross_check_scheduled_tasks_with_db(
     sanitized_cases: list[M29MutationManifestCase],
     canonical_tasks: list[ExtractedTaskEvidence],
     as_of: datetime,
+    suite: M29MutationSuite | None = None,
 ) -> dict[str, datetime]:
     """Verify task outcomes against canonical DB snapshot and return terminal timestamps."""
     case_to_raw = {r["case_id"]: r for r in raw_entries}
@@ -311,6 +313,17 @@ def _cross_check_scheduled_tasks_with_db(
                 f"case '{c.case_id}' terminal timestamp ({raw_ts.isoformat()}) "
                 f"is after frozen cutoff ({as_of.isoformat()})"
             )
+
+        ext_eval = r.get("external_evaluation") or {}
+        eval_id = ext_eval.get("evaluator_identity") or {}
+        if eval_id and suite is not None:
+            raw_prov, raw_mod = eval_id.get("provider"), eval_id.get("model")
+            s_prov, s_mod = suite.neutral_evaluator.provider, suite.neutral_evaluator.model
+            if raw_prov != s_prov or raw_mod != s_mod:
+                raise ValueError(
+                    f"case '{c.case_id}' evaluator identity raw='{raw_prov}/{raw_mod}' "
+                    f"!= suite='{s_prov}/{s_mod}'"
+                )
 
         if c.exclusion_reason is None:
             if task_id not in canonical_by_id:
@@ -359,55 +372,40 @@ def _cross_check_and_reconcile_cohort(
     window_start_at: datetime,
     window_end_at: datetime,
     effective_now: datetime,
+    suite: M29MutationSuite | None = None,
 ) -> M29MutationCohortReconciliation:
     """Verify task outcomes against canonical DB snapshot and reconcile cohort."""
     terminal_at_by_task_id = _cross_check_scheduled_tasks_with_db(
-        raw_entries, sanitized_cases, canonical_tasks, as_of
+        raw_entries, sanitized_cases, canonical_tasks, as_of, suite
     )
 
     scheduled = {
         p: [r["task_id"] for r in raw_entries if r["worker_profile"] == p]
         for p in M29_MUTATION_PROFILES
     }
-    case_to_task = {r["case_id"]: r["task_id"] for r in raw_entries}
-    eligible = {
-        p: [
-            case_to_task[c.case_id]
-            for c in sanitized_cases
-            if c.worker_profile == p and c.exclusion_reason is None
+    c_map = {r["case_id"]: r["task_id"] for r in raw_entries}
+
+    def _case_ids(cases: list[M29MutationManifestCase], prof: str, excl: bool) -> list[str]:
+        return [
+            c_map[c.case_id]
+            for c in cases
+            if c.worker_profile == prof and (c.exclusion_reason is not None) == excl
         ]
-        for p in M29_MUTATION_PROFILES
-    }
-    excluded = {
-        p: [
-            case_to_task[c.case_id]
-            for c in sanitized_cases
-            if c.worker_profile == p and c.exclusion_reason is not None
-        ]
-        for p in M29_MUTATION_PROFILES
-    }
-    current = {
-        p: [
+
+    def _prof_ids(tasks: list[ExtractedTaskEvidence], prof: str) -> list[str]:
+        return [
             t.task_id
-            for t in canonical_tasks
+            for t in tasks
             if t.task_class == "feature"
             and t.mutation_mode == "mutation"
-            and t.profile == p
-            and t.task_id is not None
+            and t.profile == prof
+            and t.task_id
         ]
-        for p in M29_MUTATION_PROFILES
-    }
-    report = {
-        p: [
-            t.task_id
-            for t in robustness_tasks
-            if t.task_class == "feature"
-            and t.mutation_mode == "mutation"
-            and t.profile == p
-            and t.task_id is not None
-        ]
-        for p in M29_MUTATION_PROFILES
-    }
+
+    eligible = {p: _case_ids(sanitized_cases, p, False) for p in M29_MUTATION_PROFILES}
+    excluded = {p: _case_ids(sanitized_cases, p, True) for p in M29_MUTATION_PROFILES}
+    current = {p: _prof_ids(canonical_tasks, p) for p in M29_MUTATION_PROFILES}
+    report = {p: _prof_ids(robustness_tasks, p) for p in M29_MUTATION_PROFILES}
 
     return reconcile_m29_mutation_cohort(
         as_of=as_of,
@@ -518,7 +516,6 @@ def reconcile_and_publish_mutation_wave(
 ) -> M29MutationPublicationArtifacts:
     """Execute post-cutoff cohort reconciliation and publish sanitized M29 reports."""
     effective_now = _parse_utc_datetime(now or datetime.now(UTC))
-    suite = build_m29_mutation_suite()
 
     (
         bundle_data,
@@ -528,6 +525,10 @@ def reconcile_and_publish_mutation_wave(
         window_start,
         window_end,
     ) = _load_and_validate_bundle_for_publication(bundle_dir, effective_now)
+
+    eval_data = bundle_data.get("neutral_evaluator")
+    neutral_eval = NeutralEvaluatorManifest.model_validate(eval_data) if eval_data else None
+    suite = build_m29_mutation_suite(neutral_evaluator=neutral_eval)
 
     effective_build_sha = _resolve_build_sha(build_sha, bundle_data.get("build_sha"))
     cohort_snap = bundle_data.get("task_cohort_snapshot") or {}
@@ -552,6 +553,7 @@ def reconcile_and_publish_mutation_wave(
         window_start_at=window_start,
         window_end_at=window_end,
         effective_now=effective_now,
+        suite=suite,
     )
 
     manifest, paired_rep, file_contents, m_sha = _render_and_validate_publications(

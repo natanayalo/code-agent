@@ -353,6 +353,13 @@ def test_manifest_matches_suite_mismatches_rejected() -> None:
     with pytest.raises(ValueError, match="topic mismatch"):
         assert_manifest_matches_suite(bad_case, suite)
 
+    # Evaluator identity mismatch
+    altered_eval = list(manifest.cases)
+    altered_eval[0] = altered_eval[0].model_copy(update={"evaluator_identity_matches": False})
+    bad_eval = manifest.model_copy(update={"cases": altered_eval})
+    with pytest.raises(ValueError, match="evaluator identity did not match suite evaluator"):
+        assert_manifest_matches_suite(bad_eval, suite)
+
 
 def test_quality_separation_integrity_passes_with_mixed_outcomes() -> None:
     as_of = datetime(2026, 10, 16, 12, 0, 0, tzinfo=UTC)
@@ -451,6 +458,29 @@ def test_canonical_report_cell_mismatches_rejected() -> None:
         assert_manifest_matches_canonical_report(
             manifest, _canonical_report(as_of, review_pass_rate=1.0)
         )
+
+    # Baseline cell with non-null stage rate mismatch
+    base_v_report = _canonical_report(as_of, verification_pass_rate=0.4, review_pass_rate=0.3)
+    bad_v_report = _canonical_report(as_of, verification_pass_rate=0.6, review_pass_rate=0.3)
+    with pytest.raises(ValueError, match="has verification_pass_rate"):
+        assert_manifest_matches_canonical_report(
+            manifest, bad_v_report, baseline_report=base_v_report
+        )
+
+    # In-task repairs presence rejected
+    bad_repair_cell = _evidence_cell("codex-native-executor")
+    bad_repair_cell.repairs.verifier_repairs_count = 1
+    bad_repair_cell.repairs.total_repaired_tasks = 1
+    bad_repair_report = _canonical_report(as_of).model_copy(
+        update={
+            "evidence_cells": [
+                bad_repair_cell,
+                _evidence_cell("antigravity-native-executor"),
+            ]
+        }
+    )
+    with pytest.raises(ValueError, match="repaired tasks"):
+        assert_manifest_matches_canonical_report(manifest, bad_repair_report)
 
     # Accepted count mismatch
     with pytest.raises(ValueError, match="accepted count mismatch"):

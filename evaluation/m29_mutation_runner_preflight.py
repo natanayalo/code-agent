@@ -9,6 +9,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import select
+
 from evaluation.m29_mutation_cohort import M29_MUTATION_PROFILES
 from evaluation.m29_mutation_fixture import verify_taskboard_fixture_repo
 from evaluation.m29_mutation_isolation import (
@@ -25,6 +27,7 @@ from evaluation.m29_mutation_smokes import (
 )
 from evaluation.m29_mutation_suite import M29MutationCase, M29MutationSuite
 from orchestrator.state import MemoryContext, TaskSpec
+from repositories import create_engine_from_url
 
 
 def _hash_task_ids(values: Collection[str]) -> str:
@@ -134,9 +137,16 @@ def run_mutation_preflight_checks(
     if not db_url.strip():
         raise ValueError("disposable database URL must not be empty")
 
+    engine = create_engine_from_url(db_url)
+    try:
+        with engine.connect() as conn:
+            conn.execute(select(1))
+    finally:
+        engine.dispose()
+
     verified_smoke = smoke_result
     if verified_smoke is None and run_smokes_if_missing:
-        verified_smoke = run_m29_extractor_stage_smokes(db_url)
+        verified_smoke = run_m29_extractor_stage_smokes()
 
     if verified_smoke is not None and not verified_smoke.is_valid:
         raise ValueError(f"extractor stage smoke verification failed: {verified_smoke.violations}")

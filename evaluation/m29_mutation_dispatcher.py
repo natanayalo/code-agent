@@ -42,6 +42,7 @@ from evaluation.provider_reliability_identity import (
     resolve_task_execution_identity,
 )
 from evaluation.provider_reliability_models import ExecutionIdentity
+from evaluation.provider_reliability_stages import resolve_failure_kind
 from orchestrator.execution_types import TaskSnapshot
 from orchestrator.state import MemoryContext, MemoryEntry, ObservationContextEntry
 from sandbox.audit import _should_ignore_path
@@ -57,6 +58,10 @@ def _build_git_cmd(workspace_path: Path, trusted_git_dir: Path | None = None) ->
     return [*cmd, "-C", str(workspace_path)]
 
 
+def _run_git(git_cmd: list[str], args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run([*git_cmd, *args], cwd=cwd, capture_output=True, text=True, check=False)
+
+
 def _extract_workspace_diff(
     workspace_path: Path,
     target_revision: str | None = None,
@@ -67,16 +72,8 @@ def _extract_workspace_diff(
         return ""
     try:
         git_cmd = _build_git_cmd(workspace_path, trusted_git_dir)
-        target = target_revision or "HEAD"
-        proc = subprocess.run(
-            [*git_cmd, "diff", target],
-            cwd=workspace_path,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if proc.returncode == 0:
-            return proc.stdout
+        p = _run_git(git_cmd, ["diff", target_revision or "HEAD"], workspace_path)
+        return p.stdout if p.returncode == 0 else ""
     except Exception as exc:
         LOGGER.warning("Failed to extract git diff from %s: %s", workspace_path, exc)
     return ""
@@ -94,25 +91,15 @@ def _extract_changed_files(
     git_cmd = _build_git_cmd(workspace_path, trusted_git_dir)
     target = target_revision or "HEAD"
     try:
-        proc_diff = subprocess.run(
-            [*git_cmd, "diff", "--name-only", target],
-            cwd=workspace_path,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        proc_diff = _run_git(git_cmd, ["diff", "--name-only", target], workspace_path)
         if proc_diff.returncode == 0:
             for line in proc_diff.stdout.splitlines():
                 path = line.strip().rstrip("/")
                 if path and not _should_ignore_path(path):
                     files.add(path)
 
-        proc_status = subprocess.run(
-            [*git_cmd, "status", "--porcelain", "--untracked-files=all"],
-            cwd=workspace_path,
-            capture_output=True,
-            text=True,
-            check=False,
+        proc_status = _run_git(
+            git_cmd, ["status", "--porcelain", "--untracked-files=all"], workspace_path
         )
         if proc_status.returncode == 0:
             for line in proc_status.stdout.splitlines():
@@ -219,11 +206,14 @@ class DisposableDbMemoryIsolationManager:
     def discard_case_memory_writes(self, repo_url: str | None = None) -> None:
         """Purge case-scoped episodic/proposed memory and restore ProjectMemory/SessionState."""
         with self.session_factory() as session:
-            session.execute(delete(MemoryObservation))
-            session.execute(delete(MemoryProposal))
-            session.execute(delete(MemoryAdmissionDecision))
-            session.execute(delete(PersonalMemory))
-            session.execute(delete(SessionState))
+            for model in (
+                MemoryObservation,
+                MemoryProposal,
+                MemoryAdmissionDecision,
+                PersonalMemory,
+                SessionState,
+            ):
+                session.execute(delete(model))
 
             if self._baseline_project_memory is not None:
                 current_rows = session.scalars(select(ProjectMemory)).all()
@@ -234,13 +224,7 @@ class DisposableDbMemoryIsolationManager:
                         for field, val in base_data.items():
                             setattr(row, field, val)
                     else:
-                        session.add(
-                            ProjectMemory(
-                                repo_url=key[0],
-                                memory_key=key[1],
-                                **base_data,
-                            )
-                        )
+                        session.add(ProjectMemory(repo_url=key[0], memory_key=key[1], **base_data))
                 for key, row in current_map.items():
                     if key not in self._baseline_project_memory:
                         session.delete(row)
@@ -269,28 +253,32 @@ def _extract_candidate_evidence(terminal_snap: TaskSnapshot) -> dict[str, Any]:
     if terminal_snap.latest_run is not None:
         for a in terminal_snap.latest_run.artifact_index or ():
             artifacts.append(dict(a))
-        for a in terminal_snap.latest_run.artifacts or ():
-            artifacts.append(a.model_dump(mode="json") if hasattr(a, "model_dump") else dict(a))
+        artifacts.extend(
+            a.model_dump(mode="json") if hasattr(a, "model_dump") else dict(a)
+            for a in terminal_snap.latest_run.artifacts or ()
+        )
     if terminal_snap.execution_plan:
         for node in terminal_snap.execution_plan.nodes:
-            for a in node.output_artifacts or ():
-                artifacts.append(dict(a))
+            artifacts.extend(dict(a) for a in node.output_artifacts or ())
 
     in_task_repairs = sum(
         max(node.retry_count, max(0, len(node.attempts) - 1))
         for node in (terminal_snap.execution_plan.nodes if terminal_snap.execution_plan else ())
     ) + sum(1 for ev in timeline_events if "repair" in getattr(ev, "event_type", "").lower())
 
+    v_keys = {"status", "summary", "deterministic_verifier_outcome", "independent_verifier_outcome"}
     verification_events: list[str] = [
         getattr(ev, "event_type", "")
         for ev in timeline_events
         if any(k in getattr(ev, "event_type", "").lower() for k in ("verification", "verifier"))
     ]
-    if terminal_snap.latest_run and terminal_snap.latest_run.verifier_outcome:
+    if terminal_snap.latest_run and v_keys.intersection(
+        terminal_snap.latest_run.verifier_outcome or ()
+    ):
         verification_events.append("verifier_outcome_recorded")
     if terminal_snap.execution_plan:
         for node in terminal_snap.execution_plan.nodes:
-            if node.verification_outcome:
+            if v_keys.intersection(node.verification_outcome or ()):
                 verification_events.append("node_verification_outcome_recorded")
 
     review_artifacts: list[str] = []
@@ -458,7 +446,7 @@ class HttpStackCandidateDispatcher(CandidateDispatcher):
                     runs = session.scalars(
                         select(WorkerRun)
                         .where(WorkerRun.task_id == task_id)
-                        .order_by(WorkerRun.created_at)
+                        .order_by(WorkerRun.started_at)
                     ).all()
                     identity, status = resolve_task_execution_identity(task, list(runs))
                     return identity, status
@@ -525,6 +513,14 @@ class HttpStackCandidateDispatcher(CandidateDispatcher):
                 terminal_snap, finish_time, pending_interaction
             )
             failure_kind = _extract_failure_kind(terminal_snap)
+            if failure_kind is None and terminal_snap.status == "failed" and self._session_factory:
+                with self._session_factory() as s_sess:
+                    t_row = s_sess.scalar(select(Task).where(Task.id == task_id))
+                    runs = list(
+                        s_sess.scalars(select(WorkerRun).where(WorkerRun.task_id == task_id))
+                    )
+                    if t_row:
+                        failure_kind = resolve_failure_kind(t_row, False, runs)
             evidence = _extract_candidate_evidence(terminal_snap)
 
             return CandidateTaskExecutionResult(
@@ -566,7 +562,7 @@ class HttpStackCandidateDispatcher(CandidateDispatcher):
             raise RuntimeError(msg)
         snap = TaskSnapshot.model_validate(resp.json())
         task_status = snap.status
-        failure_kind = _extract_failure_kind(snap)
+        failure_kind = cand_res.failure_kind or _extract_failure_kind(snap)
         terminal_event_type, terminal_ts = _derive_terminal_event_and_ts(
             snap, cand_res.terminal_timestamp, cand_res.pending_interaction
         )

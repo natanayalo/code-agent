@@ -105,6 +105,7 @@ def _run_subprocess_check(cmd: list[str], timeout: int) -> tuple[str, int, str]:
 def _compute_tree_sha256(path: Path) -> str:
     hasher = hashlib.sha256()
     for root, dirs, files in os.walk(path):
+        dirs[:] = [d for d in dirs if d not in {".git", ".code-agent"}]
         dirs.sort()
         for f in sorted(files):
             fp = Path(root) / f
@@ -119,7 +120,7 @@ def _compute_tree_sha256(path: Path) -> str:
 def _extract_workspace_diff(workspace_path: Path) -> str:
     try:
         proc = subprocess.run(
-            ["git", "diff", "HEAD"],
+            ["git", "--no-optional-locks", "diff", "HEAD"],
             cwd=workspace_path,
             capture_output=True,
             text=True,

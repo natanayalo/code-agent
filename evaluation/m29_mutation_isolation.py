@@ -342,6 +342,17 @@ def check_pending_interaction_stop_condition(
         etype = getattr(ev, "event_type", None) or (
             ev.get("event_type") if isinstance(ev, Mapping) else None
         )
+        if str(etype) in {TimelineEventType.APPROVAL_REQUESTED, "approval_requested"}:
+            msg = getattr(ev, "message", None) or (
+                ev.get("message") if isinstance(ev, Mapping) else None
+            )
+            payload = getattr(ev, "payload", None) or (
+                ev.get("payload") if isinstance(ev, Mapping) else None
+            )
+            if msg == "Approval not required." or (
+                isinstance(payload, Mapping) and payload.get("required") is False
+            ):
+                continue
         if etype in INTERACTION_STOP_EVENT_TYPES or "interaction" in str(etype).lower():
             return "human_interaction_event_detected"
     return None

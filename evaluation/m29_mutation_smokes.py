@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
+import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
@@ -20,7 +22,7 @@ from db.enums import (
     WorkerRuntimeMode,
     WorkerType,
 )
-from db.models import Task, TaskTimelineEvent, WorkerRun
+from db.models import Base, Task, TaskTimelineEvent, WorkerRun
 from evaluation.m29_mutation_cohort import M29_MUTATION_PROFILES
 from evaluation.provider_reliability_extractor import (
     extract_provider_reliability_report,
@@ -468,11 +470,26 @@ def default_smoke_policy() -> ReliabilityReportPolicy:
 
 
 def run_m29_extractor_stage_smokes(
-    db_url: str,
+    db_url: str | None = None,
     records: Sequence[SmokeTaskRecord] | None = None,
     policy: ReliabilityReportPolicy | None = None,
 ) -> ExtractorStageSmokeResult:
     """Run canonical extractor against disposable DB and verify smoke invariants."""
+    if records is None or db_url is None:
+        with tempfile.TemporaryDirectory() as smoke_tmp:
+            smoke_db_path = Path(smoke_tmp) / "smoke.db"
+            target_url = f"sqlite+pysqlite:///{smoke_db_path}"
+            engine = create_engine_from_url(target_url)
+            Base.metadata.create_all(engine)
+            with Session(engine) as session:
+                seeded_records = seed_mutation_extractor_smoke_database(session)
+            engine.dispose()
+            return run_m29_extractor_stage_smokes(
+                db_url=target_url,
+                records=seeded_records,
+                policy=policy,
+            )
+
     engine = create_engine_from_url(db_url)
     try:
         smoke_records = list(records or build_default_smoke_records())

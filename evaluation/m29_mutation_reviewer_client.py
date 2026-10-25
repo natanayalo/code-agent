@@ -6,12 +6,14 @@ import hashlib
 import json
 import logging
 import os
+import time
 from typing import Any
 
 import httpx
 
 from evaluation.m29_mutation_suite import (
     NEUTRAL_EVALUATOR_SYSTEM_PROMPT,
+    EvaluatorBudget,
     NeutralEvaluatorManifest,
 )
 from evaluation.m29_mutation_verifier import (
@@ -51,8 +53,10 @@ def _format_blinded_prompt(request: BlindedNeutralReviewRequest) -> str:
     )
 
 
-def _parse_json_verdict(raw_content: str) -> tuple[bool, tuple[str, ...], str | None]:
+def _parse_json_verdict(raw_content: str | None) -> tuple[bool, tuple[str, ...], str | None]:
     """Parse neutral reviewer JSON verdict safely."""
+    if not raw_content or not raw_content.strip():
+        return False, (), "empty_content_in_response"
     text = raw_content.strip()
     if text.startswith("```json"):
         text = text[7:]
@@ -77,6 +81,32 @@ def _parse_json_verdict(raw_content: str) -> tuple[bool, tuple[str, ...], str | 
         return False, (f"Failed to parse verdict JSON: {exc}",), f"json_parse_error:{exc}"
 
 
+def _build_completion_payload(model_name: str, user_prompt: str, max_tokens: int) -> dict[str, Any]:
+    return {
+        "model": model_name,
+        "messages": [
+            {"role": "system", "content": NEUTRAL_EVALUATOR_SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": 0.0,
+        "max_tokens": max_tokens,
+        "provider": {"allow_fallbacks": False},
+        "response_format": {"type": "json_object"},
+    }
+
+
+def _parse_completion_data(response: httpx.Response) -> tuple[dict[str, Any] | None, str | None]:
+    try:
+        data = response.json()
+    except Exception as exc:
+        return None, f"json_decode_error:{exc}"
+    if isinstance(data, dict) and data.get("error"):
+        return None, f"openrouter_error:{data.get('error')}"
+    if isinstance(data, dict) and not data.get("model"):
+        return None, "missing_or_invalid_response_model_identity"
+    return data, None
+
+
 class OpenRouterNeutralReviewerClient:
     """Blinded third-party neutral reviewer client calling an OpenAI-compatible / OpenRouter API."""
 
@@ -88,7 +118,7 @@ class OpenRouterNeutralReviewerClient:
         timeout_seconds: float = 120.0,
         httpx_client: httpx.Client | None = None,
     ) -> None:
-        self.api_key = api_key or os.environ.get("OPENROUTER_API_KEY", "")
+        self.api_key = api_key if api_key is not None else os.environ.get("OPENROUTER_API_KEY", "")
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
         self._external_client = httpx_client
@@ -132,49 +162,70 @@ class OpenRouterNeutralReviewerClient:
             reasoning_effort=manifest.reasoning_effort,
         )
 
+    def _is_local_endpoint(self) -> bool:
+        return any(
+            h in self.base_url for h in ("127.0.0.1", "localhost", "host.docker.internal", "ollama")
+        )
+
     def _execute_completion_request(
         self, user_prompt: str, manifest: NeutralEvaluatorManifest
     ) -> tuple[dict[str, Any] | None, str | None]:
-        model_name = (
-            manifest.model if "/" in manifest.model else f"{manifest.provider}/{manifest.model}"
-        )
+        if "/" in manifest.model or self._is_local_endpoint():
+            model_name = manifest.model
+        else:
+            model_name = f"{manifest.provider}/{manifest.model}"
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
             "HTTP-Referer": "https://github.com/natanayalo/code-agent",
             "X-Title": "code-agent-m29-evaluation",
         }
-        payload = {
-            "model": model_name,
-            "messages": [
-                {"role": "system", "content": NEUTRAL_EVALUATOR_SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-            "temperature": 0.0,
-            "max_tokens": manifest.budget.max_tokens,
-            "provider": {"allow_fallbacks": False},
-            "response_format": {"type": "json_object"},
-        }
-        try:
-            client = self._get_client()
-            response = client.post(
-                f"{self.base_url}/chat/completions",
-                headers=headers,
-                json=payload,
-            )
-        except Exception as exc:
-            LOGGER.error("OpenRouter neutral reviewer HTTP request failed: %s", exc)
-            return None, f"http_error:{exc}"
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        payload = _build_completion_payload(model_name, user_prompt, manifest.budget.max_tokens)
+        max_retries = 5
+        last_error = None
+        for attempt in range(max_retries + 1):
+            try:
+                client = self._get_client()
+                response = client.post(
+                    f"{self.base_url}/chat/completions",
+                    headers=headers,
+                    json=payload,
+                )
+            except Exception as exc:
+                LOGGER.warning("OpenRouter req failed (attempt %d): %s", attempt + 1, exc)
+                last_error = f"http_error:{exc}"
+                if attempt < max_retries:
+                    time.sleep(3 * (attempt + 1))
+                    continue
+                return None, last_error
 
-        if response.status_code != 200:
-            LOGGER.error(
-                "OpenRouter neutral reviewer returned HTTP %d: %s",
-                response.status_code,
-                response.text[:200],
-            )
+            if response.status_code == 200:
+                data, parse_err = _parse_completion_data(response)
+                if parse_err:
+                    LOGGER.warning(
+                        "OpenRouter error response (attempt %d): %s", attempt + 1, parse_err
+                    )
+                    last_error = parse_err
+                    if attempt < max_retries:
+                        time.sleep(3 * (attempt + 1))
+                        continue
+                    return None, last_error
+                return data, None
+
+            if response.status_code in {429, 500, 502, 503, 504} and attempt < max_retries:
+                LOGGER.warning(
+                    "OpenRouter transient HTTP %d (attempt %d); retrying...",
+                    response.status_code,
+                    attempt + 1,
+                )
+                time.sleep(3 * (attempt + 1))
+                continue
+
+            LOGGER.error("OpenRouter HTTP %d: %s", response.status_code, response.text[:200])
             return None, f"http_status_{response.status_code}:{response.text[:200]}"
 
-        return response.json(), None
+        return None, last_error or "max_retries_exhausted"
 
     def _process_completion_response(
         self, resp_json: dict[str, Any], manifest: NeutralEvaluatorManifest
@@ -250,7 +301,7 @@ class OpenRouterNeutralReviewerClient:
                 reason=pre_err,
             )
 
-        if not self.api_key:
+        if not self.api_key and not self._is_local_endpoint():
             return NeutralReviewOutcome(
                 passed=False,
                 evaluator_identity=None,
@@ -273,6 +324,39 @@ class OpenRouterNeutralReviewerClient:
         return self._process_completion_response(resp_json, manifest)
 
 
+def build_custom_neutral_evaluator(
+    raw_model: str,
+    provider: str | None = None,
+    *,
+    max_tokens: int = 2048,
+    timeout_seconds: int = 300,
+) -> NeutralEvaluatorManifest:
+    """Build a custom NeutralEvaluatorManifest from model/provider specifications."""
+    stripped_model = raw_model.strip()
+    if provider and provider.strip():
+        eff_provider = provider.strip()
+        eff_model = stripped_model
+        if eff_model.startswith(f"{eff_provider}/"):
+            eff_model = eff_model[len(eff_provider) + 1 :]
+    elif "/" in stripped_model:
+        eff_provider, eff_model = stripped_model.split("/", 1)
+    else:
+        eff_provider = "openrouter"
+        eff_model = stripped_model
+
+    return NeutralEvaluatorManifest(
+        provider=eff_provider,
+        model=eff_model,
+        reasoning_effort=None,
+        system_prompt_sha256=_expected_system_prompt_sha256(),
+        tools=("read_file", "list_dir"),
+        runtime="read_only",
+        fallback_policy="none",
+        budget=EvaluatorBudget(timeout_seconds=timeout_seconds, max_tokens=max_tokens),
+    )
+
+
 __all__ = [
     "OpenRouterNeutralReviewerClient",
+    "build_custom_neutral_evaluator",
 ]
