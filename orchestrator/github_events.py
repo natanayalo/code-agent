@@ -23,6 +23,7 @@ from orchestrator.github_issue_intake import (
     extract_code_agent_command,
     handle_issue_intake,
     is_authorized_operator,
+    parse_issue_command_intent,
     synthesize_issue_task_text,
 )
 
@@ -187,6 +188,7 @@ __all__ = [
     "handle_delivery_sync",
     "handle_issue_intake",
     "is_authorized_operator",
+    "parse_issue_command_intent",
     "process_github_webhook_event",
     "record_delivery_timeline_event",
     "sync_pr_metadata",

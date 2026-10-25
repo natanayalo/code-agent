@@ -347,3 +347,104 @@ def test_task_summary_snapshot_projects_delivery_metadata(webhook_client, sessio
     assert matching[0]["delivery_metadata"] is not None
     assert matching[0]["delivery_metadata"]["source_issue_number"] == 42
     assert matching[0]["delivery_metadata"]["branch_name"] == "github/issue-42"
+
+
+def _post_issue_comment(
+    client: TestClient, secret: str, delivery_id: str, body: str, issue_num: int = 42
+) -> tuple[int, dict]:
+    payload = {
+        "action": "created",
+        "repository": {
+            "full_name": "octocat/code-agent",
+            "html_url": "https://github.com/octocat/code-agent",
+            "owner": {"login": "octocat"},
+        },
+        "issue": {
+            "number": issue_num,
+            "title": f"Issue #{issue_num}",
+            "body": "Initial issue description",
+            "html_url": f"https://github.com/octocat/code-agent/issues/{issue_num}",
+        },
+        "comment": {
+            "id": 5555,
+            "body": body,
+            "html_url": f"https://github.com/octocat/code-agent/issues/{issue_num}#issuecomment-5555",
+            "author_association": "OWNER",
+        },
+        "sender": {"login": "octocat"},
+    }
+    raw = json.dumps(payload).encode()
+    resp = client.post(
+        "/github/webhook",
+        content=raw,
+        headers={
+            "X-Hub-Signature-256": _sign(raw, secret),
+            "X-GitHub-Event": "issue_comment",
+            "X-GitHub-Delivery": delivery_id,
+        },
+    )
+    return resp.status_code, resp.json()
+
+
+def test_github_issue_replay_rejected_when_source_task_pending(webhook_client, session_factory):
+    client, secret, _ = webhook_client
+    status, _ = _post_issue_labeled(client, secret, "del-issue-replay-init", issue_num=77)
+    assert status == 200
+
+    # Source task is still pending -> /code-agent replay must reject as not_replayable
+    replay_status, replay_data = _post_issue_comment(
+        client, secret, "del-replay-pending", "/code-agent replay", issue_num=77
+    )
+    assert replay_status == 200
+    assert replay_data["ok"] is False
+    assert replay_data["status"] == "not_replayable"
+    assert "cannot be replayed" in replay_data["detail"]
+
+
+def test_github_issue_replay_success_and_idempotency(webhook_client, session_factory):
+    client, secret, _ = webhook_client
+    status, data = _post_issue_labeled(
+        client, secret, "del-issue-replay-terminal-init", issue_num=88
+    )
+    assert status == 200
+    source_task_id = data["task_id"]
+
+    # Mark source task completed so it is replayable
+    with session_scope(session_factory) as session:
+        task = session.get(Task, source_task_id)
+        assert task is not None
+        task.status = "completed"
+
+    # Replay via /code-agent replay
+    replay_status, replay_data = _post_issue_comment(
+        client, secret, "del-replay-execute-1", "/code-agent replay", issue_num=88
+    )
+    assert replay_status == 200
+    assert replay_data["ok"] is True
+    assert replay_data["status"] == "accepted"
+    new_task_id = replay_data["task_id"]
+    assert new_task_id is not None
+    assert new_task_id != source_task_id
+
+    # Verify task constraints, lineage, and timeline event
+    with session_scope(session_factory) as session:
+        new_task = session.get(Task, new_task_id)
+        assert new_task is not None
+        assert new_task.constraints["replayed_from"] == [source_task_id]
+
+        timeline = TaskTimelineRepository(session).list_by_task(new_task_id)
+        assert len(timeline) >= 1
+        ingested_event = timeline[0]
+        assert ingested_event.event_type == TimelineEventType.TASK_INGESTED
+        assert ingested_event.event_key == "github_delivery:del-replay-execute-1"
+        assert ingested_event.payload["replayed_from"] == source_task_id
+        assert ingested_event.payload["issue_number"] == 88
+
+    # Deduplicated delivery with same delivery_id
+    dupe_status, dupe_data = _post_issue_comment(
+        client, secret, "del-replay-execute-1", "/code-agent replay", issue_num=88
+    )
+    assert dupe_status == 200
+    assert dupe_data["ok"] is True
+    assert dupe_data["duplicate"] is True
+    assert dupe_data["task_id"] == new_task_id

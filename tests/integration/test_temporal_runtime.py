@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 import pytest
 from sqlalchemy import select
 from temporalio import activity
-from temporalio.client import WorkflowFailureError
+from temporalio.client import WorkflowFailureError, WorkflowUpdateFailedError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
@@ -1012,24 +1012,7 @@ async def test_temporal_runtime_happy_path(session_factory, tmp_path: Path, monk
         assert task_id is not None
 
         # Start the Temporal worker in background
-        activities = TaskExecutionActivities(service=service)
-        temporal_worker = Worker(
-            env.client,
-            task_queue="task-execution-queue",
-            workflows=[TaskExecutionWorkflow],
-            workflow_runner=UnsandboxedWorkflowRunner(),
-            activities=[
-                activities.classify_and_plan,
-                activities.decompose_task,
-                activities.load_memory,
-                activities.provision_workspace,
-                activities.run_worker,
-                activities.record_workflow_failure,
-                activities.verify_result,
-                activities.deliver_result,
-                activities.persist_memory,
-            ],
-        )
+        temporal_worker = _create_test_temporal_worker(env.client, service)
 
         async with temporal_worker:
             dispatcher = TemporalCommandDispatcher(
@@ -1063,6 +1046,27 @@ async def test_temporal_runtime_happy_path(session_factory, tmp_path: Path, monk
         assert snapshot is None
 
 
+def _create_test_temporal_worker(client: Any, service: TaskExecutionService) -> Worker:
+    activities = TaskExecutionActivities(service=service)
+    return Worker(
+        client,
+        task_queue="task-execution-queue",
+        workflows=[TaskExecutionWorkflow],
+        workflow_runner=UnsandboxedWorkflowRunner(),
+        activities=[
+            activities.classify_and_plan,
+            activities.decompose_task,
+            activities.load_memory,
+            activities.provision_workspace,
+            activities.run_worker,
+            activities.record_workflow_failure,
+            activities.verify_result,
+            activities.deliver_result,
+            activities.persist_memory,
+        ],
+    )
+
+
 @pytest.mark.anyio
 async def test_temporal_runtime_hitl_approval(session_factory, tmp_path: Path, monkeypatch):
     """Workflow should pause at the approval checkpoint, resume on handle_approval, and complete."""
@@ -1094,54 +1098,20 @@ async def test_temporal_runtime_hitl_approval(session_factory, tmp_path: Path, m
         session_factory=lambda container, **kwargs: _GitMockingSession(container, **kwargs),
     )
     service = TaskExecutionService(session_factory=session_factory, worker=worker)
-
-    repo_path = tmp_path / "dummy_repo_hitl"
-    repo_path.mkdir()
-    (repo_path / "README.md").write_text("# Dummy Repo HITL", encoding="utf-8")
-    _run_git(["git", "init", "--initial-branch=master"], cwd=repo_path)
-    _run_git(["git", "add", "."], cwd=repo_path)
-    _run_git(
-        [
-            "git",
-            "-c",
-            "user.name=Codex",
-            "-c",
-            "user.email=codex@example.com",
-            "commit",
-            "-m",
-            "Init",
-        ],
-        cwd=repo_path,
-    )
+    repo_url = _setup_hitl_test_repo(tmp_path / "dummy_repo_hitl")
 
     submission = TaskSubmission(
         task_text="Run test with approval",
-        repo_url=f"file://{repo_path.resolve()}",
+        repo_url=repo_url,
         branch="master",
+        constraints={"skip_independent_review": True},
     )
 
     async with await WorkflowEnvironment.start_time_skipping() as env:
         snapshot, _ = service.create_task(submission)
         task_id = snapshot.task_id
 
-        activities = TaskExecutionActivities(service=service)
-        temporal_worker = Worker(
-            env.client,
-            task_queue="task-execution-queue",
-            workflows=[TaskExecutionWorkflow],
-            workflow_runner=UnsandboxedWorkflowRunner(),
-            activities=[
-                activities.classify_and_plan,
-                activities.decompose_task,
-                activities.load_memory,
-                activities.provision_workspace,
-                activities.run_worker,
-                activities.record_workflow_failure,
-                activities.verify_result,
-                activities.deliver_result,
-                activities.persist_memory,
-            ],
-        )
+        temporal_worker = _create_test_temporal_worker(env.client, service)
 
         async with temporal_worker:
             dispatcher = TemporalCommandDispatcher(
@@ -1186,6 +1156,128 @@ async def test_temporal_runtime_hitl_approval(session_factory, tmp_path: Path, m
     with session_scope(session_factory) as session:
         stmt = select(Task).where(Task.id == task_id)
         task = session.execute(stmt).scalar_one_or_none()
+        assert task is not None
+        assert task.status == "completed"
+
+
+def _setup_hitl_test_repo(repo_path: Path) -> str:
+    repo_path.mkdir(exist_ok=True)
+    (repo_path / "README.md").write_text("# Dummy Repo HITL", encoding="utf-8")
+    _run_git(["git", "init", "--initial-branch=master"], cwd=repo_path)
+    _run_git(["git", "add", "."], cwd=repo_path)
+    _run_git(
+        [
+            "git",
+            "-c",
+            "user.name=Codex",
+            "-c",
+            "user.email=codex@example.com",
+            "commit",
+            "-m",
+            "Init",
+        ],
+        cwd=repo_path,
+    )
+    codex_dir = Path.home() / ".codex"
+    codex_dir.mkdir(parents=True, exist_ok=True)
+    (codex_dir / "auth.json").write_text('{"token": "test"}')
+    return f"file://{repo_path.resolve()}"
+
+
+async def _assert_live_queries_and_update(handle: Any, task_id: str) -> None:
+    """Exercise query inspection and validated update application on a paused workflow."""
+    status = await handle.query(TaskExecutionWorkflow.get_status)
+    assert status["task_id"] == task_id
+    assert status["lifecycle_stage"] == "awaiting_approval"
+    assert status["has_pending_decision"] is True
+
+    plan = await handle.query(TaskExecutionWorkflow.get_current_plan)
+    assert "execution_task_queue" in plan
+
+    pending = await handle.query(TaskExecutionWorkflow.get_pending_decision)
+    assert pending == {"kind": "approval", "node_id": None, "escalation_count": 0}
+
+    with pytest.raises(WorkflowUpdateFailedError):
+        await handle.execute_update(
+            TaskExecutionWorkflow.apply_operator_decision,
+            {"decision_kind": "clarification", "command_key": "bad-kind"},
+        )
+
+    update_result = await handle.execute_update(
+        TaskExecutionWorkflow.apply_operator_decision,
+        {"decision_kind": "approval", "value": True, "command_key": f"task:{task_id}:upd"},
+    )
+    assert update_result["applied"] is True
+    assert update_result["duplicate"] is False
+    assert update_result["decision_kind"] == "approval"
+
+
+@pytest.mark.anyio
+async def test_temporal_runtime_queries_and_validated_updates(
+    session_factory, tmp_path: Path, monkeypatch
+):
+    """Workflow state should be queryable and updatable with validator enforcement."""
+    monkeypatch.setattr("sandbox.workspace.default_workspace_root", lambda: tmp_path)
+    monkeypatch.setattr(native_agent_runner, "DockerNativeAgentExecutor", LocalNativeAgentRunner)
+    if not _docker_available():
+        pytest.skip("Docker daemon is unavailable")
+
+    from orchestrator.state import ApprovalCheckpoint
+
+    monkeypatch.setattr(
+        "orchestrator.temporal.activities.check_approval",
+        lambda state_input: {"approval": ApprovalCheckpoint(required=True, status="pending")},
+    )
+
+    adapter = _ScriptedAdapter(
+        [
+            CliRuntimeStep(
+                kind="final",
+                final_output="Done after update.",
+                tool_name=None,
+                tool_input=None,
+            )
+        ]
+    )
+    worker = CodexCliWorker(
+        runtime_adapter=adapter,
+        session_factory=lambda container, **kwargs: _GitMockingSession(container, **kwargs),
+    )
+    service = TaskExecutionService(session_factory=session_factory, worker=worker)
+    repo_url = _setup_hitl_test_repo(tmp_path / "dummy_repo_update")
+
+    submission = TaskSubmission(
+        task_text="Run test with update",
+        repo_url=repo_url,
+        branch="master",
+        constraints={"skip_independent_review": True},
+    )
+
+    async with await WorkflowEnvironment.start_time_skipping() as env:
+        snapshot, _ = service.create_task(submission)
+        task_id = snapshot.task_id
+
+        temporal_worker = _create_test_temporal_worker(env.client, service)
+
+        async with temporal_worker:
+            dispatcher = TemporalCommandDispatcher(
+                client=env.client,
+                session_factory=session_factory,
+            )
+            with env.auto_time_skipping_disabled():
+                run_task = await _start_workflow_via_dispatcher(dispatcher, env.client, task_id)
+                await _wait_for_pending_approval(session_factory, task_id)
+                handle = env.client.get_workflow_handle(f"task-{task_id}")
+
+                await _assert_live_queries_and_update(handle, task_id)
+                await run_task
+
+                final_status = await handle.query(TaskExecutionWorkflow.get_status)
+                assert final_status["lifecycle_stage"] == "completed"
+                assert final_status["has_pending_decision"] is False
+
+    with session_scope(session_factory) as session:
+        task = session.get(Task, task_id)
         assert task is not None
         assert task.status == "completed"
 
@@ -1248,24 +1340,7 @@ async def test_temporal_runtime_clarification_interaction_resumes_workflow(
             clarification_id,
             InteractionResponse(response_data={"answer": "Update README only."}),
         )
-        activities = TaskExecutionActivities(service=service)
-        temporal_worker = Worker(
-            env.client,
-            task_queue="task-execution-queue",
-            workflows=[TaskExecutionWorkflow],
-            workflow_runner=UnsandboxedWorkflowRunner(),
-            activities=[
-                activities.classify_and_plan,
-                activities.decompose_task,
-                activities.load_memory,
-                activities.provision_workspace,
-                activities.run_worker,
-                activities.record_workflow_failure,
-                activities.verify_result,
-                activities.deliver_result,
-                activities.persist_memory,
-            ],
-        )
+        temporal_worker = _create_test_temporal_worker(env.client, service)
         async with temporal_worker:
             dispatcher = TemporalCommandDispatcher(
                 client=env.client, session_factory=session_factory

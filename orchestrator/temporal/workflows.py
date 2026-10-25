@@ -35,6 +35,13 @@ class TaskExecutionWorkflow:
         self.permission_escalation_decision: bool | None = None
         self.processed_command_keys: set[str] = set()
 
+        self.task_id: str | None = None
+        self.lifecycle_stage: str = "initializing"
+        self.escalation_count: int = 0
+        self.completion_continuation: str | None = None
+        self.current_plan: dict[str, Any] = {}
+        self.pending_decision: dict[str, Any] | None = None
+
     @workflow.run
     async def run(self, task_id: str) -> dict:
         cancellation_terminal_enabled = workflow.patched(CANCELLATION_TERMINAL_PATCH_ID)
@@ -43,7 +50,9 @@ class TaskExecutionWorkflow:
         except Exception as exc:
             cancellation = _temporal_cancellation_cause(exc)
             if cancellation_terminal_enabled and cancellation is not None:
+                self.lifecycle_stage = "cancelled"
                 raise cancellation
+            self.lifecycle_stage = "failed"
             await workflow.execute_activity(
                 "record_workflow_failure",
                 args=[task_id, str(exc)],
@@ -52,81 +61,93 @@ class TaskExecutionWorkflow:
             return {"status": "failed", "summary": "Temporal workflow activity failed."}
 
     async def _run_lifecycle(self, task_id: str) -> dict:
-        # Step 1: Classify and Plan
-        res = await workflow.execute_activity(
-            "classify_and_plan",
-            task_id,
-            **activity_options("classify_and_plan"),
-        )
-        requires_clarification = res.get("requires_clarification", False)
-        requires_approval = res.get("requires_approval", False)
-        execution_task_queue = res.get("execution_task_queue")
+        self.task_id = task_id
+        self.lifecycle_stage = "planning"
+        rejected, queue = await self._plan_and_check_initial_gates(task_id)
+        if rejected is not None:
+            return rejected
 
-        # Step 2: clarification check
-        if requires_clarification:
-            await workflow.wait_condition(lambda: self.clarification_resolved)
+        preflight_failure, shape = await self._prepare_execution(task_id)
+        if preflight_failure is not None:
+            return preflight_failure
 
-        # Step 3: approval check
-        if requires_approval and not await self._await_initial_approval(task_id):
-            return {"status": "rejected", "summary": "Manual approval rejected."}
-
-        # Step 4: Decompose Task
-        decomposition = await workflow.execute_activity(
-            "decompose_task",
-            task_id,
-            **activity_options("decompose_task"),
-        )
-        if (decomposition or {}).get("execution_shape") == "preflight_failed":
-            return await self._record_post_terminal_preflight_failure(task_id, decomposition)
-
-        # Step 5: Load memory
-        await workflow.execute_activity(
-            "load_memory",
-            task_id,
-            **activity_options("load_memory"),
-        )
-
-        # Step 6: Provision workspace
-        await workflow.execute_activity(
-            "provision_workspace",
-            task_id,
-            **activity_options("provision_workspace"),
-        )
-
-        # Step 7: Existing histories preserve their recorded worker activity.
-        # New histories enter the one-node-wave coordinator only for a validated DAG.
-        use_node_waves = workflow.patched(NODE_WAVE_PATCH_ID) and (
-            (decomposition or {}).get("execution_shape") == "decomposed"
-        )
+        use_node_waves = workflow.patched(NODE_WAVE_PATCH_ID) and (shape == "decomposed")
+        self.current_plan["use_node_waves"] = use_node_waves
         escalation_failure = (
             await self._run_decomposed_node_waves(task_id)
             if use_node_waves
-            else await self._run_worker_with_permission_escalations(task_id, execution_task_queue)
+            else await self._run_worker_with_permission_escalations(task_id, queue)
         )
         if escalation_failure is not None:
+            self.lifecycle_stage = escalation_failure.get("status", "failed")
             return escalation_failure
 
-        # Step 8: New histories execute durable bounded repair continuations.
+        self.lifecycle_stage = "verifying"
         completion_decision: dict[str, Any] = {
             "continuation": "complete",
             "summary": "verification and review completed",
         }
         if workflow.patched(COMPLETION_LOOP_PATCH_ID):
             completion_failure, completion_decision = await self._run_completion_loop(
-                task_id,
-                execution_task_queue,
+                task_id, queue
             )
             if completion_failure is not None:
+                self.lifecycle_stage = completion_failure.get("status", "failed")
                 return completion_failure
         else:
-            # Preserve the original single-pass command sequence for old histories.
             await workflow.execute_activity(
-                "verify_result",
-                task_id,
-                **activity_options("verify_result"),
+                "verify_result", task_id, **activity_options("verify_result")
             )
 
-        return await self._persist_and_deliver(task_id, completion_decision)
+        self.completion_continuation = completion_decision.get("continuation")
+        self.current_plan["last_continuation"] = self.completion_continuation
+        self.lifecycle_stage = "delivering"
+        final_result = await self._persist_and_deliver(task_id, completion_decision)
+        self.lifecycle_stage = final_result.get("status", "completed")
+        return final_result
+
+    async def _plan_and_check_initial_gates(self, task_id: str) -> tuple[dict | None, str | None]:
+        res = await workflow.execute_activity(
+            "classify_and_plan", task_id, **activity_options("classify_and_plan")
+        )
+        queue = res.get("execution_task_queue")
+        self.current_plan = {"execution_task_queue": queue}
+        if res.get("requires_clarification", False):
+            self.lifecycle_stage = "awaiting_clarification"
+            self.pending_decision = {
+                "kind": "clarification",
+                "node_id": None,
+                "escalation_count": self.escalation_count,
+            }
+            try:
+                await workflow.wait_condition(lambda: self.clarification_resolved)
+            finally:
+                self.pending_decision = None
+
+        if res.get("requires_approval", False) and not await self._await_initial_approval(task_id):
+            self.lifecycle_stage = "rejected"
+            return {"status": "rejected", "summary": "Manual approval rejected."}, queue
+        return None, queue
+
+    async def _prepare_execution(self, task_id: str) -> tuple[dict | None, str | None]:
+        self.lifecycle_stage = "decomposing"
+        decomposition = await workflow.execute_activity(
+            "decompose_task", task_id, **activity_options("decompose_task")
+        )
+        shape = (decomposition or {}).get("execution_shape")
+        self.current_plan["execution_shape"] = shape
+        if shape == "preflight_failed":
+            self.lifecycle_stage = "preflight_failed"
+            failure = await self._record_post_terminal_preflight_failure(task_id, decomposition)
+            return failure, shape
+
+        self.lifecycle_stage = "loading_memory"
+        await workflow.execute_activity("load_memory", task_id, **activity_options("load_memory"))
+        self.lifecycle_stage = "provisioning_workspace"
+        await workflow.execute_activity(
+            "provision_workspace", task_id, **activity_options("provision_workspace")
+        )
+        return None, shape
 
     async def _record_post_terminal_preflight_failure(
         self,
@@ -146,16 +167,25 @@ class TaskExecutionWorkflow:
 
     async def _await_initial_approval(self, task_id: str) -> bool:
         """Wait for approval and retain typed state when the operator rejects it."""
-        await workflow.wait_condition(lambda: self.approval_decision is not None)
-        if self.approval_decision:
-            return True
-        if workflow.patched(REJECTED_SESSION_STATE_PATCH_ID):
-            await workflow.execute_activity(
-                "persist_rejected_session_state",
-                task_id,
-                **activity_options("persist_rejected_session_state"),
-            )
-        return False
+        self.lifecycle_stage = "awaiting_approval"
+        self.pending_decision = {
+            "kind": "approval",
+            "node_id": None,
+            "escalation_count": self.escalation_count,
+        }
+        try:
+            await workflow.wait_condition(lambda: self.approval_decision is not None)
+            if self.approval_decision:
+                return True
+            if workflow.patched(REJECTED_SESSION_STATE_PATCH_ID):
+                await workflow.execute_activity(
+                    "persist_rejected_session_state",
+                    task_id,
+                    **activity_options("persist_rejected_session_state"),
+                )
+            return False
+        finally:
+            self.pending_decision = None
 
     async def _persist_and_deliver(
         self,
@@ -164,16 +194,11 @@ class TaskExecutionWorkflow:
     ) -> dict:
         """Persist the final snapshot and project exactly one terminal delivery."""
         await workflow.execute_activity(
-            "persist_memory",
-            task_id,
-            **activity_options("persist_memory"),
+            "persist_memory", task_id, **activity_options("persist_memory")
         )
-
         acceptance_enabled = workflow.patched(ACCEPTANCE_PATCH_ID)
         delivery_outcome = await workflow.execute_activity(
-            "deliver_result",
-            task_id,
-            **activity_options("deliver_result"),
+            "deliver_result", task_id, **activity_options("deliver_result")
         )
 
         if completion_decision.get("continuation") == "manual_follow_up":
@@ -198,9 +223,7 @@ class TaskExecutionWorkflow:
         """Repeat worker execution only when verification returns a durable repair decision."""
         while True:
             raw_decision = await workflow.execute_activity(
-                "verify_result",
-                task_id,
-                **activity_options("verify_result"),
+                "verify_result", task_id, **activity_options("verify_result")
             )
             decision = raw_decision if isinstance(raw_decision, dict) else {}
             continuation = decision.get("continuation", "complete")
@@ -216,9 +239,7 @@ class TaskExecutionWorkflow:
                 return {"status": "failed", "summary": failure}, decision
 
             await workflow.execute_activity(
-                "provision_workspace",
-                task_id,
-                **activity_options("provision_workspace"),
+                "provision_workspace", task_id, **activity_options("provision_workspace")
             )
             escalation_failure = await self._run_worker_with_permission_escalations(
                 task_id,
@@ -238,34 +259,32 @@ class TaskExecutionWorkflow:
     async def _run_decomposed_node_waves(self, task_id: str) -> dict | None:
         """Coordinate exactly one durable node execution before every merge."""
         escalation_count = 0
-        # Record the M25.2 marker before selection can produce a V2 contract.
-        # Passing this recorded decision to the Activity keeps a replay after a
-        # workflow-task crash on the same contract version as the original run.
         fanout_contract_enabled = workflow.patched(M25_2_FANOUT_PATCH_ID)
         while True:
-            # The legacy selector's input is part of M25.1B history. Keep its
-            # one-argument command byte-for-byte compatible for patch-false
-            # replays; V2 uses a separately named Activity contract.
             if fanout_contract_enabled:
                 selection = await workflow.execute_activity(
-                    "select_next_node_v2",
-                    task_id,
-                    **activity_options("select_next_node_v2"),
+                    "select_next_node_v2", task_id, **activity_options("select_next_node_v2")
                 )
             else:
                 selection = await workflow.execute_activity(
-                    "select_next_node",
-                    task_id,
-                    **activity_options("select_next_node"),
+                    "select_next_node", task_id, **activity_options("select_next_node")
                 )
             if (
                 fanout_contract_enabled
                 and selection.get("schema_version") == 2
                 and selection.get("fanout_applied")
             ):
+                items = selection.get("items") or []
+                self.current_plan["active_node_ids"] = [
+                    item.get("node_id") for item in items if item.get("node_id")
+                ]
+                self.current_plan["last_wave_action"] = "fanout"
                 merge = await self._run_fanout_wave(task_id, selection)
             else:
                 action = selection.get("action")
+                self.current_plan["last_wave_action"] = action
+                node_id = selection.get("node_id")
+                self.current_plan["active_node_ids"] = [node_id] if node_id else []
                 if action not in {
                     "execute",
                     "merge_terminal",
@@ -292,12 +311,15 @@ class TaskExecutionWorkflow:
                     )
                     return {"status": "failed", "summary": failure}
                 if action == "await_permission":
+                    self.escalation_count = escalation_count + 1
                     escalation_count += 1
                     if escalation_count > MAX_PERMISSION_ESCALATIONS:
                         return await self._record_node_wave_escalation_limit(
                             task_id, selection.get("node_id")
                         )
-                    if not await self._handle_permission_escalation(task_id):
+                    if not await self._handle_permission_escalation(
+                        task_id, blocked_node_id=selection.get("node_id")
+                    ):
                         return {"status": "rejected", "summary": "Permission escalation rejected."}
                     await workflow.execute_activity(
                         "provision_workspace", task_id, **activity_options("provision_workspace")
@@ -330,12 +352,15 @@ class TaskExecutionWorkflow:
             if continuation in {"continue", "retry_node"}:
                 continue
             if continuation == "await_permission":
+                self.escalation_count = escalation_count + 1
                 escalation_count += 1
                 if escalation_count > MAX_PERMISSION_ESCALATIONS:
                     return await self._record_node_wave_escalation_limit(
                         task_id, merge.get("blocked_node_id")
                     )
-                if not await self._handle_permission_escalation(task_id):
+                if not await self._handle_permission_escalation(
+                    task_id, blocked_node_id=merge.get("blocked_node_id")
+                ):
                     return {"status": "rejected", "summary": "Permission escalation rejected."}
                 await workflow.execute_activity(
                     "provision_workspace", task_id, **activity_options("provision_workspace")
@@ -408,6 +433,7 @@ class TaskExecutionWorkflow:
             worker_result = await self._run_worker(task_id, task_queue)
             if not worker_result.get("requires_permission_escalation", False):
                 return None
+            self.escalation_count = escalation_count + 1
             escalation_count += 1
             if escalation_count > MAX_PERMISSION_ESCALATIONS:
                 failure = (
@@ -436,21 +462,104 @@ class TaskExecutionWorkflow:
             **activity_options("run_worker", task_queue=task_queue),
         )
 
-    async def _handle_permission_escalation(self, task_id: str) -> bool:
+    async def _handle_permission_escalation(
+        self, task_id: str, blocked_node_id: str | None = None
+    ) -> bool:
         self.permission_escalation_decision = None
-        await workflow.execute_activity(
-            "request_permission_escalation",
-            task_id,
-            **activity_options("request_permission_escalation"),
-        )
-        await workflow.wait_condition(lambda: self.permission_escalation_decision is not None)
-        approved = self.permission_escalation_decision
-        await workflow.execute_activity(
-            "resolve_permission_escalation",
-            args=[task_id, approved],
-            **activity_options("resolve_permission_escalation"),
-        )
-        return bool(approved)
+        prev_stage = self.lifecycle_stage
+        self.lifecycle_stage = "awaiting_permission_escalation"
+        self.pending_decision = {
+            "kind": "permission_escalation",
+            "node_id": blocked_node_id,
+            "escalation_count": self.escalation_count,
+        }
+        try:
+            await workflow.execute_activity(
+                "request_permission_escalation",
+                task_id,
+                **activity_options("request_permission_escalation"),
+            )
+            await workflow.wait_condition(lambda: self.permission_escalation_decision is not None)
+            approved = self.permission_escalation_decision
+            await workflow.execute_activity(
+                "resolve_permission_escalation",
+                args=[task_id, approved],
+                **activity_options("resolve_permission_escalation"),
+            )
+            return bool(approved)
+        finally:
+            self.pending_decision = None
+            self.lifecycle_stage = prev_stage
+
+    @workflow.query
+    def get_status(self) -> dict[str, Any]:
+        return {
+            "task_id": self.task_id,
+            "lifecycle_stage": self.lifecycle_stage,
+            "escalation_count": self.escalation_count,
+            "completion_continuation": self.completion_continuation,
+            "has_pending_decision": self.pending_decision is not None,
+        }
+
+    @workflow.query
+    def get_current_plan(self) -> dict[str, Any]:
+        return dict(self.current_plan)
+
+    @workflow.query
+    def get_pending_decision(self) -> dict[str, Any] | None:
+        return dict(self.pending_decision) if self.pending_decision is not None else None
+
+    @workflow.update
+    def apply_operator_decision(self, payload: dict[str, Any]) -> dict[str, Any]:
+        decision_kind = payload.get("decision_kind") or payload.get("kind")
+        command_key = payload.get("command_key")
+        if isinstance(command_key, str) and command_key:
+            if command_key in self.processed_command_keys:
+                return {
+                    "applied": False,
+                    "duplicate": True,
+                    "decision_kind": decision_kind,
+                    "lifecycle_stage": self.lifecycle_stage,
+                }
+            self.processed_command_keys.add(command_key)
+
+        value = payload.get("value", True)
+        if decision_kind == "approval":
+            self.approval_decision = bool(value)
+        elif decision_kind == "clarification":
+            self.clarification_resolved = True
+        elif decision_kind == "permission_escalation":
+            self.permission_escalation_decision = bool(value)
+
+        return {
+            "applied": True,
+            "duplicate": False,
+            "decision_kind": decision_kind,
+            "lifecycle_stage": self.lifecycle_stage,
+        }
+
+    @apply_operator_decision.validator
+    def validate_operator_decision(self, payload: dict[str, Any]) -> None:
+        allowed_kinds = {"approval", "clarification", "permission_escalation"}
+        decision_kind = payload.get("decision_kind") or payload.get("kind")
+        if decision_kind not in allowed_kinds:
+            raise ValueError(
+                f"Invalid decision_kind '{decision_kind}'. Expected one of {allowed_kinds}."
+            )
+
+        command_key = payload.get("command_key")
+        if (
+            isinstance(command_key, str)
+            and command_key
+            and command_key in self.processed_command_keys
+        ):
+            return
+
+        if self.pending_decision is None or self.pending_decision.get("kind") != decision_kind:
+            current = self.pending_decision.get("kind") if self.pending_decision else None
+            raise ValueError(
+                f"Workflow is not awaiting '{decision_kind}'. Current pending decision: {current}."
+            )
 
     @workflow.signal
     async def handle_approval(self, approved: Any) -> None:

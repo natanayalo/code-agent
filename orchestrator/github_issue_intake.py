@@ -15,12 +15,38 @@ from orchestrator.execution import (
     TaskSubmission,
 )
 from orchestrator.github_repo import github_repo_spec_from_url
-from repositories import TaskTimelineRepository, session_scope
+from repositories import (
+    InboundDeliveryRepository,
+    SessionRepository,
+    TaskRepository,
+    TaskTimelineRepository,
+    session_scope,
+)
 
 logger = logging.getLogger(__name__)
 
 
 _CODE_AGENT_CMD_PATTERN = re.compile(r"(?:^|\s)/code-agent(?=$|\s)", re.IGNORECASE)
+_REPLAY_COMMAND_PATTERN = re.compile(r"^replay(?=$|\s)", re.IGNORECASE)
+
+
+def parse_issue_command_intent(instruction: str | None) -> tuple[str, str | None]:
+    """Distinguish replay command intent from regular task instruction.
+
+    Returns:
+        (intent, remaining_instruction)
+        where intent is 'replay' or 'create'.
+    """
+    if not instruction:
+        return "create", None
+    trimmed = instruction.strip()
+    if not trimmed:
+        return "create", None
+    match = _REPLAY_COMMAND_PATTERN.search(trimmed)
+    if match:
+        remainder = trimmed[match.end() :].strip()
+        return "replay", remainder or None
+    return "create", trimmed
 
 
 def extract_code_agent_command(text: str) -> tuple[bool, str]:
@@ -223,6 +249,195 @@ def _validate_operator_authorization(
     return authorized, sender_login
 
 
+def _check_existing_delivery(
+    task_service: TaskExecutionService, delivery_id: str
+) -> tuple[str, str | None] | None:
+    """Return task_id and session_id if this delivery was already recorded."""
+    with session_scope(task_service.session_factory) as session:
+        delivery_repo = InboundDeliveryRepository(session)
+        existing = delivery_repo.get_by_channel_delivery(channel="github", delivery_id=delivery_id)
+        if existing is not None and existing.task_id is not None:
+            task = TaskRepository(session).get(existing.task_id)
+            session_id = task.session_id if task else None
+            return existing.task_id, session_id
+    return None
+
+
+def _resolve_issue_latest_task(
+    task_service: TaskExecutionService, repo_url: str, issue_number: int
+) -> tuple[str | None, str | None, str | None]:
+    """Find the latest task and session ID for an issue thread.
+
+    Returns:
+        (latest_task_id, session_id, error_detail)
+    """
+    repo_spec = github_repo_spec_from_url(repo_url)
+    external_thread_id = f"github:{repo_spec}#issue:{issue_number}"
+    with session_scope(task_service.session_factory) as session:
+        conv = SessionRepository(session).get_by_channel_thread(
+            channel="github", external_thread_id=external_thread_id
+        )
+        if conv is None:
+            return None, None, "No prior task found for this GitHub issue to replay."
+        tasks = TaskRepository(session).list_by_session(conv.id)
+        if not tasks:
+            return None, conv.id, "No prior task found for this GitHub issue to replay."
+        return tasks[-1].id, conv.id, None
+
+
+def _link_replayed_delivery_and_timeline(
+    *,
+    task_service: TaskExecutionService,
+    new_task_id: str,
+    latest_task_id: str,
+    delivery_id: str,
+    issue_number: int,
+    payload: dict[str, Any],
+    event: str,
+    action: str | None,
+    sender_login: str,
+) -> None:
+    """Attach inbound delivery record and emit TASK_INGESTED timeline event for replay."""
+    with session_scope(task_service.session_factory) as session:
+        delivery_repo = InboundDeliveryRepository(session)
+        existing = delivery_repo.get_by_channel_delivery(channel="github", delivery_id=delivery_id)
+        if existing is None:
+            delivery_repo.create(channel="github", delivery_id=delivery_id, task_id=new_task_id)
+        elif existing.task_id is None:
+            delivery_repo.attach_task_if_unassigned(
+                channel="github", delivery_id=delivery_id, task_id=new_task_id
+            )
+
+    issue = payload.get("issue") or {}
+    github_constraints: dict[str, Any] = {
+        "delivery_id": delivery_id,
+        "issue_number": issue_number,
+        "issue_id": issue.get("id"),
+        "issue_node_id": issue.get("node_id"),
+        "issue_url": issue.get("html_url"),
+        "issue_title": str(issue.get("title") or ""),
+        "sender_login": sender_login,
+        "trigger_type": f"{event}:{action}",
+        "replayed_from": latest_task_id,
+    }
+    if event == "issue_comment":
+        comment = payload.get("comment") or {}
+        github_constraints["comment_id"] = comment.get("id")
+
+    _record_ingested_timeline_event(
+        task_service=task_service,
+        task_id=new_task_id,
+        issue_number=issue_number,
+        event=event,
+        action=action,
+        delivery_id=delivery_id,
+        github_constraints=github_constraints,
+    )
+
+
+def _handle_issue_replay(
+    *,
+    payload: dict[str, Any],
+    event: str,
+    action: str | None,
+    delivery_id: str,
+    repo_url: str,
+    sender_login: str,
+    task_service: TaskExecutionService,
+) -> tuple[bool, str, bool, str | None, str | None, str | None]:
+    """Replay the latest terminal task for the issue conversation session."""
+    existing = _check_existing_delivery(task_service, delivery_id)
+    if existing is not None:
+        return True, "duplicate", True, existing[0], existing[1], "Duplicate delivery deduplicated."
+
+    issue = payload.get("issue") or {}
+    issue_number = int(issue.get("number") or 0)
+    latest_task_id, session_id, err = _resolve_issue_latest_task(
+        task_service, repo_url, issue_number
+    )
+    if latest_task_id is None:
+        return False, "not_found", False, None, session_id, err
+
+    replay_result = task_service.replay_task(source_task_id=latest_task_id)
+    if replay_result.status != "created":
+        return (
+            False,
+            replay_result.status,
+            False,
+            None,
+            session_id,
+            replay_result.detail or f"Replay failed with status: {replay_result.status}",
+        )
+
+    assert replay_result.task_snapshot is not None
+    new_task_id = replay_result.task_snapshot.task_id
+    new_session_id = replay_result.task_snapshot.session_id
+
+    _link_replayed_delivery_and_timeline(
+        task_service=task_service,
+        new_task_id=new_task_id,
+        latest_task_id=latest_task_id,
+        delivery_id=delivery_id,
+        issue_number=issue_number,
+        payload=payload,
+        event=event,
+        action=action,
+        sender_login=sender_login,
+    )
+    return (
+        True,
+        "accepted",
+        False,
+        new_task_id,
+        new_session_id,
+        f"Replayed task {latest_task_id} from {event}:{action} event.",
+    )
+
+
+def _dispatch_issue_submission(
+    *,
+    task_service: TaskExecutionService,
+    submission: TaskSubmission,
+    github_constraints: dict[str, Any],
+    issue_number: int,
+    event: str,
+    action: str | None,
+    delivery_id: str,
+) -> tuple[bool, str, bool, str | None, str | None, str | None]:
+    """Persist new task submission or return duplicate delivery snapshot."""
+    outcome = task_service.create_task_outcome(
+        submission, delivery_key=DeliveryKey(channel="github", delivery_id=delivery_id)
+    )
+    if outcome.duplicate:
+        return (
+            True,
+            "duplicate",
+            True,
+            outcome.task_snapshot.task_id,
+            outcome.task_snapshot.session_id,
+            "Duplicate delivery deduplicated.",
+        )
+
+    task_id = outcome.task_snapshot.task_id
+    _record_ingested_timeline_event(
+        task_service=task_service,
+        task_id=task_id,
+        issue_number=issue_number,
+        event=event,
+        action=action,
+        delivery_id=delivery_id,
+        github_constraints=github_constraints,
+    )
+    return (
+        True,
+        "accepted",
+        False,
+        task_id,
+        outcome.task_snapshot.session_id,
+        f"Created task from {event}:{action} event.",
+    )
+
+
 def handle_issue_intake(
     *,
     payload: dict[str, Any],
@@ -255,6 +470,18 @@ def handle_issue_intake(
     if not eligible:
         return True, "ignored", False, None, None, reject_reason
 
+    intent, _ = parse_issue_command_intent(instruction)
+    if intent == "replay":
+        return _handle_issue_replay(
+            payload=payload,
+            event=event,
+            action=action,
+            delivery_id=delivery_id,
+            repo_url=repo_url,
+            sender_login=sender_login,
+            task_service=task_service,
+        )
+
     submission, github_constraints, issue_number = _build_issue_submission(
         payload=payload,
         event=event,
@@ -264,37 +491,12 @@ def handle_issue_intake(
         sender_login=sender_login,
         instruction=instruction,
     )
-
-    outcome = task_service.create_task_outcome(
-        submission,
-        delivery_key=DeliveryKey(channel="github", delivery_id=delivery_id),
-    )
-    if outcome.duplicate:
-        return (
-            True,
-            "duplicate",
-            True,
-            outcome.task_snapshot.task_id,
-            outcome.task_snapshot.session_id,
-            "Duplicate delivery deduplicated.",
-        )
-
-    task_id = outcome.task_snapshot.task_id
-    _record_ingested_timeline_event(
+    return _dispatch_issue_submission(
         task_service=task_service,
-        task_id=task_id,
+        submission=submission,
+        github_constraints=github_constraints,
         issue_number=issue_number,
         event=event,
         action=action,
         delivery_id=delivery_id,
-        github_constraints=github_constraints,
-    )
-
-    return (
-        True,
-        "accepted",
-        False,
-        task_id,
-        outcome.task_snapshot.session_id,
-        f"Created task from {event}:{action} event.",
     )
