@@ -15,8 +15,8 @@
     }
   },
   "neutral_evaluator": {
-    "provider": "anthropic",
-    "model": "claude-3-7-sonnet",
+    "provider": "qwen",
+    "model": "qwen2.5-coder:7b",
     "reasoning_effort": null,
     "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
     "tools": [
@@ -27,7 +27,7 @@
     "fallback_policy": "none",
     "budget": {
       "timeout_seconds": 300,
-      "max_tokens": 8192,
+      "max_tokens": 2048,
       "max_cost_usd": null
     }
   },
@@ -53,8 +53,8 @@
         "max_tokens": null
       },
       "neutral_evaluator": {
-        "provider": "anthropic",
-        "model": "claude-3-7-sonnet",
+        "provider": "qwen",
+        "model": "qwen2.5-coder:7b",
         "reasoning_effort": null,
         "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
         "tools": [
@@ -65,7 +65,7 @@
         "fallback_policy": "none",
         "budget": {
           "timeout_seconds": 300,
-          "max_tokens": 8192,
+          "max_tokens": 2048,
           "max_cost_usd": null
         }
       },
@@ -99,8 +99,8 @@
         "max_tokens": null
       },
       "neutral_evaluator": {
-        "provider": "anthropic",
-        "model": "claude-3-7-sonnet",
+        "provider": "qwen",
+        "model": "qwen2.5-coder:7b",
         "reasoning_effort": null,
         "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
         "tools": [
@@ -111,7 +111,7 @@
         "fallback_policy": "none",
         "budget": {
           "timeout_seconds": 300,
-          "max_tokens": 8192,
+          "max_tokens": 2048,
           "max_cost_usd": null
         }
       },
@@ -145,8 +145,8 @@
         "max_tokens": null
       },
       "neutral_evaluator": {
-        "provider": "anthropic",
-        "model": "claude-3-7-sonnet",
+        "provider": "qwen",
+        "model": "qwen2.5-coder:7b",
         "reasoning_effort": null,
         "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
         "tools": [
@@ -157,7 +157,7 @@
         "fallback_policy": "none",
         "budget": {
           "timeout_seconds": 300,
-          "max_tokens": 8192,
+          "max_tokens": 2048,
           "max_cost_usd": null
         }
       },
@@ -191,8 +191,8 @@
         "max_tokens": null
       },
       "neutral_evaluator": {
-        "provider": "anthropic",
-        "model": "claude-3-7-sonnet",
+        "provider": "qwen",
+        "model": "qwen2.5-coder:7b",
         "reasoning_effort": null,
         "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
         "tools": [
@@ -203,7 +203,7 @@
         "fallback_policy": "none",
         "budget": {
           "timeout_seconds": 300,
-          "max_tokens": 8192,
+          "max_tokens": 2048,
           "max_cost_usd": null
         }
       },
@@ -237,8 +237,8 @@
         "max_tokens": null
       },
       "neutral_evaluator": {
-        "provider": "anthropic",
-        "model": "claude-3-7-sonnet",
+        "provider": "qwen",
+        "model": "qwen2.5-coder:7b",
         "reasoning_effort": null,
         "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
         "tools": [
@@ -249,7 +249,7 @@
         "fallback_policy": "none",
         "budget": {
           "timeout_seconds": 300,
-          "max_tokens": 8192,
+          "max_tokens": 2048,
           "max_cost_usd": null
         }
       },
@@ -283,8 +283,8 @@
         "max_tokens": null
       },
       "neutral_evaluator": {
-        "provider": "anthropic",
-        "model": "claude-3-7-sonnet",
+        "provider": "qwen",
+        "model": "qwen2.5-coder:7b",
         "reasoning_effort": null,
         "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
         "tools": [
@@ -295,7 +295,7 @@
         "fallback_policy": "none",
         "budget": {
           "timeout_seconds": 300,
-          "max_tokens": 8192,
+          "max_tokens": 2048,
           "max_cost_usd": null
         }
       },
@@ -329,8 +329,8 @@
         "max_tokens": null
       },
       "neutral_evaluator": {
-        "provider": "anthropic",
-        "model": "claude-3-7-sonnet",
+        "provider": "qwen",
+        "model": "qwen2.5-coder:7b",
         "reasoning_effort": null,
         "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
         "tools": [
@@ -341,7 +341,7 @@
         "fallback_policy": "none",
         "budget": {
           "timeout_seconds": 300,
-          "max_tokens": 8192,
+          "max_tokens": 2048,
           "max_cost_usd": null
         }
       },
@@ -375,8 +375,8 @@
         "max_tokens": null
       },
       "neutral_evaluator": {
-        "provider": "anthropic",
-        "model": "claude-3-7-sonnet",
+        "provider": "qwen",
+        "model": "qwen2.5-coder:7b",
         "reasoning_effort": null,
         "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
         "tools": [
@@ -387,7 +387,7 @@
         "fallback_policy": "none",
         "budget": {
           "timeout_seconds": 300,
-          "max_tokens": 8192,
+          "max_tokens": 2048,
           "max_cost_usd": null
         }
       },
@@ -421,8 +421,8 @@
         "max_tokens": null
       },
       "neutral_evaluator": {
-        "provider": "anthropic",
-        "model": "claude-3-7-sonnet",
+        "provider": "qwen",
+        "model": "qwen2.5-coder:7b",
         "reasoning_effort": null,
         "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
         "tools": [
@@ -433,7 +433,7 @@
         "fallback_policy": "none",
         "budget": {
           "timeout_seconds": 300,
-          "max_tokens": 8192,
+          "max_tokens": 2048,
           "max_cost_usd": null
         }
       },
@@ -467,8 +467,8 @@
         "max_tokens": null
       },
       "neutral_evaluator": {
-        "provider": "anthropic",
-        "model": "claude-3-7-sonnet",
+        "provider": "qwen",
+        "model": "qwen2.5-coder:7b",
         "reasoning_effort": null,
         "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
         "tools": [
@@ -479,7 +479,7 @@
         "fallback_policy": "none",
         "budget": {
           "timeout_seconds": 300,
-          "max_tokens": 8192,
+          "max_tokens": 2048,
           "max_cost_usd": null
         }
       },
@@ -513,8 +513,8 @@
         "max_tokens": null
       },
       "neutral_evaluator": {
-        "provider": "anthropic",
-        "model": "claude-3-7-sonnet",
+        "provider": "qwen",
+        "model": "qwen2.5-coder:7b",
         "reasoning_effort": null,
         "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
         "tools": [
@@ -525,7 +525,7 @@
         "fallback_policy": "none",
         "budget": {
           "timeout_seconds": 300,
-          "max_tokens": 8192,
+          "max_tokens": 2048,
           "max_cost_usd": null
         }
       },
@@ -559,8 +559,8 @@
         "max_tokens": null
       },
       "neutral_evaluator": {
-        "provider": "anthropic",
-        "model": "claude-3-7-sonnet",
+        "provider": "qwen",
+        "model": "qwen2.5-coder:7b",
         "reasoning_effort": null,
         "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
         "tools": [
@@ -571,7 +571,7 @@
         "fallback_policy": "none",
         "budget": {
           "timeout_seconds": 300,
-          "max_tokens": 8192,
+          "max_tokens": 2048,
           "max_cost_usd": null
         }
       },
@@ -605,8 +605,8 @@
         "max_tokens": null
       },
       "neutral_evaluator": {
-        "provider": "anthropic",
-        "model": "claude-3-7-sonnet",
+        "provider": "qwen",
+        "model": "qwen2.5-coder:7b",
         "reasoning_effort": null,
         "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
         "tools": [
@@ -617,7 +617,7 @@
         "fallback_policy": "none",
         "budget": {
           "timeout_seconds": 300,
-          "max_tokens": 8192,
+          "max_tokens": 2048,
           "max_cost_usd": null
         }
       },
@@ -651,8 +651,8 @@
         "max_tokens": null
       },
       "neutral_evaluator": {
-        "provider": "anthropic",
-        "model": "claude-3-7-sonnet",
+        "provider": "qwen",
+        "model": "qwen2.5-coder:7b",
         "reasoning_effort": null,
         "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
         "tools": [
@@ -663,7 +663,7 @@
         "fallback_policy": "none",
         "budget": {
           "timeout_seconds": 300,
-          "max_tokens": 8192,
+          "max_tokens": 2048,
           "max_cost_usd": null
         }
       },
@@ -697,8 +697,8 @@
         "max_tokens": null
       },
       "neutral_evaluator": {
-        "provider": "anthropic",
-        "model": "claude-3-7-sonnet",
+        "provider": "qwen",
+        "model": "qwen2.5-coder:7b",
         "reasoning_effort": null,
         "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
         "tools": [
@@ -709,7 +709,7 @@
         "fallback_policy": "none",
         "budget": {
           "timeout_seconds": 300,
-          "max_tokens": 8192,
+          "max_tokens": 2048,
           "max_cost_usd": null
         }
       },
@@ -743,8 +743,8 @@
         "max_tokens": null
       },
       "neutral_evaluator": {
-        "provider": "anthropic",
-        "model": "claude-3-7-sonnet",
+        "provider": "qwen",
+        "model": "qwen2.5-coder:7b",
         "reasoning_effort": null,
         "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
         "tools": [
@@ -755,7 +755,7 @@
         "fallback_policy": "none",
         "budget": {
           "timeout_seconds": 300,
-          "max_tokens": 8192,
+          "max_tokens": 2048,
           "max_cost_usd": null
         }
       },
@@ -789,8 +789,8 @@
         "max_tokens": null
       },
       "neutral_evaluator": {
-        "provider": "anthropic",
-        "model": "claude-3-7-sonnet",
+        "provider": "qwen",
+        "model": "qwen2.5-coder:7b",
         "reasoning_effort": null,
         "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
         "tools": [
@@ -801,7 +801,7 @@
         "fallback_policy": "none",
         "budget": {
           "timeout_seconds": 300,
-          "max_tokens": 8192,
+          "max_tokens": 2048,
           "max_cost_usd": null
         }
       },
@@ -835,8 +835,8 @@
         "max_tokens": null
       },
       "neutral_evaluator": {
-        "provider": "anthropic",
-        "model": "claude-3-7-sonnet",
+        "provider": "qwen",
+        "model": "qwen2.5-coder:7b",
         "reasoning_effort": null,
         "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
         "tools": [
@@ -847,7 +847,7 @@
         "fallback_policy": "none",
         "budget": {
           "timeout_seconds": 300,
-          "max_tokens": 8192,
+          "max_tokens": 2048,
           "max_cost_usd": null
         }
       },
@@ -881,8 +881,8 @@
         "max_tokens": null
       },
       "neutral_evaluator": {
-        "provider": "anthropic",
-        "model": "claude-3-7-sonnet",
+        "provider": "qwen",
+        "model": "qwen2.5-coder:7b",
         "reasoning_effort": null,
         "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
         "tools": [
@@ -893,7 +893,7 @@
         "fallback_policy": "none",
         "budget": {
           "timeout_seconds": 300,
-          "max_tokens": 8192,
+          "max_tokens": 2048,
           "max_cost_usd": null
         }
       },
@@ -927,8 +927,8 @@
         "max_tokens": null
       },
       "neutral_evaluator": {
-        "provider": "anthropic",
-        "model": "claude-3-7-sonnet",
+        "provider": "qwen",
+        "model": "qwen2.5-coder:7b",
         "reasoning_effort": null,
         "system_prompt_sha256": "5d0453e7bbc6c3d475bc6c336f71c53e1bd4dd8d13e468c51a8979c655289883",
         "tools": [
@@ -939,7 +939,7 @@
         "fallback_policy": "none",
         "budget": {
           "timeout_seconds": 300,
-          "max_tokens": 8192,
+          "max_tokens": 2048,
           "max_cost_usd": null
         }
       },

@@ -425,7 +425,9 @@ route decision
 1. Complete the operator-approved [separate `feature/mutation` evaluation
    contract](../evaluation/m29_feature_mutation_contract.md). The opt-in
    post-terminal execution mode, persisted TaskSpec gate, frozen suite and
-   evaluator manifests, deterministic taskboard fixture builder
+   evaluator manifests standardized on local Ollama `qwen / qwen2.5-coder:7b` (`DEFAULT_M29_NEUTRAL_EVALUATOR`,
+   suite SHA-256 `81ac140df0bbbd18cd243abde2d7b86fe74b250cf0ac02e2ec5ffc208e69e987`),
+   deterministic taskboard fixture builder
    (`evaluation/m29_mutation_fixture.py`), runner-owned read-only acceptance
    oracles (`evaluation/m29_mutation_oracles.py`), concrete `ReadOnlyExternalEvaluator`
    with blinded neutral review and immutability checks (`evaluation/m29_mutation_verifier.py`),

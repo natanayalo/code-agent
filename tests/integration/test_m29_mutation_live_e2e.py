@@ -112,7 +112,7 @@ def _create_mock_stack_client(
             return httpx.Response(
                 status_code=200,
                 json={
-                    "model": "anthropic/claude-3-7-sonnet",
+                    "model": f"{suite.neutral_evaluator.provider}/{suite.neutral_evaluator.model}",
                     "choices": [
                         {
                             "message": {

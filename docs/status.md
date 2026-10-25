@@ -52,9 +52,11 @@ allowlist redaction).
 - an M29 feature/mutation evaluation runner, deterministic taskboard fixture
   builder (`evaluation/m29_mutation_fixture.py`), runner-owned read-only acceptance
   oracles (`evaluation/m29_mutation_oracles.py`), and concrete external evaluator
-  with blinded neutral review and immutability checks (`evaluation/m29_mutation_verifier.py`,
-  `evaluation/m29_mutation_runner.py`) with preflight gates, terminal snapshot
-  immutability verification, stop-condition halts, pinned revision
+  with blinded neutral review (`evaluation/m29_mutation_verifier.py`,
+  `evaluation/m29_mutation_runner.py`) standardized on local Ollama
+  `qwen / qwen2.5-coder:7b` as the zero-cost neutral evaluator (`DEFAULT_M29_NEUTRAL_EVALUATOR`,
+  suite SHA-256 `81ac140df0bbbd18cd243abde2d7b86fe74b250cf0ac02e2ec5ffc208e69e987`) with preflight gates,
+  terminal snapshot immutability verification, stop-condition halts, pinned revision
   `228071722c645e813af16053e56d007c25e9f127`, and outcome-dependent workspace
   cleanup/retention; live provider collection remains gated and `feature/mutation`
   stays at N=0
@@ -245,7 +247,10 @@ Temporal migration and rollback record is in the
       pending-interaction handling, delivery safeguards, extractor-stage smokes, and
       72-hour cleanup before live evidence collection. The frozen `feature/mutation`
       suite & neutral evaluator manifest contract
-      (`evaluation/m29_mutation_suite.py`), the exact baseline-plus-eligible-suite
+      (`evaluation/m29_mutation_suite.py`) is standardized on local Ollama
+      `qwen / qwen2.5-coder:7b` as the permanent zero-cost neutral evaluator (`DEFAULT_M29_NEUTRAL_EVALUATOR`),
+      sharing exact SHA-256 alignment (`81ac140df0bbbd18cd243abde2d7b86fe74b250cf0ac02e2ec5ffc208e69e987`)
+      with the published mutation manifest. The exact baseline-plus-eligible-suite
       reconciliation gate (`evaluation/m29_mutation_cohort.py`), the
       sanitized manifest & report-publication reconciliation layer
       (`evaluation/m29_mutation_manifest.py`,
