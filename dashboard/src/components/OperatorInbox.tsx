@@ -49,6 +49,9 @@ const getSafeNextAction = (meta: TaskSummarySnapshot['delivery_metadata']) => {
   if (meta.pr_state === 'merged') {
     return 'Pull request merged';
   }
+  if (!meta.pr_url && meta.pr_number == null && !meta.ci_status) {
+    return 'Draft PR has not been created yet — task in progress or delivery pending';
+  }
   return 'Review pull request or check status on GitHub';
 };
 
@@ -84,7 +87,6 @@ export function OperatorInbox({
             (m.pr_url ||
               m.pr_number != null ||
               m.ci_status ||
-              m.source_issue_number != null ||
               (m.check_runs && m.check_runs.length > 0))
         );
       })

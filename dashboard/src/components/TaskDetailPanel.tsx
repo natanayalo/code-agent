@@ -906,7 +906,21 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
           <section className="task-detail-section">
             <h4>Delivery Metadata</h4>
             {(() => {
-              const deliveryMeta = run?.delivery_metadata || task?.delivery_metadata || null;
+              const taskMeta = task?.delivery_metadata;
+              const runMeta = run?.delivery_metadata;
+              const deliveryMeta =
+                taskMeta || runMeta
+                  ? {
+                      ...taskMeta,
+                      ...runMeta,
+                      source_issue_number:
+                        runMeta?.source_issue_number ?? taskMeta?.source_issue_number ?? null,
+                      source_issue_url:
+                        runMeta?.source_issue_url ?? taskMeta?.source_issue_url ?? null,
+                      base_branch: runMeta?.base_branch ?? taskMeta?.base_branch ?? null,
+                      branch_name: runMeta?.branch_name ?? taskMeta?.branch_name ?? null,
+                    }
+                  : null;
               if (!deliveryMeta) {
                 return <p className="task-detail-muted">No delivery metadata available.</p>;
               }
@@ -1010,6 +1024,8 @@ export function TaskDetailPanel({ task, loading, error, onClose, onRefresh }: Ta
                         </span>
                       ) : deliveryMeta.pr_state === 'merged' ? (
                         <span>Pull request merged.</span>
+                      ) : !deliveryMeta.pr_url && deliveryMeta.pr_number == null && !deliveryMeta.ci_status ? (
+                        <span>Draft PR has not been created yet — task in progress or delivery pending.</span>
                       ) : (
                         <span>Review pull request or check status on GitHub.</span>
                       )}

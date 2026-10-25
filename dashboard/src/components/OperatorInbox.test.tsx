@@ -330,4 +330,68 @@ describe('OperatorInbox', () => {
     expect(screen.getByText('CI: custom_state')).toHaveClass('ci-badge', 'ci-unknown');
     expect(screen.queryByText('Task without delivery')).not.toBeInTheDocument();
   });
+
+  it('excludes pre-PR tasks that only have source issue metadata from actionable PR/CI list', () => {
+    const prePrTask: TaskSummarySnapshot = {
+      task_id: 'task-pre-pr',
+      session_id: 's-pre',
+      status: TaskStatus.IN_PROGRESS,
+      task_text: 'Pre-PR intake task',
+      priority: 1,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      delivery_metadata: {
+        source_issue_number: 99,
+        source_issue_url: 'https://github.com/octocat/code-agent/issues/99',
+        branch_name: 'feature/issue-99',
+      },
+    };
+
+    render(
+      <OperatorInbox
+        interactions={[]}
+        selectedTaskId={null}
+        onOpenTask={vi.fn()}
+        tasks={[prePrTask]}
+      />
+    );
+
+    // Should not appear in deliveryTasks PR/CI list
+    expect(screen.queryByText('Pre-PR intake task')).not.toBeInTheDocument();
+    expect(screen.getByText('No pending interactions.')).toBeInTheDocument();
+  });
+
+  it('renders pre-PR delivery message when check runs exist but PR has not been created yet', () => {
+    const checkRunOnlyTask: TaskSummarySnapshot = {
+      task_id: 'task-checks-only',
+      session_id: 's-checks',
+      status: TaskStatus.IN_PROGRESS,
+      task_text: 'Early check run task',
+      priority: 1,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      delivery_metadata: {
+        check_runs: [
+          {
+            id: 101,
+            name: 'early-check',
+            status: 'in_progress',
+          },
+        ],
+      },
+    };
+
+    render(
+      <OperatorInbox
+        interactions={[]}
+        selectedTaskId={null}
+        onOpenTask={vi.fn()}
+        tasks={[checkRunOnlyTask]}
+      />
+    );
+
+    expect(
+      screen.getByText('Draft PR has not been created yet — task in progress or delivery pending')
+    ).toBeInTheDocument();
+  });
 });

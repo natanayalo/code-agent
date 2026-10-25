@@ -1422,5 +1422,50 @@ describe('TaskDetailPanel', () => {
     });
     rerender(<TaskDetailPanel task={mergedTask} loading={false} error={null} onClose={vi.fn()} />);
     expect(screen.getByText('Pull request merged.')).toBeInTheDocument();
+
+    // 4. Pre-PR task with source issue but no PR or CI yet
+    const prePrTask = buildTask({
+      delivery_metadata: {
+        source_issue_number: 50,
+        source_issue_url: 'https://github.com/octocat/code-agent/issues/50',
+      },
+      latest_run: null,
+    });
+    rerender(<TaskDetailPanel task={prePrTask} loading={false} error={null} onClose={vi.fn()} />);
+    expect(
+      screen.getByText('Draft PR has not been created yet — task in progress or delivery pending.')
+    ).toBeInTheDocument();
+  });
+
+  it('preserves task-level issue lineage when latest run delivery metadata omits it', () => {
+    const task = buildTask({
+      delivery_metadata: {
+        source_issue_number: 77,
+        source_issue_url: 'https://github.com/octocat/code-agent/issues/77',
+        base_branch: 'master',
+        branch_name: 'feature/agent-task',
+      },
+      latest_run: buildLatestRun({
+        delivery_metadata: {
+          pr_number: 222,
+          pr_url: 'https://github.com/octocat/code-agent/pull/222',
+          ci_status: 'passed',
+          // Note: source_issue_number and source_issue_url omitted on run
+        },
+      }),
+    });
+
+    render(<TaskDetailPanel task={task} loading={false} error={null} onClose={vi.fn()} />);
+
+    // Issue link from task.delivery_metadata is preserved
+    const issueLink = screen.getByRole('link', { name: /#77/ });
+    expect(issueLink).toHaveAttribute('href', 'https://github.com/octocat/code-agent/issues/77');
+
+    // Run PR metadata is also rendered
+    const prLink = screen.getByRole('link', { name: /#222/ });
+    expect(prLink).toHaveAttribute('href', 'https://github.com/octocat/code-agent/pull/222');
+
+    // Branch lineage preserved from task metadata
+    expect(screen.getByText('feature/agent-task')).toBeInTheDocument();
   });
 });

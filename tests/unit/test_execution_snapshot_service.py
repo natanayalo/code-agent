@@ -115,3 +115,79 @@ def test_resolve_task_delivery_metadata_returns_none_when_empty() -> None:
     task = SimpleNamespace(constraints={}, worker_runs=[])
     resolved = _resolve_task_delivery_metadata(task)
     assert resolved is None
+
+
+def test_map_task_to_snapshot_enriches_latest_run_delivery_metadata() -> None:
+    from orchestrator.execution_snapshot_service import (
+        _map_task_to_snapshot,
+        _resolve_task_delivery_metadata,
+    )
+    from orchestrator.execution_types import TaskSummarySnapshot
+
+    now = datetime.now(UTC)
+    task = SimpleNamespace(
+        id="task-1",
+        session_id="session-1",
+        task_text="Delivery test",
+        status="completed",
+        constraints={
+            "github": {
+                "issue_number": 42,
+                "issue_url": "https://github.com/octocat/code-agent/issues/42",
+            },
+            "delivery_branch": "agent/task-42",
+        },
+        worker_runs=[
+            SimpleNamespace(
+                id="run-1",
+                session_id="session-1",
+                worker_type="codex",
+                worker_profile=None,
+                runtime_mode=None,
+                orchestration_runtime=None,
+                workspace_id="ws-1",
+                status="success",
+                started_at=now,
+                finished_at=now,
+                summary="Done",
+                requested_permission=None,
+                budget_usage=None,
+                verifier_outcome=None,
+                commands_run=[],
+                files_changed_count=0,
+                files_changed=[],
+                artifact_index=[],
+                delivery_metadata={
+                    "pr_number": 105,
+                    "pr_url": "https://github.com/octocat/code-agent/pull/105",
+                },
+                artifacts=[],
+            )
+        ],
+        task_spec=None,
+        execution_plan=None,
+        timeline_events=[],
+    )
+    svc = SimpleNamespace(
+        _pending_interaction_snapshots=lambda _t: [],
+        _ensure_verifier_outcome_ids=lambda _v: None,
+        _map_task_to_summary=lambda _t, latest_run=None: TaskSummarySnapshot(
+            task_id="task-1",
+            session_id="session-1",
+            status="completed",
+            task_text="Delivery test",
+            created_at=now,
+            updated_at=now,
+            delivery_metadata=_resolve_task_delivery_metadata(task, latest_run=latest_run),
+        ),
+    )
+    snapshot = _map_task_to_snapshot(svc, task)
+    assert snapshot.latest_run is not None
+    assert snapshot.latest_run.delivery_metadata is not None
+    assert snapshot.latest_run.delivery_metadata.pr_number == 105
+    assert snapshot.latest_run.delivery_metadata.source_issue_number == 42
+    assert (
+        snapshot.latest_run.delivery_metadata.source_issue_url
+        == "https://github.com/octocat/code-agent/issues/42"
+    )
+    assert snapshot.latest_run.delivery_metadata.branch_name == "agent/task-42"

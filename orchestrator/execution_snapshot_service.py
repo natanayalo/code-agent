@@ -609,7 +609,7 @@ def _map_task_to_snapshot(self: Any, task: Task) -> TaskSnapshot:
                 for idx, entry in enumerate(latest_run_obj.artifact_index or [])
                 if isinstance(entry, dict)
             ],
-            delivery_metadata=cast(Any, latest_run_obj.delivery_metadata),
+            delivery_metadata=_resolve_task_delivery_metadata(task, latest_run=latest_run_obj),
             artifacts=[
                 ArtifactSnapshot(
                     artifact_id=artifact.id,
