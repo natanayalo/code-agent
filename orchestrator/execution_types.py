@@ -166,6 +166,8 @@ class ArtifactSnapshot(ExecutionModel):
 class DeliveryMetadataSnapshot(ExecutionModel):
     """Metadata captured during task delivery, particularly for PRs and CI status."""
 
+    model_config = ConfigDict(extra="ignore")
+
     delivery_mode: str | None = None
     branch_name: str | None = None
     pr_url: str | None = None
@@ -174,6 +176,13 @@ class DeliveryMetadataSnapshot(ExecutionModel):
     ci_status: str | None = None
     ci_failed_jobs: list[str] = Field(default_factory=list)
     ci_last_checked_at: datetime | None = None
+    pr_node_id: str | None = None
+    pr_state: str | None = None
+    pr_draft: bool | None = None
+    base_branch: str | None = None
+    check_runs: list[dict[str, Any]] = Field(default_factory=list)
+    source_issue_number: int | None = None
+    source_issue_url: str | None = None
 
 
 class WorkerRunSnapshot(ExecutionModel):

@@ -249,6 +249,13 @@ def _delivery_completed_response(
 ) -> dict[str, Any]:
     assert state.task_spec is not None
     set_span_input_output(None, output_data="success")
+    payload: dict[str, Any] = {"branch": branch_name, "pr_title": pr_title}
+    github_meta = (state.task.constraints or {}).get("github") if state.task else None
+    if isinstance(github_meta, dict):
+        if github_meta.get("issue_number") is not None:
+            payload["source_issue_number"] = github_meta["issue_number"]
+        if github_meta.get("issue_url") is not None:
+            payload["source_issue_url"] = github_meta["issue_url"]
     return {
         "current_step": "deliver_result",
         "progress_updates": _progress_update(state, "delivery completed"),
@@ -257,7 +264,7 @@ def _delivery_completed_response(
             state,
             TimelineEventType.DELIVERY_COMPLETED,
             message=f"Successfully delivered result via {state.task_spec.delivery_mode}",
-            payload={"branch": branch_name, "pr_title": pr_title},
+            payload=payload,
         ),
     }
 
@@ -305,6 +312,18 @@ async def _delivery_success_response(
             payload={"branch": branch_name},
         )
     if delivery_metadata:
+        github_meta = (state.task.constraints or {}).get("github") if state.task else None
+        if isinstance(github_meta, dict):
+            if (
+                github_meta.get("issue_number") is not None
+                and "source_issue_number" not in delivery_metadata
+            ):
+                delivery_metadata["source_issue_number"] = github_meta["issue_number"]
+            if (
+                github_meta.get("issue_url") is not None
+                and "source_issue_url" not in delivery_metadata
+            ):
+                delivery_metadata["source_issue_url"] = github_meta["issue_url"]
         merged_result.delivery_metadata = delivery_metadata
     return _delivery_completed_response(
         state,

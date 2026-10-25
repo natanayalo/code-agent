@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 PRIVATE_TAG_REPLACEMENT = "[redacted-private]"
-_PRIVATE_TAG_PATTERN = re.compile(r"<private>(.*?)</private>", re.DOTALL | re.IGNORECASE)
+_OPEN_TAG = "<private>"
+_CLOSE_TAG = "</private>"
 _CONTAINER_TYPES = (dict, list, tuple, set, frozenset)
 _REDACTABLE_TYPES = (*_CONTAINER_TYPES, str)
 
@@ -15,8 +15,35 @@ def redact_private_tags(text: str) -> tuple[str, bool]:
     """Replace case-insensitive <private>...</private> blocks in text."""
     if not text:
         return text, False
-    redacted, count = _PRIVATE_TAG_PATTERN.subn(PRIVATE_TAG_REPLACEMENT, text)
-    return redacted, count > 0
+
+    lower = text.lower()
+    open_len = len(_OPEN_TAG)
+    close_len = len(_CLOSE_TAG)
+
+    idx = lower.find(_OPEN_TAG)
+    if idx == -1:
+        return text, False
+
+    result: list[str] = []
+    last_idx = 0
+    any_redacted = False
+
+    while idx != -1:
+        result.append(text[last_idx:idx])
+        close_idx = lower.find(_CLOSE_TAG, idx + open_len)
+        if close_idx == -1:
+            result.append(text[idx:])
+            last_idx = len(text)
+            break
+        result.append(PRIVATE_TAG_REPLACEMENT)
+        any_redacted = True
+        last_idx = close_idx + close_len
+        idx = lower.find(_OPEN_TAG, last_idx)
+
+    if last_idx < len(text):
+        result.append(text[last_idx:])
+
+    return "".join(result), any_redacted
 
 
 def redact_private_tags_recursive(data: Any) -> tuple[Any, bool]:

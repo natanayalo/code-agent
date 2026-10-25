@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from apps.runtime import coerce_non_negative_int_env, coerce_positive_int_env, is_enabled
+from orchestrator.github_repo import github_repo_spec_from_url
 from sandbox.container import DEFAULT_SANDBOX_IMAGE
 from sandbox.workspace import default_workspace_root
 
@@ -87,6 +88,8 @@ class SystemConfig:
     allowed_repos: dict[str, str] = field(default_factory=dict)
     scout_allowed_repos: dict[str, str] = field(default_factory=dict)
     retention_seconds: int = DEFAULT_RETENTION_SECONDS
+    github_owner_login: str | None = None
+    github_issue_label: str = "code-agent"
 
     @classmethod
     def load_from_env(cls, env: Mapping[str, str] | None = None) -> SystemConfig:
@@ -152,6 +155,9 @@ class SystemConfig:
             allowed_repos=allowed_repos,
             scout_allowed_repos=scout_allowed_repos,
             retention_seconds=resolve_retention_seconds(environ),
+            github_owner_login=(environ.get("CODE_AGENT_GITHUB_OWNER_LOGIN") or "").strip() or None,
+            github_issue_label=(environ.get("CODE_AGENT_GITHUB_ISSUE_LABEL") or "").strip()
+            or "code-agent",
         )
 
     def resolve_repo_key(self, key: str | None) -> str | None:
@@ -159,3 +165,21 @@ class SystemConfig:
         if not key:
             return None
         return self.allowed_repos.get(key)
+
+    def resolve_github_repo_url(self, repo_full_name_or_url: str | None) -> str | None:
+        """Resolve a GitHub repo name or URL against the allowed_repos registry."""
+        if not repo_full_name_or_url:
+            return None
+        spec = github_repo_spec_from_url(repo_full_name_or_url)
+        if not spec:
+            return None
+        spec_lower = spec.lower()
+        for configured_url in self.allowed_repos.values():
+            configured_spec = github_repo_spec_from_url(configured_url)
+            if configured_spec and configured_spec.lower() == spec_lower:
+                return configured_url
+        for key, configured_url in self.allowed_repos.items():
+            key_spec = github_repo_spec_from_url(key)
+            if key_spec and key_spec.lower() == spec_lower:
+                return configured_url
+        return None
