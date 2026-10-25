@@ -679,7 +679,7 @@ RESERVED_INTERNAL_CONSTRAINT_KEYS: frozenset[str] = frozenset(
 class TaskReplayResult:
     """Outcome of replaying a prior task."""
 
-    status: Literal["created", "not_found", "not_replayable", "validation_error"]
+    status: Literal["created", "duplicate", "not_found", "not_replayable", "validation_error"]
     task_snapshot: TaskSnapshot | None = None
     source_task_id: str | None = None
     detail: str | None = None

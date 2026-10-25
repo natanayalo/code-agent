@@ -48,6 +48,24 @@ def test_workflow_validate_operator_decision_idempotent_duplicate_key():
     workflow.validate_operator_decision({"decision_kind": "approval", "command_key": "cmd-123"})
 
 
+def test_workflow_validate_operator_decision_requires_boolean_value():
+    workflow = TaskExecutionWorkflow()
+    workflow.pending_decision = {"kind": "approval", "node_id": None, "escalation_count": 0}
+    with pytest.raises(ValueError, match="requires a boolean 'value' field"):
+        workflow.validate_operator_decision({"decision_kind": "approval"})
+
+    with pytest.raises(ValueError, match="requires a boolean 'value' field"):
+        workflow.validate_operator_decision({"decision_kind": "approval", "value": "yes"})
+
+    workflow.pending_decision = {
+        "kind": "permission_escalation",
+        "node_id": None,
+        "escalation_count": 0,
+    }
+    with pytest.raises(ValueError, match="requires a boolean 'value' field"):
+        workflow.validate_operator_decision({"decision_kind": "permission_escalation"})
+
+
 def test_workflow_apply_operator_decision_approval():
     workflow = TaskExecutionWorkflow()
     workflow.pending_decision = {"kind": "approval", "node_id": None, "escalation_count": 0}
@@ -64,9 +82,13 @@ def test_workflow_apply_operator_decision_approval():
         "lifecycle_stage": "initializing",
     }
     assert workflow.approval_decision is True
+    assert workflow.pending_decision is None
     assert "cmd-approve" in workflow.processed_command_keys
 
-    # Duplicate call with same command_key
+    # Duplicate call with same command_key is accepted by validator and recognized as dupe
+    workflow.validate_operator_decision(
+        {"decision_kind": "approval", "value": False, "command_key": "cmd-approve"}
+    )
     dupe_result = workflow.apply_operator_decision(
         {"decision_kind": "approval", "value": False, "command_key": "cmd-approve"}
     )
@@ -74,6 +96,35 @@ def test_workflow_apply_operator_decision_approval():
     assert dupe_result["duplicate"] is True
     # State was not overwritten
     assert workflow.approval_decision is True
+
+    # But a different command_key is rejected because pending_decision was cleared
+    with pytest.raises(ValueError, match="Workflow is not awaiting 'approval'"):
+        workflow.validate_operator_decision(
+            {"decision_kind": "approval", "value": True, "command_key": "cmd-other"}
+        )
+
+
+@pytest.mark.anyio
+async def test_workflow_signals_clear_pending_decision():
+    workflow = TaskExecutionWorkflow()
+    workflow.pending_decision = {"kind": "approval", "node_id": None, "escalation_count": 0}
+    await workflow.handle_approval(True)
+    assert workflow.approval_decision is True
+    assert workflow.pending_decision is None
+
+    workflow.pending_decision = {"kind": "clarification", "node_id": None, "escalation_count": 0}
+    await workflow.handle_clarification({"answer": "ok"})
+    assert workflow.clarification_resolved is True
+    assert workflow.pending_decision is None
+
+    workflow.pending_decision = {
+        "kind": "permission_escalation",
+        "node_id": None,
+        "escalation_count": 1,
+    }
+    await workflow.handle_permission_escalation(True)
+    assert workflow.permission_escalation_decision is True
+    assert workflow.pending_decision is None
 
 
 def test_workflow_apply_operator_decision_clarification():

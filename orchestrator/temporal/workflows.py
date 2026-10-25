@@ -73,6 +73,7 @@ class TaskExecutionWorkflow:
 
         use_node_waves = workflow.patched(NODE_WAVE_PATCH_ID) and (shape == "decomposed")
         self.current_plan["use_node_waves"] = use_node_waves
+        self.lifecycle_stage = "executing_node_waves" if use_node_waves else "executing_worker"
         escalation_failure = (
             await self._run_decomposed_node_waves(task_id)
             if use_node_waves
@@ -150,13 +151,12 @@ class TaskExecutionWorkflow:
         return None, shape
 
     async def _record_post_terminal_preflight_failure(
-        self,
-        task_id: str,
-        decomposition: dict[str, Any],
+        self, task_id: str, decomposition: dict[str, Any]
     ) -> dict[str, str]:
         """Persist the typed preflight reason without loading memory or starting execution."""
-        failure = decomposition.get("preflight_failure") or (
-            "Post-terminal quality evaluation preflight failed."
+        failure = (
+            decomposition.get("preflight_failure")
+            or "Post-terminal quality evaluation preflight failed."
         )
         await workflow.execute_activity(
             "record_workflow_failure",
@@ -175,23 +175,20 @@ class TaskExecutionWorkflow:
         }
         try:
             await workflow.wait_condition(lambda: self.approval_decision is not None)
-            if self.approval_decision:
-                return True
-            if workflow.patched(REJECTED_SESSION_STATE_PATCH_ID):
-                await workflow.execute_activity(
-                    "persist_rejected_session_state",
-                    task_id,
-                    **activity_options("persist_rejected_session_state"),
-                )
-            return False
         finally:
             self.pending_decision = None
 
-    async def _persist_and_deliver(
-        self,
-        task_id: str,
-        completion_decision: dict[str, Any],
-    ) -> dict:
+        if self.approval_decision:
+            return True
+        if workflow.patched(REJECTED_SESSION_STATE_PATCH_ID):
+            await workflow.execute_activity(
+                "persist_rejected_session_state",
+                task_id,
+                **activity_options("persist_rejected_session_state"),
+            )
+        return False
+
+    async def _persist_and_deliver(self, task_id: str, completion_decision: dict[str, Any]) -> dict:
         """Persist the final snapshot and project exactly one terminal delivery."""
         await workflow.execute_activity(
             "persist_memory", task_id, **activity_options("persist_memory")
@@ -222,6 +219,7 @@ class TaskExecutionWorkflow:
     ) -> tuple[dict | None, dict[str, Any]]:
         """Repeat worker execution only when verification returns a durable repair decision."""
         while True:
+            self.lifecycle_stage = "verifying"
             raw_decision = await workflow.execute_activity(
                 "verify_result", task_id, **activity_options("verify_result")
             )
@@ -238,6 +236,7 @@ class TaskExecutionWorkflow:
                 )
                 return {"status": "failed", "summary": failure}, decision
 
+            self.lifecycle_stage = "repairing"
             await workflow.execute_activity(
                 "provision_workspace", task_id, **activity_options("provision_workspace")
             )
@@ -261,14 +260,8 @@ class TaskExecutionWorkflow:
         escalation_count = 0
         fanout_contract_enabled = workflow.patched(M25_2_FANOUT_PATCH_ID)
         while True:
-            if fanout_contract_enabled:
-                selection = await workflow.execute_activity(
-                    "select_next_node_v2", task_id, **activity_options("select_next_node_v2")
-                )
-            else:
-                selection = await workflow.execute_activity(
-                    "select_next_node", task_id, **activity_options("select_next_node")
-                )
+            act = "select_next_node_v2" if fanout_contract_enabled else "select_next_node"
+            selection = await workflow.execute_activity(act, task_id, **activity_options(act))
             if (
                 fanout_contract_enabled
                 and selection.get("schema_version") == 2
@@ -450,16 +443,12 @@ class TaskExecutionWorkflow:
             if not permission_granted:
                 return {"status": "rejected", "summary": "Permission escalation rejected."}
             await workflow.execute_activity(
-                "provision_workspace",
-                task_id,
-                **activity_options("provision_workspace"),
+                "provision_workspace", task_id, **activity_options("provision_workspace")
             )
 
     async def _run_worker(self, task_id: str, task_queue: str | None) -> dict:
         return await workflow.execute_activity(
-            "run_worker",
-            task_id,
-            **activity_options("run_worker", task_queue=task_queue),
+            "run_worker", task_id, **activity_options("run_worker", task_queue=task_queue)
         )
 
     async def _handle_permission_escalation(
@@ -468,18 +457,24 @@ class TaskExecutionWorkflow:
         self.permission_escalation_decision = None
         prev_stage = self.lifecycle_stage
         self.lifecycle_stage = "awaiting_permission_escalation"
-        self.pending_decision = {
-            "kind": "permission_escalation",
-            "node_id": blocked_node_id,
-            "escalation_count": self.escalation_count,
-        }
         try:
             await workflow.execute_activity(
                 "request_permission_escalation",
                 task_id,
                 **activity_options("request_permission_escalation"),
             )
-            await workflow.wait_condition(lambda: self.permission_escalation_decision is not None)
+            self.pending_decision = {
+                "kind": "permission_escalation",
+                "node_id": blocked_node_id,
+                "escalation_count": self.escalation_count,
+            }
+            try:
+                await workflow.wait_condition(
+                    lambda: self.permission_escalation_decision is not None
+                )
+            finally:
+                self.pending_decision = None
+
             approved = self.permission_escalation_decision
             await workflow.execute_activity(
                 "resolve_permission_escalation",
@@ -523,13 +518,14 @@ class TaskExecutionWorkflow:
                 }
             self.processed_command_keys.add(command_key)
 
-        value = payload.get("value", True)
+        value = payload.get("value")
         if decision_kind == "approval":
             self.approval_decision = bool(value)
         elif decision_kind == "clarification":
             self.clarification_resolved = True
         elif decision_kind == "permission_escalation":
             self.permission_escalation_decision = bool(value)
+        self.pending_decision = None
 
         return {
             "applied": True,
@@ -561,23 +557,31 @@ class TaskExecutionWorkflow:
                 f"Workflow is not awaiting '{decision_kind}'. Current pending decision: {current}."
             )
 
+        if decision_kind in {"approval", "permission_escalation"} and not isinstance(
+            payload.get("value"), bool
+        ):
+            raise ValueError(f"Decision kind '{decision_kind}' requires a boolean 'value' field.")
+
     @workflow.signal
     async def handle_approval(self, approved: Any) -> None:
         accepted, value = self._accept_signal(approved)
         if accepted:
             self.approval_decision = bool(value)
+            self.pending_decision = None
 
     @workflow.signal
     async def handle_clarification(self, response: Any = None) -> None:
         accepted, _ = self._accept_signal(response)
         if accepted:
             self.clarification_resolved = True
+            self.pending_decision = None
 
     @workflow.signal
     async def handle_permission_escalation(self, approved: Any) -> None:
         accepted, value = self._accept_signal(approved)
         if accepted:
             self.permission_escalation_decision = bool(value)
+            self.pending_decision = None
 
     def _accept_signal(self, payload: Any) -> tuple[bool, Any]:
         """Deduplicate new command envelopes while accepting historical raw signals."""

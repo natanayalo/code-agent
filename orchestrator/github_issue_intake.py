@@ -6,6 +6,8 @@ import logging
 import re
 from typing import Any
 
+from sqlalchemy.exc import IntegrityError
+
 from apps.api.config import SystemConfig
 from db.enums import TimelineEventType
 from orchestrator.execution import (
@@ -27,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 _CODE_AGENT_CMD_PATTERN = re.compile(r"(?:^|\s)/code-agent(?=$|\s)", re.IGNORECASE)
-_REPLAY_COMMAND_PATTERN = re.compile(r"^replay(?=$|\s)", re.IGNORECASE)
+_REPLAY_COMMAND_PATTERN = re.compile(r"^replay$", re.IGNORECASE)
 
 
 def parse_issue_command_intent(instruction: str | None) -> tuple[str, str | None]:
@@ -42,10 +44,8 @@ def parse_issue_command_intent(instruction: str | None) -> tuple[str, str | None
     trimmed = instruction.strip()
     if not trimmed:
         return "create", None
-    match = _REPLAY_COMMAND_PATTERN.search(trimmed)
-    if match:
-        remainder = trimmed[match.end() :].strip()
-        return "replay", remainder or None
+    if _REPLAY_COMMAND_PATTERN.match(trimmed):
+        return "replay", None
     return "create", trimmed
 
 
@@ -302,7 +302,13 @@ def _link_replayed_delivery_and_timeline(
         delivery_repo = InboundDeliveryRepository(session)
         existing = delivery_repo.get_by_channel_delivery(channel="github", delivery_id=delivery_id)
         if existing is None:
-            delivery_repo.create(channel="github", delivery_id=delivery_id, task_id=new_task_id)
+            try:
+                with session.begin_nested():
+                    delivery_repo.create(
+                        channel="github", delivery_id=delivery_id, task_id=new_task_id
+                    )
+            except IntegrityError:
+                pass
         elif existing.task_id is None:
             delivery_repo.attach_task_if_unassigned(
                 channel="github", delivery_id=delivery_id, task_id=new_task_id
@@ -358,7 +364,20 @@ def _handle_issue_replay(
     if latest_task_id is None:
         return False, "not_found", False, None, session_id, err
 
-    replay_result = task_service.replay_task(source_task_id=latest_task_id)
+    delivery_key = DeliveryKey(channel="github", delivery_id=delivery_id)
+    replay_result = task_service.replay_task(
+        source_task_id=latest_task_id, delivery_key=delivery_key
+    )
+    if replay_result.status == "duplicate":
+        assert replay_result.task_snapshot is not None
+        return (
+            True,
+            "duplicate",
+            True,
+            replay_result.task_snapshot.task_id,
+            replay_result.task_snapshot.session_id,
+            "Duplicate delivery deduplicated.",
+        )
     if replay_result.status != "created":
         return (
             False,

@@ -1203,6 +1203,12 @@ async def _assert_live_queries_and_update(handle: Any, task_id: str) -> None:
             {"decision_kind": "clarification", "command_key": "bad-kind"},
         )
 
+    with pytest.raises(WorkflowUpdateFailedError):
+        await handle.execute_update(
+            TaskExecutionWorkflow.apply_operator_decision,
+            {"decision_kind": "approval", "command_key": "bad-val-missing"},
+        )
+
     update_result = await handle.execute_update(
         TaskExecutionWorkflow.apply_operator_decision,
         {"decision_kind": "approval", "value": True, "command_key": f"task:{task_id}:upd"},
@@ -1210,6 +1216,19 @@ async def _assert_live_queries_and_update(handle: Any, task_id: str) -> None:
     assert update_result["applied"] is True
     assert update_result["duplicate"] is False
     assert update_result["decision_kind"] == "approval"
+
+    pending_cleared = await handle.query(TaskExecutionWorkflow.get_pending_decision)
+    assert pending_cleared is None
+
+    with pytest.raises(WorkflowUpdateFailedError):
+        await handle.execute_update(
+            TaskExecutionWorkflow.apply_operator_decision,
+            {
+                "decision_kind": "approval",
+                "value": True,
+                "command_key": f"task:{task_id}:second-key",
+            },
+        )
 
 
 @pytest.mark.anyio

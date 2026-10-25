@@ -20,7 +20,11 @@ def test_parse_issue_command_intent():
     assert parse_issue_command_intent("replay") == ("replay", None)
     assert parse_issue_command_intent("REPLAY") == ("replay", None)
     assert parse_issue_command_intent("  replay  ") == ("replay", None)
-    assert parse_issue_command_intent("replay with debug") == ("replay", "with debug")
+    assert parse_issue_command_intent("replay with debug") == ("create", "replay with debug")
+    assert parse_issue_command_intent("replay the failing test") == (
+        "create",
+        "replay the failing test",
+    )
     assert parse_issue_command_intent("replay-task") == ("create", "replay-task")
     assert parse_issue_command_intent("fix the login bug") == ("create", "fix the login bug")
 
@@ -233,3 +237,68 @@ def test_handle_issue_replay_unit_success():
         assert kwargs["task_id"] == "task-replayed-200"
         assert kwargs["github_constraints"]["replayed_from"] == "task-source-100"
         assert kwargs["github_constraints"]["issue_number"] == 42
+
+
+def test_handle_issue_replay_unit_atomic_duplicate_from_replay_task():
+    mock_service = MagicMock()
+    mock_session = MagicMock()
+    mock_service.session_factory.return_value.__enter__.return_value = mock_session
+
+    now = datetime.now(UTC)
+    dup_snapshot = TaskSnapshot(
+        task_id="task-replayed-already",
+        session_id="session-1",
+        status="pending",
+        task_text="Issue #42",
+        created_at=now,
+        updated_at=now,
+    )
+    mock_service.replay_task.return_value = TaskReplayResult(
+        status="duplicate",
+        source_task_id="task-source-100",
+        task_snapshot=dup_snapshot,
+    )
+
+    with (
+        patch("orchestrator.github_issue_intake.InboundDeliveryRepository") as mock_del_cls,
+        patch("orchestrator.github_issue_intake.SessionRepository") as mock_sess_cls,
+        patch("orchestrator.github_issue_intake.TaskRepository") as mock_task_cls,
+    ):
+        mock_del_cls.return_value.get_by_channel_delivery.return_value = None
+        conv_mock = MagicMock()
+        conv_mock.id = "session-1"
+        mock_sess_cls.return_value.get_by_channel_thread.return_value = conv_mock
+
+        prior_task = MagicMock()
+        prior_task.id = "task-source-100"
+        mock_task_cls.return_value.list_by_session.return_value = [prior_task]
+
+        config = SystemConfig(
+            default_image="img",
+            workspace_root="/tmp",
+            github_owner_login="octocat",
+            github_issue_label="code-agent",
+        )
+        payload = {
+            "issue": {"number": 42, "title": "Crash fix", "id": 1234},
+            "comment": {"id": 9999, "body": "/code-agent replay"},
+            "sender": {"login": "octocat"},
+        }
+        ok, status, dupe, task_id, sess_id, detail = handle_issue_intake(
+            payload=payload,
+            event="issue_comment",
+            action="created",
+            delivery_id="del-concurrent-replay",
+            repo_url="https://github.com/octocat/code-agent",
+            config=config,
+            task_service=mock_service,
+        )
+        assert ok is True
+        assert status == "duplicate"
+        assert dupe is True
+        assert task_id == "task-replayed-already"
+        assert sess_id == "session-1"
+        mock_service.replay_task.assert_called_once()
+        _, kwargs = mock_service.replay_task.call_args
+        assert kwargs["source_task_id"] == "task-source-100"
+        assert kwargs["delivery_key"].delivery_id == "del-concurrent-replay"

@@ -448,3 +448,28 @@ def test_github_issue_replay_success_and_idempotency(webhook_client, session_fac
     assert dupe_data["ok"] is True
     assert dupe_data["duplicate"] is True
     assert dupe_data["task_id"] == new_task_id
+
+
+def test_github_issue_natural_language_replay_instruction_creates_task(
+    webhook_client, session_factory
+):
+    """Instructions like '/code-agent replay failing test' must create tasks, not trigger replay."""
+    client, secret, _ = webhook_client
+    status, data = _post_issue_comment(
+        client,
+        secret,
+        "del-nl-replay-1",
+        "/code-agent replay the failing test in auth",
+        issue_num=99,
+    )
+    assert status == 200
+    assert data["ok"] is True
+    assert data["status"] == "accepted"
+    task_id = data["task_id"]
+    assert task_id is not None
+
+    with session_scope(session_factory) as session:
+        task = session.get(Task, task_id)
+        assert task is not None
+        assert "replay the failing test in auth" in task.task_text
+        assert "replayed_from" not in (task.constraints or {})
