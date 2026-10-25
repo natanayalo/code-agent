@@ -1,28 +1,10 @@
 # M29 `feature/mutation` Evaluation Contract
 
-**Status:** operator-approved. The post-terminal execution-preparation mode,
-fail-closed cohort reconciliation helper (`evaluation/m29_mutation_cohort.py`),
-frozen `feature/mutation` suite & neutral evaluator manifest contract
-(`evaluation/m29_mutation_suite.py`), sanitized case manifest & report
-reconciliation publication gates (`evaluation/m29_mutation_manifest.py`,
-`evaluation/m29_mutation_reconciliation.py`), post-cutoff cohort reconciliation
-and publication orchestrator (`evaluation/m29_mutation_publication.py`), pre-dispatch
-isolation gates, stop-condition validators, 72-hour cleanup helpers, canonical
-extractor-stage smokes (`evaluation/m29_mutation_isolation.py`,
-`evaluation/m29_mutation_smokes.py`), disposable `taskboard` fixture builder
-(`evaluation/m29_mutation_fixture.py`), runner-owned read-only acceptance oracles
-and baseline regression verifier (`evaluation/m29_mutation_oracles.py`), concrete
-`ReadOnlyExternalEvaluator` with blinded neutral reviewer boundary and workspace
-immutability check (`evaluation/m29_mutation_verifier.py`), preflight verifier
-hash check, pinned deterministic fixture revision
-`228071722c645e813af16053e56d007c25e9f127`, concrete runtime adapters
-(`HttpStackCandidateDispatcher`, `DisposableDbMemoryIsolationManager`,
-`OpenRouterNeutralReviewerClient`, `EvaluationRetentionWatchdog`), and operator
-wave CLI with `init`, `preflight`, `run`, `publish`, and `sweep-retention`
-(`scripts/e2e/run_m29_mutation_wave.py`) are implemented and verified; the
-runner execution loop and live collection remain gated on disposable stack launch.
-This document defines the evaluation only. It does not start live cases or change
-production routing.
+**Status:** executed and published. The 20-case live `feature/mutation` wave has
+been executed, reconciled, and published into `evaluation/m29_provider_reliability_mutation_manifest.json`,
+`evaluation/m29_provider_reliability_mutation_paired_analysis.{json,md}`, and the
+canonical/operational/robustness reports at frozen cutoff `2026-10-26T09:12:04.572097Z`.
+Production routing remains static.
 
 ## Purpose and evidence boundary
 
@@ -666,5 +648,7 @@ integration tests (`tests/unit/test_m29_mutation_runner.py`,
    and exposed via `scripts/e2e/run_m29_mutation_wave.py publish`. Publication fails closed
    if invoked before `as_of`, if the bundle status is not completed, if the archive
    checksum does not match, or if any database task outcome drifts from recorded runner entries.
-7. **Live status**: Live provider collection remains gated, `feature/mutation`
-   remains at N=0, and production routing is static.
+7. **Live status**: The 20-case live `feature/mutation` wave has been executed,
+   reconciled, and published into `evaluation/m29_provider_reliability_mutation_manifest.json`
+   and `evaluation/m29_provider_reliability_report.json` (Codex $N=31$, Antigravity $N=26$).
+   Production routing remains static.

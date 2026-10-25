@@ -1,0 +1,20 @@
+{
+  "as_of": "2026-10-26T09:12:04.572097Z",
+  "build_sha": "036bde95c74d517f80c17e6bf32e92d300e3b873",
+  "manifest_sha256": "ac863335239078210cd58f792b966b0a81c0b7f2d5bad387e4d48d21fdcece87",
+  "paired_summary": {
+    "antigravity_only_completed_count": 0,
+    "antigravity_only_quality_pass_count": 0,
+    "both_completed_count": 9,
+    "both_quality_pass_count": 8,
+    "codex_only_completed_count": 1,
+    "codex_only_quality_pass_count": 2,
+    "identity_complete_pair_count": 10,
+    "neither_completed_count": 0,
+    "neither_quality_pass_count": 0,
+    "pair_count": 10
+  },
+  "schema_version": 1,
+  "suite_name": "m29-live-provider-evidence-mutation",
+  "suite_sha256": "81ac140df0bbbd18cd243abde2d7b86fe74b250cf0ac02e2ec5ffc208e69e987"
+}
