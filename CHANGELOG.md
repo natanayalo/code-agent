@@ -157,6 +157,11 @@ completed-task ledger; keep completed work here instead.
 
 - Fix: heartbeat Temporal verification activity ([#339](https://github.com/natanayalo/code-agent/pull/339))
 
+
+### Maintenance
+
+- Chore: update default M29 neutral evaluator to local Ollama qwen2.5-coder ([#432](https://github.com/natanayalo/code-agent/pull/432))
+
 ## m25.3-temporal-cutover-20260726T213001Z - 2026-07-26
 
 ### Added
