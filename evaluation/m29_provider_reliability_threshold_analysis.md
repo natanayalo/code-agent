@@ -227,7 +227,7 @@ regression oracles.
 All 20 cases reached immutable terminal outcomes (19 completed, 1 failed):
 all 10 Codex cases (`codex-native-executor`) completed successfully; 9 of 10
 Antigravity cases (`antigravity-native-executor`) completed successfully, with 1
-terminal failure (`tool_runtime` on case `m29-mut-06-api-ratelimit-ag`).
+terminal failure (`tool_runtime` on case `m29-mut-07-retry-delay-antigravity`).
 
 Persisted execution identity matches the frozen candidate identities for all
 20 cases: Codex `gpt-6-luna/high` and Antigravity `gemini-3.8-flash/medium`.
@@ -281,10 +281,10 @@ Post-terminal independent quality evaluated:
 
 For Codex: 10/10 passed acceptance, 10/10 passed regression, and 10/10 passed
 neutral review (10/10 overall quality pass).
-For Antigravity: 9/10 passed acceptance, 9/10 passed regression, and 8/10 passed
+For Antigravity: 8/10 passed acceptance, 10/10 passed regression, and 9/10 passed
 neutral review (8/10 overall quality pass; 1 quality fail due to terminal task failure
-on `m29-mut-06-api-ratelimit-ag`, and 1 quality fail on
-`m29-mut-04-cache-invalidation-ag` due to neutral review rejection).
+on `m29-mut-07-retry-delay-antigravity`, and 1 quality fail on
+`m29-mut-04-cursor-page-antigravity` due to acceptance oracle failure).
 
 ### 8.3 Model vintage transition and operational report interpretation
 

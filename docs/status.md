@@ -184,10 +184,11 @@ Temporal migration and rollback record is in the
   10 Codex and 10 Antigravity tasks on the frozen disposable taskboard fixture
   revision `228071722c645e813af16053e56d007c25e9f127`. All 10 Codex tasks
   completed (10/10 accepted); 9 Antigravity tasks completed (9/10 accepted; 1
-  terminal failure `tool_runtime` on `m29-mut-06-api-ratelimit-ag`). Runner-owned
+  terminal failure `tool_runtime` on `m29-mut-07-retry-delay-antigravity`). Runner-owned
   read-only acceptance oracles and neutral review by local Ollama `qwen / qwen2.5-coder:7b`
   confirmed post-terminal independent quality: 10/10 quality pass for Codex and
-  8/10 for Antigravity (1 task failure, 1 neutral review rejection).
+  8/10 for Antigravity (1 task failure on `m29-mut-07-retry-delay-antigravity`, 1
+  acceptance oracle failure on `m29-mut-04-cursor-page-antigravity`).
   Reconciled cumulative 90-day cohort accounting gives Codex $N=31$ (30 accepted,
   Wilson lower bound $0.8381$, median successful latency $25.5\text{s}$) and
   Antigravity $N=26$ (23 accepted, Wilson lower bound $0.7102$, median successful

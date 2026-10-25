@@ -123,12 +123,6 @@ def _make_baseline_ag_cell() -> ProviderReliabilityEvidenceCell:
 
 
 def _load_baseline_report(canonical_report: ProviderReliabilityReport) -> ProviderReliabilityReport:
-    bundle_baseline = Path("/private/tmp/code_agent_m29_eval/bundle/baseline_report.json")
-    if bundle_baseline.exists():
-        return ProviderReliabilityReport.model_validate_json(
-            bundle_baseline.read_text(encoding="utf-8")
-        )
-
     b_cells = [_make_baseline_codex_cell(), _make_baseline_ag_cell()]
     return ProviderReliabilityReport(
         schema_version=canonical_report.schema_version,
