@@ -148,16 +148,18 @@ def check_api_readiness(api_base_url: str, *, client: httpx.Client | None = None
     base = api_base_url.rstrip("/")
     cli = client or httpx.Client(timeout=10.0)
     try:
-        for ep, exp in [("/health", "ok"), ("/ready", "ready")]:
+        for ep, name, exp in [("/health", "health", "ok"), ("/ready", "readiness", "ready")]:
             resp = cli.get(f"{base}{ep}")
             if resp.status_code != 200:
-                raise RuntimeError(f"API {ep} failed: status {resp.status_code} ({resp.text})")
+                raise RuntimeError(
+                    f"API {name} check failed: status {resp.status_code} ({resp.text})"
+                )
             try:
                 data = resp.json()
             except Exception as exc:
-                raise RuntimeError(f"API {ep} response is not valid JSON: {exc}") from exc
+                raise RuntimeError(f"API {name} response is not valid JSON: {exc}") from exc
             if data.get("status") != exp:
-                raise RuntimeError(f"API {ep} returned non-{exp} status: {data}")
+                raise RuntimeError(f"API {name} check returned non-{exp} status: {data}")
     finally:
         if client is None:
             cli.close()
@@ -220,13 +222,13 @@ def handle_preflight(args: argparse.Namespace) -> int:
 
         as_of_arg = getattr(args, "as_of", None)
         horizon_min = getattr(args, "as_of_horizon_minutes", None)
-        if as_of_arg:
+        if isinstance(as_of_arg, str) and as_of_arg.strip():
             raw_as_of = as_of_arg[:-1] + "+00:00" if as_of_arg.endswith("Z") else as_of_arg
             effective_as_of = datetime.fromisoformat(raw_as_of)
             if effective_as_of.tzinfo is None:
                 effective_as_of = effective_as_of.replace(tzinfo=UTC)
         else:
-            horizon = horizon_min if horizon_min is not None else 75
+            horizon = horizon_min if isinstance(horizon_min, int | float) else 75
             effective_as_of = datetime.now(UTC) + timedelta(minutes=horizon)
 
         baseline_ids, baseline_report = extract_mutation_baseline_snapshot(
