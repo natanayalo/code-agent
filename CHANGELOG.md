@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: publish M29 Wave 5 feature mutation evidence and close out M29 ([#433](https://github.com/natanayalo/code-agent/pull/433))
+
 - Feat: enforce m29 disposable stack readiness and branch alignment ([#428](https://github.com/natanayalo/code-agent/pull/428))
 
 - Feat: add m29 mutation cohort reconciliation and publication cli ([#426](https://github.com/natanayalo/code-agent/pull/426))
