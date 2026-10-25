@@ -1,11 +1,11 @@
 # M29 Provider Reliability Threshold Analysis
 
-This analysis preserves the Wave 3 decision record and appends the refreshed
-Wave 4 investigation/read-only result. The current canonical
+This analysis preserves the historical Wave 3 and Wave 4 decision records and
+appends the reconciled Wave 5 feature/mutation result. The canonical
 current-execution-cohort report, operational diagnostic report, and robustness
-report use the frozen Wave 4 terminal timestamp
-`2026-09-27T22:02:06.727893Z`. Production routing and
-`evaluation/routing_metrics.json` are unchanged.
+report use the frozen Wave 5 terminal timestamp
+`2026-10-26T09:12:04.572097Z`. Production routing and
+`evaluation/routing_metrics.json` remain unchanged.
 
 ## 1. Wave 3 evidence provenance and integrity (historical snapshot)
 
@@ -196,7 +196,7 @@ remains at N=0 and has no recommendation. The provider recommendation is
 advisory only; M27 remains deferred and neither live routing nor
 `evaluation/routing_metrics.json` was changed.
 
-## 7. Updated decision record and remaining M29 work
+## 7. Wave 4 decision record (historical snapshot)
 
 1. Retain the existing advisory recommendations for `docs/read_only` and
    `feature/read_only`; add Antigravity as the `investigation/read_only`
@@ -212,3 +212,125 @@ advisory only; M27 remains deferred and neither live routing nor
 5. Evaluate hierarchical budget controls separately. Keep M27 deferred and
    production routing static pending separate review, reversible policy work,
    and held-out validation.
+
+## 8. Wave 5 feature/mutation evidence and cohort reconciliation
+
+Wave 5 used the frozen 20-case paired `feature/mutation` suite
+`evaluation/m29_live_provider_suite_mutation.json` at build SHA
+`036bde95c74d517f80c17e6bf32e92d300e3b873` and fixture revision
+`228071722c645e813af16053e56d007c25e9f127`, with suite SHA-256
+`81ac140df0bbbd18cd243abde2d7b86fe74b250cf0ac02e2ec5ffc208e69e987`.
+Neutral evaluation was performed by local Ollama `qwen / qwen2.5-coder:7b`
+(`DEFAULT_M29_NEUTRAL_EVALUATOR`) with runner-owned read-only acceptance and
+regression oracles.
+
+All 20 cases reached immutable terminal outcomes (19 completed, 1 failed):
+all 10 Codex cases (`codex-native-executor`) completed successfully; 9 of 10
+Antigravity cases (`antigravity-native-executor`) completed successfully, with 1
+terminal failure (`tool_runtime` on case `m29-mut-06-api-ratelimit-ag`).
+
+Persisted execution identity matches the frozen candidate identities for all
+20 cases: Codex `gpt-6-luna/high` and Antigravity `gemini-3.8-flash/medium`.
+The sanitized manifest reconciles all eligible Wave 5 tasks against the canonical
+PostgreSQL extractor at frozen cutoff `2026-10-26T09:12:04.572097Z`. Its SHA-256
+is `ac863335239078210cd58f792b966b0a81c0b7f2d5bad387e4d48d21fdcece87`; the
+paired-analysis JSON SHA-256 is
+`dd144d6d67b3c50984a383d8decf5c7073ced0fc97ae7dc579d3fdf229d2f2d1`.
+
+### 8.1 Cumulative cohort accounting
+
+The canonical 90-day current-execution cohort reconciles the pre-existing baseline
+and the Wave 5 suite:
+
+- **Codex (`codex-native-executor`)**:
+  - Baseline: 21 tasks (20 accepted, 1 failure: `worker_failure`)
+  - Wave 5 suite: 10 tasks (10 accepted, 0 failures)
+  - Cumulative: $N=31$ tasks (30 accepted, 1 failure)
+  - Acceptance rate: $96.77\%$ ($30/31$)
+  - Wilson 95% lower bound: $0.8381$
+  - Median successful-task latency: $25.5\text{s}$ (terminal median: $26.0\text{s}$)
+
+- **Antigravity (`antigravity-native-executor`)**:
+  - Baseline: 16 tasks (14 accepted, 2 failures: `tool_runtime`)
+  - Wave 5 suite: 10 tasks (9 accepted, 1 failure: `tool_runtime`)
+  - Cumulative: $N=26$ tasks (23 accepted, 3 failures)
+  - Acceptance rate: $88.46\%$ ($23/26$)
+  - Wilson 95% lower bound: $0.7102$
+  - Median successful-task latency: $178.7\text{s}$ (terminal median: $186.6\text{s}$)
+
+The advisory recommendation recommends `codex-native-executor` on the primary
+reliability criterion: its Wilson lower bound ($0.8381$) exceeds Antigravity
+($0.7102$). Furthermore, Codex displays substantially lower median successful-task
+latency ($25.5\text{s}$ vs $178.7\text{s}$). The 10,000-iteration unpaired bootstrap
+(seed 29) assigns `codex-native-executor` a $92.11\%$ first-rank probability.
+
+### 8.2 Pre-evaluation completion vs. post-terminal independent feature quality
+
+Wave 5 separated canonical in-task completion from post-terminal independent
+quality:
+
+| Evaluation Stage | Pairs | Both Passed | Codex Only | Antigravity Only | Neither |
+|---|---:|---:|---:|---:|---:|
+| **Pre-evaluation completion** | 10 | 9 | 1 | 0 | 0 |
+| **Post-terminal quality** | 10 | 8 | 2 | 0 | 0 |
+
+Post-terminal independent quality evaluated:
+1. Runner-owned acceptance oracle (functional verification of the requested mutation)
+2. Regression suite (proving existing repository invariants were preserved)
+3. Neutral review (blinded prompt evaluated by `qwen / qwen2.5-coder:7b`)
+
+For Codex: 10/10 passed acceptance, 10/10 passed regression, and 10/10 passed
+neutral review (10/10 overall quality pass).
+For Antigravity: 9/10 passed acceptance, 9/10 passed regression, and 8/10 passed
+neutral review (8/10 overall quality pass; 1 quality fail due to terminal task failure
+on `m29-mut-06-api-ratelimit-ag`, and 1 quality fail on
+`m29-mut-04-cache-invalidation-ag` due to neutral review rejection).
+
+### 8.3 Model vintage transition and operational report interpretation
+
+Between Wave 4 (`2026-09-27`, Codex `gpt-5.6-luna/high`) and Wave 5 (`2026-10-25`,
+Codex `gpt-6-luna/high`), the pinned Codex candidate execution identity transitioned.
+Because the extractor is strictly fail-closed and enforces current-vintage identity
+without backfill, the 37 earlier `gpt-5.6-luna` read-only tasks are categorized as
+`execution_identity_mismatch` in the `2026-10-26` canonical snapshot, causing
+`codex-native-executor-read-only` to register $N=0$ in this current-vintage cohort.
+The operational diagnostic report (`evaluation/m29_provider_reliability_operational_report.{json,md}`)
+preserves all historical model vintages across 523 scanned tasks (34 docs/read_only,
+44 feature/read_only, 38 investigation/read_only, and 55 feature/mutation Codex tasks).
+
+### 8.4 Longitudinal robustness split status
+
+The robustness report remains `partial`. Model-aware execution identity
+(`budget_usage.native_agent.model_execution`) was introduced on 2026-09-18 (37 days
+prior to cutoff). Under the robustness policy, the historical split requires tasks
+$\ge 45$ days old. Consequently, the historical 45-day window contains 0 verified
+tasks, calendar-gating longitudinal consistency until approximately 2026-11-02 for
+Wave 2/3 tasks and 2026-12-08 for `gpt-6-luna` tasks.
+
+## 9. Final M29 4-cell qualification and milestone closeout
+
+With Wave 5 published, all four canonical M29 task-class and mode cells have
+empirical, verified advisory recommendations meeting or exceeding the 10-sample floor:
+
+1. **`docs/read_only`**: recommends `codex-native-executor-read-only`
+   (Wave 2/3: $N=10$ vs $10$, 10/10 vs 9/10 accepted)
+2. **`feature/read_only`**: recommends `antigravity-native-executor-read-only`
+   (Wave 3: $N=10$ vs $10$, 5/10 accepted each, lower successful latency $202.9\text{s}$ vs $359.4\text{s}$)
+3. **`investigation/read_only`**: recommends `antigravity-native-executor-read-only`
+   (Wave 4: $N=16$ Antigravity vs $N=17$ Codex, Wilson lower bound $0.7167$ vs $0.3096$)
+4. **`feature/mutation`**: recommends `codex-native-executor`
+   (Wave 5: $N=31$ Codex vs $N=26$ Antigravity, Wilson lower bound $0.8381$ vs $0.7102$,
+   paired quality $10/10$ vs $8/10$, successful latency $25.5\text{s}$ vs $178.7\text{s}$)
+
+### Final decision record
+
+1. **Close out active M29 evidence collection and engineering**: All items under M29
+   (1a registered references, 1b pre-dispatch diagnostics, 1c investigation qualification,
+   1d post-terminal evaluation runner and 20-case mutation wave, and 1f hierarchical budget
+   controls) are complete.
+2. **Preserve fail-closed identity contracts**: No historical backfill or inference is
+   permitted. Longitudinal consistency across the 45-day split is recognized as
+   calendar-gated.
+3. **Maintain static production routing**: M27 autonomy policy remains deferred. Production
+   routing heuristics and `evaluation/routing_metrics.json` remain untouched.
+4. **Advance active milestone priority**: Transition active focus to **M30 (GitHub-Native Task and Delivery Control)**.

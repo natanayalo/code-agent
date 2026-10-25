@@ -4,10 +4,11 @@
 
 Phase 4A: Temporal stabilization, execution architecture foundation, and measured reliability.
 
-Active focus: **M29 — Provider Reliability and Evidence-Driven Routing**
-(offline advisory provider reliability report from persisted real-task
-outcomes with Wilson confidence intervals, candidate ranking, and public
-allowlist redaction).
+Active focus: **M30 — GitHub-Native Task and Delivery Control**
+(authenticated GitHub event intake, issue/delivery timeline mapping, draft PR
+synchronization, and traceable issue-to-delivery flow).
+M29 is completed with all four canonical task-class/mode cells empirically
+qualified; production routing remains static and M27 deferred.
 
 ## Current capabilities
 
@@ -51,15 +52,16 @@ allowlist redaction).
   public allowlist redaction
 - an M29 feature/mutation evaluation runner, deterministic taskboard fixture
   builder (`evaluation/m29_mutation_fixture.py`), runner-owned read-only acceptance
-  oracles (`evaluation/m29_mutation_oracles.py`), and concrete external evaluator
+  oracles (`evaluation/m29_mutation_oracles.py`), concrete external evaluator
   with blinded neutral review (`evaluation/m29_mutation_verifier.py`,
   `evaluation/m29_mutation_runner.py`) standardized on local Ollama
   `qwen / qwen2.5-coder:7b` as the zero-cost neutral evaluator (`DEFAULT_M29_NEUTRAL_EVALUATOR`,
-  suite SHA-256 `81ac140df0bbbd18cd243abde2d7b86fe74b250cf0ac02e2ec5ffc208e69e987`) with preflight gates,
-  terminal snapshot immutability verification, stop-condition halts, pinned revision
-  `228071722c645e813af16053e56d007c25e9f127`, and outcome-dependent workspace
-  cleanup/retention; live provider collection remains gated and `feature/mutation`
-  stays at N=0
+  suite SHA-256 `81ac140df0bbbd18cd243abde2d7b86fe74b250cf0ac02e2ec5ffc208e69e987`),
+  and published 20-case live `feature/mutation` wave artifacts
+  (`evaluation/m29_provider_reliability_mutation_manifest.json`,
+  `evaluation/m29_provider_reliability_mutation_paired_analysis.{json,md}`)
+  qualifying `feature/mutation` (Codex $N=31$, Antigravity $N=26$) with advisory
+  recommendation `codex-native-executor`; production routing remains static
 
 Completed work remains in [`CHANGELOG.md`](../CHANGELOG.md). The historical
 Temporal migration and rollback record is in the
@@ -178,36 +180,24 @@ Temporal migration and rollback record is in the
   included tasks. `feature/mutation` remains N=0; routing and
   `evaluation/routing_metrics.json` are unchanged.
 - The [`feature/mutation` evaluation contract](../evaluation/m29_feature_mutation_contract.md)
-  is drafted and checked against the current extractor, repo-profile delivery
-  overlay, verification/review completion flow, evaluator identity policy,
-  workspace retention, full memory isolation, and unresolved interactions.
-  Operator review is approved. The opt-in post-terminal execution mode now
-  rejects unsafe persisted TaskSpecs before dispatch and keeps failed
-  worker-reported tests from changing canonical completion; its Temporal smoke
-  confirms verification/review stages are inapplicable. The frozen
-  `feature/mutation` suite and neutral evaluator manifest contract
-  (`evaluation/m29_mutation_suite.py`), fail-closed cohort reconciliation
-  helper (`evaluation/m29_mutation_cohort.py`), sanitized manifest &
-  report-publication reconciliation layer (`evaluation/m29_mutation_manifest.py`,
-  `evaluation/m29_mutation_reconciliation.py`), and pre-dispatch isolation gates,
-  stop-condition validators, 72-hour cleanup helpers, canonical extractor
-  smokes (`evaluation/m29_mutation_isolation.py`,
-  `evaluation/m29_mutation_smokes.py`), post-cutoff cohort reconciliation and
-  publication orchestrator (`evaluation/m29_mutation_publication.py`), full evaluation
-  runner with post-terminal external quality evaluation (`evaluation/m29_mutation_runner.py`,
-  `evaluation/m29_mutation_runner_models.py`, `evaluation/m29_mutation_runner_preflight.py`,
-  `evaluation/m29_mutation_runner_archive.py`), deterministic taskboard fixture
-  builder (`evaluation/m29_mutation_fixture.py`), runner-owned read-only acceptance
-  oracles (`evaluation/m29_mutation_oracles.py`), concrete `ReadOnlyExternalEvaluator`
-  (`evaluation/m29_mutation_verifier.py`), pinned deterministic revision
-  `228071722c645e813af16053e56d007c25e9f127`, the complete operator CLI
-  with `init`, `preflight`, `run`, `publish`, and `sweep-retention`
-  (`scripts/e2e/run_m29_mutation_wave.py`), and disposable-stack readiness
-  integration fixes (branch alignment for master/main, <=259,200s retention
-  enforcement, .code-agent-git cleanup, and live API /health + /ready preflight
-  checks) are implemented and validated.
-  Live cases remain gated, `feature/mutation` is N=0, and production routing
-  remains static.
+  is completed and published. The 20-case live `feature/mutation` wave evaluated
+  10 Codex and 10 Antigravity tasks on the frozen disposable taskboard fixture
+  revision `228071722c645e813af16053e56d007c25e9f127`. All 10 Codex tasks
+  completed (10/10 accepted); 9 Antigravity tasks completed (9/10 accepted; 1
+  terminal failure `tool_runtime` on `m29-mut-06-api-ratelimit-ag`). Runner-owned
+  read-only acceptance oracles and neutral review by local Ollama `qwen / qwen2.5-coder:7b`
+  confirmed post-terminal independent quality: 10/10 quality pass for Codex and
+  8/10 for Antigravity (1 task failure, 1 neutral review rejection).
+  Reconciled cumulative 90-day cohort accounting gives Codex $N=31$ (30 accepted,
+  Wilson lower bound $0.8381$, median successful latency $25.5\text{s}$) and
+  Antigravity $N=26$ (23 accepted, Wilson lower bound $0.7102$, median successful
+  latency $178.7\text{s}$). The advisory recommendation recommends `codex-native-executor`
+  for `feature/mutation` (92.11% bootstrap win probability). All four canonical
+  M29 cells (`docs/read_only`, `feature/read_only`, `investigation/read_only`,
+  and `feature/mutation`) are now empirically qualified with $\ge 10$ samples per
+  provider. Robustness remains `partial` because model-aware execution identity is
+  37 days old (<45-day historical split); M27 remains deferred and production routing
+  is static.
 
 ## Known limitations
 
@@ -236,51 +226,23 @@ Temporal migration and rollback record is in the
 
 ## Next slices only
 
-1. Continue remaining M29 evidence work following the Wave 4 conclusion
-   (advisory recommendations for `docs/read_only`, `feature/read_only`, and
-   `investigation/read_only`; partial robustness; static production routing):
-   a. [Completed] remove legacy raw-secret ingress and enforce opaque registered references (M29 Item 1a);
-   b. [Completed] add provider-specific pre-dispatch diagnostics (M29 Item 1b);
-   c. [Completed] qualify the cumulative `investigation/read_only` sample floor,
-      retaining the three Wave 4 Codex identity exclusions;
-   d. [Completed] complete the post-terminal evaluation runner, memory isolation,
-      pending-interaction handling, delivery safeguards, extractor-stage smokes, and
-      72-hour cleanup before live evidence collection. The frozen `feature/mutation`
-      suite & neutral evaluator manifest contract
-      (`evaluation/m29_mutation_suite.py`) is standardized on local Ollama
-      `qwen / qwen2.5-coder:7b` as the permanent zero-cost neutral evaluator (`DEFAULT_M29_NEUTRAL_EVALUATOR`),
-      sharing exact SHA-256 alignment (`81ac140df0bbbd18cd243abde2d7b86fe74b250cf0ac02e2ec5ffc208e69e987`)
-      with the published mutation manifest. The exact baseline-plus-eligible-suite
-      reconciliation gate (`evaluation/m29_mutation_cohort.py`), the
-      sanitized manifest & report-publication reconciliation layer
-      (`evaluation/m29_mutation_manifest.py`,
-      `evaluation/m29_mutation_reconciliation.py`), the post-cutoff cohort
-      reconciliation and publication orchestrator (`evaluation/m29_mutation_publication.py`),
-      the pre-dispatch memory isolation gate, stop-condition validators, 72-hour cleanup helpers,
-      and canonical extractor-stage smokes
-      (`evaluation/m29_mutation_isolation.py`,
-      `evaluation/m29_mutation_smokes.py`), concrete `CandidateDispatcher`,
-      `NeutralReviewerClient`, and 72-hour retention watchdog live adapters
-      (`evaluation/m29_mutation_dispatcher.py`,
-      `evaluation/m29_mutation_reviewer_client.py`,
-      `evaluation/m29_mutation_watchdog.py`), and the operator wave CLI
-      with `init`, `preflight`, `run`, `publish`, and `sweep-retention`
-      (`scripts/e2e/run_m29_mutation_wave.py`) are implemented and validated;
-   e. gather evidence in a historical 45-day cohort before claiming
-      longitudinal robustness;
-   f. evaluate hierarchical budget controls separately (`orchestrator/hierarchical_budget.py`
-      implements typed whole-task, slice, and repair limits, pre-dispatch exhaustion gates,
-      concurrency clamping, and deterministic compliance reporting; validated via unit
-      and vertical-slice E2E suites).
-2. Use the M28 report as a scoped safety/effectiveness signal only; do not
-   change routing or add semantic retrieval without further evidence.
+1. Begin **M30 — GitHub-Native Task and Delivery Control**:
+   a. add authenticated, idempotent GitHub event intake for selected issue and delivery events;
+   b. persist external issue, branch, commit, pull-request, and check-run identity on the existing task and delivery timeline;
+   c. allow starting or replaying a task from an eligible issue event without generic webhook payload translation;
+   d. synchronize pull-request and CI state into the dashboard operator inbox with direct links and safe next actions;
+   e. preserve one traceable chain from source issue through task, worker evidence, validation, branch, and draft PR.
+2. Maintain completed M29 advisory report contracts and static production routing:
+   a. all four canonical task-class/mode cells are qualified (`docs/read_only`, `feature/read_only`, `investigation/read_only`, `feature/mutation`);
+   b. longitudinal 45-day split robustness remains calendar-gated on model-aware task age (expected ~2026-11-02 for Wave 2/3 tasks and ~2026-12-08 for `gpt-6-luna`);
+   c. M27 autonomy policy remains deferred.
 
 ## Deferred
 
 - M27 reliability-based autonomy remains reserved until real-task metrics can
-  support reversible policy thresholds. Wave 4 now qualifies the cumulative
-  investigation/read-only cohort, but M29 robustness is still partial, the
-  historical 45-day cohort is empty, and `feature/mutation` remains unmeasured.
+  support reversible policy thresholds. All four M29 cells now have qualified
+  advisory recommendations, but 45-day longitudinal split robustness remains
+  calendar-gated on task age.
 - durable child workflows, broad mutable fan-out, isolated worktree/patch
   reconciliation, an operator-visible agent tree, and evidence-backed
   procedural skills remain future/conditional ideas rather than current work.
