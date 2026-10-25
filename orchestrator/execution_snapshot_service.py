@@ -686,19 +686,24 @@ def _resolve_task_delivery_metadata(
         if delivery_branch and not raw_meta.get("branch_name"):
             raw_meta["branch_name"] = delivery_branch
 
-    has_content = any(
-        raw_meta.get(k) is not None
-        for k in (
-            "delivery_mode",
-            "branch_name",
-            "pr_url",
-            "pr_number",
-            "head_sha",
-            "ci_status",
-            "source_issue_number",
-            "source_issue_url",
+    has_content = (
+        any(
+            raw_meta.get(k) is not None
+            for k in (
+                "delivery_mode",
+                "branch_name",
+                "pr_title",
+                "pr_url",
+                "pr_number",
+                "head_sha",
+                "ci_status",
+                "source_issue_number",
+                "source_issue_url",
+            )
         )
-    ) or bool(raw_meta.get("check_runs"))
+        or bool(raw_meta.get("check_runs"))
+        or bool(raw_meta.get("review_comments"))
+    )
 
     if not has_content:
         return None

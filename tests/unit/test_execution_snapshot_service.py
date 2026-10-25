@@ -191,3 +191,44 @@ def test_map_task_to_snapshot_enriches_latest_run_delivery_metadata() -> None:
         == "https://github.com/octocat/code-agent/issues/42"
     )
     assert snapshot.latest_run.delivery_metadata.branch_name == "agent/task-42"
+
+
+def test_delivery_metadata_snapshot_retains_review_comments_and_pr_title() -> None:
+    from orchestrator.execution_snapshot_service import _resolve_task_delivery_metadata
+    from orchestrator.execution_types import DeliveryMetadataSnapshot
+
+    now = datetime.now(UTC)
+    raw = {
+        "pr_title": "Fix memory leak (#42)",
+        "pr_number": 105,
+        "pr_url": "https://github.com/octocat/code-agent/pull/105",
+        "review_comments": [
+            {
+                "id": 901,
+                "path": "src/app.py",
+                "line": 42,
+                "body": "Improve error handling",
+                "user_login": "reviewer1",
+                "created_at": now.isoformat(),
+                "replied": True,
+            }
+        ],
+        "review_comments_last_checked_at": now.isoformat(),
+        "review_comments_replied_at": now.isoformat(),
+    }
+
+    snapshot = DeliveryMetadataSnapshot.model_validate(raw)
+    assert snapshot.pr_title == "Fix memory leak (#42)"
+    assert len(snapshot.review_comments) == 1
+    assert snapshot.review_comments[0]["id"] == 901
+    assert snapshot.review_comments[0]["replied"] is True
+    assert snapshot.review_comments_last_checked_at == now
+    assert snapshot.review_comments_replied_at == now
+
+    task = SimpleNamespace(constraints={}, worker_runs=[])
+    run = SimpleNamespace(id="r1", started_at=now, delivery_metadata=raw)
+    resolved = _resolve_task_delivery_metadata(task, latest_run=run)
+    assert resolved is not None
+    assert resolved.pr_title == "Fix memory leak (#42)"
+    assert len(resolved.review_comments) == 1
+    assert resolved.review_comments_last_checked_at == now

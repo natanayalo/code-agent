@@ -170,6 +170,7 @@ class DeliveryMetadataSnapshot(ExecutionModel):
 
     delivery_mode: str | None = None
     branch_name: str | None = None
+    pr_title: str | None = None
     pr_url: str | None = None
     pr_number: int | None = None
     head_sha: str | None = None
@@ -183,6 +184,9 @@ class DeliveryMetadataSnapshot(ExecutionModel):
     check_runs: list[dict[str, Any]] = Field(default_factory=list)
     source_issue_number: int | None = None
     source_issue_url: str | None = None
+    review_comments: list[dict[str, Any]] = Field(default_factory=list)
+    review_comments_last_checked_at: datetime | None = None
+    review_comments_replied_at: datetime | None = None
 
 
 class WorkerRunSnapshot(ExecutionModel):
