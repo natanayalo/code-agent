@@ -143,6 +143,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Fixed
 
+- Fix(eval): run extractor stage smokes in isolated disposable db ([#429](https://github.com/natanayalo/code-agent/pull/429))
+
 - Fix(orchestrator): ignore negated refactor instructions in task classification ([#382](https://github.com/natanayalo/code-agent/pull/382))
 
 - Fix: require verification and broker delivery before completing tasks ([#383](https://github.com/natanayalo/code-agent/pull/383))
