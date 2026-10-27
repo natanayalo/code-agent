@@ -92,6 +92,7 @@ def test_temporal_compatibility_pin_and_isolated_server_gate() -> None:
     cleanup_step = _step_by_name(steps, "Stop isolated Temporal compatibility stack")
     assert "docker-compose.temporal-compatibility.yml" in server_step["run"]
     assert "tests/integration/test_temporal_compatibility.py" in test_step["run"]
+    assert 'test "$TEMPORAL_COMPATIBILITY_ADDRESS" = "127.0.0.1:17233"' in test_step["run"]
     assert test_step["env"]["TEMPORAL_COMPATIBILITY_ADDRESS"] == "127.0.0.1:17233"
     assert "--ignore=tests/integration/test_temporal_compatibility.py" in integration_step["run"]
     assert cleanup_step["if"] == "always()"

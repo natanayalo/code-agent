@@ -23,6 +23,7 @@ from temporalio.client import (
     WorkflowFailureError,
     WorkflowHandle,
 )
+from temporalio.exceptions import CancelledError
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
 from orchestrator.temporal.workflows import TaskExecutionWorkflow
@@ -32,10 +33,22 @@ from tests.temporal_history_fixtures import capture_history_fixture
 def _server_address() -> str:
     address = os.environ.get("TEMPORAL_COMPATIBILITY_ADDRESS")
     if not address:
-        pytest.fail("TEMPORAL_COMPATIBILITY_ADDRESS must target the disposable compatibility stack")
+        pytest.skip("real-server compatibility gate is opt-in")
     if address != "127.0.0.1:17233":
         pytest.fail("Refusing a non-disposable Temporal target; use 127.0.0.1:17233")
     return address
+
+
+def test_server_address_skips_when_not_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("TEMPORAL_COMPATIBILITY_ADDRESS", raising=False)
+    with pytest.raises(pytest.skip.Exception, match="opt-in"):
+        _server_address()
+
+
+def test_server_address_rejects_non_disposable_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TEMPORAL_COMPATIBILITY_ADDRESS", "temporal:7233")
+    with pytest.raises(pytest.fail.Exception, match="Refusing a non-disposable Temporal target"):
+        _server_address()
 
 
 @activity.defn(name="classify_and_plan")
@@ -208,8 +221,9 @@ async def test_production_workflow_signal_and_cancellation() -> None:
         )
         await _wait_for_decision(cancelled)
         await cancelled.cancel()
-        with pytest.raises(WorkflowFailureError):
+        with pytest.raises(WorkflowFailureError) as failure:
             await cancelled.result()
+        assert isinstance(failure.value.cause, CancelledError)
         capture_history_fixture("cancellation", await cancelled.fetch_history())
     finally:
         await worker.shutdown()
