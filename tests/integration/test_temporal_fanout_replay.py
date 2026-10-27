@@ -16,6 +16,7 @@ from orchestrator.temporal.workflows import (
     REJECTED_SESSION_STATE_PATCH_ID,
     TaskExecutionWorkflow,
 )
+from tests.temporal_history_fixtures import capture_history_fixture
 
 
 @activity.defn(name="classify_and_plan")
@@ -189,6 +190,7 @@ async def test_m25_1b_history_replays_without_changing_select_next_node_input() 
             )
             assert (await handle.result())["status"] == "completed"
             history = await handle.fetch_history()
+            capture_history_fixture("decomposed-patch-false", history)
 
     replay = await Replayer(
         workflows=[TaskExecutionWorkflow], workflow_runner=UnsandboxedWorkflowRunner()
@@ -257,6 +259,7 @@ async def test_m25_4_repair_history_replays_with_completion_loop_patch() -> None
             )
             assert (await handle.result())["status"] == "completed"
             history = await handle.fetch_history()
+            capture_history_fixture("repair", history)
 
     assert worker_calls == 2
     assert verification_calls == 2
@@ -299,9 +302,38 @@ async def test_pre_persistence_approval_history_replays(approved: bool) -> None:
             await handle.signal(_M30PriorApprovalWorkflow.handle_approval, approved)
             await handle.result()
             history = await handle.fetch_history()
+            decision = "approved" if approved else "rejected"
+            capture_history_fixture(f"approval-{decision}", history)
 
     replay = await Replayer(
         workflows=[TaskExecutionWorkflow], workflow_runner=UnsandboxedWorkflowRunner()
     ).replay_workflow(history)
 
     assert replay.replay_failure is None
+
+
+@pytest.mark.anyio
+async def test_sanitized_frozen_temporal_histories_replay() -> None:
+    """Frozen approval, cancellation, repair, and decomposed histories replay."""
+    from pathlib import Path
+
+    from temporalio.client import WorkflowHistory
+
+    fixture_dir = Path(__file__).parent / "fixtures" / "temporal_histories"
+    fixture_names = (
+        "approval-approved",
+        "approval-rejected",
+        "approval-update",
+        "cancellation",
+        "repair",
+        "decomposed-patch-false",
+    )
+    replayer = Replayer(
+        workflows=[TaskExecutionWorkflow], workflow_runner=UnsandboxedWorkflowRunner()
+    )
+    for fixture_name in fixture_names:
+        path = fixture_dir / f"{fixture_name}.json"
+        assert path.is_file(), f"missing frozen Temporal history fixture: {path}"
+        history = WorkflowHistory.from_json(f"frozen-{fixture_name}", path.read_text("utf-8"))
+        replay = await replayer.replay_workflow(history)
+        assert replay.replay_failure is None, f"{fixture_name}: {replay.replay_failure}"

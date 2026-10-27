@@ -1,0 +1,42 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: temporal
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal -d temporal"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    ports:
+      - "127.0.0.1:15432:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    volumes:
+      - ./scripts/temporal-compatibility/init.sql:/docker-entrypoint-initdb.d/01-temporal.sql:ro
+  temporal:
+    image: temporalio/auto-setup:1.24.2
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: temporal
+      POSTGRES_SEEDS: postgres
+      DBNAME: temporal
+      VISIBILITY_DBNAME: temporal_visibility
+      DYNAMIC_CONFIG_FILE_PATH: /etc/temporal/config/dynamicconfig/compatibility.yaml
+    volumes:
+      - ./scripts/temporal-compatibility/dynamicconfig.yaml:/etc/temporal/config/dynamicconfig/compatibility.yaml:ro
+    ports:
+      - "127.0.0.1:17233:7233"
+    healthcheck:
+      test: ["CMD-SHELL", "tctl --address \"$(hostname -i):7233\" cluster health"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+      start_period: 10s

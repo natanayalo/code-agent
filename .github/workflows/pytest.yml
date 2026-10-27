@@ -61,6 +61,14 @@ jobs:
             --cov-branch \
             --cov-report=term-missing \
             --cov-report=xml
+      - name: Start isolated Temporal 1.24.2 compatibility stack
+        run: docker compose -p temporal-compat-${{ github.run_id }} -f docker-compose.temporal-compatibility.yml up -d --wait
+      - name: Run real-server Temporal compatibility gate
+        env:
+          TEMPORAL_COMPATIBILITY_ADDRESS: 127.0.0.1:17233
+        run: |
+          test "$TEMPORAL_COMPATIBILITY_ADDRESS" = "127.0.0.1:17233"
+          poetry run pytest -q tests/integration/test_temporal_compatibility.py
       - name: Run integration pytest suite with coverage gate
         env:
           CODE_AGENT_TEST_POSTGRES_URL: postgresql+psycopg://postgres:postgres@127.0.0.1:5432/code_agent_test
@@ -69,6 +77,7 @@ jobs:
           CODE_AGENT_PRE_DISPATCH_DIAGNOSTICS_ENABLED: "0"
         run: |
           poetry run pytest tests/integration \
+            --ignore=tests/integration/test_temporal_compatibility.py \
             --cov=apps \
             --cov=db \
             --cov=memory \
@@ -82,6 +91,9 @@ jobs:
             --cov-report=term-missing \
             --cov-report=xml \
             --cov-fail-under=90
+      - name: Stop isolated Temporal compatibility stack
+        if: always()
+        run: docker compose -p temporal-compat-${{ github.run_id }} -f docker-compose.temporal-compatibility.yml down --volumes --remove-orphans
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v7
         with:
