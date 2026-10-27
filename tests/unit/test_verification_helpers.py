@@ -53,6 +53,15 @@ def test_verifier_requests_keep_task_id_for_nested_trace_filtering() -> None:
 
     assert independent.task_id == state.task.task_id
     assert deterministic.task_id == state.task.task_id
+    assert deterministic.scratch_namespace is None
+
+
+def test_read_only_verification_uses_external_scratch_namespace() -> None:
+    state = OrchestratorState(
+        task={"task_id": "task-id", "task_text": "Review", "constraints": {"read_only": True}}
+    )
+    request = _build_deterministic_verification_request(state, ["true"], 30)
+    assert request.scratch_namespace == "verification:task-id:0"
 
 
 # ---------------------------------------------------------------------------

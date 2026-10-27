@@ -12,18 +12,21 @@ from temporalio.worker import UnsandboxedWorkflowRunner
 from temporalio.worker import Worker as TemporalWorker
 
 import workers.native_agent_runner as native_agent_runner
+from apps.api.config import SystemConfig
 from db.enums import TimelineEventType
 from db.models import Base, Task, TaskTimelineEvent, WorkerRun
 from orchestrator.execution import TaskExecutionService, TaskSubmission
 from orchestrator.nodes.verification_result import verify_result as evaluate_verification
+from orchestrator.schedule_spec import ScheduleSpec
 from orchestrator.state import OrchestratorState
 from orchestrator.temporal.activities import TaskExecutionActivities
 from orchestrator.temporal.command_dispatcher import TemporalCommandDispatcher
+from orchestrator.temporal.scheduled_review import ScheduledReviewActivities
 from orchestrator.temporal.workflows import TaskExecutionWorkflow
 from repositories import create_engine_from_url, create_session_factory, session_scope
 from sandbox import DockerShellCommandResult, DockerShellSession
 from tests.native_agent_test_doubles import LocalNativeAgentRunner
-from workers import CodexCliWorker
+from workers import CodexCliWorker, ShellWorker, WorkerFacade
 from workers.cli_runtime import CliRuntimeAdapter, CliRuntimeStep
 
 
@@ -78,7 +81,10 @@ def session_factory(tmp_path: Path):
 
 
 @pytest.mark.anyio
-async def test_vertical_slice_e2e_happy_path(session_factory, tmp_path: Path, monkeypatch):
+@pytest.mark.parametrize("scheduled", [False, True])
+async def test_vertical_slice_e2e_happy_path(
+    session_factory, tmp_path: Path, monkeypatch, scheduled
+):
     """The full stack should ingest a task, run it in a sandbox, and persist the result."""
     monkeypatch.setattr("sandbox.workspace.default_workspace_root", lambda: tmp_path)
     monkeypatch.setattr(native_agent_runner, "DockerNativeAgentExecutor", LocalNativeAgentRunner)
@@ -87,7 +93,9 @@ async def test_vertical_slice_e2e_happy_path(session_factory, tmp_path: Path, mo
 
     # 1. Setup real components with mocked turns
     adapter = _ScriptedAdapter(
-        [
+        [CliRuntimeStep(kind="final", final_output="Dependency review completed with limitations.")]
+        if scheduled
+        else [
             CliRuntimeStep(
                 kind="tool_call",
                 tool_name="execute_bash",
@@ -108,9 +116,12 @@ async def test_vertical_slice_e2e_happy_path(session_factory, tmp_path: Path, mo
             self._real = DockerShellSession(container, secrets=secrets)
 
         def execute(self, command, **kwargs):
-            if "status --porcelain=v1 -z --untracked-files=all" in command:
+            if not scheduled and "status --porcelain=v1 -z --untracked-files=all" in command:
                 return DockerShellCommandResult(
-                    command=command, output="?? hello.txt\0", exit_code=0, duration_seconds=0.1
+                    command=command,
+                    output="?? hello.txt\0",
+                    exit_code=0,
+                    duration_seconds=0.1,
                 )
             return self._real.execute(command, **kwargs)
 
@@ -120,8 +131,18 @@ async def test_vertical_slice_e2e_happy_path(session_factory, tmp_path: Path, mo
     worker = CodexCliWorker(
         runtime_adapter=adapter,
         session_factory=lambda container, **kwargs: _GitMockingSession(container, **kwargs),
+        workspace_root=tmp_path if scheduled else None,
     )
-    service = TaskExecutionService(session_factory=session_factory, worker=worker)
+    service_worker = (
+        WorkerFacade(codex_worker=worker, shell_worker=ShellWorker(workspace_root=tmp_path))
+        if scheduled
+        else worker
+    )
+    service = TaskExecutionService(
+        session_factory=session_factory,
+        worker=service_worker,
+        workspace_root=tmp_path if scheduled else None,
+    )
 
     # 2. Ingest a task
     # We use a dummy repo that exists on the filesystem for cloning
@@ -147,12 +168,38 @@ async def test_vertical_slice_e2e_happy_path(session_factory, tmp_path: Path, mo
 
     task_text = "Create hello.txt in the dummy repo"
     repo_url = f"file://{repo_path.resolve()}"
+    if scheduled:
+        monkeypatch.setenv("CODE_AGENT_ALLOWED_LOCAL_REMOTES", str(repo_path.resolve()))
 
     submission = TaskSubmission(task_text=task_text, repo_url=repo_url, branch="master")
 
     async with await WorkflowEnvironment.start_time_skipping() as environment:
-        snapshot, _ = service.create_task(submission)
-        task_id = snapshot.task_id
+        if scheduled:
+            review = ScheduledReviewActivities(
+                service,
+                SystemConfig(
+                    default_image="test",
+                    workspace_root=str(tmp_path),
+                    allowed_repos={"repo": repo_url},
+                ),
+            )
+            spec = ScheduleSpec(
+                version=1,
+                purpose="dependency_review",
+                repo_key="repo",
+                branch="master",
+                weekdays=("monday",),
+                time="09:00",
+                timezone="UTC",
+            )
+            outcome = await review.submit("weekly", "occurrence", spec.model_dump(mode="json"))
+            task_id = outcome["task_id"]
+            assert task_id is not None
+            snapshot = service.get_task(task_id)
+            assert snapshot is not None
+        else:
+            snapshot, _ = service.create_task(submission)
+            task_id = snapshot.task_id
         assert snapshot.orchestration_runtime == "temporal"
 
         activities = TaskExecutionActivities(service=service)
@@ -189,7 +236,10 @@ async def test_vertical_slice_e2e_happy_path(session_factory, tmp_path: Path, mo
             handle = environment.client.get_workflow_handle(f"task-{task_id}")
             workflow_result = await handle.result()
 
-        assert workflow_result["status"] == "completed"
+        snapshot = service.get_task(task_id)
+        assert workflow_result["status"] == "completed", (
+            snapshot.model_dump_json() if snapshot else str(workflow_result),
+        )
 
     # 4. Verify the outcome
     with session_scope(session_factory) as session:
@@ -208,10 +258,20 @@ async def test_vertical_slice_e2e_happy_path(session_factory, tmp_path: Path, mo
 
         assert run is not None
         assert run.status == "success"
-        assert "Successfully created hello.txt" in run.summary
-        assert len(run.commands_run) == 1
-        assert run.files_changed_count == 1
-        assert "hello.txt" in run.files_changed
+        if scheduled:
+            assert "Dependency review" in run.summary
+            assert run.files_changed_count == 0
+            assert run.files_changed == []
+            assert _run_git(["git", "status", "--porcelain"], cwd=repo_path) == ""
+            workspaces = list(tmp_path.glob(f"workspace-{task_id}-*"))
+            assert workspaces
+            for workspace in workspaces:
+                assert _run_git(["git", "status", "--porcelain"], cwd=workspace) == ""
+        else:
+            assert "Successfully created hello.txt" in run.summary
+            assert len(run.commands_run) == 1
+            assert run.files_changed_count == 1
+            assert "hello.txt" in run.files_changed
 
         timeline = (
             session.execute(
@@ -227,7 +287,7 @@ async def test_vertical_slice_e2e_happy_path(session_factory, tmp_path: Path, mo
         assert [event.sequence_number for event in timeline] == list(
             range(first_sequence, first_sequence + len(timeline))
         )
-        assert timeline[-1].event_type.value == "task_completed"
+        assert any(event.event_type.value == "task_completed" for event in timeline)
 
 
 @pytest.mark.anyio

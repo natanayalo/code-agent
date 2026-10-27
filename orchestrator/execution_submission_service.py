@@ -38,6 +38,7 @@ from orchestrator.execution_types import (
 from orchestrator.execution_types import (
     RESERVED_INTERNAL_CONSTRAINT_KEYS as _RESERVED_INTERNAL_CONSTRAINT_KEYS,
 )
+from orchestrator.scheduled_submission import lock_and_check_occurrence
 from orchestrator.task_spec import build_task_spec
 from privacy.redaction import redact_private_tags, redact_private_tags_recursive
 from repositories import (
@@ -59,6 +60,10 @@ from sandbox.secrets import (
 )
 
 logger = logging.getLogger("orchestrator.execution")
+
+
+class ScheduledSessionBusyError(Exception):
+    """A scheduled session already has an unfinished task."""
 
 
 def _normalize_and_validate_submission(self: Any, submission: TaskSubmission) -> TaskSubmission:
@@ -257,6 +262,7 @@ def _persist_submission(
     status: TaskStatus,
     max_attempts: int,
     delivery_key: DeliveryKey | None = None,
+    skip_if_session_busy: bool = False,
 ) -> tuple[_PersistedTaskContext | None, str | None]:
     """Create or restore the session scaffolding for a submitted task."""
     now = utc_now()
@@ -313,6 +319,10 @@ def _persist_submission(
                 external_thread_id=submission.session.external_thread_id,
                 last_seen_at=now,
             )
+        if skip_if_session_busy:
+            outcome = lock_and_check_occurrence(session, conversation_session.id, delivery_key, now)
+            if outcome is not None:
+                return None, outcome
         session_repo.touch(session_id=conversation_session.id, seen_at=now)
 
         task_id = str(uuid.uuid4())

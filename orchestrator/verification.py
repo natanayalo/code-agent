@@ -625,6 +625,11 @@ def _build_deterministic_verification_request(
         branch=state.task.branch,
         workspace_id=workspace_id,
         read_only=state.task.constraints.get("read_only", False),
+        scratch_namespace=(
+            f"verification:{state.task.task_id}:{state.attempt_count}"
+            if state.task.constraints.get("read_only") is True
+            else None
+        ),
         task_text=script,
         budget={"worker_timeout_seconds": timeout_seconds},
         secrets=dict(state.task.secrets),

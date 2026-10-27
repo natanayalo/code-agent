@@ -11,11 +11,16 @@ from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 from temporalio.client import Client
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
+from apps.api.config import SystemConfig
 from db.enums import WorkerNodeStatus
 from orchestrator.operational_health import WORKER_HEARTBEAT_INTERVAL_SECONDS
 from orchestrator.temporal.activities import TaskExecutionActivities
 from orchestrator.temporal.command_dispatcher import TemporalCommandDispatcher
 from orchestrator.temporal.queues import CODEX_EXECUTION_TASK_QUEUE
+from orchestrator.temporal.scheduled_review import (
+    ScheduledReviewActivities,
+    ScheduledReviewWorkflow,
+)
 from orchestrator.temporal.workflows import TaskExecutionWorkflow
 
 logger = logging.getLogger(__name__)
@@ -69,15 +74,19 @@ async def _heartbeat_temporal_worker(task_service: Any, *, worker_id: str) -> No
 
 
 def _build_temporal_workers(
-    *, client: Client, task_queue: str, task_service: Any
+    *, client: Client, task_queue: str, task_service: Any, config: SystemConfig | None = None
 ) -> tuple[Worker, Worker]:
     activities = TaskExecutionActivities(service=task_service)
+    scheduled_activities = ScheduledReviewActivities(
+        task_service, config or SystemConfig.load_from_env()
+    )
     workflow_worker = Worker(
         client,
         task_queue=task_queue,
-        workflows=[TaskExecutionWorkflow],
+        workflows=[TaskExecutionWorkflow, ScheduledReviewWorkflow],
         workflow_runner=UnsandboxedWorkflowRunner(),
         activities=[
+            scheduled_activities.submit,
             activities.classify_and_plan,
             activities.decompose_task,
             activities.select_next_node,
@@ -114,6 +123,7 @@ async def start_temporal_worker(
     temporal_address: str,
     task_queue: str,
     task_service: Any,
+    config: SystemConfig | None = None,
 ) -> None:
     """Connect to Temporal and start the worker loop."""
     logger.info(
@@ -146,6 +156,7 @@ async def start_temporal_worker(
         client=client,
         task_queue=task_queue,
         task_service=task_service,
+        config=config,
     )
 
     logger.info("Temporal workers successfully started. Running worker loops...")

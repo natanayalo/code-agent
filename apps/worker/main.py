@@ -9,6 +9,7 @@ import signal
 
 from sqlalchemy.orm import sessionmaker
 
+from apps.api.config import SystemConfig
 from apps.api.progress import create_outbound_http_clients
 from apps.api.task_service_factory import build_task_service_from_env
 from apps.observability import configure_tracing_from_env
@@ -49,6 +50,7 @@ async def run_worker_forever() -> None:
             temporal_address=temporal_address,
             task_queue="task-execution-queue",
             task_service=service,
+            config=SystemConfig.load_from_env(),
         )
     finally:
         await asyncio.gather(

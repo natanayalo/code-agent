@@ -97,6 +97,7 @@ from orchestrator.nodes.utils import _available_workers
 from orchestrator.nodes.verification import build_verify_result_node
 from orchestrator.post_terminal_quality import post_terminal_quality_evaluation_spec_errors
 from orchestrator.provider_diagnostics import ProviderDiagnosticsService
+from orchestrator.read_only_evidence import has_clean_trusted_workspace
 from orchestrator.state import (
     DecomposedTaskPlan,
     NodeOutcome,
@@ -1864,9 +1865,14 @@ class TaskExecutionActivities:
             source_files_changed = _source_file_changes(
                 result.files_changed, node_activity.logical_activity_key
             )
+            diff_evidence = bool(result.diff_text)
+            if node.parallel_safe and result.diff_text == "<no textual git diff output>":
+                diff_evidence = not await asyncio.to_thread(
+                    has_clean_trusted_workspace, selected_worker, result.workspace_id
+                )
             if node.parallel_safe and (
                 source_files_changed
-                or result.diff_text
+                or diff_evidence
                 or (result.delivery_metadata if hasattr(result, "delivery_metadata") else None)
             ):
                 return result.model_copy(

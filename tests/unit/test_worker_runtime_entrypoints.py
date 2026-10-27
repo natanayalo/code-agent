@@ -280,7 +280,8 @@ def test_temporal_worker_builds_workflow_and_bounded_execution_workers(monkeypat
 
     assert workflow.config["task_queue"] == "workflow-queue"
     assert workflow.config["workflow_runner"] == "runner"
-    assert len(workflow.config["activities"]) == 18
+    assert len(workflow.config["activities"]) == 19
+    assert temporal_worker.ScheduledReviewWorkflow in workflow.config["workflows"]
     assert "persist_approval_decision" in workflow.config["activities"]
     assert "persist_rejected_session_state" in workflow.config["activities"]
     assert execution.config["task_queue"] == temporal_worker.CODEX_EXECUTION_TASK_QUEUE
@@ -351,13 +352,11 @@ async def test_run_worker_forever_always_starts_temporal_and_ignores_legacy_sele
 
     await worker_main.run_worker_forever()
 
-    assert worker_calls == [
-        {
-            "temporal_address": "temporal:7233",
-            "task_queue": "task-execution-queue",
-            "task_service": fake_service,
-        }
-    ]
+    assert len(worker_calls) == 1
+    assert worker_calls[0]["temporal_address"] == "temporal:7233"
+    assert worker_calls[0]["task_queue"] == "task-execution-queue"
+    assert worker_calls[0]["task_service"] is fake_service
+    assert isinstance(worker_calls[0]["config"], worker_main.SystemConfig)
     assert set(close_calls) == {"telegram", "webhook"}
 
 
