@@ -103,9 +103,8 @@ def _normalize_and_validate_submission(self: Any, submission: TaskSubmission) ->
         and submission.worker_profile_override not in self.worker_profiles
     ):
         raise TaskSubmissionValidationError(
-            "worker_profile_override must reference a configured worker profile "
-            "when profile routing is enabled. Unknown profile: "
-            f"'{submission.worker_profile_override}'."
+            "worker_profile_override must reference a configured worker profile when "
+            f"profile routing is enabled. Unknown profile: '{submission.worker_profile_override}'."
         )
     try:
         normalized_constraints, normalized_budget = normalize_scout_submission(
@@ -114,10 +113,7 @@ def _normalize_and_validate_submission(self: Any, submission: TaskSubmission) ->
     except ValueError as e:
         raise TaskSubmissionValidationError(str(e)) from e
     return submission.model_copy(
-        update={
-            "constraints": normalized_constraints,
-            "budget": normalized_budget,
-        }
+        update={"constraints": normalized_constraints, "budget": normalized_budget}
     )
 
 
@@ -127,6 +123,7 @@ def replay_task(
     source_task_id: str,
     replay_request: TaskReplayRequest | None = None,
     raw_secrets: dict[str, str] | None = None,
+    delivery_key: DeliveryKey | None = None,
 ) -> TaskReplayResult:
     """Create a new task by replaying a prior terminal task with optional overrides."""
     if raw_secrets or (replay_request is not None and replay_request.secrets):
@@ -220,7 +217,23 @@ def replay_task(
     updates["constraints"]["replayed_from"] = [source_task_id, *existing_chain]
 
     submission = submission.model_copy(update=updates)
-    task_snapshot, _ = self.create_task(submission)
+    outcome = self.create_task_outcome(submission, delivery_key=delivery_key)
+    if outcome.duplicate:
+        logger.warning(
+            "Duplicate task delivery detected during replay",
+            extra={
+                "source_task_id": source_task_id,
+                "replayed_task_id": outcome.task_snapshot.task_id,
+                "delivery_id": delivery_key.delivery_id if delivery_key else None,
+            },
+        )
+        return TaskReplayResult(
+            status="duplicate",
+            task_snapshot=outcome.task_snapshot,
+            source_task_id=source_task_id,
+            detail="Duplicate delivery deduplicated.",
+        )
+    task_snapshot = outcome.task_snapshot
     logger.info(
         "Replayed task created from source",
         extra={

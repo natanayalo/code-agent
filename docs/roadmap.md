@@ -421,7 +421,7 @@ route decision
 
 M29 active engineering and evidence collection are complete. Active focus moves to M30.
 
-## M30 — GitHub-Native Task and Delivery Control
+## M30 — GitHub-Native Task and Delivery Control (Completed)
 
 ### Goal
 
@@ -712,7 +712,13 @@ provider-native cognition with the OpenHands reasoning loop.
 3. Which `AgentEvent` subset can both native providers expose without lossy
    inference?
 4. Which M30 interactions materially benefit from Temporal Updates rather than
-   the proven signal/outbox path?
+   the proven signal/outbox path? *(Resolved under M30 Slice 2: Temporal Updates
+   provide synchronous phase-validated operator decision application for direct
+   Temporal callers and test environments, rejecting out-of-phase requests before
+   state mutation; the transactional Postgres outbox + Signal path remains
+   authoritative for HTTP and webhook ingress to eliminate dual-write split-brain
+   hazards, while post-terminal GitHub delivery events project directly to Postgres
+   without signaling completed workflows).*
 5. Which read-only schedule and degraded thresholds form the first M31 slice?
 
 *(Question regarding M29 sample floor and recency was retired following Wave 2: resolved with a canonical sample floor of 10 tasks per compatible profile cell over a 90-day lookback window).*

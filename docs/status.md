@@ -4,9 +4,11 @@
 
 Phase 4A: Temporal stabilization, execution architecture foundation, and measured reliability.
 
-Active focus: **M30 — GitHub-Native Task and Delivery Control**
-(authenticated GitHub event intake, issue/delivery timeline mapping, draft PR
-synchronization, and traceable issue-to-delivery flow).
+Active focus: **M31 — Proactive Operations and Safe Scheduled Work**
+entry prerequisites (supported Temporal compatibility baseline and schedule execution foundation).
+M30 is completed with authenticated GitHub event intake, issue/delivery timeline mapping,
+draft PR synchronization, issue task replay (`/code-agent replay`), and Temporal
+interaction primitives (Queries & Updates).
 M29 is completed with all four canonical task-class/mode cells empirically
 qualified; production routing remains static and M27 deferred.
 
@@ -25,7 +27,11 @@ qualified; production routing remains static and M27 deferred.
 - skeptical personal/project memory, compact session state, admission review,
   observation evidence, and full-text retrieval
 - clarification, approval, permission escalation, cancellation, and replay
-  controls through API and dashboard
+  controls through API, dashboard, and GitHub issue comments (`/code-agent replay`)
+- Temporal-native interaction primitives: read-only coordination inspection via
+  `@workflow.query` (`get_status`, `get_current_plan`, `get_pending_decision`)
+  and synchronous phase-validated operator decision application via
+  `@workflow.update` (`apply_operator_decision`) with command-key deduplication
 - sequential decomposed-task DAG execution and opt-in bounded two-node
   read-only fan-out
 - deterministic and independent verification, independent review, and
@@ -231,8 +237,8 @@ Temporal migration and rollback record is in the
 
 ## Next slices only
 
-1. Continue **M30 — GitHub-Native Task and Delivery Control**:
-   a. evaluate Temporal-native interaction primitives where they simplify real M30 requirements (Queries for status/current plan/pending decision, Updates for operator actions, Signals for asynchronous external events).
+1. Prepare **M31 — Proactive Operations and Safe Scheduled Work**:
+   a. establish supported Temporal compatibility baseline and schedule execution foundation.
 2. Maintain completed M29 advisory report contracts and static production routing:
    a. all four canonical task-class/mode cells are qualified (`docs/read_only`, `feature/read_only`, `investigation/read_only`, `feature/mutation`);
    b. longitudinal 45-day split robustness remains calendar-gated on model-aware task age (expected ~2026-11-02 for Wave 2/3 tasks and ~2026-12-08 for `gpt-6-luna`);

@@ -293,3 +293,50 @@ To guarantee zero regressions when reducing `TemporalTaskState` serialization in
 | **Memory & Ephemeral Updates** | `memory_to_persist`, `scout_phase_results`, `session_state_update`, `errors` | Retained `state.result` (canonical derivation) / Regenerated at consumption / Ephemeral in-memory | `memory_*`, `proposals`, `session_states`, `tasks` | **Wave 2 Closeout — Completed** | **Excluded from snapshot payload**; canonical derivation & regenerated-at-consumption |
 | **DAG Plan Models** | `task_plan`, `decomposed_plan` | `task_timeline_events(TASK_PLANNED)` / operational validation against `execution_plans` | `task_timeline_events`, `execution_plans`, `execution_plan_nodes` | **Wave 3A — Completed** | **Excluded from snapshot payload**; authoritatively restored from timeline events with relational projection validation |
 | **Node Outcomes** | `node_outcomes` | `execution_plan_nodes.merged_logical_activity_key` & `execution_plan_node_attempts.result_payload` | `execution_plan_nodes`, `execution_plan_node_attempts` | **Wave 3B — Completed** | **Excluded from snapshot payload**; authoritatively restored via `restore_merged_node_outcomes()` |
+
+---
+
+## Section 5: M30 Temporal Interaction Primitives and Authority Boundaries
+
+Under Milestone M30, Temporal interaction primitives provide clear authority and
+safety boundaries between live workflow coordination, operator control, and
+relational persistence:
+
+1. **Read-Only Inspection via Queries (`@workflow.query`):**
+   - Handlers: `get_status`, `get_current_plan`, `get_pending_decision` on
+     `TaskExecutionWorkflow`.
+   - Authority: Zero-history-event inspection of active in-memory workflow
+     attributes (`lifecycle_stage`, `escalation_count`, `completion_continuation`,
+     `current_plan`, and `pending_decision`).
+   - Guarantees: Pure Python queries emit no Temporal history events and do not
+     mutate workflow state. 100% replay-safe across past and future histories
+     without patch markers.
+
+2. **Synchronous Validated Control via Updates (`@workflow.update` + `@update.validator`):**
+   - Handlers: `apply_operator_decision` validated by `validate_operator_decision`
+     on `TaskExecutionWorkflow`.
+   - Authority: Synchronous operator decisions (`approval`, `clarification`,
+     `permission_escalation`) for direct Temporal callers and test environments.
+   - Guarantees: Validators enforce that the workflow is actively awaiting the
+     specified decision kind before any state mutation occurs; out-of-phase or
+     invalid updates are rejected before history commit. Replay deduplication is
+     enforced via `command_key` tracking.
+
+3. **Ingress Invariant: Transactional Command Outbox + Signals (`@workflow.signal`):**
+   - Handlers: `handle_approval`, `handle_clarification`,
+     `handle_permission_escalation` dispatched via `TemporalCommandDispatcher`.
+   - Authority: The relational Postgres outbox (`temporal_commands`) remains the
+     authoritative ingress path for HTTP API endpoints and GitHub webhooks.
+   - Guarantees: Relational state updates (such as `human_interactions` or `tasks`)
+     and corresponding command enqueueing commit atomically in a single Postgres
+     transaction, strictly preventing dual-write split-brain hazards between
+     relational stores and Temporal RPC execution.
+
+4. **Post-Terminal Delivery Synchronization:**
+   - Handlers: `handle_delivery_sync` in `orchestrator/github_delivery_sync.py`.
+   - Authority: External asynchronous GitHub delivery events (`pull_request`,
+     `check_run`, `check_suite`) arrive after `deliver_result` finishes and
+     `TaskExecutionWorkflow` is terminal (`COMPLETED`).
+   - Guarantees: Delivery metadata and timeline audit events project directly to
+     Postgres (`worker_runs.delivery_metadata` and `task_timeline_events`), avoiding
+     signal delivery errors to completed workflows while preserving full auditability.
