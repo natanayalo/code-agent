@@ -6,6 +6,7 @@ from temporalio.exceptions import CancelledError as TemporalCancelledError
 
 from orchestrator.temporal.policy import activity_options
 from orchestrator.temporal.workflows import (
+    APPROVAL_DECISION_PERSISTENCE_PATCH_ID,
     CANCELLATION_TERMINAL_PATCH_ID,
     COMPLETION_LOOP_PATCH_ID,
     MAX_PERMISSION_ESCALATIONS,
@@ -152,7 +153,8 @@ async def test_workflow_persists_compact_state_before_initial_approval_rejection
     monkeypatch.setattr(
         workflow,
         "patched",
-        lambda patch_id: patch_id == REJECTED_SESSION_STATE_PATCH_ID,
+        lambda patch_id: patch_id
+        in {APPROVAL_DECISION_PERSISTENCE_PATCH_ID, REJECTED_SESSION_STATE_PATCH_ID},
     )
 
     result = await workflow_instance._run_lifecycle("task-id")
