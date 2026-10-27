@@ -203,6 +203,7 @@ class TaskExecutionService:
         *,
         delivery_key: DeliveryKey | None = None,
         raw_secrets: dict[str, str] | None = None,
+        skip_if_session_busy: bool = False,
     ) -> CreateTaskOutcome:
         """Persist a task request or return the previously created task for a duplicate delivery."""
         if raw_secrets or submission.secrets:
@@ -241,7 +242,12 @@ class TaskExecutionService:
             status=TaskStatus.PENDING,
             max_attempts=self.default_task_max_attempts,
             delivery_key=delivery_key,
+            skip_if_session_busy=skip_if_session_busy,
         )
+        if skip_if_session_busy and duplicate_task_id == "":
+            raise execution_submission_service.ScheduledSessionBusyError(
+                submission.session.external_thread_id
+            )
         task_id = duplicate_task_id or (persisted.task_id if persisted is not None else None)
         if task_id is None:
             raise RuntimeError("Task persistence did not produce a task id.")

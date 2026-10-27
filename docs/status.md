@@ -6,7 +6,7 @@ Phase 4A: Temporal stabilization, execution architecture foundation, and measure
 
 Active focus: **M31 — Proactive Operations and Safe Scheduled Work**. The
 Temporal Server 1.24.2 / Python SDK 1.30.0 compatibility prerequisite is
-repository-qualified; schedule implementation remains the next M31 work.
+repository-qualified; the weekly dependency-review scheduling slice is in progress.
 M30 is completed with authenticated GitHub event intake, issue/delivery timeline mapping,
 draft PR synchronization, issue task replay (`/code-agent replay`), and Temporal
 interaction primitives (Queries & Updates).

@@ -29,6 +29,32 @@ The platform is built for one operator-first use case: reliable coding execution
 
 ## Product Boundaries
 
+### Weekly dependency reviews
+
+The authenticated schedules API creates read-only dependency reviews in Temporal.
+Set the same `CODE_AGENT_ALLOWED_REPOS` registry on the API and worker; the worker
+checks the key again when each occurrence runs. Supply an explicit IANA timezone.
+For example, send a `PUT` to `/schedules/project-dependencies` with:
+
+```json
+{"version":1,"purpose":"dependency_review","repo_key":"project","branch":"main","weekdays":["monday"],"time":"09:00","timezone":"Asia/Jerusalem"}
+```
+
+New schedules are paused. Use `POST /schedules/{id}/resume`, `/pause`, or
+`/trigger` (manual triggers also work while paused). Identical `PUT` retries
+are idempotent; changing a specification requires a new ID. `GET /schedules`
+and `GET /schedules/{id}` show upcoming actions and recent outcomes;
+`GET /schedules/{id}/runs` lists submitted tasks, with `limit` and `offset`.
+Task details contain the timeline and artifacts. A previous nonterminal task
+causes the next occurrence to be skipped. Temporal skips overlapping submissions
+and catches up missed actions only within one hour.
+
+Temporal keeps only the most recent ten schedule actions; their workflow results
+also expire under the Temporal namespace's workflow retention policy. Task
+history follows the existing task retention policy. To roll back, pause each
+schedule and drain or cancel submitted tasks using existing task controls before
+reverting the worker. Scheduling controls require the existing API credentials.
+
 This repo intentionally focuses on coding execution infrastructure. It is not currently a multi-tenant SaaS, app-store mobile product, or autonomous self-modifying platform.
 
 ## Architecture At A Glance

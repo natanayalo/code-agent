@@ -68,7 +68,7 @@ jobs:
           TEMPORAL_COMPATIBILITY_ADDRESS: 127.0.0.1:17233
         run: |
           test "$TEMPORAL_COMPATIBILITY_ADDRESS" = "127.0.0.1:17233"
-          poetry run pytest -q tests/integration/test_temporal_compatibility.py
+          poetry run pytest -q tests/integration/test_temporal_compatibility.py tests/integration/test_temporal_schedules_compatibility.py
       - name: Run integration pytest suite with coverage gate
         env:
           CODE_AGENT_TEST_POSTGRES_URL: postgresql+psycopg://postgres:postgres@127.0.0.1:5432/code_agent_test
