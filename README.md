@@ -168,7 +168,11 @@ Authenticated `GET /alerts/readiness` shows the latest reason state, and
 Postgres coordinates transition creation and delivery leases across API
 instances. Telegram requests are bounded to five seconds, retried at most eight
 times with capped exponential backoff, and then retained as failed for operator
-inspection. Delivery history is retained in Postgres without automatic pruning.
+inspection. Later transitions for a reason wait until earlier deliveries succeed
+or exhaust retries; an exhausted delivery remains visible as failed and does not
+block newer transitions. The API claims one message at a time and processes at
+most 20 messages per monitor cycle. Delivery history is retained in Postgres
+without automatic pruning.
 Delivery is at least once: a process crash after Telegram accepts a message but
 before its success is recorded can create a duplicate. Postgres outages cannot
 be notified until persistence returns, so an independent external monitor is

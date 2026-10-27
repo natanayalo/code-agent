@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from apps.api.auth import ApiAuthConfig
 from apps.api.main import create_app
@@ -46,8 +47,14 @@ class FakeTelegram:
         return FakeResponse(self.statuses.pop(0) if self.statuses else 200)
 
 
-def _snapshot(*reasons: str):
-    return SimpleNamespace(degraded_reasons=list(reasons))
+class SlowTelegram(FakeTelegram):
+    async def post(self, url: str, *, json: dict, timeout: int) -> FakeResponse:
+        await asyncio.sleep(0.3)
+        return await super().post(url, json=json, timeout=timeout)
+
+
+def _snapshot(*reasons: str, components: dict | None = None):
+    return SimpleNamespace(degraded_reasons=list(reasons), components=components or {})
 
 
 def _delivery_rows(session_factory) -> list[ReadinessAlertDelivery]:
@@ -112,6 +119,53 @@ def test_readiness_alert_retry_is_bounded_and_visible(session_factory) -> None:
     assert exhausted.last_failure_code == "telegram_request_failed"
 
 
+def test_recovery_waits_for_degradation_retry(session_factory) -> None:
+    """A due recovery cannot overtake an earlier transition waiting for retry."""
+    reasons = ["worker_unavailable"]
+    telegram = FakeTelegram([503])
+    monitor = ReadinessAlertMonitor(
+        task_service=object(),
+        session_factory=session_factory,
+        telegram_client=telegram,
+        bot_token="token",
+        chat_id="123",
+        readiness_probe=lambda _service: _snapshot(*reasons),
+    )
+    asyncio.run(monitor.run_once())
+    reasons.clear()
+    asyncio.run(monitor.run_once())
+    assert len(telegram.messages) == 1
+
+    with session_scope(session_factory) as session:
+        degraded = session.scalar(
+            select(ReadinessAlertDelivery).where(ReadinessAlertDelivery.transition == "degraded")
+        )
+        degraded.next_attempt_at = utc_now() - timedelta(seconds=1)
+    asyncio.run(monitor.run_once())
+
+    assert [message["text"].split("\n", 1)[0] for message in telegram.messages] == [
+        "Execution readiness degraded: worker_unavailable",
+        "Execution readiness degraded: worker_unavailable",
+        "Execution readiness recovered: worker_unavailable",
+    ]
+
+
+def test_exhausted_transition_does_not_block_later_transition(session_factory) -> None:
+    """A terminal failed delivery remains visible but releases the reason queue."""
+    with session_scope(session_factory) as session:
+        repository = ReadinessAlertRepository(session)
+        repository.record_snapshot(["worker_unavailable"])
+        degraded = repository.claim_due(limit=1)[0]
+        degraded.attempts = 8
+        repository.mark_failed(degraded.id, http_status=503)
+        repository.record_snapshot([])
+        recovery = repository.claim_due(limit=1)
+
+    assert degraded.status == "failed"
+    assert len(recovery) == 1
+    assert recovery[0].transition == "recovered"
+
+
 def test_concurrent_monitors_create_one_transition_delivery(session_factory) -> None:
     telegram = FakeTelegram()
     monitors = [
@@ -135,6 +189,45 @@ def test_concurrent_monitors_create_one_transition_delivery(session_factory) -> 
     assert len(telegram.messages) == 1
 
 
+def test_slow_batch_does_not_expire_leases_for_queued_deliveries(
+    session_factory, monkeypatch
+) -> None:
+    """Instances claim one item at a time so a slow batch cannot lease stale work."""
+    from repositories import sqlalchemy_readiness_alerts
+
+    monkeypatch.setattr(sqlalchemy_readiness_alerts, "DELIVERY_LEASE_SECONDS", 1)
+    reasons = [
+        "postgres_unavailable",
+        "temporal_unavailable",
+        "worker_unavailable",
+        "dispatcher_unavailable",
+        "dispatcher_backlog_stale",
+    ]
+    telegram = SlowTelegram()
+    monitors = [
+        ReadinessAlertMonitor(
+            task_service=object(),
+            session_factory=session_factory,
+            telegram_client=telegram,
+            bot_token="token",
+            chat_id="123",
+            readiness_probe=lambda _service: _snapshot(*reasons),
+        )
+        for _ in range(2)
+    ]
+
+    async def run_with_overlap() -> None:
+        first = asyncio.create_task(monitors[0].run_once())
+        await asyncio.sleep(1.1)
+        second = asyncio.create_task(monitors[1].run_once())
+        await asyncio.gather(first, second)
+
+    asyncio.run(run_with_overlap())
+    assert len(telegram.messages) == len(reasons)
+    deliveries = _delivery_rows(session_factory)
+    assert all(delivery.status == "delivered" for delivery in deliveries)
+
+
 def test_postgres_outage_observed_while_unavailable_is_reported_after_recovery(
     session_factory,
 ) -> None:
@@ -152,12 +245,12 @@ def test_postgres_outage_observed_while_unavailable_is_reported_after_recovery(
     record_snapshot = monitor._record_snapshot
     failed_once = True
 
-    def temporarily_unavailable(reasons: list[str]) -> None:
+    def temporarily_unavailable(reasons: list[str], unknown_reasons: list[str]) -> None:
         nonlocal failed_once
         if failed_once:
             failed_once = False
             raise ConnectionError("database unavailable")
-        record_snapshot(reasons)
+        record_snapshot(reasons, unknown_reasons)
 
     monitor._record_snapshot = temporarily_unavailable
     asyncio.run(monitor.run_once())
@@ -165,6 +258,75 @@ def test_postgres_outage_observed_while_unavailable_is_reported_after_recovery(
     asyncio.run(monitor.run_once())
 
     assert [message["text"].split("\n", 1)[0] for message in telegram.messages] == [
+        "Execution readiness degraded: postgres_unavailable",
+        "Execution readiness recovered: postgres_unavailable",
+    ]
+
+
+def test_unknown_worker_observation_preserves_degraded_state_during_postgres_outage(
+    session_factory,
+) -> None:
+    """Postgres recovery does not emit false worker recovery if the worker stays down."""
+    ready = SimpleNamespace(status="ready")
+    unavailable = SimpleNamespace(status="not_ready")
+    unknown = SimpleNamespace(status="unknown")
+    snapshots = iter(
+        [
+            _snapshot(
+                "worker_unavailable",
+                components={
+                    "postgres": ready,
+                    "temporal": ready,
+                    "worker": unavailable,
+                    "dispatcher": ready,
+                },
+            ),
+            _snapshot(
+                "postgres_unavailable",
+                components={
+                    "postgres": unavailable,
+                    "temporal": ready,
+                    "worker": unknown,
+                    "dispatcher": unknown,
+                },
+            ),
+            _snapshot(
+                "worker_unavailable",
+                components={
+                    "postgres": ready,
+                    "temporal": ready,
+                    "worker": unavailable,
+                    "dispatcher": ready,
+                },
+            ),
+        ]
+    )
+    telegram = FakeTelegram()
+    monitor = ReadinessAlertMonitor(
+        task_service=object(),
+        session_factory=session_factory,
+        telegram_client=telegram,
+        bot_token="token",
+        chat_id="123",
+        readiness_probe=lambda _service: next(snapshots),
+    )
+    record_snapshot = monitor._record_snapshot
+    calls = 0
+
+    def fail_postgres_sample_once(reasons: list[str], unknown_reasons: list[str]) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise ConnectionError("database unavailable")
+        record_snapshot(reasons, unknown_reasons)
+
+    monitor._record_snapshot = fail_postgres_sample_once
+    asyncio.run(monitor.run_once())
+    asyncio.run(monitor.run_once())
+    asyncio.run(monitor.run_once())
+
+    assert [message["text"].split("\n", 1)[0] for message in telegram.messages] == [
+        "Execution readiness degraded: worker_unavailable",
         "Execution readiness degraded: postgres_unavailable",
         "Execution readiness recovered: postgres_unavailable",
     ]

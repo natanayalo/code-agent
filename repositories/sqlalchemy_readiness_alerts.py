@@ -6,7 +6,7 @@ from datetime import timedelta
 from typing import Any
 
 from sqlalchemy import or_, select, text
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from db.base import generate_uuid, utc_now
 from db.readiness_alert_models import ReadinessAlertDelivery, ReadinessAlertState
@@ -21,17 +21,25 @@ class ReadinessAlertRepository:
     def __init__(self, session: Session) -> None:
         self.session = session
 
-    def record_snapshot(self, degraded_reasons: list[str]) -> None:
-        """Persist reason transitions and enqueue one delivery per transition."""
+    def record_snapshot(
+        self,
+        degraded_reasons: list[str],
+        *,
+        unknown_reasons: list[str] | None = None,
+    ) -> None:
+        """Persist observed transitions without resolving components currently unknown."""
         if self.session.bind is not None and self.session.bind.dialect.name == "postgresql":
             self.session.execute(text("SELECT pg_advisory_xact_lock(731004219)"))
         now = utc_now()
         active = set(degraded_reasons)
+        unknown = set(unknown_reasons or ())
         states = {
             state.reason: state
             for state in self.session.scalars(select(ReadinessAlertState).with_for_update()).all()
         }
-        for reason in active | {key for key, state in states.items() if state.degraded}:
+        for reason in sorted(active | {key for key, state in states.items() if state.degraded}):
+            if reason in unknown:
+                continue
             state = states.get(reason)
             degraded = reason in active
             if state is None:
@@ -76,6 +84,16 @@ class ReadinessAlertRepository:
     def claim_due(self, *, limit: int = 20) -> list[ReadinessAlertDelivery]:
         """Lease a bounded batch of due notifications for one API instance."""
         now = utc_now()
+        earlier_unfinished = aliased(ReadinessAlertDelivery)
+        earlier_transition_exists = (
+            select(earlier_unfinished.id)
+            .where(
+                earlier_unfinished.reason == ReadinessAlertDelivery.reason,
+                earlier_unfinished.transition_number < ReadinessAlertDelivery.transition_number,
+                earlier_unfinished.status.in_(("pending", "processing")),
+            )
+            .exists()
+        )
         due = self.session.scalars(
             select(ReadinessAlertDelivery)
             .where(
@@ -84,7 +102,8 @@ class ReadinessAlertRepository:
                     & (ReadinessAlertDelivery.next_attempt_at <= now),
                     (ReadinessAlertDelivery.status == "processing")
                     & (ReadinessAlertDelivery.lease_expires_at <= now),
-                )
+                ),
+                ~earlier_transition_exists,
             )
             .order_by(ReadinessAlertDelivery.created_at)
             .limit(limit)

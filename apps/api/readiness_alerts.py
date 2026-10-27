@@ -20,8 +20,15 @@ ALERT_CHAT_ID_ENV_VAR = "CODE_AGENT_READINESS_ALERT_TELEGRAM_CHAT_ID"
 ALERT_INTERVAL_SECONDS = 30
 TELEGRAM_REQUEST_TIMEOUT_SECONDS = 5
 MAX_UNPERSISTED_SNAPSHOTS = 100
+MAX_DELIVERIES_PER_CYCLE = 20
 _CHAT_ID_PATTERN = re.compile(r"^-?\d+$")
-_LOCAL_RECORD_LOCK = threading.Lock()
+_LOCAL_DB_LOCK = threading.Lock()
+_UNKNOWN_COMPONENT_REASONS = {
+    "postgres": ("postgres_unavailable",),
+    "temporal": ("temporal_unavailable",),
+    "worker": ("worker_unavailable",),
+    "dispatcher": ("dispatcher_unavailable", "dispatcher_backlog_stale"),
+}
 _SAFE_ACTIONS = {
     "postgres_unavailable": "Check Postgres connectivity, then confirm /ready recovers.",
     "temporal_unavailable": "Check Temporal health and confirm /ready recovers.",
@@ -53,6 +60,17 @@ def format_readiness_alert(reason: str, transition: str) -> str:
     return f"Execution readiness {state}: {reason}\nNext action: {action}"
 
 
+def _unknown_reason_codes(snapshot: Any) -> list[str]:
+    """Return reason codes whose source components were not observable this sample."""
+    components = getattr(snapshot, "components", {})
+    unknown: set[str] = set()
+    for component_name, reason_codes in _UNKNOWN_COMPONENT_REASONS.items():
+        component = components.get(component_name)
+        if getattr(component, "status", None) == "unknown":
+            unknown.update(reason_codes)
+    return sorted(unknown)
+
+
 class ReadinessAlertMonitor:
     """Probe readiness independently and deliver persisted transitions with retries."""
 
@@ -77,7 +95,7 @@ class ReadinessAlertMonitor:
         self.interval_seconds = interval_seconds
         self.readiness_probe = readiness_probe or (lambda service: service.get_readiness())
         self._task: asyncio.Task[None] | None = None
-        self._unpersisted_snapshots: list[list[str]] = []
+        self._unpersisted_snapshots: list[tuple[list[str], list[str]]] = []
 
     def start(self) -> None:
         """Start the monitor once; it runs only in the API process."""
@@ -110,38 +128,44 @@ class ReadinessAlertMonitor:
         """Persist one readiness sample, then attempt a bounded due batch."""
         snapshot = await asyncio.to_thread(self.readiness_probe, self.task_service)
         reasons = sorted(set(snapshot.degraded_reasons))
+        unknown_reasons = _unknown_reason_codes(snapshot)
+        current_sample = (reasons, unknown_reasons)
         try:
-            for pending in self._unpersisted_snapshots:
-                await asyncio.to_thread(self._record_snapshot, pending)
-            await asyncio.to_thread(self._record_snapshot, reasons)
+            for pending_reasons, pending_unknown in self._unpersisted_snapshots:
+                await asyncio.to_thread(self._record_snapshot, pending_reasons, pending_unknown)
+            await asyncio.to_thread(self._record_snapshot, reasons, unknown_reasons)
         except Exception as exc:
-            if not self._unpersisted_snapshots or self._unpersisted_snapshots[-1] != reasons:
-                self._unpersisted_snapshots.append(reasons)
+            if not self._unpersisted_snapshots or self._unpersisted_snapshots[-1] != current_sample:
+                self._unpersisted_snapshots.append(current_sample)
                 if len(self._unpersisted_snapshots) > MAX_UNPERSISTED_SNAPSHOTS:
                     self._unpersisted_snapshots.pop(1)
             logger.warning("Readiness alert state persistence failed (%s)", type(exc).__name__)
             return
         self._unpersisted_snapshots.clear()
-        batch = await asyncio.to_thread(self._claim_batch)
-        for delivery in batch:
+        for _ in range(MAX_DELIVERIES_PER_CYCLE):
+            delivery = await asyncio.to_thread(self._claim_one)
+            if delivery is None:
+                break
             await self._deliver(delivery)
 
-    def _record_snapshot(self, reasons: list[str]) -> None:
-        with _LOCAL_RECORD_LOCK, session_scope(self.session_factory) as session:
-            ReadinessAlertRepository(session).record_snapshot(reasons)
+    def _record_snapshot(self, reasons: list[str], unknown_reasons: list[str]) -> None:
+        with _LOCAL_DB_LOCK, session_scope(self.session_factory) as session:
+            ReadinessAlertRepository(session).record_snapshot(
+                reasons, unknown_reasons=unknown_reasons
+            )
 
-    def _claim_batch(self) -> list[dict[str, Any]]:
-        with session_scope(self.session_factory) as session:
-            claimed = ReadinessAlertRepository(session).claim_due()
-            return [
-                {
-                    "id": item.id,
-                    "reason": item.reason,
-                    "transition": item.transition,
-                    "attempts": item.attempts,
-                }
-                for item in claimed
-            ]
+    def _claim_one(self) -> dict[str, Any] | None:
+        with _LOCAL_DB_LOCK, session_scope(self.session_factory) as session:
+            claimed = ReadinessAlertRepository(session).claim_due(limit=1)
+            if not claimed:
+                return None
+            item = claimed[0]
+            return {
+                "id": item.id,
+                "reason": item.reason,
+                "transition": item.transition,
+                "attempts": item.attempts,
+            }
 
     async def _deliver(self, item: dict[str, Any]) -> None:
         url = f"{self.api_base_url}/bot{self.bot_token}/sendMessage"

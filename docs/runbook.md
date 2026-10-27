@@ -298,6 +298,10 @@ states and `GET /alerts/readiness/deliveries` for delivery attempts. A
 `pending` record retries up to eight attempts with a five-second initial delay
 that doubles to a 15-minute cap; `failed` means automatic retries are exhausted.
 Use `last_failure_code` and `last_http_status` to diagnose the delivery boundary.
+Later transitions for the same reason wait for earlier deliveries to succeed or
+exhaust retries. An exhausted earlier delivery remains marked `failed` and does
+not block newer transitions. The monitor claims one message immediately before
+sending and processes at most 20 messages per cycle.
 History is currently retained indefinitely. Telegram delivery is at least once,
 so a crash after Telegram accepts a message and before Postgres records success
 can create a duplicate. While Postgres is down, alert state cannot be stored or
