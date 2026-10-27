@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: implement temporal interaction primitives and github issue replay (m30 closeout) ([#437](https://github.com/natanayalo/code-agent/pull/437))
+
 - Feat: synchronize PR and CI state into dashboard operator inbox (m30 slice 1a) ([#436](https://github.com/natanayalo/code-agent/pull/436))
 
 - Feat: add authenticated github webhook intake and task delivery control ([#434](https://github.com/natanayalo/code-agent/pull/434))
