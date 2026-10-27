@@ -15,6 +15,7 @@ M25_2_FANOUT_PATCH_ID = "m25-2-bounded-selective-fanout"
 COMPLETION_LOOP_PATCH_ID = "m25-4-temporal-completion-loop"
 CANCELLATION_TERMINAL_PATCH_ID = "m25-6-cancelled-terminal-state"
 REJECTED_SESSION_STATE_PATCH_ID = "m28-2-rejected-session-state"
+APPROVAL_DECISION_PERSISTENCE_PATCH_ID = "m30-approval-decision-persistence"
 
 
 def _temporal_cancellation_cause(exc: Exception) -> TemporalCancelledError | None:
@@ -44,11 +45,12 @@ class TaskExecutionWorkflow:
 
     @workflow.run
     async def run(self, task_id: str) -> dict:
+        cancellation_terminal_enabled = workflow.patched(CANCELLATION_TERMINAL_PATCH_ID)
         try:
             return await self._run_lifecycle(task_id)
         except Exception as exc:
             cancellation = _temporal_cancellation_cause(exc)
-            if workflow.patched(CANCELLATION_TERMINAL_PATCH_ID) and cancellation is not None:
+            if cancellation_terminal_enabled and cancellation is not None:
                 self.lifecycle_stage = "cancelled"
                 raise cancellation
             self.lifecycle_stage = "failed"
@@ -178,11 +180,12 @@ class TaskExecutionWorkflow:
             self.pending_decision = None
 
         approved = bool(self.approval_decision)
-        await workflow.execute_activity(
-            "persist_approval_decision",
-            args=[task_id, approved],
-            **activity_options("persist_approval_decision"),
-        )
+        if workflow.patched(APPROVAL_DECISION_PERSISTENCE_PATCH_ID):
+            await workflow.execute_activity(
+                "persist_approval_decision",
+                args=[task_id, approved],
+                **activity_options("persist_approval_decision"),
+            )
         if approved:
             return True
         if workflow.patched(REJECTED_SESSION_STATE_PATCH_ID):
