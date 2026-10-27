@@ -512,7 +512,9 @@ async def test_draft_pr_delivery_publishes_or_fails_when_metadata_is_missing() -
 
 
 @pytest.mark.asyncio
-async def test_broker_token_ignores_non_git_push_secret() -> None:
+async def test_broker_token_ignores_non_git_push_secret(monkeypatch) -> None:
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
     secret_ref_name = "ephem_custom_token"
     store = MagicMock()
     store.get_record.return_value = EphemeralSecretRecord(

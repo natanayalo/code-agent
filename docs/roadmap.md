@@ -21,12 +21,11 @@
 ## Current phase
 
 Phase 4A: Temporal stabilization and measured reliability. M25.6, M26, M28,
-M28.5, and M29 are complete. M30 is active.
+M28.5, M29, and M30 are complete. M31 is active.
 
 Committed/current priority:
 
-1. M30: GitHub-Native Task and Delivery Control
-2. M31: Proactive Operations and Safe Scheduled Work
+1. M31: Proactive Operations and Safe Scheduled Work
 
 Deferred / evidence-gated:
 
@@ -499,9 +498,15 @@ test a supported compatibility baseline covering:
 - Continue-As-New/history strategy where needed
 - lifecycle and removal strategy for existing workflow patch markers
 
-This is a bounded architecture/operations prerequisite, not an instruction to
-upgrade blindly to the latest release. M31 scheduling work starts only after
-the selected server/SDK combination and workflow-evolution policy are proven.
+This was a bounded architecture/operations prerequisite, not an instruction to
+upgrade blindly to the latest release. The selected pair and workflow-evolution
+policy have passed the repository compatibility gate. The repository-tested
+baseline is Temporal Server 1.24.2 / Python SDK 1.30.0; Worker Deployment
+Versioning remains disabled. The compatibility gate and workflow-evolution
+policy are documented in
+[`docs/temporal_compatibility.md`](temporal_compatibility.md). This does not
+claim upstream maintenance support. Schedule execution, management APIs,
+alerting, and recurring jobs remain future work.
 
 ### Scope
 

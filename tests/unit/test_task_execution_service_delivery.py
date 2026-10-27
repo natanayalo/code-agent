@@ -598,7 +598,7 @@ def test_create_task_persists_encryption_metadata() -> None:
                 assert reloaded.secrets_encrypted is True
 
 
-def test_map_task_to_summary_includes_trace_metadata(monkeypatch) -> None:
+def test_map_task_to_summary_includes_trace_metadata(monkeypatch, request) -> None:
     """Task snapshots should include trace_id and trace_url when context is present."""
     engine = create_engine_from_url("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -611,9 +611,10 @@ def test_map_task_to_summary_includes_trace_metadata(monkeypatch) -> None:
 
     # Enable tracing for URL generation
     execution_module._clear_tracing_config_cache()
+    request.addfinalizer(execution_module._clear_tracing_config_cache)
     monkeypatch.setenv("CODE_AGENT_ENABLE_TRACING", "1")
     monkeypatch.setenv("CODE_AGENT_TRACING_OTLP_ENDPOINT", "http://phoenix:6006/v1/traces")
-    monkeypatch.setenv("CODE_AGENT_TRACING_PROJECT_NAME", "code-agent")
+    monkeypatch.setenv("CODE_AGENT_TRACING_PROJECT", "code-agent")
 
     with session_scope(session_factory) as session:
         user = User(external_user_id="user-1")

@@ -4,8 +4,9 @@
 
 Phase 4A: Temporal stabilization, execution architecture foundation, and measured reliability.
 
-Active focus: **M31 — Proactive Operations and Safe Scheduled Work**
-entry prerequisites (supported Temporal compatibility baseline and schedule execution foundation).
+Active focus: **M31 — Proactive Operations and Safe Scheduled Work**. The
+Temporal Server 1.24.2 / Python SDK 1.30.0 compatibility prerequisite is
+repository-qualified; schedule implementation remains the next M31 work.
 M30 is completed with authenticated GitHub event intake, issue/delivery timeline mapping,
 draft PR synchronization, issue task replay (`/code-agent replay`), and Temporal
 interaction primitives (Queries & Updates).
@@ -32,6 +33,9 @@ qualified; production routing remains static and M27 deferred.
   `@workflow.query` (`get_status`, `get_current_plan`, `get_pending_decision`)
   and synchronous phase-validated operator decision application via
   `@workflow.update` (`apply_operator_decision`) with command-key deduplication
+- repository-tested Temporal Server 1.24.2 / Python SDK 1.30.0 compatibility
+  gate covering workflow interactions, worker restart/cancellation, Schedule
+  trigger, and sanitized frozen-history replay
 - sequential decomposed-task DAG execution and opt-in bounded two-node
   read-only fan-out
 - deterministic and independent verification, independent review, and

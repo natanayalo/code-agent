@@ -78,6 +78,35 @@ def test_pyproject_dev_dependencies_include_pytest_xdist() -> None:
     assert dev_dependencies["pytest-xdist"] == ">=3.8.0,<4.0"
 
 
+def test_temporal_compatibility_pin_and_isolated_server_gate() -> None:
+    """The Temporal baseline must remain exact and run against its disposable server."""
+    with Path("pyproject.toml").open("rb") as file:
+        config = tomllib.load(file)
+    assert "temporalio==1.30.0" in config["project"]["dependencies"]
+
+    workflow = _load_yaml(".github/workflows/pytest.yml")
+    steps = _job_steps(workflow, "pytest")
+    server_step = _step_by_name(steps, "Start isolated Temporal 1.24.2 compatibility stack")
+    test_step = _step_by_name(steps, "Run real-server Temporal compatibility gate")
+    integration_step = _step_by_name(steps, "Run integration pytest suite with coverage gate")
+    cleanup_step = _step_by_name(steps, "Stop isolated Temporal compatibility stack")
+    assert "docker-compose.temporal-compatibility.yml" in server_step["run"]
+    assert "tests/integration/test_temporal_compatibility.py" in test_step["run"]
+    assert test_step["env"]["TEMPORAL_COMPATIBILITY_ADDRESS"] == "127.0.0.1:17233"
+    assert "--ignore=tests/integration/test_temporal_compatibility.py" in integration_step["run"]
+    assert cleanup_step["if"] == "always()"
+
+    compose = _load_yaml("docker-compose.temporal-compatibility.yml")
+    assert compose["services"]["temporal"]["image"] == "temporalio/auto-setup:1.24.2"
+    assert compose["services"]["postgres"]["tmpfs"] == ["/var/lib/postgresql/data"]
+    assert compose["services"]["temporal"]["environment"]["DYNAMIC_CONFIG_FILE_PATH"].endswith(
+        "compatibility.yaml"
+    )
+    assert "frontend.enableUpdateWorkflowExecution" in Path(
+        "scripts/temporal-compatibility/dynamicconfig.yaml"
+    ).read_text("utf-8")
+
+
 def test_pytest_workflow_runs_unit_coverage_and_integration_suite_on_push() -> None:
     """The pytest workflow should validate each push with unit coverage plus integration tests."""
     workflow = _load_yaml(".github/workflows/pytest.yml")
