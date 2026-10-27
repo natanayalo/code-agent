@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 import yaml
+
+from apps.api.config import SystemConfig
+from orchestrator.schedule_spec import ScheduleSpec
+from orchestrator.temporal.scheduled_review import ScheduledReviewActivities
 
 
 @pytest.fixture(scope="module")
@@ -184,6 +189,58 @@ def test_api_and_worker_share_optional_deployment_identity_overrides(
     assert worker_env["BUILD_SHA"] == "${BUILD_SHA:-}"
     assert api_env["CODE_AGENT_ENV"] == "${CODE_AGENT_ENV:-local}"
     assert worker_env["CODE_AGENT_ENV"] == "${CODE_AGENT_ENV:-local}"
+
+
+def test_api_and_worker_share_repository_allowlist_configuration(
+    compose_config: dict[str, Any],
+) -> None:
+    """Scheduled submissions must revalidate against the same registry as the API."""
+    api_env = compose_config["services"]["api"]["environment"]
+    worker_env = compose_config["services"]["worker"]["environment"]
+    for name in ("CODE_AGENT_ALLOWED_REPOS", "CODE_AGENT_SCOUT_ALLOWED_REPOS"):
+        assert api_env[name] == f"${{{name}:-}}"
+        assert worker_env[name] == api_env[name]
+
+
+@pytest.mark.anyio
+async def test_compose_worker_registry_admits_general_and_scout_reviews(
+    compose_config: dict[str, Any],
+) -> None:
+    """Use the Compose worker settings to revalidate both kinds of repository key."""
+    configured = {
+        "CODE_AGENT_ALLOWED_REPOS": "general:https://example.com/general,shared:https://example.com/main",
+        "CODE_AGENT_SCOUT_ALLOWED_REPOS": "scout:https://example.com/scout,shared:https://example.com/other",
+    }
+    worker_env = compose_config["services"]["worker"]["environment"]
+    effective_env = {
+        name: value if worker_env.get(name) == f"${{{name}:-}}" else ""
+        for name, value in configured.items()
+    }
+    config = SystemConfig.load_from_env(effective_env)
+    submissions = []
+
+    class Service:
+        def create_task_outcome(self, submission, **kwargs):
+            submissions.append(submission)
+            return SimpleNamespace(duplicate=False, task_snapshot=SimpleNamespace(task_id="task"))
+
+    activity = ScheduledReviewActivities(Service(), config)
+    for repo_key in ("general", "scout", "shared"):
+        spec = ScheduleSpec(
+            version=1,
+            purpose="dependency_review",
+            repo_key=repo_key,
+            weekdays=("monday",),
+            time="09:00",
+            timezone="UTC",
+        )
+        result = await activity.submit("weekly", repo_key, spec.model_dump(mode="json"))
+        assert result["outcome"] == "submitted"
+    assert [submission.repo_url for submission in submissions] == [
+        "https://example.com/general",
+        "https://example.com/scout",
+        "https://example.com/main",
+    ]
 
 
 def test_api_and_worker_expose_context_envelope_rollout_flag(
