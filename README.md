@@ -154,6 +154,30 @@ codes while any global execution blocker is degraded. Authenticated `/metrics`
 adds task-specific outbox, interaction-wait, and terminal-reconciliation
 signals without turning those individual anomalies into global downtime.
 
+### Readiness alerts
+
+The API can send Telegram messages when a global execution-readiness reason
+degrades or recovers. Alerts are disabled by default. Set the existing
+`CODE_AGENT_TELEGRAM_BOT_TOKEN` and `CODE_AGENT_READINESS_ALERT_TELEGRAM_CHAT_ID`
+(a numeric chat ID) on the API service to enable them; the monitor runs every
+30 seconds in the API process and does not depend on the Temporal worker.
+Messages include only a stable reason code, transition, and fixed recovery hint.
+
+Authenticated `GET /alerts/readiness` shows the latest reason state, and
+`GET /alerts/readiness/deliveries` shows recent delivery attempts and failures.
+Postgres coordinates transition creation and delivery leases across API
+instances. Telegram requests are bounded to five seconds, retried at most eight
+times with capped exponential backoff, and then retained as failed for operator
+inspection. Delivery history is retained in Postgres without automatic pruning.
+Delivery is at least once: a process crash after Telegram accepts a message but
+before its success is recorded can create a duplicate. Postgres outages cannot
+be notified until persistence returns, so an independent external monitor is
+still needed for immediate database-outage alerting. The API retains at most
+100 distinct unpersisted readiness snapshots in memory; restarting the API
+during a Postgres outage loses those observations. To roll back, unset the chat
+ID and restart the API; persisted status remains available, and task scheduling
+and execution are unchanged.
+
 ### Database Migrations
 
 To apply database migrations to your local Postgres container, use the included Docker Compose service:

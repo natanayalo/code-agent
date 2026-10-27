@@ -53,6 +53,8 @@ EXPECTED_TABLES = {
     "worker_nodes",
     "worker_runs",
     "ephemeral_secret_records",
+    "readiness_alert_states",
+    "readiness_alert_deliveries",
 }
 
 

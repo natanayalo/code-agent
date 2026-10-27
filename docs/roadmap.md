@@ -505,14 +505,15 @@ baseline is Temporal Server 1.24.2 / Python SDK 1.30.0; Worker Deployment
 Versioning remains disabled. The compatibility gate and workflow-evolution
 policy are documented in
 [`docs/temporal_compatibility.md`](temporal_compatibility.md). This does not
-claim upstream maintenance support. Schedule execution, management APIs,
-alerting, and recurring jobs remain future work.
+claim upstream maintenance support. The weekly dependency-review schedule and
+its management API foundation are merged. The active M31 slice adds opt-in
+readiness-reason Telegram alerts; it does not change scheduled task execution.
 
 ### Scope
 
-- notify through Telegram and generic webhooks when readiness, outbox age,
-  worker freshness, stuck waits, terminal divergence, or provider capability
-  crosses a configured degraded threshold
+- notify through Telegram when an existing global execution-readiness reason
+  becomes degraded or recovers; task-specific outbox, wait, reconciliation,
+  provider-capability, and generic webhook alerts remain follow-ups
 - deduplicate, throttle, acknowledge, and resolve alerts using stable reason
   codes and task references
 - add scheduled read-only tasks for health summaries, evidence collection,

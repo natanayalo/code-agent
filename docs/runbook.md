@@ -283,6 +283,30 @@ and Temporal/Postgres terminal reconciliation. Dead letters, stuck waits, and
 per-task divergence are degraded operator signals but do not make the entire
 API non-ready.
 
+### Telegram readiness alerts
+
+Alerts are opt-in on the API service. Configure both the existing
+`CODE_AGENT_TELEGRAM_BOT_TOKEN` and numeric
+`CODE_AGENT_READINESS_ALERT_TELEGRAM_CHAT_ID`; unset the chat ID and restart the
+API to disable new alert monitoring. The monitor samples `/ready` policy every
+30 seconds in the API process. It persists only stable readiness reason codes
+and transition metadata, and sends a fixed safe action without task text, secret
+values, or artifact paths.
+
+Inspect authenticated `GET /alerts/readiness` for the current stored reason
+states and `GET /alerts/readiness/deliveries` for delivery attempts. A
+`pending` record retries up to eight attempts with a five-second initial delay
+that doubles to a 15-minute cap; `failed` means automatic retries are exhausted.
+Use `last_failure_code` and `last_http_status` to diagnose the delivery boundary.
+History is currently retained indefinitely. Telegram delivery is at least once,
+so a crash after Telegram accepts a message and before Postgres records success
+can create a duplicate. While Postgres is down, alert state cannot be stored or
+delivered; an independent external monitor is required for immediate
+Postgres-outage notification. The API buffers at most 100 distinct readiness
+snapshots in memory until Postgres returns; an API restart during the outage
+loses those observations. Alert delivery errors are isolated from task
+reconciliation and task-state persistence.
+
 Useful commands:
 
 ```bash
