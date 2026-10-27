@@ -295,9 +295,10 @@ def _handle_approval_rejection(
     task: Any,
     worker_run_repo: Any,
     decided_at: Any,
+    source: str = "api",
 ) -> None:
     task.status = TaskStatus.FAILED
-    task.last_error = "Manual approval rejected via API decision endpoint."
+    task.last_error = f"Manual approval rejected via {source}."
     worker_type = task.chosen_worker or task.worker_override or WorkerType.CODEX
     worker_run_repo.create_for_task(
         task=task,
@@ -306,7 +307,7 @@ def _handle_approval_rejection(
         started_at=decided_at,
         finished_at=decided_at,
         status=WorkerRunStatus.FAILURE,
-        summary="Manual approval rejected via API decision endpoint; task remains failed.",
+        summary=f"Manual approval rejected via {source}; task remains failed.",
         commands_run=[],
         files_changed_count=0,
         files_changed=[],
@@ -314,11 +315,81 @@ def _handle_approval_rejection(
     )
 
 
+def _resolve_pending_permission_interactions(
+    interaction_repo: Any,
+    task_id: str,
+    *,
+    approved: bool,
+    source: str,
+    reason: str | None,
+    decided_at: Any,
+) -> None:
+    for interaction in interaction_repo.list_by_task(
+        task_id=task_id,
+        interaction_types=(HumanInteractionType.PERMISSION,),
+        statuses=(HumanInteractionStatus.PENDING,),
+    ):
+        interaction.status = (
+            HumanInteractionStatus.RESOLVED if approved else HumanInteractionStatus.REJECTED
+        )
+        interaction.response_data = {
+            "approved": approved,
+            "source": source,
+            "reason": reason or interaction.summary,
+        }
+        interaction.updated_at = decided_at
+
+
+def _apply_approval_mutation(
+    task: Any,
+    constraints: dict[str, Any],
+    worker_run_repo: Any,
+    interaction_repo: Any,
+    timeline_repo: Any,
+    *,
+    approved: bool,
+    source: str,
+    reason: str | None,
+    requested_status: str,
+    decided_at: Any,
+) -> None:
+    if approved:
+        constraints["requires_approval"] = False
+        task.status = TaskStatus.PENDING
+        task.last_error = None
+    else:
+        _handle_approval_rejection(task, worker_run_repo, decided_at, source=source)
+
+    _resolve_pending_permission_interactions(
+        interaction_repo,
+        task.id,
+        approved=approved,
+        source=source,
+        reason=reason,
+        decided_at=decided_at,
+    )
+
+    event_type = (
+        TimelineEventType.APPROVAL_GRANTED if approved else TimelineEventType.APPROVAL_REJECTED
+    )
+    timeline_repo.create_next_for_attempt(
+        task_id=task.id,
+        attempt_number=task.attempt_count,
+        event_type=event_type,
+        event_key=f"task:{task.id}:approval:{requested_status}",
+        message=f"Manual approval {'granted' if approved else 'rejected'} via {source}.",
+        payload={"approved": approved, "source": source},
+    )
+    task.constraints = constraints
+
+
 def apply_task_approval_decision(
     self: Any,
     *,
     task_id: str,
     approved: bool,
+    source: str = "api",
+    enqueue_signal: bool = True,
 ) -> ApprovalDecisionResult:
     """Apply an idempotent approval decision for a paused task."""
     decided_at = utc_now()
@@ -326,6 +397,7 @@ def apply_task_approval_decision(
         task_repo = TaskRepository(session)
         interaction_repo = HumanInteractionRepository(session)
         worker_run_repo = WorkerRunRepository(session)
+        timeline_repo = TaskTimelineRepository(session)
 
         task = task_repo.get(task_id)
         if task is None:
@@ -345,41 +417,32 @@ def apply_task_approval_decision(
 
         # We know approval_state is not None after validation
         assert approval_state is not None
-        approval_type = str(approval_state.get("approval_type") or "").strip() or None
         reason = str(approval_state.get("reason") or "").strip() or None
-        resume_token = str(approval_state.get("resume_token") or "").strip() or None
         requested_status = "approved" if approved else "rejected"
         constraints["approval"] = _approval_constraints_payload(
             status=requested_status,
-            approval_type=approval_type,
+            approval_type=str(approval_state.get("approval_type") or "").strip() or None,
             reason=reason,
-            resume_token=resume_token,
+            resume_token=str(approval_state.get("resume_token") or "").strip() or None,
             updated_at=decided_at,
-            source="api",
+            source=source,
             approved=approved,
         )
 
-        if approved:
-            constraints["requires_approval"] = False
-            task.status = TaskStatus.PENDING
-            task.last_error = None
-        else:
-            _handle_approval_rejection(task, worker_run_repo, decided_at)
-            for interaction in interaction_repo.list_by_task(
-                task_id=task_id,
-                interaction_types=(HumanInteractionType.PERMISSION,),
-                statuses=(HumanInteractionStatus.PENDING,),
-            ):
-                interaction.status = HumanInteractionStatus.REJECTED
-                interaction.response_data = {
-                    "approved": False,
-                    "source": "api",
-                    "reason": reason or interaction.summary,
-                }
-                interaction.updated_at = decided_at
+        _apply_approval_mutation(
+            task,
+            constraints,
+            worker_run_repo,
+            interaction_repo,
+            timeline_repo,
+            approved=approved,
+            source=source,
+            reason=reason,
+            requested_status=requested_status,
+            decided_at=decided_at,
+        )
 
-        task.constraints = constraints
-        if task.orchestration_runtime == OrchestrationRuntime.TEMPORAL:
+        if enqueue_signal and task.orchestration_runtime == OrchestrationRuntime.TEMPORAL:
             _enqueue_approval_signal(session, task_id, approved)
         session.flush()
 

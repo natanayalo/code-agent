@@ -26,9 +26,11 @@ from db.models import (
     Base,
     HumanInteraction,
     Task,
+    TaskStatus,
     TaskTimelineEvent,
     TemporalTaskState,
     WorkerRun,
+    WorkerRunStatus,
 )
 from evaluation.provider_reliability_stages import check_task_stages
 from orchestrator.execution import TaskExecutionService, TaskSubmission
@@ -46,6 +48,7 @@ from repositories import (
     TaskTimelineRepository,
     TemporalCommandRepository,
     TemporalTaskStateRepository,
+    WorkerRunRepository,
     create_engine_from_url,
     create_session_factory,
     session_scope,
@@ -263,6 +266,7 @@ def _completion_activity_functions(activities: TaskExecutionActivities) -> list:
         activities.run_worker,
         activities.request_permission_escalation,
         activities.resolve_permission_escalation,
+        activities.persist_approval_decision,
         activities.record_workflow_failure,
         activities.verify_result,
         activities.deliver_result,
@@ -1059,6 +1063,7 @@ def _create_test_temporal_worker(client: Any, service: TaskExecutionService) -> 
             activities.load_memory,
             activities.provision_workspace,
             activities.run_worker,
+            activities.persist_approval_decision,
             activities.record_workflow_failure,
             activities.verify_result,
             activities.deliver_result,
@@ -1299,6 +1304,10 @@ async def test_temporal_runtime_queries_and_validated_updates(
         task = session.get(Task, task_id)
         assert task is not None
         assert task.status == "completed"
+        assert (task.constraints or {}).get("approval", {}).get("status") == "approved"
+        timeline_events = TaskTimelineRepository(session).list_by_task(task_id)
+        event_types = [event.event_type for event in timeline_events]
+        assert TimelineEventType.APPROVAL_GRANTED in event_types
 
 
 @pytest.mark.anyio
@@ -1679,6 +1688,7 @@ async def test_temporal_approval_rejection_persists_compact_session_context(
             workflow_runner=UnsandboxedWorkflowRunner(),
             activities=[
                 activities.classify_and_plan,
+                activities.persist_approval_decision,
                 activities.persist_rejected_session_state,
                 activities.record_workflow_failure,
             ],
@@ -1715,6 +1725,87 @@ async def test_temporal_approval_rejection_persists_compact_session_context(
         assert context.identified_risks["requested_permission"] is None
         durable_state = TemporalTaskStateRepository(session).get(task_id=snapshot.task_id)
         assert durable_state is None
+
+
+@pytest.mark.anyio
+async def test_temporal_runtime_direct_update_rejection_projects_terminal_state(
+    session_factory,
+    monkeypatch,
+):
+    """Direct Temporal update rejection must project terminal DB and session state."""
+    from orchestrator.state import ApprovalCheckpoint
+
+    monkeypatch.setattr(
+        "orchestrator.temporal.activities.check_approval",
+        lambda _state: {
+            "approval": ApprovalCheckpoint(
+                required=True,
+                status="pending",
+                approval_type="manual_approval",
+            )
+        },
+    )
+    service = TaskExecutionService(
+        session_factory=session_factory,
+        worker=CodexCliWorker(runtime_adapter=_ScriptedAdapter([])),
+    )
+    snapshot, _ = service.create_task(TaskSubmission(task_text="Reject via update"))
+    task_id = snapshot.task_id
+
+    async with await WorkflowEnvironment.start_time_skipping() as env:
+        activities = TaskExecutionActivities(service=service)
+        temporal_worker = Worker(
+            env.client,
+            task_queue="task-execution-queue",
+            workflows=[TaskExecutionWorkflow],
+            workflow_runner=UnsandboxedWorkflowRunner(),
+            activities=[
+                activities.classify_and_plan,
+                activities.persist_approval_decision,
+                activities.persist_rejected_session_state,
+                activities.record_workflow_failure,
+            ],
+        )
+        async with temporal_worker:
+            dispatcher = TemporalCommandDispatcher(
+                client=env.client,
+                session_factory=session_factory,
+            )
+            with env.auto_time_skipping_disabled():
+                run_task = await _start_workflow_via_dispatcher(dispatcher, env.client, task_id)
+                await _wait_for_pending_approval(session_factory, task_id)
+                handle = env.client.get_workflow_handle(f"task-{task_id}")
+
+                update_result = await handle.execute_update(
+                    TaskExecutionWorkflow.apply_operator_decision,
+                    {
+                        "decision_kind": "approval",
+                        "value": False,
+                        "command_key": f"task:{task_id}:reject_update",
+                    },
+                )
+                assert update_result["applied"] is True
+                assert update_result["decision_kind"] == "approval"
+                workflow_result = await run_task
+
+    assert workflow_result == {"status": "rejected", "summary": "Manual approval rejected."}
+    with session_scope(session_factory) as session:
+        task = session.get(Task, task_id)
+        assert task is not None
+        assert task.status == TaskStatus.FAILED
+        assert (task.constraints or {}).get("approval", {}).get("status") == "rejected"
+        assert (task.constraints or {}).get("approval", {}).get("source") == "temporal_update"
+        assert task.last_error == "Manual approval rejected via temporal_update."
+
+        runs = WorkerRunRepository(session).list_by_task(task_id)
+        assert any(r.status == WorkerRunStatus.FAILURE for r in runs)
+
+        events = TaskTimelineRepository(session).list_by_task(task_id)
+        assert TimelineEventType.APPROVAL_REJECTED in [e.event_type for e in events]
+        assert TemporalTaskStateRepository(session).get(task_id=task_id) is None
+        context = SessionStateRepository(session).get(snapshot.session_id)
+        assert context is not None
+        assert context.decisions_made["approval_status"] == "rejected"
 
 
 @pytest.mark.anyio

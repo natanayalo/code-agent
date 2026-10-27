@@ -44,12 +44,11 @@ class TaskExecutionWorkflow:
 
     @workflow.run
     async def run(self, task_id: str) -> dict:
-        cancellation_terminal_enabled = workflow.patched(CANCELLATION_TERMINAL_PATCH_ID)
         try:
             return await self._run_lifecycle(task_id)
         except Exception as exc:
             cancellation = _temporal_cancellation_cause(exc)
-            if cancellation_terminal_enabled and cancellation is not None:
+            if workflow.patched(CANCELLATION_TERMINAL_PATCH_ID) and cancellation is not None:
                 self.lifecycle_stage = "cancelled"
                 raise cancellation
             self.lifecycle_stage = "failed"
@@ -178,7 +177,13 @@ class TaskExecutionWorkflow:
         finally:
             self.pending_decision = None
 
-        if self.approval_decision:
+        approved = bool(self.approval_decision)
+        await workflow.execute_activity(
+            "persist_approval_decision",
+            args=[task_id, approved],
+            **activity_options("persist_approval_decision"),
+        )
+        if approved:
             return True
         if workflow.patched(REJECTED_SESSION_STATE_PATCH_ID):
             await workflow.execute_activity(
@@ -199,10 +204,8 @@ class TaskExecutionWorkflow:
         )
 
         if completion_decision.get("continuation") == "manual_follow_up":
-            return {
-                "status": "failed",
-                "summary": completion_decision.get("summary") or "Manual follow-up is required.",
-            }
+            summary = completion_decision.get("summary") or "Manual follow-up is required."
+            return {"status": "failed", "summary": summary}
         if (
             acceptance_enabled
             and isinstance(delivery_outcome, dict)
@@ -401,7 +404,7 @@ class TaskExecutionWorkflow:
     ) -> dict:
         """Project a bounded terminal result for repeated node permission requests."""
         failure = (
-            "Maximum sequential permission escalation limit reached "
+            f"Maximum sequential permission escalation limit reached "
             f"({MAX_PERMISSION_ESCALATIONS})."
         )
         if blocked_node_id is not None:
@@ -566,22 +569,19 @@ class TaskExecutionWorkflow:
     async def handle_approval(self, approved: Any) -> None:
         accepted, value = self._accept_signal(approved)
         if accepted:
-            self.approval_decision = bool(value)
-            self.pending_decision = None
+            self.approval_decision, self.pending_decision = bool(value), None
 
     @workflow.signal
     async def handle_clarification(self, response: Any = None) -> None:
         accepted, _ = self._accept_signal(response)
         if accepted:
-            self.clarification_resolved = True
-            self.pending_decision = None
+            self.clarification_resolved, self.pending_decision = True, None
 
     @workflow.signal
     async def handle_permission_escalation(self, approved: Any) -> None:
         accepted, value = self._accept_signal(approved)
         if accepted:
-            self.permission_escalation_decision = bool(value)
-            self.pending_decision = None
+            self.permission_escalation_decision, self.pending_decision = bool(value), None
 
     def _accept_signal(self, payload: Any) -> tuple[bool, Any]:
         """Deduplicate new command envelopes while accepting historical raw signals."""

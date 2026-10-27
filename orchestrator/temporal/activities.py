@@ -2352,6 +2352,21 @@ class TaskExecutionActivities:
             approved,
         )
 
+    @activity.defn(name="persist_approval_decision")
+    @_restore_task_trace_context
+    async def persist_approval_decision(self, task_id: str, approved: bool) -> None:
+        """Persist a direct-update approval decision for initial task approval."""
+
+        def _persist() -> None:
+            self.service.apply_task_approval_decision(
+                task_id=task_id,
+                approved=approved,
+                source="temporal_update",
+                enqueue_signal=False,
+            )
+
+        await self.service._run_blocking(_persist)
+
     @activity.defn(name="persist_rejected_session_state")
     @_restore_task_trace_context
     async def persist_rejected_session_state(self, task_id: str) -> None:

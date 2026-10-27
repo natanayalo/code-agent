@@ -158,7 +158,11 @@ async def test_workflow_persists_compact_state_before_initial_approval_rejection
     result = await workflow_instance._run_lifecycle("task-id")
 
     assert result == {"status": "rejected", "summary": "Manual approval rejected."}
-    assert activity_names == ["classify_and_plan", "persist_rejected_session_state"]
+    assert activity_names == [
+        "classify_and_plan",
+        "persist_approval_decision",
+        "persist_rejected_session_state",
+    ]
 
 
 @pytest.mark.anyio
