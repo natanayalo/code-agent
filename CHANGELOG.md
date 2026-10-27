@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: qualify Temporal compatibility baseline ([#438](https://github.com/natanayalo/code-agent/pull/438))
+
 - Feat: implement temporal interaction primitives and github issue replay (m30 closeout) ([#437](https://github.com/natanayalo/code-agent/pull/437))
 
 - Feat: synchronize PR and CI state into dashboard operator inbox (m30 slice 1a) ([#436](https://github.com/natanayalo/code-agent/pull/436))
