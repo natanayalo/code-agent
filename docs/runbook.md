@@ -309,7 +309,9 @@ delivered; an independent external monitor is required for immediate
 Postgres-outage notification. The API buffers at most 100 distinct readiness
 snapshots in memory until Postgres returns; an API restart during the outage
 loses those observations. Alert delivery errors are isolated from task
-reconciliation and task-state persistence.
+reconciliation and task-state persistence. Buffered samples replay in
+observation order and are removed individually after commit; a replay older
+than a persisted observation is ignored to prevent cross-instance duplicates.
 
 Useful commands:
 

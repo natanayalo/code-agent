@@ -8,10 +8,12 @@ import os
 import re
 import threading
 from collections.abc import Callable, Mapping
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy.orm import sessionmaker
 
+from db.base import utc_now
 from repositories import ReadinessAlertRepository, session_scope
 
 logger = logging.getLogger(__name__)
@@ -95,7 +97,7 @@ class ReadinessAlertMonitor:
         self.interval_seconds = interval_seconds
         self.readiness_probe = readiness_probe or (lambda service: service.get_readiness())
         self._task: asyncio.Task[None] | None = None
-        self._unpersisted_snapshots: list[tuple[list[str], list[str]]] = []
+        self._unpersisted_snapshots: list[tuple[list[str], list[str], datetime]] = []
 
     def start(self) -> None:
         """Start the monitor once; it runs only in the API process."""
@@ -129,29 +131,45 @@ class ReadinessAlertMonitor:
         snapshot = await asyncio.to_thread(self.readiness_probe, self.task_service)
         reasons = sorted(set(snapshot.degraded_reasons))
         unknown_reasons = _unknown_reason_codes(snapshot)
-        current_sample = (reasons, unknown_reasons)
+        observed_at = getattr(snapshot, "checked_at", None) or utc_now()
+        current_sample = (reasons, unknown_reasons, observed_at)
+        self._buffer_snapshot(current_sample)
         try:
-            for pending_reasons, pending_unknown in self._unpersisted_snapshots:
-                await asyncio.to_thread(self._record_snapshot, pending_reasons, pending_unknown)
-            await asyncio.to_thread(self._record_snapshot, reasons, unknown_reasons)
+            while self._unpersisted_snapshots:
+                pending_reasons, pending_unknown, observed_at = self._unpersisted_snapshots[0]
+                await asyncio.to_thread(
+                    self._record_snapshot, pending_reasons, pending_unknown, observed_at
+                )
+                self._unpersisted_snapshots.pop(0)
         except Exception as exc:
-            if not self._unpersisted_snapshots or self._unpersisted_snapshots[-1] != current_sample:
-                self._unpersisted_snapshots.append(current_sample)
-                if len(self._unpersisted_snapshots) > MAX_UNPERSISTED_SNAPSHOTS:
-                    self._unpersisted_snapshots.pop(1)
             logger.warning("Readiness alert state persistence failed (%s)", type(exc).__name__)
             return
-        self._unpersisted_snapshots.clear()
         for _ in range(MAX_DELIVERIES_PER_CYCLE):
             delivery = await asyncio.to_thread(self._claim_one)
             if delivery is None:
                 break
             await self._deliver(delivery)
 
-    def _record_snapshot(self, reasons: list[str], unknown_reasons: list[str]) -> None:
+    def _buffer_snapshot(self, sample: tuple[list[str], list[str], datetime]) -> None:
+        reasons, unknown_reasons, _observed_at = sample
+        if self._unpersisted_snapshots:
+            last_reasons, last_unknown, _last_observed_at = self._unpersisted_snapshots[-1]
+            if last_reasons == reasons and last_unknown == unknown_reasons:
+                self._unpersisted_snapshots[-1] = sample
+                return
+        self._unpersisted_snapshots.append(sample)
+        if len(self._unpersisted_snapshots) > MAX_UNPERSISTED_SNAPSHOTS:
+            self._unpersisted_snapshots.pop(1)
+
+    def _record_snapshot(
+        self,
+        reasons: list[str],
+        unknown_reasons: list[str],
+        observed_at: datetime,
+    ) -> None:
         with _LOCAL_DB_LOCK, session_scope(self.session_factory) as session:
             ReadinessAlertRepository(session).record_snapshot(
-                reasons, unknown_reasons=unknown_reasons
+                reasons, unknown_reasons=unknown_reasons, observed_at=observed_at
             )
 
     def _claim_one(self) -> dict[str, Any] | None:

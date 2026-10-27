@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, timedelta
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -245,12 +245,14 @@ def test_postgres_outage_observed_while_unavailable_is_reported_after_recovery(
     record_snapshot = monitor._record_snapshot
     failed_once = True
 
-    def temporarily_unavailable(reasons: list[str], unknown_reasons: list[str]) -> None:
+    def temporarily_unavailable(
+        reasons: list[str], unknown_reasons: list[str], observed_at: datetime
+    ) -> None:
         nonlocal failed_once
         if failed_once:
             failed_once = False
             raise ConnectionError("database unavailable")
-        record_snapshot(reasons, unknown_reasons)
+        record_snapshot(reasons, unknown_reasons, observed_at)
 
     monitor._record_snapshot = temporarily_unavailable
     asyncio.run(monitor.run_once())
@@ -313,12 +315,14 @@ def test_unknown_worker_observation_preserves_degraded_state_during_postgres_out
     record_snapshot = monitor._record_snapshot
     calls = 0
 
-    def fail_postgres_sample_once(reasons: list[str], unknown_reasons: list[str]) -> None:
+    def fail_postgres_sample_once(
+        reasons: list[str], unknown_reasons: list[str], observed_at: datetime
+    ) -> None:
         nonlocal calls
         calls += 1
         if calls == 2:
             raise ConnectionError("database unavailable")
-        record_snapshot(reasons, unknown_reasons)
+        record_snapshot(reasons, unknown_reasons, observed_at)
 
     monitor._record_snapshot = fail_postgres_sample_once
     asyncio.run(monitor.run_once())
@@ -330,6 +334,83 @@ def test_unknown_worker_observation_preserves_degraded_state_during_postgres_out
         "Execution readiness degraded: postgres_unavailable",
         "Execution readiness recovered: postgres_unavailable",
     ]
+
+
+def test_buffered_samples_are_removed_after_each_committed_replay(session_factory) -> None:
+    """A later replay failure does not duplicate already committed transitions."""
+    snapshots = iter([_snapshot("worker_unavailable"), _snapshot(), _snapshot()])
+    telegram = FakeTelegram()
+    monitor = ReadinessAlertMonitor(
+        task_service=object(),
+        session_factory=session_factory,
+        telegram_client=telegram,
+        bot_token="token",
+        chat_id="123",
+        readiness_probe=lambda _service: next(snapshots),
+    )
+    record_snapshot = monitor._record_snapshot
+    calls = 0
+
+    def fail_recovery_replay_once(
+        reasons: list[str], unknown_reasons: list[str], observed_at: datetime
+    ) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 3:
+            raise ConnectionError("database unavailable")
+        record_snapshot(reasons, unknown_reasons, observed_at)
+
+    monitor._record_snapshot = fail_recovery_replay_once
+    asyncio.run(monitor.run_once())
+    asyncio.run(monitor.run_once())
+    asyncio.run(monitor.run_once())
+
+    assert sorted(
+        (item.reason, item.transition, item.status) for item in _delivery_rows(session_factory)
+    ) == [
+        ("worker_unavailable", "degraded", "delivered"),
+        ("worker_unavailable", "recovered", "delivered"),
+    ]
+
+
+def test_stale_outage_replay_from_another_monitor_is_ignored(session_factory) -> None:
+    """A newer healthy observation suppresses another process's stale replay."""
+    stale_telegram = FakeTelegram()
+    current_telegram = FakeTelegram()
+    stale_reasons = ["temporal_unavailable"]
+    stale_monitor = ReadinessAlertMonitor(
+        task_service=object(),
+        session_factory=session_factory,
+        telegram_client=stale_telegram,
+        bot_token="token",
+        chat_id="123",
+        readiness_probe=lambda _service: _snapshot(*stale_reasons),
+    )
+    current_monitor = ReadinessAlertMonitor(
+        task_service=object(),
+        session_factory=session_factory,
+        telegram_client=current_telegram,
+        bot_token="token",
+        chat_id="123",
+        readiness_probe=lambda _service: _snapshot(),
+    )
+    record_snapshot = stale_monitor._record_snapshot
+
+    def database_temporarily_unavailable(
+        reasons: list[str], unknown_reasons: list[str], observed_at: datetime
+    ) -> None:
+        raise ConnectionError("database unavailable")
+
+    stale_monitor._record_snapshot = database_temporarily_unavailable
+    asyncio.run(stale_monitor.run_once())
+    stale_monitor._record_snapshot = record_snapshot
+    asyncio.run(current_monitor.run_once())
+    stale_reasons.clear()
+    asyncio.run(stale_monitor.run_once())
+
+    assert stale_telegram.messages == []
+    assert current_telegram.messages == []
+    assert _delivery_rows(session_factory) == []
 
 
 def test_alert_configuration_requires_destination_and_token(monkeypatch) -> None:

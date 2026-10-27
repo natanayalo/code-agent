@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import or_, select, text
@@ -10,9 +10,15 @@ from sqlalchemy.orm import Session, aliased
 
 from db.base import generate_uuid, utc_now
 from db.readiness_alert_models import ReadinessAlertDelivery, ReadinessAlertState
+from orchestrator.operational_health_types import READINESS_REASON_CODES
 
 MAX_DELIVERY_ATTEMPTS = 8
 DELIVERY_LEASE_SECONDS = 30
+
+
+def _utc_aware(value: datetime) -> datetime:
+    """Normalize SQLite's naive datetime values for observation ordering."""
+    return value.replace(tzinfo=value.tzinfo or utc_now().tzinfo)
 
 
 class ReadinessAlertRepository:
@@ -26,34 +32,38 @@ class ReadinessAlertRepository:
         degraded_reasons: list[str],
         *,
         unknown_reasons: list[str] | None = None,
+        observed_at: datetime | None = None,
     ) -> None:
-        """Persist observed transitions without resolving components currently unknown."""
+        """Persist ordered transitions, ignoring stale and currently unknown observations."""
         if self.session.bind is not None and self.session.bind.dialect.name == "postgresql":
             self.session.execute(text("SELECT pg_advisory_xact_lock(731004219)"))
-        now = utc_now()
+        now = observed_at or utc_now()
         active = set(degraded_reasons)
         unknown = set(unknown_reasons or ())
         states = {
             state.reason: state
             for state in self.session.scalars(select(ReadinessAlertState).with_for_update()).all()
         }
-        for reason in sorted(active | {key for key, state in states.items() if state.degraded}):
+        observed_reasons = active | set(READINESS_REASON_CODES)
+        observed_reasons.update(states)
+        for reason in sorted(observed_reasons):
             if reason in unknown:
                 continue
             state = states.get(reason)
+            if state is not None and _utc_aware(state.last_checked_at) >= _utc_aware(now):
+                continue
             degraded = reason in active
             if state is None:
-                if not degraded:
-                    continue
                 state = ReadinessAlertState(
                     reason=reason,
-                    degraded=True,
-                    transition_number=1,
+                    degraded=degraded,
+                    transition_number=1 if degraded else 0,
                     last_transition_at=now,
                     last_checked_at=now,
                 )
                 self.session.add(state)
-                self._enqueue(reason, 1, "degraded", now)
+                if degraded:
+                    self._enqueue(reason, 1, "degraded", now)
             elif state.degraded != degraded:
                 state.degraded = degraded
                 state.transition_number += 1
@@ -143,9 +153,13 @@ class ReadinessAlertRepository:
         delivery.next_attempt_at = checked_at + timedelta(seconds=delay)
 
     def list_states(self) -> list[ReadinessAlertState]:
-        """Return current persisted reason states in stable order."""
+        """Return reasons that have produced at least one alert transition."""
         return list(
-            self.session.scalars(select(ReadinessAlertState).order_by(ReadinessAlertState.reason))
+            self.session.scalars(
+                select(ReadinessAlertState)
+                .where(ReadinessAlertState.transition_number > 0)
+                .order_by(ReadinessAlertState.reason)
+            )
         )
 
     def list_deliveries(self, *, limit: int = 100) -> list[ReadinessAlertDelivery]:

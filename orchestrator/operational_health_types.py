@@ -7,6 +7,14 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+READINESS_REASON_CODES = (
+    "postgres_unavailable",
+    "temporal_unavailable",
+    "worker_unavailable",
+    "dispatcher_unavailable",
+    "dispatcher_backlog_stale",
+)
+
 
 class OperationalHealthModel(BaseModel):
     """Strict base model for operator-facing health contracts."""
