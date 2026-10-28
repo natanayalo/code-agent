@@ -27,8 +27,13 @@ class ReadinessAlertRepository:
     def __init__(self, session: Session) -> None:
         self.session = session
 
+    def _lock_state_updates(self) -> None:
+        if self.session.bind is not None and self.session.bind.dialect.name == "postgresql":
+            self.session.execute(text("SELECT pg_advisory_xact_lock(731004219)"))
+
     def capture_observed_states(self) -> dict[str, tuple[bool, datetime, datetime, int]]:
         """Capture latest known component states before replaying buffered samples."""
+        self._lock_state_updates()
         return {
             state.reason: (
                 state.degraded,
@@ -80,8 +85,7 @@ class ReadinessAlertRepository:
         observed_at: datetime | None = None,
     ) -> None:
         """Persist ordered transitions, ignoring stale and currently unknown observations."""
-        if self.session.bind is not None and self.session.bind.dialect.name == "postgresql":
-            self.session.execute(text("SELECT pg_advisory_xact_lock(731004219)"))
+        self._lock_state_updates()
         now = observed_at or utc_now()
         active = set(degraded_reasons)
         unknown = set(unknown_reasons or ())
