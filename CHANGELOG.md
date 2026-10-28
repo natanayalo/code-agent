@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: add opt-in Telegram readiness alerts ([#441](https://github.com/natanayalo/code-agent/pull/441))
+
 - Feat: add weekly read-only dependency schedules ([#440](https://github.com/natanayalo/code-agent/pull/440))
 
 - Feat: qualify Temporal compatibility baseline ([#438](https://github.com/natanayalo/code-agent/pull/438))
