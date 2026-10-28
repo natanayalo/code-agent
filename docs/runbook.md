@@ -310,8 +310,9 @@ Postgres-outage notification. The API buffers at most 100 distinct readiness
 snapshots in memory until Postgres returns; an API restart during the outage
 loses those observations. Alert delivery errors are isolated from task
 reconciliation and task-state persistence. Buffered samples replay in
-observation order and are removed individually after commit; a replay older
-than a persisted observation is ignored to prevent cross-instance duplicates.
+observation order and are removed individually after commit. If a newer healthy
+baseline arrives first, an unreported stale degradation is retained as an
+ordered degraded/recovered pair; duplicate stale observations are ignored.
 
 Useful commands:
 

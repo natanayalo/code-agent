@@ -373,18 +373,29 @@ def test_buffered_samples_are_removed_after_each_committed_replay(session_factor
     ]
 
 
-def test_stale_outage_replay_from_another_monitor_is_ignored(session_factory) -> None:
-    """A newer healthy observation suppresses another process's stale replay."""
+def test_unreported_outage_replay_is_preserved_after_newer_healthy_observation(
+    session_factory,
+) -> None:
+    """A later healthy baseline does not erase an outage only one process observed."""
     stale_telegram = FakeTelegram()
     current_telegram = FakeTelegram()
-    stale_reasons = ["temporal_unavailable"]
+    checked_at = utc_now()
+    outage_at = checked_at - timedelta(seconds=3)
+    healthy_at = checked_at - timedelta(seconds=2)
+    replay_at = checked_at - timedelta(seconds=1)
+    stale_samples = [
+        SimpleNamespace(
+            degraded_reasons=["temporal_unavailable"], components={}, checked_at=outage_at
+        ),
+        SimpleNamespace(degraded_reasons=[], components={}, checked_at=replay_at),
+    ]
     stale_monitor = ReadinessAlertMonitor(
         task_service=object(),
         session_factory=session_factory,
         telegram_client=stale_telegram,
         bot_token="token",
         chat_id="123",
-        readiness_probe=lambda _service: _snapshot(*stale_reasons),
+        readiness_probe=lambda _service: stale_samples.pop(0),
     )
     current_monitor = ReadinessAlertMonitor(
         task_service=object(),
@@ -392,7 +403,9 @@ def test_stale_outage_replay_from_another_monitor_is_ignored(session_factory) ->
         telegram_client=current_telegram,
         bot_token="token",
         chat_id="123",
-        readiness_probe=lambda _service: _snapshot(),
+        readiness_probe=lambda _service: SimpleNamespace(
+            degraded_reasons=[], components={}, checked_at=healthy_at
+        ),
     )
     record_snapshot = stale_monitor._record_snapshot
 
@@ -405,12 +418,24 @@ def test_stale_outage_replay_from_another_monitor_is_ignored(session_factory) ->
     asyncio.run(stale_monitor.run_once())
     stale_monitor._record_snapshot = record_snapshot
     asyncio.run(current_monitor.run_once())
-    stale_reasons.clear()
     asyncio.run(stale_monitor.run_once())
 
-    assert stale_telegram.messages == []
+    assert [message["text"].split("\n", 1)[0] for message in stale_telegram.messages] == [
+        "Execution readiness degraded: temporal_unavailable",
+        "Execution readiness recovered: temporal_unavailable",
+    ]
     assert current_telegram.messages == []
-    assert _delivery_rows(session_factory) == []
+    with session_scope(session_factory) as session:
+        ReadinessAlertRepository(session).record_snapshot(
+            ["temporal_unavailable"], observed_at=outage_at
+        )
+    deliveries = _delivery_rows(session_factory)
+    assert sorted(
+        (item.reason, item.transition_number, item.transition, item.status) for item in deliveries
+    ) == [
+        ("temporal_unavailable", 1, "degraded", "delivered"),
+        ("temporal_unavailable", 2, "recovered", "delivered"),
+    ]
 
 
 def test_alert_configuration_requires_destination_and_token(monkeypatch) -> None:

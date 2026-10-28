@@ -182,8 +182,9 @@ during a Postgres outage loses those observations. To roll back, unset the chat
 ID and restart the API; persisted status remains available, and task scheduling
 and execution are unchanged.
 Buffered samples retain their observation time and replay in order. Each sample
-is removed only after its transaction commits, and older samples from another
-API instance are ignored after a newer observation has been stored.
+is removed only after its transaction commits. A previously unreported
+degradation is retained as an ordered degraded/recovered pair if a newer
+healthy baseline was stored first; duplicate stale observations are ignored.
 
 ### Database Migrations
 

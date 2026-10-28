@@ -51,6 +51,8 @@ class ReadinessAlertRepository:
                 continue
             state = states.get(reason)
             if state is not None and _utc_aware(state.last_checked_at) >= _utc_aware(now):
+                if reason in active and state.transition_number == 0 and not state.degraded:
+                    self._record_unreported_outage(state, reason, now)
                 continue
             degraded = reason in active
             if state is None:
@@ -77,6 +79,19 @@ class ReadinessAlertRepository:
                 )
             else:
                 state.last_checked_at = now
+
+    def _record_unreported_outage(
+        self,
+        state: ReadinessAlertState,
+        reason: str,
+        observed_at: datetime,
+    ) -> None:
+        """Retain a stale degradation when no instance has recorded transitions yet."""
+        recovered_at = state.last_checked_at
+        state.transition_number = 2
+        state.last_transition_at = recovered_at
+        self._enqueue(reason, 1, "degraded", observed_at)
+        self._enqueue(reason, 2, "recovered", recovered_at)
 
     def _enqueue(self, reason: str, number: int, transition: str, now: Any) -> None:
         self.session.add(
