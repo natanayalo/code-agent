@@ -44,6 +44,46 @@ class ReadinessAlertRepository:
             for state in self.session.scalars(select(ReadinessAlertState)).all()
         }
 
+    def record_earlier_incidents(
+        self, samples: list[tuple[list[str], list[str], datetime]]
+    ) -> None:
+        """Retain completed buffered incidents in gaps before recorded transitions."""
+        states = {
+            state.reason: state
+            for state in self.session.scalars(select(ReadinessAlertState).with_for_update()).all()
+        }
+        for reason, state in states.items():
+            history = self.session.scalars(
+                select(ReadinessAlertDelivery)
+                .where(ReadinessAlertDelivery.reason == reason)
+                .order_by(ReadinessAlertDelivery.observed_at)
+            ).all()
+            if not history:
+                continue
+            events = [(_utc_aware(item.observed_at), item.transition) for item in history]
+            started: datetime | None = None
+            for reasons, unknown, observed_at in samples:
+                if reason in unknown:
+                    continue
+                observed_at = _utc_aware(observed_at)
+                if reason in reasons:
+                    if started is None:
+                        started = observed_at
+                    continue
+                if started is None:
+                    continue
+                previous = [event for event in events if event[0] <= started]
+                between = [event for event in events if started < event[0] <= observed_at]
+                has_later = any(event[0] > observed_at for event in events)
+                if has_later and not between and (not previous or previous[-1][1] == "recovered"):
+                    state.transition_number += 1
+                    self._enqueue(reason, state.transition_number, "degraded", started)
+                    state.transition_number += 1
+                    self._enqueue(reason, state.transition_number, "recovered", observed_at)
+                    events.extend([(started, "degraded"), (observed_at, "recovered")])
+                    events.sort()
+                started = None
+
     def restore_newer_observations(
         self,
         captured: dict[str, tuple[bool, datetime, datetime, int]],
@@ -165,6 +205,7 @@ class ReadinessAlertRepository:
                 reason=reason,
                 transition_number=number,
                 transition=transition,
+                observed_at=now,
                 status="pending",
                 attempts=0,
                 next_attempt_at=now,

@@ -39,6 +39,7 @@ def upgrade() -> None:
         sa.Column("reason", sa.String(length=80), nullable=False),
         sa.Column("transition_number", sa.Integer(), nullable=False),
         sa.Column("transition", sa.String(length=16), nullable=False),
+        sa.Column("observed_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("status", sa.String(length=16), nullable=False),
         sa.Column("attempts", sa.Integer(), nullable=False),
         sa.Column("next_attempt_at", sa.DateTime(timezone=True), nullable=False),

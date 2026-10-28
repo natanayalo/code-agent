@@ -186,6 +186,8 @@ Postgres transaction. If replay fails, none of that batch commits and the API
 retains it for retry. A previously unreported degradation is retained if a
 newer healthy baseline was stored first; distinct outages replay as individual
 degraded/recovered pairs, and duplicate stale observations are ignored.
+If a later incident was reported before replay, an earlier buffered incident's
+notifications arrive afterward.
 
 ### Database Migrations
 

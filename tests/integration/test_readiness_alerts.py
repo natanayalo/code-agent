@@ -581,6 +581,59 @@ def test_multiple_unreported_outages_replay_after_newer_healthy_observation(
     _assert_replayed_incidents(session_factory, stale_telegram, current_telegram)
 
 
+def test_earlier_buffered_incident_is_retained_after_later_incident(session_factory) -> None:
+    now = utc_now()
+    reason = "temporal_unavailable"
+    first_down, first_up, later_down, later_up, current = (
+        now - timedelta(seconds=seconds) for seconds in (50, 40, 30, 20, 10)
+    )
+    _seed_delivered_incident(session_factory, reason, later_down, later_up)
+    telegram = FakeTelegram()
+    monitor = ReadinessAlertMonitor(
+        task_service=object(),
+        session_factory=session_factory,
+        telegram_client=telegram,
+        bot_token="token",
+        chat_id="123",
+    )
+    samples = [([reason], [], first_down), ([], [], first_up), ([], [], current)]
+    monitor._record_snapshots(samples)
+    monitor._record_snapshots(samples)
+    deliveries = _delivery_rows(session_factory)
+    assert sorted((item.transition_number, item.transition) for item in deliveries) == [
+        (1, "degraded"),
+        (2, "recovered"),
+        (3, "degraded"),
+        (4, "recovered"),
+    ]
+    with session_scope(session_factory) as session:
+        state = session.get(ReadinessAlertState, reason)
+        assert state is not None and not state.degraded
+
+
+def test_buffered_samples_inside_recorded_incident_do_not_duplicate(session_factory) -> None:
+    now = utc_now()
+    reason = "temporal_unavailable"
+    _seed_delivered_incident(
+        session_factory, reason, now - timedelta(seconds=50), now - timedelta(seconds=20)
+    )
+    monitor = ReadinessAlertMonitor(
+        task_service=object(),
+        session_factory=session_factory,
+        telegram_client=FakeTelegram(),
+        bot_token="token",
+        chat_id="123",
+    )
+    monitor._record_snapshots(
+        [
+            ([reason], [], now - timedelta(seconds=40)),
+            ([], [], now - timedelta(seconds=30)),
+            ([], [], now - timedelta(seconds=10)),
+        ]
+    )
+    assert len(_delivery_rows(session_factory)) == 2
+
+
 def test_alert_configuration_requires_destination_and_token(monkeypatch) -> None:
     monkeypatch.delenv(ALERT_CHAT_ID_ENV_VAR, raising=False)
     monkeypatch.setenv("CODE_AGENT_TELEGRAM_BOT_TOKEN", "token")

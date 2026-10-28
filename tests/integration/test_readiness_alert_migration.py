@@ -39,9 +39,11 @@ def test_readiness_alert_migration_upgrades_and_persists_transitions(tmp_path: P
         connection.execute(
             text(
                 "INSERT INTO readiness_alert_deliveries "
-                "(id, reason, transition_number, transition, status, attempts, next_attempt_at, "
+                "(id, reason, transition_number, transition, observed_at, status, "
+                "attempts, next_attempt_at, "
                 "created_at, updated_at) VALUES "
-                "('delivery-1', 'temporal_unavailable', 1, 'degraded', 'pending', 0, "
+                "('delivery-1', 'temporal_unavailable', 1, 'degraded', "
+                "CURRENT_TIMESTAMP, 'pending', 0, "
                 "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
             )
         )

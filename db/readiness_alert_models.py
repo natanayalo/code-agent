@@ -35,6 +35,7 @@ class ReadinessAlertDelivery(TimestampMixin, Base):
     reason: Mapped[str] = mapped_column(String(80), nullable=False)
     transition_number: Mapped[int] = mapped_column(Integer, nullable=False)
     transition: Mapped[str] = mapped_column(String(16), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     next_attempt_at: Mapped[datetime] = mapped_column(

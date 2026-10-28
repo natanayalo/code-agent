@@ -164,6 +164,7 @@ class ReadinessAlertMonitor:
         with _LOCAL_DB_LOCK, session_scope(self.session_factory) as session:
             repository = ReadinessAlertRepository(session)
             latest_states = repository.capture_observed_states()
+            repository.record_earlier_incidents(samples)
             latest_replayed_at: dict[str, datetime] = {}
             for reasons, unknown_reasons, observed_at in samples:
                 repository.record_snapshot(
