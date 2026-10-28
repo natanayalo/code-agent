@@ -34,6 +34,8 @@ EXPECTED_TABLES = {
     "users",
     "worker_nodes",
     "worker_runs",
+    "readiness_alert_states",
+    "readiness_alert_deliveries",
 }
 
 EXPECTED_CHECK_CONSTRAINTS = {

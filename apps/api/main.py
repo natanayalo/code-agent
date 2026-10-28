@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio  # noqa: E402
 import logging  # noqa: E402
+import os  # noqa: E402
 from collections.abc import AsyncIterator  # noqa: E402
 from contextlib import asynccontextmanager  # noqa: E402
 from typing import Any
@@ -22,12 +23,17 @@ from apps.api.auth import (  # noqa: E402
 from apps.api.ci_polling import CIPollingScheduler  # noqa: E402
 from apps.api.config import SystemConfig  # noqa: E402
 from apps.api.progress import create_outbound_http_clients  # noqa: E402
+from apps.api.readiness_alerts import (  # noqa: E402
+    ReadinessAlertMonitor,
+    readiness_alert_configuration,
+)
 from apps.api.routes.auth import router as auth_router  # noqa: E402
 from apps.api.routes.github import router as github_router  # noqa: E402
 from apps.api.routes.health import router as health_router  # noqa: E402
 from apps.api.routes.knowledge_base import router as knowledge_base_router  # noqa: E402
 from apps.api.routes.metrics import router as metrics_router  # noqa: E402
 from apps.api.routes.proposals import router as proposals_router  # noqa: E402
+from apps.api.routes.readiness_alerts import router as readiness_alerts_router  # noqa: E402
 from apps.api.routes.schedules import router as schedules_router  # noqa: E402
 from apps.api.routes.sessions import router as sessions_router  # noqa: E402
 from apps.api.routes.system import router as system_router  # noqa: E402
@@ -51,6 +57,34 @@ from orchestrator.execution import (  # noqa: E402
 from sandbox.secrets import DeprecatedLegacySecretsError  # noqa: E402
 
 logger = logging.getLogger(__name__)
+
+
+def _build_readiness_alert_monitor(app: FastAPI) -> ReadinessAlertMonitor | None:
+    """Build the opt-in API monitor only when destination and existing credentials exist."""
+    configured = readiness_alert_configuration()
+    task_service = getattr(app.state, "task_service", None)
+    clients = getattr(app.state, "outbound_http_clients", None)
+    session_factory = getattr(task_service, "session_factory", None)
+    if configured is None or task_service is None or session_factory is None or clients is None:
+        return None
+    chat_id, bot_token = configured
+    return ReadinessAlertMonitor(
+        task_service=task_service,
+        session_factory=session_factory,
+        telegram_client=clients.telegram,
+        bot_token=bot_token,
+        chat_id=chat_id,
+        api_base_url=os.environ.get("CODE_AGENT_TELEGRAM_API_BASE_URL", "https://api.telegram.org"),
+    )
+
+
+def _start_readiness_alert_monitor(app: FastAPI) -> ReadinessAlertMonitor | None:
+    """Build, start, and publish the opt-in API readiness monitor."""
+    monitor = _build_readiness_alert_monitor(app)
+    if monitor is not None:
+        monitor.start()
+    app.state.readiness_alert_monitor = monitor
+    return monitor
 
 
 def _validate_security_config(app: FastAPI) -> None:
@@ -119,6 +153,7 @@ def _build_lifespan(
 
                 if app.state.task_service is not None:
                     async with app.state.task_service:
+                        readiness_alert_monitor = _start_readiness_alert_monitor(app)
                         scout_scheduler = ScoutScheduler(
                             task_service=app.state.task_service, config=app.state.system_config
                         )
@@ -130,6 +165,8 @@ def _build_lifespan(
                         try:
                             yield
                         finally:
+                            if readiness_alert_monitor is not None:
+                                await readiness_alert_monitor.stop()
                             await scout_scheduler.stop()
                             await ci_polling_scheduler.stop()
                 else:
@@ -164,6 +201,7 @@ def _build_lifespan(
 
 def _register_routers(app: FastAPI) -> None:
     app.include_router(health_router)
+    app.include_router(readiness_alerts_router)
     app.include_router(metrics_router)
     app.include_router(auth_router)
     app.include_router(tasks_router)

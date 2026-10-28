@@ -82,6 +82,21 @@ def test_api_service_has_healthcheck(compose_config: dict[str, Any]) -> None:
     ]
 
 
+def test_readiness_alert_destination_is_optional_api_only_configuration(
+    compose_config: dict[str, Any],
+) -> None:
+    """The API receives the optional destination while worker execution stays unchanged."""
+    services = compose_config["services"]
+    api_env = services["api"]["environment"]
+    worker_env = services["worker"]["environment"]
+
+    assert (
+        api_env["CODE_AGENT_READINESS_ALERT_TELEGRAM_CHAT_ID"]
+        == "${CODE_AGENT_READINESS_ALERT_TELEGRAM_CHAT_ID:-}"
+    )
+    assert "CODE_AGENT_READINESS_ALERT_TELEGRAM_CHAT_ID" not in worker_env
+
+
 def test_postgres_service_has_healthcheck_and_port_mapping(
     compose_config: dict[str, Any],
 ) -> None:

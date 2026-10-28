@@ -29,6 +29,7 @@ from repositories.sqlalchemy import (
 )
 from repositories.sqlalchemy_capacity import ExecutionCapacityPermitRepository
 from repositories.sqlalchemy_plan import ExecutionPlanRepository
+from repositories.sqlalchemy_readiness_alerts import ReadinessAlertRepository
 
 __all__ = [
     "ArtifactRepository",
@@ -40,6 +41,7 @@ __all__ = [
     "MemoryProposalRepository",
     "ObservationRepository",
     "OperationalHealthRepository",
+    "ReadinessAlertRepository",
     "PersonalMemoryRepository",
     "ProjectMemoryRepository",
     "ProposalRepository",

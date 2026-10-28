@@ -5,8 +5,10 @@
 Phase 4A: Temporal stabilization, execution architecture foundation, and measured reliability.
 
 Active focus: **M31 — Proactive Operations and Safe Scheduled Work**. The
-Temporal Server 1.24.2 / Python SDK 1.30.0 compatibility prerequisite is
-repository-qualified; the weekly dependency-review scheduling slice is in progress.
+Temporal Server 1.24.2 / Python SDK 1.30.0 compatibility prerequisite and the
+weekly dependency-review scheduling foundation are merged. This slice adds
+opt-in readiness transition alerts to Telegram; scheduled task behavior remains
+unchanged.
 M30 is completed with authenticated GitHub event intake, issue/delivery timeline mapping,
 draft PR synchronization, issue task replay (`/code-agent replay`), and Temporal
 interaction primitives (Queries & Updates).
@@ -241,8 +243,9 @@ Temporal migration and rollback record is in the
 
 ## Next slices only
 
-1. Prepare **M31 — Proactive Operations and Safe Scheduled Work**:
-   a. establish supported Temporal compatibility baseline and schedule execution foundation.
+1. Complete **M31 — Proactive Operations and Safe Scheduled Work**:
+   a. ship the opt-in Telegram readiness alerting slice with durable state,
+      delivery retries, and authenticated inspection.
 2. Maintain completed M29 advisory report contracts and static production routing:
    a. all four canonical task-class/mode cells are qualified (`docs/read_only`, `feature/read_only`, `investigation/read_only`, `feature/mutation`);
    b. longitudinal 45-day split robustness remains calendar-gated on model-aware task age (expected ~2026-11-02 for Wave 2/3 tasks and ~2026-12-08 for `gpt-6-luna`);

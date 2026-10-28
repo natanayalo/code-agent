@@ -1166,3 +1166,8 @@ class EphemeralSecret(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     task: Mapped[Task | None] = relationship()
+
+
+# Keep operational readiness alert tables in a focused module while registering
+# them on Base.metadata for create_all and Alembic autogeneration.
+from db.readiness_alert_models import ReadinessAlertDelivery, ReadinessAlertState  # noqa: E402,F401
