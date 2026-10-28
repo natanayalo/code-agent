@@ -14,6 +14,7 @@ from typing import Any
 from sqlalchemy.orm import sessionmaker
 
 from db.base import utc_now
+from orchestrator.operational_health_types import READINESS_REASON_CODES
 from repositories import ReadinessAlertRepository, session_scope
 
 logger = logging.getLogger(__name__)
@@ -162,10 +163,15 @@ class ReadinessAlertMonitor:
         """Persist the buffered replay atomically to keep its transitions ordered."""
         with _LOCAL_DB_LOCK, session_scope(self.session_factory) as session:
             repository = ReadinessAlertRepository(session)
+            latest_states = repository.capture_observed_states()
+            latest_replayed_at: dict[str, datetime] = {}
             for reasons, unknown_reasons, observed_at in samples:
                 repository.record_snapshot(
                     reasons, unknown_reasons=unknown_reasons, observed_at=observed_at
                 )
+                for reason in set(READINESS_REASON_CODES) - set(unknown_reasons):
+                    latest_replayed_at[reason] = observed_at
+            repository.restore_newer_observations(latest_states, latest_replayed_at)
 
     def _claim_one(self) -> dict[str, Any] | None:
         with _LOCAL_DB_LOCK, session_scope(self.session_factory) as session:

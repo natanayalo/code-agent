@@ -20,7 +20,7 @@ from apps.api.readiness_alerts import (
     readiness_alert_configuration,
 )
 from db.base import utc_now
-from db.readiness_alert_models import ReadinessAlertDelivery
+from db.readiness_alert_models import ReadinessAlertDelivery, ReadinessAlertState
 from orchestrator.execution import TaskExecutionService
 from repositories import ReadinessAlertRepository, session_scope
 from tests.integration.task_endpoints_support import DEFAULT_SHARED_SECRET, _default_worker
@@ -390,6 +390,78 @@ def test_unknown_worker_observation_preserves_degraded_state_during_postgres_out
         "Execution readiness degraded: postgres_unavailable",
         "Execution readiness recovered: postgres_unavailable",
     ]
+
+
+def test_stale_worker_replay_restores_newer_healthy_state_after_unknown_sample(
+    session_factory,
+) -> None:
+    """An older buffered outage cannot overwrite a newer known healthy state."""
+    checked_at = utc_now()
+    degraded_at = checked_at - timedelta(seconds=3)
+    healthy_at = checked_at - timedelta(seconds=2)
+    unknown_at = checked_at - timedelta(seconds=1)
+    with session_scope(session_factory) as session:
+        ReadinessAlertRepository(session).record_snapshot([], observed_at=healthy_at)
+
+    unknown = SimpleNamespace(status="unknown")
+    unavailable = SimpleNamespace(status="not_ready")
+    samples = iter(
+        [
+            SimpleNamespace(
+                degraded_reasons=["worker_unavailable"],
+                components={"worker": unavailable},
+                checked_at=degraded_at,
+            ),
+            SimpleNamespace(
+                degraded_reasons=["postgres_unavailable"],
+                components={"postgres": unavailable, "worker": unknown, "dispatcher": unknown},
+                checked_at=unknown_at,
+            ),
+        ]
+    )
+    telegram = FakeTelegram()
+    monitor = ReadinessAlertMonitor(
+        task_service=object(),
+        session_factory=session_factory,
+        telegram_client=telegram,
+        bot_token="token",
+        chat_id="123",
+        readiness_probe=lambda _service: next(samples),
+    )
+    persist = monitor._record_snapshots
+    fail_once = True
+
+    def fail_first_replay(
+        buffered: list[tuple[list[str], list[str], datetime]],
+    ) -> None:
+        nonlocal fail_once
+        if fail_once:
+            fail_once = False
+            raise ConnectionError("database unavailable")
+        persist(buffered)
+
+    monitor._record_snapshots = fail_first_replay
+    asyncio.run(monitor.run_once())
+    asyncio.run(monitor.run_once())
+
+    with session_scope(session_factory) as session:
+        worker_state = session.get(ReadinessAlertState, "worker_unavailable")
+        assert worker_state is not None
+        assert worker_state.degraded is False
+        worker_deliveries = session.scalars(
+            select(ReadinessAlertDelivery)
+            .where(ReadinessAlertDelivery.reason == "worker_unavailable")
+            .order_by(ReadinessAlertDelivery.transition_number)
+        ).all()
+        assert [item.transition for item in worker_deliveries] == ["degraded", "recovered"]
+
+    assert sorted(message["text"].split("\n", 1)[0] for message in telegram.messages) == sorted(
+        [
+            "Execution readiness degraded: worker_unavailable",
+            "Execution readiness recovered: worker_unavailable",
+            "Execution readiness degraded: postgres_unavailable",
+        ]
+    )
 
 
 def test_buffered_replay_rolls_back_atomically_after_partial_failure(

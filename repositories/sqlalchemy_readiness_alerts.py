@@ -27,6 +27,51 @@ class ReadinessAlertRepository:
     def __init__(self, session: Session) -> None:
         self.session = session
 
+    def capture_observed_states(self) -> dict[str, tuple[bool, datetime, datetime, int]]:
+        """Capture latest known component states before replaying buffered samples."""
+        return {
+            state.reason: (
+                state.degraded,
+                state.last_checked_at,
+                state.last_transition_at,
+                state.transition_number,
+            )
+            for state in self.session.scalars(select(ReadinessAlertState)).all()
+        }
+
+    def restore_newer_observations(
+        self,
+        captured: dict[str, tuple[bool, datetime, datetime, int]],
+        latest_replayed_at: dict[str, datetime],
+    ) -> None:
+        """Keep a newer known component state after replaying older buffered transitions."""
+        states = {
+            state.reason: state
+            for state in self.session.scalars(select(ReadinessAlertState).with_for_update()).all()
+        }
+        for reason, replayed_at in latest_replayed_at.items():
+            baseline = captured.get(reason)
+            state = states.get(reason)
+            if baseline is None or state is None:
+                continue
+            degraded, checked_at, transition_at, transition_number = baseline
+            if _utc_aware(checked_at) < _utc_aware(replayed_at):
+                continue
+            if state.degraded != degraded:
+                state.degraded = degraded
+                state.transition_number += 1
+                state.last_transition_at = checked_at
+                self._enqueue(
+                    reason,
+                    state.transition_number,
+                    "degraded" if degraded else "recovered",
+                    checked_at,
+                )
+            elif _utc_aware(state.last_transition_at) < _utc_aware(transition_at):
+                state.last_transition_at = transition_at
+            state.last_checked_at = max((_utc_aware(state.last_checked_at), _utc_aware(checked_at)))
+            state.transition_number = max(state.transition_number, transition_number)
+
     def record_snapshot(
         self,
         degraded_reasons: list[str],
