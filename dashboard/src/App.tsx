@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { DashboardLayout } from './components/layout/DashboardLayout';
 import { TaskBoard } from './components/TaskBoard';
 import { StatsPanel } from './components/StatsPanel';
@@ -22,6 +22,15 @@ const REFRESH_INTERVAL_MS = 30000;
 
 function DashboardContent() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const location = useLocation();
+  const navigate = useNavigate();
+  React.useEffect(() => {
+    const state = location.state as { openTaskId?: string } | null;
+    if (state?.openTaskId) {
+      setSelectedTaskId(state.openTaskId);
+      navigate('/', { replace: true, state: null });
+    }
+  }, [location.state, navigate]);
   const {
     data: tasks = [],
     isLoading: loading,

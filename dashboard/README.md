@@ -7,6 +7,16 @@ outbox, worker, interaction-wait, and terminal-reconciliation signals. HTTP 503
 from `/ready` is treated as structured degraded-state data so operators can see
 the reason and safe first action during an outage.
 
+The metrics page also shows persisted readiness-alert reason state and recent
+notification deliveries, including retry and failure metadata. Dependency
+review schedules show their specification, pause state, upcoming executions,
+recent Temporal outcomes, skipped/missed counts, and paginated submitted tasks.
+Each source refreshes independently and displays its own loading, error, and
+last-checked state; expired Temporal history is presented as an unavailable
+outcome. Submitted tasks open in the existing task detail panel. These views
+are read-only; schedule management remains available through the authenticated
+API.
+
 ## Tech Stack
 
 - **Framework**: [Vite](https://vitejs.dev/) + [React](https://reactjs.org/)

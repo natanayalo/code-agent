@@ -11,6 +11,10 @@ vi.mock('../services/api', () => ({
   api: {
     getMetrics: vi.fn(),
     getReadiness: vi.fn(),
+    listReadinessAlertStates: vi.fn().mockResolvedValue([]),
+    listReadinessAlertDeliveries: vi.fn().mockResolvedValue([]),
+    listDependencyReviewSchedules: vi.fn().mockResolvedValue([]),
+    listScheduledTasks: vi.fn().mockResolvedValue([]),
   },
 }));
 
@@ -104,7 +108,7 @@ describe('MetricsPage', () => {
     expect(screen.getByText('Set TEMPORAL_ONLY_CUTOVER_AT to enable since-cutover drain metrics.')).toBeInTheDocument();
     expect(screen.getByText('Active legacy').nextElementSibling).toHaveTextContent('1');
     expect(screen.getByText('Active unknown').nextElementSibling).toHaveTextContent('3');
-    expect(document.querySelectorAll('.metric-detail-card')).toHaveLength(3);
+    expect(document.querySelectorAll('.metrics-container .metric-detail-card')).toHaveLength(3);
   });
 
   it('shows legacy submissions after a configured cutover', async () => {

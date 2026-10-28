@@ -3,7 +3,7 @@ import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { TaskCard } from './TaskCard';
-import { TaskStatus, ApprovalStatus, TaskSnapshot } from '../types/task';
+import { TaskStatus, ApprovalStatus, TaskSnapshot, TaskSummarySnapshot } from '../types/task';
 import { api } from '../services/api';
 
 vi.mock('../services/api', () => ({

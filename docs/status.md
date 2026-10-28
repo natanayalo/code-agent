@@ -244,8 +244,10 @@ Temporal migration and rollback record is in the
 ## Next slices only
 
 1. Complete **M31 — Proactive Operations and Safe Scheduled Work**:
-   a. ship the opt-in Telegram readiness alerting slice with durable state,
-      delivery retries, and authenticated inspection.
+   a. add read-only dashboard visibility for persisted readiness reasons,
+      notification delivery retries/failures, dependency-review schedules, and
+      paginated submitted-task history (PR #441 completed the readiness-alert
+      backend slice).
 2. Maintain completed M29 advisory report contracts and static production routing:
    a. all four canonical task-class/mode cells are qualified (`docs/read_only`, `feature/read_only`, `investigation/read_only`, `feature/mutation`);
    b. longitudinal 45-day split robustness remains calendar-gated on model-aware task age (expected ~2026-11-02 for Wave 2/3 tasks and ~2026-12-08 for `gpt-6-luna`);

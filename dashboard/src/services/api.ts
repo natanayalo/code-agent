@@ -7,7 +7,14 @@ import {
   InteractionInboxCard,
 } from '../types/task';
 import { SessionSnapshot } from '../types/session';
-import { OperationalMetrics, ReadinessSnapshot } from '../types/metrics';
+import {
+  DependencyReviewScheduleSnapshot,
+  OperationalMetrics,
+  ReadinessAlertDeliverySnapshot,
+  ReadinessAlertStateSnapshot,
+  ReadinessSnapshot,
+  ScheduledTaskSnapshot,
+} from '../types/metrics';
 import {
   KnowledgeBaseStatsSnapshot,
   MemoryAdmissionDecisionSnapshot,
@@ -693,6 +700,47 @@ export const api = {
       return parseReadinessSnapshot(await fetchWithAuth('/ready', {}, [503]));
     } catch (error) {
       console.warn('Failed to fetch execution readiness from API', error);
+      throw error;
+    }
+  },
+
+  async listReadinessAlertStates(): Promise<ReadinessAlertStateSnapshot[]> {
+    try {
+      const data = await fetchWithAuth('/alerts/readiness');
+      return Array.isArray(data) ? data : [];
+    } catch (error) {
+      console.warn('Failed to fetch readiness alert states', error);
+      throw error;
+    }
+  },
+
+  async listReadinessAlertDeliveries(limit: number = 100): Promise<ReadinessAlertDeliverySnapshot[]> {
+    try {
+      const data = await fetchWithAuth(`/alerts/readiness/deliveries?limit=${limit}`);
+      return Array.isArray(data) ? data : [];
+    } catch (error) {
+      console.warn('Failed to fetch readiness alert deliveries', error);
+      throw error;
+    }
+  },
+
+  async listDependencyReviewSchedules(): Promise<DependencyReviewScheduleSnapshot[]> {
+    try {
+      const data = await fetchWithAuth('/schedules');
+      return Array.isArray(data) ? data : [];
+    } catch (error) {
+      console.warn('Failed to fetch dependency review schedules', error);
+      throw error;
+    }
+  },
+
+  async listScheduledTasks(scheduleId: string, limit: number = 50, offset: number = 0): Promise<ScheduledTaskSnapshot[]> {
+    try {
+      const query = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+      const data = await fetchWithAuth(`/schedules/${encodeURIComponent(scheduleId)}/runs?${query}`);
+      return Array.isArray(data) ? data : [];
+    } catch (error) {
+      console.warn(`Failed to fetch runs for schedule ${scheduleId}`, error);
       throw error;
     }
   },
