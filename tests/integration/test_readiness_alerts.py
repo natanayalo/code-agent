@@ -380,15 +380,24 @@ def test_unreported_outage_replay_is_preserved_after_newer_healthy_observation(
     stale_telegram = FakeTelegram()
     current_telegram = FakeTelegram()
     checked_at = utc_now()
-    outage_at = checked_at - timedelta(seconds=3)
-    healthy_at = checked_at - timedelta(seconds=2)
-    replay_at = checked_at - timedelta(seconds=1)
+    previous_outage_at = checked_at - timedelta(seconds=12)
+    previous_recovery_at = checked_at - timedelta(seconds=10)
+    outage_at = checked_at - timedelta(seconds=6)
+    healthy_at = checked_at - timedelta(seconds=4)
+    replay_at = checked_at - timedelta(seconds=2)
     stale_samples = [
         SimpleNamespace(
             degraded_reasons=["temporal_unavailable"], components={}, checked_at=outage_at
         ),
         SimpleNamespace(degraded_reasons=[], components={}, checked_at=replay_at),
     ]
+    with session_scope(session_factory) as session:
+        repository = ReadinessAlertRepository(session)
+        repository.record_snapshot(["temporal_unavailable"], observed_at=previous_outage_at)
+        repository.record_snapshot([], observed_at=previous_recovery_at)
+        for _ in range(2):
+            for delivery in repository.claim_due(limit=10):
+                repository.mark_delivered(delivery.id, http_status=200)
     stale_monitor = ReadinessAlertMonitor(
         task_service=object(),
         session_factory=session_factory,
@@ -435,6 +444,8 @@ def test_unreported_outage_replay_is_preserved_after_newer_healthy_observation(
     ) == [
         ("temporal_unavailable", 1, "degraded", "delivered"),
         ("temporal_unavailable", 2, "recovered", "delivered"),
+        ("temporal_unavailable", 3, "degraded", "delivered"),
+        ("temporal_unavailable", 4, "recovered", "delivered"),
     ]
 
 
