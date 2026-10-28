@@ -135,15 +135,12 @@ class ReadinessAlertMonitor:
         current_sample = (reasons, unknown_reasons, observed_at)
         self._buffer_snapshot(current_sample)
         try:
-            while self._unpersisted_snapshots:
-                pending_reasons, pending_unknown, observed_at = self._unpersisted_snapshots[0]
-                await asyncio.to_thread(
-                    self._record_snapshot, pending_reasons, pending_unknown, observed_at
-                )
-                self._unpersisted_snapshots.pop(0)
+            pending_samples = list(self._unpersisted_snapshots)
+            await asyncio.to_thread(self._record_snapshots, pending_samples)
         except Exception as exc:
             logger.warning("Readiness alert state persistence failed (%s)", type(exc).__name__)
             return
+        self._unpersisted_snapshots.clear()
         for _ in range(MAX_DELIVERIES_PER_CYCLE):
             delivery = await asyncio.to_thread(self._claim_one)
             if delivery is None:
@@ -161,16 +158,14 @@ class ReadinessAlertMonitor:
         if len(self._unpersisted_snapshots) > MAX_UNPERSISTED_SNAPSHOTS:
             self._unpersisted_snapshots.pop(1)
 
-    def _record_snapshot(
-        self,
-        reasons: list[str],
-        unknown_reasons: list[str],
-        observed_at: datetime,
-    ) -> None:
+    def _record_snapshots(self, samples: list[tuple[list[str], list[str], datetime]]) -> None:
+        """Persist the buffered replay atomically to keep its transitions ordered."""
         with _LOCAL_DB_LOCK, session_scope(self.session_factory) as session:
-            ReadinessAlertRepository(session).record_snapshot(
-                reasons, unknown_reasons=unknown_reasons, observed_at=observed_at
-            )
+            repository = ReadinessAlertRepository(session)
+            for reasons, unknown_reasons, observed_at in samples:
+                repository.record_snapshot(
+                    reasons, unknown_reasons=unknown_reasons, observed_at=observed_at
+                )
 
     def _claim_one(self) -> dict[str, Any] | None:
         with _LOCAL_DB_LOCK, session_scope(self.session_factory) as session:

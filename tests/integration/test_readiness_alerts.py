@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -60,6 +61,65 @@ def _snapshot(*reasons: str, components: dict | None = None):
 def _delivery_rows(session_factory) -> list[ReadinessAlertDelivery]:
     with session_scope(session_factory) as session:
         return ReadinessAlertRepository(session).list_deliveries()
+
+
+def _seed_delivered_incident(session_factory, reason: str, degraded_at, recovered_at) -> None:
+    with session_scope(session_factory) as session:
+        repository = ReadinessAlertRepository(session)
+        repository.record_snapshot([reason], observed_at=degraded_at)
+        repository.record_snapshot([], observed_at=recovered_at)
+        for _ in range(2):
+            for delivery in repository.claim_due(limit=10):
+                repository.mark_delivered(delivery.id, http_status=200)
+
+
+def _incident_replay_samples(times: list[datetime], reason: str) -> list[SimpleNamespace]:
+    degraded_at_1, recovered_at_1, degraded_at_2, recovered_at_2, checked_at = times
+    return [
+        SimpleNamespace(degraded_reasons=[reason], components={}, checked_at=degraded_at_1),
+        SimpleNamespace(degraded_reasons=[], components={}, checked_at=recovered_at_1),
+        SimpleNamespace(degraded_reasons=[reason], components={}, checked_at=degraded_at_2),
+        SimpleNamespace(degraded_reasons=[], components={}, checked_at=recovered_at_2),
+        SimpleNamespace(degraded_reasons=[], components={}, checked_at=checked_at),
+    ]
+
+
+def _transition_history(session_factory) -> list[tuple[str, int, str, str]]:
+    return sorted(
+        (
+            item.reason,
+            item.transition_number,
+            item.transition,
+            item.status,
+        )
+        for item in _delivery_rows(session_factory)
+    )
+
+
+def _assert_replayed_incidents(
+    session_factory, stale_telegram: FakeTelegram, current_telegram: FakeTelegram
+) -> None:
+    expected_messages = [
+        "Execution readiness degraded: temporal_unavailable",
+        "Execution readiness recovered: temporal_unavailable",
+        "Execution readiness degraded: temporal_unavailable",
+        "Execution readiness recovered: temporal_unavailable",
+    ]
+    assert [message["text"].split("\n", 1)[0] for message in stale_telegram.messages] == (
+        expected_messages
+    )
+    assert current_telegram.messages == []
+    assert _transition_history(session_factory) == [
+        ("temporal_unavailable", number, transition, "delivered")
+        for number, transition in (
+            (1, "degraded"),
+            (2, "recovered"),
+            (3, "degraded"),
+            (4, "recovered"),
+            (5, "degraded"),
+            (6, "recovered"),
+        )
+    ]
 
 
 def test_readiness_alerts_deduplicate_and_emit_recovery(session_factory) -> None:
@@ -242,19 +302,17 @@ def test_postgres_outage_observed_while_unavailable_is_reported_after_recovery(
         chat_id="123",
         readiness_probe=lambda _service: next(snapshots),
     )
-    record_snapshot = monitor._record_snapshot
+    record_snapshots = monitor._record_snapshots
     failed_once = True
 
-    def temporarily_unavailable(
-        reasons: list[str], unknown_reasons: list[str], observed_at: datetime
-    ) -> None:
+    def temporarily_unavailable(samples: list[tuple[list[str], list[str], datetime]]) -> None:
         nonlocal failed_once
         if failed_once:
             failed_once = False
             raise ConnectionError("database unavailable")
-        record_snapshot(reasons, unknown_reasons, observed_at)
+        record_snapshots(samples)
 
-    monitor._record_snapshot = temporarily_unavailable
+    monitor._record_snapshots = temporarily_unavailable
     asyncio.run(monitor.run_once())
     assert telegram.messages == []
     asyncio.run(monitor.run_once())
@@ -312,19 +370,17 @@ def test_unknown_worker_observation_preserves_degraded_state_during_postgres_out
         chat_id="123",
         readiness_probe=lambda _service: next(snapshots),
     )
-    record_snapshot = monitor._record_snapshot
+    record_snapshots = monitor._record_snapshots
     calls = 0
 
-    def fail_postgres_sample_once(
-        reasons: list[str], unknown_reasons: list[str], observed_at: datetime
-    ) -> None:
+    def fail_postgres_sample_once(samples: list[tuple[list[str], list[str], datetime]]) -> None:
         nonlocal calls
         calls += 1
         if calls == 2:
             raise ConnectionError("database unavailable")
-        record_snapshot(reasons, unknown_reasons, observed_at)
+        record_snapshots(samples)
 
-    monitor._record_snapshot = fail_postgres_sample_once
+    monitor._record_snapshots = fail_postgres_sample_once
     asyncio.run(monitor.run_once())
     asyncio.run(monitor.run_once())
     asyncio.run(monitor.run_once())
@@ -336,8 +392,10 @@ def test_unknown_worker_observation_preserves_degraded_state_during_postgres_out
     ]
 
 
-def test_buffered_samples_are_removed_after_each_committed_replay(session_factory) -> None:
-    """A later replay failure does not duplicate already committed transitions."""
+def test_buffered_replay_rolls_back_atomically_after_partial_failure(
+    session_factory, monkeypatch
+) -> None:
+    """A failed replay transaction retains the whole buffer without partial transitions."""
     snapshots = iter([_snapshot("worker_unavailable"), _snapshot(), _snapshot()])
     telegram = FakeTelegram()
     monitor = ReadinessAlertMonitor(
@@ -348,21 +406,24 @@ def test_buffered_samples_are_removed_after_each_committed_replay(session_factor
         chat_id="123",
         readiness_probe=lambda _service: next(snapshots),
     )
-    record_snapshot = monitor._record_snapshot
+    original_record_snapshot = ReadinessAlertRepository.record_snapshot
     calls = 0
 
-    def fail_recovery_replay_once(
-        reasons: list[str], unknown_reasons: list[str], observed_at: datetime
+    def fail_inside_replay_once(
+        repository: ReadinessAlertRepository, reasons: list[str], **kwargs: Any
     ) -> None:
         nonlocal calls
         calls += 1
+        if calls == 1:
+            raise ConnectionError("database unavailable")
+        original_record_snapshot(repository, reasons, **kwargs)
         if calls == 3:
             raise ConnectionError("database unavailable")
-        record_snapshot(reasons, unknown_reasons, observed_at)
 
-    monitor._record_snapshot = fail_recovery_replay_once
+    monkeypatch.setattr(ReadinessAlertRepository, "record_snapshot", fail_inside_replay_once)
     asyncio.run(monitor.run_once())
     asyncio.run(monitor.run_once())
+    assert _delivery_rows(session_factory) == []
     asyncio.run(monitor.run_once())
 
     assert sorted(
@@ -373,31 +434,37 @@ def test_buffered_samples_are_removed_after_each_committed_replay(session_factor
     ]
 
 
-def test_unreported_outage_replay_is_preserved_after_newer_healthy_observation(
+def test_multiple_unreported_outages_replay_after_newer_healthy_observation(
     session_factory,
 ) -> None:
-    """A later healthy baseline does not erase an outage only one process observed."""
+    """Buffered outages replay individually even after earlier transition history."""
     stale_telegram = FakeTelegram()
     current_telegram = FakeTelegram()
     checked_at = utc_now()
-    previous_outage_at = checked_at - timedelta(seconds=12)
-    previous_recovery_at = checked_at - timedelta(seconds=10)
-    outage_at = checked_at - timedelta(seconds=6)
+    previous_outage_at = checked_at - timedelta(seconds=20)
+    previous_recovery_at = checked_at - timedelta(seconds=18)
+    first_outage_at = checked_at - timedelta(seconds=12)
+    first_recovery_at = checked_at - timedelta(seconds=10)
+    second_outage_at = checked_at - timedelta(seconds=8)
+    second_recovery_at = checked_at - timedelta(seconds=6)
     healthy_at = checked_at - timedelta(seconds=4)
     replay_at = checked_at - timedelta(seconds=2)
-    stale_samples = [
-        SimpleNamespace(
-            degraded_reasons=["temporal_unavailable"], components={}, checked_at=outage_at
-        ),
-        SimpleNamespace(degraded_reasons=[], components={}, checked_at=replay_at),
-    ]
-    with session_scope(session_factory) as session:
-        repository = ReadinessAlertRepository(session)
-        repository.record_snapshot(["temporal_unavailable"], observed_at=previous_outage_at)
-        repository.record_snapshot([], observed_at=previous_recovery_at)
-        for _ in range(2):
-            for delivery in repository.claim_due(limit=10):
-                repository.mark_delivered(delivery.id, http_status=200)
+    stale_samples = _incident_replay_samples(
+        [
+            first_outage_at,
+            first_recovery_at,
+            second_outage_at,
+            second_recovery_at,
+            replay_at,
+        ],
+        "temporal_unavailable",
+    )
+    _seed_delivered_incident(
+        session_factory,
+        "temporal_unavailable",
+        previous_outage_at,
+        previous_recovery_at,
+    )
     stale_monitor = ReadinessAlertMonitor(
         task_service=object(),
         session_factory=session_factory,
@@ -416,37 +483,30 @@ def test_unreported_outage_replay_is_preserved_after_newer_healthy_observation(
             degraded_reasons=[], components={}, checked_at=healthy_at
         ),
     )
-    record_snapshot = stale_monitor._record_snapshot
+    record_snapshots = stale_monitor._record_snapshots
 
     def database_temporarily_unavailable(
-        reasons: list[str], unknown_reasons: list[str], observed_at: datetime
+        samples: list[tuple[list[str], list[str], datetime]],
     ) -> None:
         raise ConnectionError("database unavailable")
 
-    stale_monitor._record_snapshot = database_temporarily_unavailable
-    asyncio.run(stale_monitor.run_once())
-    stale_monitor._record_snapshot = record_snapshot
+    stale_monitor._record_snapshots = database_temporarily_unavailable
+    for _ in range(4):
+        asyncio.run(stale_monitor.run_once())
     asyncio.run(current_monitor.run_once())
+    stale_monitor._record_snapshots = record_snapshots
     asyncio.run(stale_monitor.run_once())
 
-    assert [message["text"].split("\n", 1)[0] for message in stale_telegram.messages] == [
-        "Execution readiness degraded: temporal_unavailable",
-        "Execution readiness recovered: temporal_unavailable",
-    ]
-    assert current_telegram.messages == []
     with session_scope(session_factory) as session:
-        ReadinessAlertRepository(session).record_snapshot(
-            ["temporal_unavailable"], observed_at=outage_at
-        )
-    deliveries = _delivery_rows(session_factory)
-    assert sorted(
-        (item.reason, item.transition_number, item.transition, item.status) for item in deliveries
-    ) == [
-        ("temporal_unavailable", 1, "degraded", "delivered"),
-        ("temporal_unavailable", 2, "recovered", "delivered"),
-        ("temporal_unavailable", 3, "degraded", "delivered"),
-        ("temporal_unavailable", 4, "recovered", "delivered"),
-    ]
+        repository = ReadinessAlertRepository(session)
+        for observed_at, reasons in (
+            (first_outage_at, ["temporal_unavailable"]),
+            (first_recovery_at, []),
+            (second_outage_at, ["temporal_unavailable"]),
+            (second_recovery_at, []),
+        ):
+            repository.record_snapshot(reasons, observed_at=observed_at)
+    _assert_replayed_incidents(session_factory, stale_telegram, current_telegram)
 
 
 def test_alert_configuration_requires_destination_and_token(monkeypatch) -> None:

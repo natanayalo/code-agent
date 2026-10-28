@@ -181,10 +181,11 @@ still needed for immediate database-outage alerting. The API retains at most
 during a Postgres outage loses those observations. To roll back, unset the chat
 ID and restart the API; persisted status remains available, and task scheduling
 and execution are unchanged.
-Buffered samples retain their observation time and replay in order. Each sample
-is removed only after its transaction commits. A previously unreported
-degradation is retained as an ordered degraded/recovered pair if a newer
-healthy baseline was stored first; duplicate stale observations are ignored.
+Buffered samples retain their observation time and replay in order in one
+Postgres transaction. If replay fails, none of that batch commits and the API
+retains it for retry. A previously unreported degradation is retained if a
+newer healthy baseline was stored first; distinct outages replay as individual
+degraded/recovered pairs, and duplicate stale observations are ignored.
 
 ### Database Migrations
 
