@@ -174,6 +174,8 @@ class ReadinessAlertRepository:
                     "degraded" if degraded else "recovered",
                     now,
                 )
+            else:
+                state.last_checked_at = now
 
     def record_interaction_snapshot(
         self, task_ids: list[str], *, observed_at: datetime | None = None
@@ -182,6 +184,7 @@ class ReadinessAlertRepository:
         self._lock_state_updates()
         now = observed_at or utc_now()
         current = {f"{INTERACTION_REASON_PREFIX}{task_id}" for task_id in task_ids}
+        watermark_key = f"{INTERACTION_REASON_PREFIX}__observation_watermark__"
         states = {
             state.reason: state
             for state in self.session.scalars(
@@ -190,6 +193,21 @@ class ReadinessAlertRepository:
                 .with_for_update()
             ).all()
         }
+        watermark = states.get(watermark_key)
+        if watermark is not None and _utc_aware(watermark.last_checked_at) >= _utc_aware(now):
+            return
+        if watermark is None:
+            watermark = ReadinessAlertState(
+                reason=watermark_key,
+                degraded=False,
+                transition_number=0,
+                last_transition_at=now,
+                last_checked_at=now,
+            )
+            self.session.add(watermark)
+        else:
+            watermark.last_checked_at = now
+        states.pop(watermark_key, None)
         for reason in sorted(current | set(states)):
             state = states.get(reason)
             if state is None:
@@ -231,9 +249,8 @@ class ReadinessAlertRepository:
         """Replay an unrecorded transition without moving the latest-sample watermark."""
         if state.degraded == degraded:
             return
-        no_prior_transitions = state.transition_number == 0
         after_latest_transition = _utc_aware(observed_at) > _utc_aware(state.last_transition_at)
-        if not no_prior_transitions and not after_latest_transition:
+        if not after_latest_transition:
             return
         state.degraded = degraded
         state.transition_number += 1

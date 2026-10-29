@@ -149,6 +149,23 @@ def test_readiness_alerts_deduplicate_and_emit_recovery(session_factory) -> None
     assert all("task" not in message["text"].lower() for message in telegram.messages)
 
 
+def test_stale_readiness_observation_cannot_override_newer_healthy_sample(session_factory) -> None:
+    newer_at = utc_now() - timedelta(seconds=1)
+    stale_at = newer_at - timedelta(seconds=1)
+    with session_scope(session_factory) as session:
+        repository = ReadinessAlertRepository(session)
+        repository.record_snapshot([], observed_at=newer_at)
+        repository.record_snapshot(["worker_unavailable"], observed_at=stale_at)
+        state = session.get(ReadinessAlertState, "worker_unavailable")
+        deliveries = repository.list_deliveries()
+
+    assert state is not None
+    assert state.degraded is False
+    checked_at = state.last_checked_at
+    assert (checked_at.replace(tzinfo=UTC) if checked_at.tzinfo is None else checked_at) == newer_at
+    assert all(item.reason != "worker_unavailable" for item in deliveries)
+
+
 def test_readiness_alert_retry_is_bounded_and_visible(session_factory) -> None:
     telegram = FakeTelegram([503])
     monitor = ReadinessAlertMonitor(
@@ -453,14 +470,10 @@ def test_stale_worker_replay_restores_newer_healthy_state_after_unknown_sample(
             .where(ReadinessAlertDelivery.reason == "worker_unavailable")
             .order_by(ReadinessAlertDelivery.transition_number)
         ).all()
-        assert [item.transition for item in worker_deliveries] == ["degraded", "recovered"]
+        assert worker_deliveries == []
 
     assert sorted(message["text"].split("\n", 1)[0] for message in telegram.messages) == sorted(
-        [
-            "Execution readiness degraded: worker_unavailable",
-            "Execution readiness recovered: worker_unavailable",
-            "Execution readiness degraded: postgres_unavailable",
-        ]
+        ["Execution readiness degraded: postgres_unavailable"]
     )
 
 

@@ -98,7 +98,7 @@ class ReadinessAlertMonitor:
         api_base_url: str = "https://api.telegram.org",
         interval_seconds: int = ALERT_INTERVAL_SECONDS,
         readiness_probe: Callable[[Any], Any] | None = None,
-        interaction_probe: Callable[[Any], list[str]] | None = None,
+        interaction_probe: Callable[[Any, datetime], list[str]] | None = None,
     ) -> None:
         self.task_service = task_service
         self.session_factory = session_factory
@@ -155,8 +155,13 @@ class ReadinessAlertMonitor:
             return
         self._unpersisted_snapshots.clear()
         try:
-            task_ids = await asyncio.to_thread(self.interaction_probe, self.task_service)
-            await asyncio.to_thread(self._record_interaction_snapshot, task_ids)
+            interaction_observed_at = utc_now()
+            task_ids = await asyncio.to_thread(
+                self.interaction_probe, self.task_service, interaction_observed_at
+            )
+            await asyncio.to_thread(
+                self._record_interaction_snapshot, task_ids, interaction_observed_at
+            )
         except Exception as exc:
             logger.warning("Interaction alert observation failed (%s)", type(exc).__name__)
         for _ in range(MAX_DELIVERIES_PER_CYCLE):
@@ -204,9 +209,11 @@ class ReadinessAlertMonitor:
                 "attempts": item.attempts,
             }
 
-    def _record_interaction_snapshot(self, task_ids: list[str]) -> None:
+    def _record_interaction_snapshot(self, task_ids: list[str], observed_at: datetime) -> None:
         with _LOCAL_DB_LOCK, session_scope(self.session_factory) as session:
-            ReadinessAlertRepository(session).record_interaction_snapshot(task_ids)
+            ReadinessAlertRepository(session).record_interaction_snapshot(
+                task_ids, observed_at=observed_at
+            )
 
     async def _deliver(self, item: dict[str, Any]) -> None:
         url = f"{self.api_base_url}/bot{self.bot_token}/sendMessage"
