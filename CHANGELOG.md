@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: add task-specific stuck interaction alerts ([#444](https://github.com/natanayalo/code-agent/pull/444))
+
 - Feat(dashboard): add M31 operations visibility ([#442](https://github.com/natanayalo/code-agent/pull/442))
 
 - Feat: add opt-in Telegram readiness alerts ([#441](https://github.com/natanayalo/code-agent/pull/441))
