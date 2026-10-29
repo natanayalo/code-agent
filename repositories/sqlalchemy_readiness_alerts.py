@@ -14,6 +14,7 @@ from orchestrator.operational_health_types import READINESS_REASON_CODES
 
 MAX_DELIVERY_ATTEMPTS = 8
 DELIVERY_LEASE_SECONDS = 30
+INTERACTION_REASON_PREFIX = "interaction_wait_stuck|"
 
 
 def _utc_aware(value: datetime) -> datetime:
@@ -51,6 +52,7 @@ class ReadinessAlertRepository:
         states = {
             state.reason: state
             for state in self.session.scalars(select(ReadinessAlertState).with_for_update()).all()
+            if not state.reason.startswith(INTERACTION_REASON_PREFIX)
         }
         for reason, state in states.items():
             history = self.session.scalars(
@@ -93,6 +95,7 @@ class ReadinessAlertRepository:
         states = {
             state.reason: state
             for state in self.session.scalars(select(ReadinessAlertState).with_for_update()).all()
+            if not state.reason.startswith(INTERACTION_REASON_PREFIX)
         }
         for reason, replayed_at in latest_replayed_at.items():
             baseline = captured.get(reason)
@@ -132,6 +135,7 @@ class ReadinessAlertRepository:
         states = {
             state.reason: state
             for state in self.session.scalars(select(ReadinessAlertState).with_for_update()).all()
+            if not state.reason.startswith(INTERACTION_REASON_PREFIX)
         }
         observed_reasons = active | set(READINESS_REASON_CODES)
         observed_reasons.update(states)
@@ -164,6 +168,49 @@ class ReadinessAlertRepository:
                 state.transition_number += 1
                 state.last_transition_at = now
                 state.last_checked_at = now
+                self._enqueue(
+                    reason,
+                    state.transition_number,
+                    "degraded" if degraded else "recovered",
+                    now,
+                )
+
+    def record_interaction_snapshot(
+        self, task_ids: list[str], *, observed_at: datetime | None = None
+    ) -> None:
+        """Persist per-task transitions from one complete, successful observation."""
+        self._lock_state_updates()
+        now = observed_at or utc_now()
+        current = {f"{INTERACTION_REASON_PREFIX}{task_id}" for task_id in task_ids}
+        states = {
+            state.reason: state
+            for state in self.session.scalars(
+                select(ReadinessAlertState)
+                .where(ReadinessAlertState.reason.like(f"{INTERACTION_REASON_PREFIX}%"))
+                .with_for_update()
+            ).all()
+        }
+        for reason in sorted(current | set(states)):
+            state = states.get(reason)
+            if state is None:
+                state = ReadinessAlertState(
+                    reason=reason,
+                    degraded=True,
+                    transition_number=1,
+                    last_transition_at=now,
+                    last_checked_at=now,
+                )
+                self.session.add(state)
+                self._enqueue(reason, 1, "degraded", now)
+                continue
+            if _utc_aware(state.last_checked_at) >= _utc_aware(now):
+                continue
+            degraded = reason in current
+            state.last_checked_at = now
+            if state.degraded != degraded:
+                state.degraded = degraded
+                state.transition_number += 1
+                state.last_transition_at = now
                 self._enqueue(
                     reason,
                     state.transition_number,

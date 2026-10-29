@@ -54,6 +54,7 @@ class InteractionOperationalSnapshot:
     stuck_count: int
     oldest_pending_age_seconds: float | None
     affected_task_ids: list[str]
+    all_stuck_task_ids: list[str]
 
 
 @dataclass(frozen=True)
@@ -196,13 +197,15 @@ class OperationalHealthRepository:
         stuck_rows = [
             row for row in pending_rows if (_as_aware(row.created_at) or now) < stuck_cutoff
         ]
-        affected = sorted({row.task_id for row in stuck_rows})[:task_id_limit]
+        all_stuck_task_ids = sorted({row.task_id for row in stuck_rows})
+        affected = all_stuck_task_ids[:task_id_limit]
         oldest_pending_at = _as_aware(pending_rows[0].created_at) if pending_rows else None
         return InteractionOperationalSnapshot(
             pending_count=len(pending_rows),
             stuck_count=len(stuck_rows),
             oldest_pending_age_seconds=_age_seconds(now, oldest_pending_at),
             affected_task_ids=affected,
+            all_stuck_task_ids=all_stuck_task_ids,
         )
 
     def temporal_task_projections(self) -> dict[str, TemporalTaskProjection]:

@@ -14,8 +14,8 @@ function StateList({ states, checkedAt }: { states: ReadinessAlertStateSnapshot[
     <h3 id="readiness-alert-states">Persisted readiness reasons</h3>
     <p className="metric-note">Last checked: {timestamp(new Date(checkedAt).toISOString())}</p>
     {states.length === 0 ? <p>No readiness reasons have been recorded.</p> : <ul className="ops-list">
-      {states.map((state) => <li key={state.reason}>
-        <strong>{state.degraded ? <AlertTriangle size={15} aria-label="Degraded" /> : <CheckCircle2 size={15} aria-label="Recovered" />} {state.reason}</strong>
+      {states.map((state) => <li key={`${state.reason}-${state.task_id ?? 'global'}`}>
+        <strong>{state.degraded ? <AlertTriangle size={15} aria-label="Degraded" /> : <CheckCircle2 size={15} aria-label="Recovered" />} {state.reason}{state.task_id ? ` · task ${state.task_id}` : ''}</strong>
         <span>{state.degraded ? 'Degraded' : 'Recovered'} · transition {state.transition_number}</span>
         <small>Last transition: {timestamp(state.last_transition_at)} · reason checked: {timestamp(state.last_checked_at)}</small>
       </li>)}
@@ -29,7 +29,7 @@ function DeliveryList({ deliveries, checkedAt }: { deliveries: ReadinessAlertDel
     <p className="metric-note">Last checked: {timestamp(new Date(checkedAt).toISOString())}</p>
     {deliveries.length === 0 ? <p>No notification deliveries recorded.</p> : <ul className="ops-list">
       {deliveries.map((delivery) => <li key={delivery.id}>
-        <strong>{delivery.reason} · {delivery.transition}</strong>
+        <strong>{delivery.reason}{delivery.task_id ? ` · task ${delivery.task_id}` : ''} · {delivery.transition}</strong>
         <span>Status: {delivery.status} · attempts: {delivery.attempts}</span>
         <small>Created: {timestamp(delivery.created_at)} · next attempt: {timestamp(delivery.next_attempt_at)}{delivery.delivered_at ? ` · delivered: ${timestamp(delivery.delivered_at)}` : ''}</small>
         {delivery.last_failure_code || delivery.last_http_status ? <small>Last failure: {delivery.last_failure_code ?? 'unknown'}{delivery.last_http_status ? ` · HTTP ${delivery.last_http_status}` : ''}</small> : null}

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from apps.api.dependencies import require_any_valid_auth
 from repositories import ReadinessAlertRepository, session_scope
+from repositories.sqlalchemy_readiness_alerts import INTERACTION_REASON_PREFIX
 
 router = APIRouter(
     prefix="/alerts/readiness",
@@ -25,6 +26,7 @@ class ReadinessAlertStateResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     reason: str
+    task_id: str | None = None
     degraded: bool
     transition_number: int
     last_transition_at: datetime
@@ -38,6 +40,7 @@ class ReadinessAlertDeliveryResponse(BaseModel):
 
     id: str
     reason: str
+    task_id: str | None = None
     transition_number: int
     transition: str
     status: str
@@ -60,13 +63,27 @@ def _session_factory(request: Request) -> sessionmaker[Session]:
     return cast(sessionmaker[Session], factory)
 
 
+def _public_alert_identity(reason: str) -> tuple[str, str | None]:
+    if reason.startswith(INTERACTION_REASON_PREFIX):
+        return "interaction_wait_stuck", reason.removeprefix(INTERACTION_REASON_PREFIX)
+    return reason, None
+
+
 @router.get("", response_model=list[ReadinessAlertStateResponse])
 def get_readiness_alert_states(request: Request) -> list[ReadinessAlertStateResponse]:
     """Return the persisted current state for observed readiness reasons."""
     factory = _session_factory(request)
     with session_scope(factory) as session:
         states = ReadinessAlertRepository(session).list_states()
-        return [ReadinessAlertStateResponse.model_validate(item) for item in states]
+        return [
+            ReadinessAlertStateResponse.model_validate(item).model_copy(
+                update={
+                    "reason": _public_alert_identity(item.reason)[0],
+                    "task_id": _public_alert_identity(item.reason)[1],
+                }
+            )
+            for item in states
+        ]
 
 
 @router.get("/deliveries", response_model=list[ReadinessAlertDeliveryResponse])
@@ -78,4 +95,12 @@ def get_readiness_alert_deliveries(
     factory = _session_factory(request)
     with session_scope(factory) as session:
         deliveries = ReadinessAlertRepository(session).list_deliveries(limit=limit)
-        return [ReadinessAlertDeliveryResponse.model_validate(item) for item in deliveries]
+        return [
+            ReadinessAlertDeliveryResponse.model_validate(item).model_copy(
+                update={
+                    "reason": _public_alert_identity(item.reason)[0],
+                    "task_id": _public_alert_identity(item.reason)[1],
+                }
+            )
+            for item in deliveries
+        ]

@@ -293,6 +293,17 @@ API to disable new alert monitoring. The monitor samples `/ready` policy every
 and transition metadata, and sends a fixed safe action without task text, secret
 values, or artifact paths.
 
+The monitor also evaluates the complete set of tasks with pending interactions
+older than the existing 24-hour threshold. It sends one `interaction_wait_stuck`
+degraded transition per task and sends recovery only after a successful
+complete-set observation confirms that no pending interaction for that task
+remains past the threshold. Multiple pending interactions on one task produce
+one transition. Task alerts share the existing chat destination, bounded retry
+policy, delivery ordering, and 20-message cycle limit. Messages contain the
+stable reason, task ID, transition, and fixed safe action; they omit task text
+and private paths. A failed observation leaves the last persisted task state
+unchanged.
+
 Inspect authenticated `GET /alerts/readiness` for the current stored reason
 states and `GET /alerts/readiness/deliveries` for delivery attempts. A
 `pending` record retries up to eight attempts with a five-second initial delay
@@ -314,6 +325,10 @@ observation order in one transaction; failed replay batches remain buffered for
 retry. If a newer healthy baseline arrives first, unreported stale degradations
 are retained as ordered degraded/recovered pairs, including multiple distinct
 outages; duplicate stale observations are ignored.
+Task alert state and delivery records appear in these same authenticated
+endpoints with `reason: interaction_wait_stuck` and a task-specific `task_id`.
+To roll back this alert slice, unset the existing alert chat ID and restart the
+API; readiness alerts also stop and task scheduling and execution continue.
 
 Useful commands:
 

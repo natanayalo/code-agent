@@ -92,6 +92,7 @@ def _snapshots(*, eligible_age: float | None = None):
             stuck_count=0,
             oldest_pending_age_seconds=None,
             affected_task_ids=[],
+            all_stuck_task_ids=[],
         ),
         {},
     )
@@ -294,7 +295,7 @@ def test_execution_health_reports_every_nonblocking_anomaly(monkeypatch) -> None
             freshest_dispatcher_heartbeat_at=now - timedelta(seconds=40),
             freshest_dispatcher_heartbeat_age_seconds=40,
         ),
-        InteractionOperationalSnapshot(4, 1, 90_000, affected),
+        InteractionOperationalSnapshot(4, 1, 90_000, affected, affected),
         {"terminal": TemporalTaskProjection("completed", now, now - timedelta(minutes=2))},
     )
     probe = FakeTemporalProbe(statuses={"terminal": "running"})
@@ -316,6 +317,7 @@ def test_execution_health_reports_every_nonblocking_anomaly(monkeypatch) -> None
     assert metrics.outbox.affected_task_ids == affected[:20]
     assert metrics.outbox.affected_task_ids_truncated
     assert metrics.interactions.affected_task_ids_truncated
+    assert metrics.interactions.affected_task_ids == affected[:20]
 
     probe.available = False
     unknown = operational_health.get_execution_health(service)
@@ -542,6 +544,22 @@ def _add_operational_interactions(
                 created_at=now - timedelta(hours=25),
             ),
             HumanInteraction(
+                task_id=pending.id,
+                interaction_type=HumanInteractionType.CLARIFICATION,
+                status=HumanInteractionStatus.PENDING,
+                hitl_mode=HumanInteractionHitlMode.REQUIRE_APPROVAL,
+                summary="boundary",
+                created_at=now - timedelta(hours=24),
+            ),
+            HumanInteraction(
+                task_id=pending.id,
+                interaction_type=HumanInteractionType.CLARIFICATION,
+                status=HumanInteractionStatus.PENDING,
+                hitl_mode=HumanInteractionHitlMode.REQUIRE_APPROVAL,
+                summary="second stuck interaction",
+                created_at=now - timedelta(hours=25, seconds=1),
+            ),
+            HumanInteraction(
                 task_id=terminal.id,
                 interaction_type=HumanInteractionType.CLARIFICATION,
                 status=HumanInteractionStatus.PENDING,
@@ -584,6 +602,7 @@ def test_operational_repository_reports_mixed_state() -> None:
         interactions = repo.interaction_snapshot(
             now=now, stuck_seconds=24 * 60 * 60, task_id_limit=20
         )
+        all_stuck_ids = interactions.all_stuck_task_ids
         projections = repo.temporal_task_projections()
         pending_id, retrying_id, dead_id, terminal_id = (task.id for task in tasks)
 
@@ -598,13 +617,61 @@ def test_operational_repository_reports_mixed_state() -> None:
     assert (workers.fresh_count, workers.stale_count, workers.fresh_dispatcher_count) == (1, 1, 1)
     assert workers.freshest_heartbeat_age_seconds == 0
     assert workers.freshest_dispatcher_heartbeat_age_seconds == 30
-    assert interactions.pending_count == interactions.stuck_count == 1
-    assert interactions.oldest_pending_age_seconds == 25 * 60 * 60
+    assert interactions.pending_count == 3
+    assert interactions.stuck_count == 2
+    assert interactions.oldest_pending_age_seconds == 25 * 60 * 60 + 1
     assert interactions.affected_task_ids == [pending_id]
+    assert interactions.all_stuck_task_ids == [pending_id]
+    assert all_stuck_ids == [pending_id]
     assert projections[terminal_id].status == "completed"
     assert projections[terminal_id].start_delivered_at == old
     assert combined[0].pending_count == 1
     assert combined[3][terminal_id].status == "completed"
+
+
+def test_interaction_snapshot_keeps_complete_alert_set_beyond_metrics_limit() -> None:
+    engine = create_engine_from_url(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = create_session_factory(engine)
+    now = datetime(2026, 8, 1, 12, tzinfo=UTC)
+    with session_scope(session_factory) as session:
+        user = UserRepository(session).create(external_user_id="many-stuck-user")
+        conversation = SessionRepository(session).create(
+            user_id=user.id, channel="test", external_thread_id="many-stuck-thread"
+        )
+        task_repo = TaskRepository(session)
+        tasks = [
+            task_repo.create(
+                session_id=conversation.id,
+                task_text=f"task-{index}",
+                orchestration_runtime=OrchestrationRuntime.TEMPORAL,
+            )
+            for index in range(23)
+        ]
+        session.add_all(
+            [
+                HumanInteraction(
+                    task_id=task.id,
+                    interaction_type=HumanInteractionType.CLARIFICATION,
+                    status=HumanInteractionStatus.PENDING,
+                    hitl_mode=HumanInteractionHitlMode.REQUIRE_APPROVAL,
+                    summary="pending operator response",
+                    created_at=now - timedelta(days=2),
+                )
+                for task in tasks
+            ]
+        )
+        snapshot = OperationalHealthRepository(session).interaction_snapshot(
+            now=now, stuck_seconds=24 * 60 * 60, task_id_limit=20
+        )
+
+    assert snapshot.stuck_count == 23
+    assert len(snapshot.affected_task_ids) == 20
+    assert snapshot.all_stuck_task_ids == sorted(task.id for task in tasks)
 
 
 def test_operational_repository_helpers_and_empty_state() -> None:

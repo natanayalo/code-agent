@@ -161,10 +161,20 @@ degrades or recovers. Alerts are disabled by default. Set the existing
 `CODE_AGENT_TELEGRAM_BOT_TOKEN` and `CODE_AGENT_READINESS_ALERT_TELEGRAM_CHAT_ID`
 (a numeric chat ID) on the API service to enable them; the monitor runs every
 30 seconds in the API process and does not depend on the Temporal worker.
-Messages include only a stable reason code, transition, and fixed recovery hint.
+Readiness messages include only a stable reason code, transition, and fixed
+recovery hint. The same monitor sends task-specific `interaction_wait_stuck`
+alerts when a pending interaction is older than the existing 24-hour threshold.
+It sends one degraded transition per task and recovers only after a successful
+complete-set observation finds no pending interaction for that task past the
+threshold. Task alerts use the same opt-in destination and retry/delivery
+ordering. Messages include the task ID and fixed safe action, never task text or
+private paths; the monitor evaluates the complete affected-task set even though
+`/metrics` caps its displayed ID list.
 
 Authenticated `GET /alerts/readiness` shows the latest reason state, and
 `GET /alerts/readiness/deliveries` shows recent delivery attempts and failures.
+Both endpoints include task-specific `interaction_wait_stuck` records with a
+`task_id` field.
 Postgres coordinates transition creation and delivery leases across API
 instances. Telegram requests are bounded to five seconds, retried at most eight
 times with capped exponential backoff, and then retained as failed for operator

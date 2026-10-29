@@ -79,6 +79,7 @@ export interface OperationalMetrics {
 
 export interface ReadinessAlertStateSnapshot {
   reason: string;
+  task_id?: string | null;
   degraded: boolean;
   transition_number: number;
   last_transition_at: string;
@@ -88,6 +89,7 @@ export interface ReadinessAlertStateSnapshot {
 export interface ReadinessAlertDeliverySnapshot {
   id: string;
   reason: string;
+  task_id?: string | null;
   transition_number: number;
   transition: string;
   status: string;
