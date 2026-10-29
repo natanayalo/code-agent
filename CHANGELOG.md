@@ -142,6 +142,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Documentation
 
+- Docs: reconcile M31 dashboard progress ([#443](https://github.com/natanayalo/code-agent/pull/443))
+
 - Docs: define M29 feature mutation evaluation contract ([#411](https://github.com/natanayalo/code-agent/pull/411))
 
 - Docs: publish M29 provider reliability threshold baseline ([#400](https://github.com/natanayalo/code-agent/pull/400))
