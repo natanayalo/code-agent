@@ -507,10 +507,10 @@ policy are documented in
 [`docs/temporal_compatibility.md`](temporal_compatibility.md). This does not
 claim upstream maintenance support. The weekly dependency-review schedule and
 its management API foundation and the opt-in readiness-reason Telegram alert
-backend are merged. The active M31 slice adds read-only dashboard visibility
-for persisted alert state, delivery outcomes, schedule details, and submitted
-task history. It does not change scheduled task execution or expose schedule
-mutation controls.
+backend are merged. Read-only dashboard visibility for persisted alert state,
+delivery outcomes, schedule details, and submitted task history is also merged
+(PR #442). It does not expose schedule mutation controls. The next M31 slice
+has not yet been selected.
 
 ### Scope
 
@@ -730,7 +730,7 @@ provider-native cognition with the OpenHands reasoning loop.
    without signaling completed workflows).*
 5. Which read-only schedule and degraded thresholds form the first M31 slice?
    *(Resolved: authenticated API foundations cover readiness-reason alerts and
-   weekly dependency reviews; the current dashboard slice exposes their state,
-   delivery outcomes, schedule history, and submitted tasks without controls.)*
+   weekly dependency reviews; the dashboard exposes their state, delivery
+   outcomes, schedule history, and submitted tasks without controls.)*
 
 *(Question regarding M29 sample floor and recency was retired following Wave 2: resolved with a canonical sample floor of 10 tasks per compatible profile cell over a 90-day lookback window).*
