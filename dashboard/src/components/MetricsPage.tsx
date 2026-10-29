@@ -5,12 +5,16 @@ import { DashboardLayout } from './layout/DashboardLayout';
 import { Activity, Clock, Database, Cpu, GitBranch, TrendingUp } from 'lucide-react';
 import { formatLabel } from '../utils/formatters';
 import { ExecutionHealthPanel } from './ExecutionHealthPanel';
+import { ReadinessAlertsSection } from './ReadinessAlertsSection';
+import { ScheduleVisibilitySection } from './ScheduleVisibilitySection';
+import { useNavigate } from 'react-router-dom';
 
 const METRICS_REFETCH_INTERVAL_MS = 60000;
 const SUCCESS_RATE_HEALTHY_THRESHOLD = 0.8;
 const RETRY_RATE_HEALTHY_THRESHOLD = 0.1;
 
 export function MetricsPage() {
+  const navigate = useNavigate();
   const {
     data: metrics,
     isLoading,
@@ -66,6 +70,9 @@ export function MetricsPage() {
           void Promise.all([refetch(), refetchReadiness()]);
         }}
       />
+
+      <ReadinessAlertsSection />
+      <ScheduleVisibilitySection onOpenTask={(taskId) => navigate('/', { state: { openTaskId: taskId } })} />
 
       {error && !metrics ? (
         <div className="error-container metrics-performance-error">

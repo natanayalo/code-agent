@@ -1138,6 +1138,29 @@ describe('api service', () => {
       warnSpy.mockRestore();
     });
 
+    it('reads readiness alert states and bounded delivery history', async () => {
+      const states = [{ reason: 'temporal_unavailable', degraded: true }];
+      const deliveries = [{ id: 'delivery-1', attempts: 2 }];
+      for (const payload of [states, deliveries]) {
+        mockFetch.mockResolvedValueOnce({ ok: true, status: 200, headers: new Map([['content-type', 'application/json']]), json: async () => payload });
+      }
+      await expect(api.listReadinessAlertStates()).resolves.toEqual(states);
+      await expect(api.listReadinessAlertDeliveries(25)).resolves.toEqual(deliveries);
+      expect(mockFetch.mock.calls[0][0]).toContain('/alerts/readiness');
+      expect(mockFetch.mock.calls[1][0]).toContain('/alerts/readiness/deliveries?limit=25');
+      expect(mockFetch.mock.calls[0][1].credentials).toBe('include');
+    });
+
+    it('reads schedules and paginated scheduled tasks, normalizing unexpected empty payloads', async () => {
+      mockFetch
+        .mockResolvedValueOnce({ ok: true, status: 200, headers: new Map([['content-type', 'application/json']]), json: async () => [] })
+        .mockResolvedValueOnce({ ok: true, status: 200, headers: new Map([['content-type', 'application/json']]), json: async () => ({}) });
+      await expect(api.listDependencyReviewSchedules()).resolves.toEqual([]);
+      await expect(api.listScheduledTasks('review/project', 20, 40)).resolves.toEqual([]);
+      expect(mockFetch.mock.calls[0][0]).toContain('/schedules');
+      expect(mockFetch.mock.calls[1][0]).toContain('/schedules/review%2Fproject/runs?limit=20&offset=40');
+    });
+
     it('getSystemTools returns array and falls back to [] for non-array payloads', async () => {
       const toolsPayload = [{ name: 'shell', description: 'Shell tool' }];
       mockFetch.mockResolvedValueOnce({

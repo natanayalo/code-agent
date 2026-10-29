@@ -506,8 +506,11 @@ Versioning remains disabled. The compatibility gate and workflow-evolution
 policy are documented in
 [`docs/temporal_compatibility.md`](temporal_compatibility.md). This does not
 claim upstream maintenance support. The weekly dependency-review schedule and
-its management API foundation are merged. The active M31 slice adds opt-in
-readiness-reason Telegram alerts; it does not change scheduled task execution.
+its management API foundation and the opt-in readiness-reason Telegram alert
+backend are merged. The active M31 slice adds read-only dashboard visibility
+for persisted alert state, delivery outcomes, schedule details, and submitted
+task history. It does not change scheduled task execution or expose schedule
+mutation controls.
 
 ### Scope
 
@@ -726,5 +729,8 @@ provider-native cognition with the OpenHands reasoning loop.
    hazards, while post-terminal GitHub delivery events project directly to Postgres
    without signaling completed workflows).*
 5. Which read-only schedule and degraded thresholds form the first M31 slice?
+   *(Resolved: authenticated API foundations cover readiness-reason alerts and
+   weekly dependency reviews; the current dashboard slice exposes their state,
+   delivery outcomes, schedule history, and submitted tasks without controls.)*
 
 *(Question regarding M29 sample floor and recency was retired following Wave 2: resolved with a canonical sample floor of 10 tasks per compatible profile cell over a 90-day lookback window).*
