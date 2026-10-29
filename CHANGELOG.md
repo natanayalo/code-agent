@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat(dashboard): add M31 operations visibility ([#442](https://github.com/natanayalo/code-agent/pull/442))
+
 - Feat: add opt-in Telegram readiness alerts ([#441](https://github.com/natanayalo/code-agent/pull/441))
 
 - Feat: add weekly read-only dependency schedules ([#440](https://github.com/natanayalo/code-agent/pull/440))
