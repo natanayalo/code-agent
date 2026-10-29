@@ -334,6 +334,7 @@ class TaskExecutionService:
     cancel_task = execution_interaction_service.cancel_task
     get_operational_metrics = execution_snapshot_service.get_operational_metrics
     get_execution_health = operational_health.get_execution_health
+    get_stuck_interaction_task_ids = operational_health.get_stuck_interaction_task_ids
     get_readiness = operational_health.get_readiness
     is_secret_encryption_active = execution_snapshot_service.is_secret_encryption_active
     replay_task = execution_submission_service.replay_task

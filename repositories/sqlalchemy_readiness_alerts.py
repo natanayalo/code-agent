@@ -14,6 +14,7 @@ from orchestrator.operational_health_types import READINESS_REASON_CODES
 
 MAX_DELIVERY_ATTEMPTS = 8
 DELIVERY_LEASE_SECONDS = 30
+INTERACTION_REASON_PREFIX = "interaction_wait_stuck|"
 
 
 def _utc_aware(value: datetime) -> datetime:
@@ -45,12 +46,16 @@ class ReadinessAlertRepository:
         }
 
     def record_earlier_incidents(
-        self, samples: list[tuple[list[str], list[str], datetime]]
+        self,
+        samples: list[tuple[list[str], list[str], datetime]],
+        *,
+        captured: dict[str, tuple[bool, datetime, datetime, int]],
     ) -> None:
         """Retain completed buffered incidents in gaps before recorded transitions."""
         states = {
             state.reason: state
             for state in self.session.scalars(select(ReadinessAlertState).with_for_update()).all()
+            if not state.reason.startswith(INTERACTION_REASON_PREFIX)
         }
         for reason, state in states.items():
             history = self.session.scalars(
@@ -59,6 +64,11 @@ class ReadinessAlertRepository:
                 .order_by(ReadinessAlertDelivery.observed_at)
             ).all()
             if not history:
+                baseline = captured.get(reason)
+                if baseline is not None and not baseline[0] and baseline[3] == 0:
+                    self._record_before_initial_baseline(
+                        reason, state, samples, _utc_aware(baseline[1])
+                    )
                 continue
             events = [(_utc_aware(item.observed_at), item.transition) for item in history]
             started: datetime | None = None
@@ -84,6 +94,45 @@ class ReadinessAlertRepository:
                     events.sort()
                 started = None
 
+    def _record_before_initial_baseline(
+        self,
+        reason: str,
+        state: ReadinessAlertState,
+        samples: list[tuple[list[str], list[str], datetime]],
+        baseline_at: datetime,
+    ) -> None:
+        """Replay an outage closed by an initial healthy observation."""
+        if state.degraded or state.transition_number != 0:
+            return
+        started: datetime | None = None
+        saw_unknown_after_start = False
+        for reasons, unknown, observed_at in samples:
+            observed_at = _utc_aware(observed_at)
+            if reason in unknown:
+                if started is not None and observed_at > started:
+                    saw_unknown_after_start = True
+                continue
+            if reason in reasons:
+                if started is None:
+                    started = observed_at
+                continue
+            if started is not None and started < observed_at <= baseline_at:
+                self._enqueue_historical_incident(state, reason, started, observed_at)
+            elif started is not None and saw_unknown_after_start and started < baseline_at:
+                self._enqueue_historical_incident(state, reason, started, baseline_at)
+            started = None
+            saw_unknown_after_start = False
+        if started is not None and saw_unknown_after_start and started < baseline_at:
+            self._enqueue_historical_incident(state, reason, started, baseline_at)
+
+    def _enqueue_historical_incident(
+        self, state: ReadinessAlertState, reason: str, started: datetime, recovered: datetime
+    ) -> None:
+        state.transition_number += 1
+        self._enqueue(reason, state.transition_number, "degraded", started)
+        state.transition_number += 1
+        self._enqueue(reason, state.transition_number, "recovered", recovered)
+
     def restore_newer_observations(
         self,
         captured: dict[str, tuple[bool, datetime, datetime, int]],
@@ -93,6 +142,7 @@ class ReadinessAlertRepository:
         states = {
             state.reason: state
             for state in self.session.scalars(select(ReadinessAlertState).with_for_update()).all()
+            if not state.reason.startswith(INTERACTION_REASON_PREFIX)
         }
         for reason, replayed_at in latest_replayed_at.items():
             baseline = captured.get(reason)
@@ -132,6 +182,7 @@ class ReadinessAlertRepository:
         states = {
             state.reason: state
             for state in self.session.scalars(select(ReadinessAlertState).with_for_update()).all()
+            if not state.reason.startswith(INTERACTION_REASON_PREFIX)
         }
         observed_reasons = active | set(READINESS_REASON_CODES)
         observed_reasons.update(states)
@@ -173,6 +224,67 @@ class ReadinessAlertRepository:
             else:
                 state.last_checked_at = now
 
+    def record_interaction_snapshot(
+        self, task_ids: list[str], *, observed_at: datetime | None = None
+    ) -> None:
+        """Persist per-task transitions from one complete, successful observation."""
+        self._lock_state_updates()
+        now = observed_at or utc_now()
+        current = {f"{INTERACTION_REASON_PREFIX}{task_id}" for task_id in task_ids}
+        watermark_key = f"{INTERACTION_REASON_PREFIX}__observation_watermark__"
+        states = {
+            state.reason: state
+            for state in self.session.scalars(
+                select(ReadinessAlertState)
+                .where(ReadinessAlertState.reason.like(f"{INTERACTION_REASON_PREFIX}%"))
+                .with_for_update()
+            ).all()
+        }
+        watermark = states.get(watermark_key)
+        if watermark is not None and _utc_aware(watermark.last_checked_at) >= _utc_aware(now):
+            return
+        if watermark is None:
+            watermark = ReadinessAlertState(
+                reason=watermark_key,
+                degraded=False,
+                transition_number=0,
+                last_transition_at=now,
+                last_checked_at=now,
+            )
+            self.session.add(watermark)
+        else:
+            watermark.last_checked_at = now
+        states.pop(watermark_key, None)
+        for reason in sorted(current | set(states)):
+            state = states.get(reason)
+            if state is None:
+                state = ReadinessAlertState(
+                    reason=reason,
+                    degraded=True,
+                    transition_number=1,
+                    last_transition_at=now,
+                    last_checked_at=now,
+                )
+                self.session.add(state)
+                self._enqueue(reason, 1, "degraded", now)
+                continue
+            if _utc_aware(state.last_checked_at) >= _utc_aware(now):
+                continue
+            degraded = reason in current
+            state.last_checked_at = now
+            if state.degraded != degraded:
+                state.degraded = degraded
+                state.transition_number += 1
+                state.last_transition_at = now
+                self._enqueue(
+                    reason,
+                    state.transition_number,
+                    "degraded" if degraded else "recovered",
+                    now,
+                )
+            else:
+                state.last_checked_at = now
+
     def _record_stale_transition(
         self,
         state: ReadinessAlertState,
@@ -184,9 +296,8 @@ class ReadinessAlertRepository:
         """Replay an unrecorded transition without moving the latest-sample watermark."""
         if state.degraded == degraded:
             return
-        no_prior_transitions = state.transition_number == 0
         after_latest_transition = _utc_aware(observed_at) > _utc_aware(state.last_transition_at)
-        if not no_prior_transitions and not after_latest_transition:
+        if not after_latest_transition:
             return
         state.degraded = degraded
         state.transition_number += 1

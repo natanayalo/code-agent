@@ -14,8 +14,10 @@ from typing import Any
 from sqlalchemy.orm import sessionmaker
 
 from db.base import utc_now
+from orchestrator.operational_health import get_stuck_interaction_task_ids
 from orchestrator.operational_health_types import READINESS_REASON_CODES
 from repositories import ReadinessAlertRepository, session_scope
+from repositories.sqlalchemy_readiness_alerts import INTERACTION_REASON_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +60,14 @@ def readiness_alert_configuration(
 
 def format_readiness_alert(reason: str, transition: str) -> str:
     """Format a bounded message from stable codes only; never include probe details."""
+    if reason.startswith(INTERACTION_REASON_PREFIX):
+        task_id = reason.removeprefix(INTERACTION_REASON_PREFIX)
+        state = "degraded" if transition == "degraded" else "recovered"
+        return (
+            f"Execution alert {state}: interaction_wait_stuck\nTask: {task_id}"
+            "\nNext action: Answer, reject, or cancel the pending interaction "
+            "through the dashboard or API."
+        )
     action = _SAFE_ACTIONS.get(reason, "Inspect authenticated readiness status and /ready.")
     state = "degraded" if transition == "degraded" else "recovered"
     return f"Execution readiness {state}: {reason}\nNext action: {action}"
@@ -88,6 +98,7 @@ class ReadinessAlertMonitor:
         api_base_url: str = "https://api.telegram.org",
         interval_seconds: int = ALERT_INTERVAL_SECONDS,
         readiness_probe: Callable[[Any], Any] | None = None,
+        interaction_probe: Callable[[Any, datetime], list[str]] | None = None,
     ) -> None:
         self.task_service = task_service
         self.session_factory = session_factory
@@ -97,6 +108,7 @@ class ReadinessAlertMonitor:
         self.api_base_url = api_base_url.rstrip("/")
         self.interval_seconds = interval_seconds
         self.readiness_probe = readiness_probe or (lambda service: service.get_readiness())
+        self.interaction_probe = interaction_probe or get_stuck_interaction_task_ids
         self._task: asyncio.Task[None] | None = None
         self._unpersisted_snapshots: list[tuple[list[str], list[str], datetime]] = []
 
@@ -142,6 +154,16 @@ class ReadinessAlertMonitor:
             logger.warning("Readiness alert state persistence failed (%s)", type(exc).__name__)
             return
         self._unpersisted_snapshots.clear()
+        try:
+            interaction_observed_at = utc_now()
+            task_ids = await asyncio.to_thread(
+                self.interaction_probe, self.task_service, interaction_observed_at
+            )
+            await asyncio.to_thread(
+                self._record_interaction_snapshot, task_ids, interaction_observed_at
+            )
+        except Exception as exc:
+            logger.warning("Interaction alert observation failed (%s)", type(exc).__name__)
         for _ in range(MAX_DELIVERIES_PER_CYCLE):
             delivery = await asyncio.to_thread(self._claim_one)
             if delivery is None:
@@ -164,7 +186,7 @@ class ReadinessAlertMonitor:
         with _LOCAL_DB_LOCK, session_scope(self.session_factory) as session:
             repository = ReadinessAlertRepository(session)
             latest_states = repository.capture_observed_states()
-            repository.record_earlier_incidents(samples)
+            repository.record_earlier_incidents(samples, captured=latest_states)
             latest_replayed_at: dict[str, datetime] = {}
             for reasons, unknown_reasons, observed_at in samples:
                 repository.record_snapshot(
@@ -186,6 +208,12 @@ class ReadinessAlertMonitor:
                 "transition": item.transition,
                 "attempts": item.attempts,
             }
+
+    def _record_interaction_snapshot(self, task_ids: list[str], observed_at: datetime) -> None:
+        with _LOCAL_DB_LOCK, session_scope(self.session_factory) as session:
+            ReadinessAlertRepository(session).record_interaction_snapshot(
+                task_ids, observed_at=observed_at
+            )
 
     async def _deliver(self, item: dict[str, Any]) -> None:
         url = f"{self.api_base_url}/bot{self.bot_token}/sendMessage"

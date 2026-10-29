@@ -26,11 +26,11 @@ describe('ReadinessAlertsSection', () => {
   });
 
   it('shows empty and populated source results independently', async () => {
-    vi.mocked(api.listReadinessAlertStates).mockResolvedValue([{ reason: 'temporal_unavailable', degraded: true, transition_number: 3, last_transition_at: '2026-10-27T12:00:00Z', last_checked_at: '2026-10-27T12:01:00Z' }]);
-    vi.mocked(api.listReadinessAlertDeliveries).mockResolvedValue([]);
+    vi.mocked(api.listReadinessAlertStates).mockResolvedValue([{ reason: 'interaction_wait_stuck', task_id: 'task-42', degraded: true, transition_number: 3, last_transition_at: '2026-10-27T12:00:00Z', last_checked_at: '2026-10-27T12:01:00Z' }]);
+    vi.mocked(api.listReadinessAlertDeliveries).mockResolvedValue([{ id: 'interaction-1', reason: 'interaction_wait_stuck', task_id: 'task-42', transition_number: 3, transition: 'degraded', status: 'delivered', attempts: 1, next_attempt_at: '2026-10-27T12:01:00Z', delivered_at: '2026-10-27T12:01:01Z', last_failure_code: null, last_http_status: null, created_at: '2026-10-27T12:00:00Z' }]);
     mount();
-    expect(await screen.findByText(/temporal_unavailable/)).toBeInTheDocument();
-    expect(screen.getByText('No notification deliveries recorded.')).toBeInTheDocument();
+    expect(await screen.findAllByText(/interaction_wait_stuck/)).toHaveLength(2);
+    expect(screen.getAllByText(/task task-42/)).toHaveLength(2);
     expect(screen.getAllByText(/Last checked:/)).toHaveLength(2);
   });
 

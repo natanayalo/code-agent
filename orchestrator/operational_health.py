@@ -7,7 +7,7 @@ import logging
 import os
 from collections.abc import Coroutine
 from concurrent.futures import ThreadPoolExecutor
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any, Protocol, TypeVar
 
 from temporalio.client import Client, WorkflowExecutionStatus
@@ -261,6 +261,17 @@ def get_execution_health(self: Any) -> ExecutionHealthMetrics:
         reconciliation=reconciliation,
         degraded_reasons=degraded_reasons,
     )
+
+
+def get_stuck_interaction_task_ids(self: Any, observed_at: datetime) -> list[str]:
+    """Return the complete stuck-interaction set for alert transition evaluation."""
+    with session_scope(self.session_factory) as session:
+        repo = OperationalHealthRepository(session)
+        repo.ping(timeout_seconds=POSTGRES_PROBE_TIMEOUT_SECONDS)
+        snapshot = repo.interaction_snapshot(
+            now=observed_at, stuck_seconds=INTERACTION_STUCK_SECONDS, task_id_limit=0
+        )
+        return snapshot.all_stuck_task_ids
 
 
 def get_readiness(self: Any) -> ReadinessSnapshot:

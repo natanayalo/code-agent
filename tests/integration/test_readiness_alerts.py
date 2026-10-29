@@ -149,6 +149,91 @@ def test_readiness_alerts_deduplicate_and_emit_recovery(session_factory) -> None
     assert all("task" not in message["text"].lower() for message in telegram.messages)
 
 
+def test_stale_readiness_observation_cannot_override_newer_healthy_sample(session_factory) -> None:
+    newer_at = utc_now() - timedelta(seconds=1)
+    stale_at = newer_at - timedelta(seconds=1)
+    with session_scope(session_factory) as session:
+        repository = ReadinessAlertRepository(session)
+        repository.record_snapshot([], observed_at=newer_at)
+        repository.record_snapshot(["worker_unavailable"], observed_at=stale_at)
+        state = session.get(ReadinessAlertState, "worker_unavailable")
+        deliveries = repository.list_deliveries()
+
+    assert state is not None
+    assert state.degraded is False
+    checked_at = state.last_checked_at
+    assert (checked_at.replace(tzinfo=UTC) if checked_at.tzinfo is None else checked_at) == newer_at
+    assert all(item.reason != "worker_unavailable" for item in deliveries)
+
+
+def test_completed_buffered_incident_replays_before_initial_healthy_baseline(
+    session_factory,
+) -> None:
+    now = utc_now()
+    degraded_at = now - timedelta(seconds=3)
+    recovered_at = now - timedelta(seconds=2)
+    healthy_at = now - timedelta(seconds=1)
+    with session_scope(session_factory) as session:
+        ReadinessAlertRepository(session).record_snapshot([], observed_at=healthy_at)
+
+    monitor = ReadinessAlertMonitor(
+        task_service=object(),
+        session_factory=session_factory,
+        telegram_client=FakeTelegram(),
+        bot_token="token",
+        chat_id="123",
+    )
+    monitor._record_snapshots(
+        [
+            (["worker_unavailable"], [], degraded_at),
+            ([], [], recovered_at),
+        ]
+    )
+
+    with session_scope(session_factory) as session:
+        state = session.get(ReadinessAlertState, "worker_unavailable")
+        deliveries = ReadinessAlertRepository(session).list_deliveries()
+    assert state is not None
+    assert not state.degraded
+    assert state.last_checked_at.replace(tzinfo=UTC) == healthy_at
+    assert state.last_transition_at.replace(tzinfo=UTC) == healthy_at
+    assert state.transition_number == 2
+    assert sorted(
+        (
+            item.transition_number,
+            item.transition,
+            item.observed_at.replace(tzinfo=UTC),
+        )
+        for item in deliveries
+    ) == [
+        (1, "degraded", degraded_at),
+        (2, "recovered", recovered_at),
+    ]
+
+
+def test_lone_buffered_stale_sample_does_not_replay_as_incident(session_factory) -> None:
+    healthy_at = utc_now() - timedelta(seconds=1)
+    stale_at = healthy_at - timedelta(seconds=1)
+    with session_scope(session_factory) as session:
+        ReadinessAlertRepository(session).record_snapshot([], observed_at=healthy_at)
+
+    monitor = ReadinessAlertMonitor(
+        task_service=object(),
+        session_factory=session_factory,
+        telegram_client=FakeTelegram(),
+        bot_token="token",
+        chat_id="123",
+    )
+    monitor._record_snapshots([(["worker_unavailable"], [], stale_at)])
+
+    with session_scope(session_factory) as session:
+        state = session.get(ReadinessAlertState, "worker_unavailable")
+        deliveries = ReadinessAlertRepository(session).list_deliveries()
+    assert state is not None and not state.degraded
+    assert state.last_checked_at.replace(tzinfo=UTC) == healthy_at
+    assert deliveries == []
+
+
 def test_readiness_alert_retry_is_bounded_and_visible(session_factory) -> None:
     telegram = FakeTelegram([503])
     monitor = ReadinessAlertMonitor(
@@ -454,6 +539,13 @@ def test_stale_worker_replay_restores_newer_healthy_state_after_unknown_sample(
             .order_by(ReadinessAlertDelivery.transition_number)
         ).all()
         assert [item.transition for item in worker_deliveries] == ["degraded", "recovered"]
+        assert [item.observed_at.replace(tzinfo=UTC) for item in worker_deliveries] == [
+            degraded_at,
+            healthy_at,
+        ]
+        assert worker_state.last_checked_at.replace(tzinfo=UTC) == healthy_at
+        assert worker_state.last_transition_at.replace(tzinfo=UTC) == healthy_at
+        assert worker_state.transition_number == 2
 
     assert sorted(message["text"].split("\n", 1)[0] for message in telegram.messages) == sorted(
         [
