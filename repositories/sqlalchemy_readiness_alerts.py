@@ -46,7 +46,10 @@ class ReadinessAlertRepository:
         }
 
     def record_earlier_incidents(
-        self, samples: list[tuple[list[str], list[str], datetime]]
+        self,
+        samples: list[tuple[list[str], list[str], datetime]],
+        *,
+        captured: dict[str, tuple[bool, datetime, datetime, int]],
     ) -> None:
         """Retain completed buffered incidents in gaps before recorded transitions."""
         states = {
@@ -61,25 +64,11 @@ class ReadinessAlertRepository:
                 .order_by(ReadinessAlertDelivery.observed_at)
             ).all()
             if not history:
-                if state.degraded or state.transition_number != 0:
-                    continue
-                baseline_at = _utc_aware(state.last_checked_at)
-                initial_started: datetime | None = None
-                for reasons, unknown, observed_at in samples:
-                    if reason in unknown:
-                        initial_started = None
-                        continue
-                    observed_at = _utc_aware(observed_at)
-                    if reason in reasons:
-                        if initial_started is None:
-                            initial_started = observed_at
-                        continue
-                    if initial_started is not None and initial_started < observed_at <= baseline_at:
-                        state.transition_number += 1
-                        self._enqueue(reason, state.transition_number, "degraded", initial_started)
-                        state.transition_number += 1
-                        self._enqueue(reason, state.transition_number, "recovered", observed_at)
-                    initial_started = None
+                baseline = captured.get(reason)
+                if baseline is not None and not baseline[0] and baseline[3] == 0:
+                    self._record_before_initial_baseline(
+                        reason, state, samples, _utc_aware(baseline[1])
+                    )
                 continue
             events = [(_utc_aware(item.observed_at), item.transition) for item in history]
             started: datetime | None = None
@@ -104,6 +93,45 @@ class ReadinessAlertRepository:
                     events.extend([(started, "degraded"), (observed_at, "recovered")])
                     events.sort()
                 started = None
+
+    def _record_before_initial_baseline(
+        self,
+        reason: str,
+        state: ReadinessAlertState,
+        samples: list[tuple[list[str], list[str], datetime]],
+        baseline_at: datetime,
+    ) -> None:
+        """Replay an outage closed by an initial healthy observation."""
+        if state.degraded or state.transition_number != 0:
+            return
+        started: datetime | None = None
+        saw_unknown_after_start = False
+        for reasons, unknown, observed_at in samples:
+            observed_at = _utc_aware(observed_at)
+            if reason in unknown:
+                if started is not None and observed_at > started:
+                    saw_unknown_after_start = True
+                continue
+            if reason in reasons:
+                if started is None:
+                    started = observed_at
+                continue
+            if started is not None and started < observed_at <= baseline_at:
+                self._enqueue_historical_incident(state, reason, started, observed_at)
+            elif started is not None and saw_unknown_after_start and started < baseline_at:
+                self._enqueue_historical_incident(state, reason, started, baseline_at)
+            started = None
+            saw_unknown_after_start = False
+        if started is not None and saw_unknown_after_start and started < baseline_at:
+            self._enqueue_historical_incident(state, reason, started, baseline_at)
+
+    def _enqueue_historical_incident(
+        self, state: ReadinessAlertState, reason: str, started: datetime, recovered: datetime
+    ) -> None:
+        state.transition_number += 1
+        self._enqueue(reason, state.transition_number, "degraded", started)
+        state.transition_number += 1
+        self._enqueue(reason, state.transition_number, "recovered", recovered)
 
     def restore_newer_observations(
         self,
