@@ -91,4 +91,34 @@ describe('ScheduleVisibilitySection', () => {
     expect(await screen.findByText('No recent outcomes retained by Temporal.')).toBeInTheDocument();
     expect(screen.getByText('Loading submitted tasks…')).toBeInTheDocument();
   });
+
+  it('keeps Previous available when an exact page-size result advances to an empty page', async () => {
+    vi.mocked(api.listDependencyReviewSchedules).mockResolvedValue([schedule]);
+    const task = { task_id: 'task-1', session_id: 'session-1', status: TaskStatus.COMPLETED, task_text: 'Review dependencies', created_at: '2026-10-26T07:01:00Z', updated_at: '2026-10-26T07:02:00Z', priority: 0 };
+    const page = Array.from({ length: 20 }, (_, index) => ({ task: { ...task, task_id: `task-${index}` }, status_url: '', timeline_url: '', artifacts_url: '' }));
+    vi.mocked(api.listScheduledTasks).mockImplementation((_id, _limit, offset) => Promise.resolve(offset === 0 ? page : []));
+    mount();
+    expect(await screen.findByText('Tasks 1–20')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await screen.findByText('No more submitted tasks.')).toBeInTheDocument();
+    expect(screen.getByText('Page 2')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Previous' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Previous' }));
+    expect(await screen.findByText('Tasks 1–20')).toBeInTheDocument();
+  });
+
+  it('keeps Previous available after a later page request fails', async () => {
+    vi.mocked(api.listDependencyReviewSchedules).mockResolvedValue([schedule]);
+    const task = { task_id: 'task-1', session_id: 'session-1', status: TaskStatus.COMPLETED, task_text: 'Review dependencies', created_at: '2026-10-26T07:01:00Z', updated_at: '2026-10-26T07:02:00Z', priority: 0 };
+    const page = Array.from({ length: 20 }, (_, index) => ({ task: { ...task, task_id: `task-${index}` }, status_url: '', timeline_url: '', artifacts_url: '' }));
+    vi.mocked(api.listScheduledTasks).mockImplementation((_id, _limit, offset) => offset === 0 ? Promise.resolve(page) : Promise.reject(new Error('page request failed')));
+    mount();
+    expect(await screen.findByText('Tasks 1–20')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('page request failed');
+    expect(screen.getByRole('button', { name: 'Previous' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Previous' }));
+    expect(await screen.findByText('Tasks 1–20')).toBeInTheDocument();
+  });
 });

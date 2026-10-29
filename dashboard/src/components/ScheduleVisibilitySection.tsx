@@ -37,17 +37,19 @@ function ScheduleCard({ schedule, onOpenTask }: { schedule: DependencyReviewSche
     </li>)}</ul> : <p>No recent outcomes retained by Temporal.</p>}
     <p className="metric-note">Skipped overlaps: {schedule.skipped_overlap} · missed catch-up window: {schedule.missed_catchup}</p>
     <h4>Submitted tasks</h4>
-    {runs.isLoading ? <p>Loading submitted tasks…</p> : runs.error ? <p role="alert">Task history unavailable: {(runs.error as Error).message}. Temporal schedule details above remain available.</p> : runs.data?.length ? <>
-      <ul className="ops-list">{runs.data.map(({ task }) => <li key={task.task_id}>
+    {runs.isLoading ? <p>Loading submitted tasks…</p> : runs.error ? <p role="alert">Task history unavailable: {(runs.error as Error).message}. Temporal schedule details above remain available.</p> : null}
+    {!runs.isLoading && !runs.error && runs.data?.length ? <ul className="ops-list">{runs.data.map(({ task }) => <li key={task.task_id}>
         <strong>{task.status}</strong><span>{task.task_text}</span><small>{task.task_id} · {date(task.created_at)}</small>
         <button className="btn-secondary" onClick={() => onOpenTask(task.task_id)}>Open task</button>
-      </li>)}</ul>
+      </li>)}</ul> : null}
+    {!runs.isLoading && !runs.error && !runs.data?.length ? <p>{offset ? 'No more submitted tasks.' : 'No submitted tasks found.'}</p> : null}
+    {offset > 0 || (runs.data?.length ?? 0) > 0 ?
       <div className="schedule-pagination">
         <button className="btn-secondary" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>Previous</button>
-        <span>Tasks {offset + 1}–{offset + runs.data.length}</span>
-        <button className="btn-secondary" disabled={runs.data.length < PAGE_SIZE} onClick={() => setOffset(offset + PAGE_SIZE)}>Next</button>
+        <span>{runs.data?.length ? `Tasks ${offset + 1}–${offset + runs.data.length}` : `Page ${offset / PAGE_SIZE + 1}`}</span>
+        <button className="btn-secondary" disabled={runs.isLoading || Boolean(runs.error) || (runs.data?.length ?? 0) < PAGE_SIZE} onClick={() => setOffset(offset + PAGE_SIZE)}>Next</button>
       </div>
-    </> : <p>{offset ? 'No more submitted tasks.' : 'No submitted tasks found.'}</p>}
+      : null}
   </article>;
 }
 
