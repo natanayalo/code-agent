@@ -64,22 +64,22 @@ class ReadinessAlertRepository:
                 if state.degraded or state.transition_number != 0:
                     continue
                 baseline_at = _utc_aware(state.last_checked_at)
-                started: datetime | None = None
+                initial_started: datetime | None = None
                 for reasons, unknown, observed_at in samples:
                     if reason in unknown:
-                        started = None
+                        initial_started = None
                         continue
                     observed_at = _utc_aware(observed_at)
                     if reason in reasons:
-                        if started is None:
-                            started = observed_at
+                        if initial_started is None:
+                            initial_started = observed_at
                         continue
-                    if started is not None and started < observed_at <= baseline_at:
+                    if initial_started is not None and initial_started < observed_at <= baseline_at:
                         state.transition_number += 1
-                        self._enqueue(reason, state.transition_number, "degraded", started)
+                        self._enqueue(reason, state.transition_number, "degraded", initial_started)
                         state.transition_number += 1
                         self._enqueue(reason, state.transition_number, "recovered", observed_at)
-                    started = None
+                    initial_started = None
                 continue
             events = [(_utc_aware(item.observed_at), item.transition) for item in history]
             started: datetime | None = None
