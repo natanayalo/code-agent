@@ -166,6 +166,51 @@ def test_stale_readiness_observation_cannot_override_newer_healthy_sample(sessio
     assert all(item.reason != "worker_unavailable" for item in deliveries)
 
 
+def test_completed_buffered_incident_replays_before_initial_healthy_baseline(
+    session_factory,
+) -> None:
+    now = utc_now()
+    degraded_at = now - timedelta(seconds=3)
+    recovered_at = now - timedelta(seconds=2)
+    healthy_at = now - timedelta(seconds=1)
+    with session_scope(session_factory) as session:
+        ReadinessAlertRepository(session).record_snapshot([], observed_at=healthy_at)
+
+    monitor = ReadinessAlertMonitor(
+        task_service=object(),
+        session_factory=session_factory,
+        telegram_client=FakeTelegram(),
+        bot_token="token",
+        chat_id="123",
+    )
+    monitor._record_snapshots(
+        [
+            (["worker_unavailable"], [], degraded_at),
+            ([], [], recovered_at),
+        ]
+    )
+
+    with session_scope(session_factory) as session:
+        state = session.get(ReadinessAlertState, "worker_unavailable")
+        deliveries = ReadinessAlertRepository(session).list_deliveries()
+    assert state is not None
+    assert not state.degraded
+    assert state.last_checked_at.replace(tzinfo=UTC) == healthy_at
+    assert state.last_transition_at.replace(tzinfo=UTC) == healthy_at
+    assert state.transition_number == 2
+    assert sorted(
+        (
+            item.transition_number,
+            item.transition,
+            item.observed_at.replace(tzinfo=UTC),
+        )
+        for item in deliveries
+    ) == [
+        (1, "degraded", degraded_at),
+        (2, "recovered", recovered_at),
+    ]
+
+
 def test_readiness_alert_retry_is_bounded_and_visible(session_factory) -> None:
     telegram = FakeTelegram([503])
     monitor = ReadinessAlertMonitor(
