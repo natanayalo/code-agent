@@ -190,6 +190,11 @@ completed-task ledger; keep completed work here instead.
 
 - Chore: update default M29 neutral evaluator to local Ollama qwen2.5-coder ([#432](https://github.com/natanayalo/code-agent/pull/432))
 
+
+### Testing
+
+- Test: isolate stub workers from provider readiness ([#449](https://github.com/natanayalo/code-agent/pull/449))
+
 ## m25.3-temporal-cutover-20260726T213001Z - 2026-07-26
 
 ### Added
