@@ -183,6 +183,45 @@ def test_reconciliation_caps_affected_task_ids() -> None:
     assert result.affected_task_ids_truncated
 
 
+def test_shared_reconciliation_comparison_keeps_grace_boundary_and_full_set() -> None:
+    now = datetime(2026, 8, 1, 12, tzinfo=UTC)
+    grace_boundary = now - timedelta(
+        seconds=operational_health.TERMINAL_RECONCILIATION_GRACE_SECONDS
+    )
+    projections = {
+        "terminal-running-at-boundary": TemporalTaskProjection(
+            "completed", grace_boundary, grace_boundary
+        ),
+        "terminal-running-after-boundary": TemporalTaskProjection(
+            "completed",
+            grace_boundary - timedelta(microseconds=1),
+            grace_boundary + timedelta(microseconds=1),
+        ),
+        "active-terminal": TemporalTaskProjection("in_progress", grace_boundary, grace_boundary),
+        "active-running": TemporalTaskProjection("in_progress", grace_boundary, grace_boundary),
+        "active-start-in-grace": TemporalTaskProjection("in_progress", now, grace_boundary),
+    }
+
+    divergent = operational_health.terminal_reconciliation_divergent_task_ids(
+        projections,
+        {
+            "terminal-running-at-boundary": "running",
+            "terminal-running-after-boundary": "running",
+            "active-terminal": "completed",
+            "active-running": "running",
+            "active-start-in-grace": "completed",
+            "workflow-only": "continued_as_new",
+        },
+        checked_at=now,
+    )
+
+    assert divergent == [
+        "active-terminal",
+        "terminal-running-at-boundary",
+        "workflow-only",
+    ]
+
+
 def test_temporal_probe_checks_health_and_keeps_latest_running_execution(monkeypatch) -> None:
     now = datetime(2026, 8, 1, tzinfo=UTC)
     healthy = {"value": True}

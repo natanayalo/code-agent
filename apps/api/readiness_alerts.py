@@ -14,13 +14,18 @@ from typing import Any
 from sqlalchemy.orm import sessionmaker
 
 from db.base import utc_now
-from orchestrator.operational_health import OUTBOX_STALE_SECONDS, get_stuck_interaction_task_ids
+from orchestrator.operational_health import (
+    OUTBOX_STALE_SECONDS,
+    get_stuck_interaction_task_ids,
+    get_terminal_reconciliation_task_ids,
+)
 from orchestrator.operational_health_types import READINESS_REASON_CODES
 from repositories import ReadinessAlertRepository, session_scope
 from repositories.sqlalchemy_operational_health import OperationalHealthRepository
 from repositories.sqlalchemy_readiness_alerts import (
     INTERACTION_REASON_PREFIX,
     OUTBOX_STALE_REASON_PREFIX,
+    TERMINAL_RECONCILIATION_REASON_PREFIX,
 )
 
 logger = logging.getLogger(__name__)
@@ -45,6 +50,7 @@ _SAFE_ACTIONS = {
     "dispatcher_unavailable": "Check the worker command dispatcher heartbeat.",
     "dispatcher_backlog_stale": "Inspect the Temporal command outbox and worker dispatcher.",
     "outbox_command_stale": "Inspect the Temporal command outbox and worker dispatcher.",
+    "terminal_reconciliation_divergent": "Inspect the task and its Temporal workflow.",
 }
 
 
@@ -80,6 +86,13 @@ def format_readiness_alert(reason: str, transition: str) -> str:
             f"Execution alert {state}: outbox_command_stale\nTask: {task_id}"
             "\nNext action: Inspect the Temporal command outbox and worker dispatcher."
         )
+    if reason.startswith(TERMINAL_RECONCILIATION_REASON_PREFIX):
+        task_id = reason.removeprefix(TERMINAL_RECONCILIATION_REASON_PREFIX)
+        state = "degraded" if transition == "degraded" else "recovered"
+        return (
+            f"Execution alert {state}: terminal_reconciliation_divergent\nTask: {task_id}"
+            f"\nNext action: {_SAFE_ACTIONS['terminal_reconciliation_divergent']}"
+        )
     action = _SAFE_ACTIONS.get(reason, "Inspect authenticated readiness status and /ready.")
     state = "degraded" if transition == "degraded" else "recovered"
     return f"Execution readiness {state}: {reason}\nNext action: {action}"
@@ -112,6 +125,7 @@ class ReadinessAlertMonitor:
         readiness_probe: Callable[[Any], Any] | None = None,
         interaction_probe: Callable[[Any, datetime], list[str]] | None = None,
         outbox_probe: Callable[[Any, datetime], list[str]] | None = None,
+        reconciliation_probe: Callable[[Any, datetime], list[str]] | None = None,
     ) -> None:
         self.task_service = task_service
         self.session_factory = session_factory
@@ -123,6 +137,7 @@ class ReadinessAlertMonitor:
         self.readiness_probe = readiness_probe or (lambda service: service.get_readiness())
         self.interaction_probe = interaction_probe or get_stuck_interaction_task_ids
         self.outbox_probe = outbox_probe or self._probe_stale_outbox_task_ids
+        self.reconciliation_probe = reconciliation_probe or get_terminal_reconciliation_task_ids
         self._task: asyncio.Task[None] | None = None
         self._unpersisted_snapshots: list[tuple[list[str], list[str], datetime]] = []
 
@@ -188,6 +203,20 @@ class ReadinessAlertMonitor:
             )
         except Exception as exc:
             logger.warning("Stale outbox alert observation failed (%s)", type(exc).__name__)
+        try:
+            reconciliation_observed_at = utc_now()
+            task_ids = await asyncio.to_thread(
+                self.reconciliation_probe, self.task_service, reconciliation_observed_at
+            )
+            await asyncio.to_thread(
+                self._record_terminal_reconciliation_snapshot,
+                task_ids,
+                reconciliation_observed_at,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Terminal reconciliation alert observation failed (%s)", type(exc).__name__
+            )
         for _ in range(MAX_DELIVERIES_PER_CYCLE):
             delivery = await asyncio.to_thread(self._claim_one)
             if delivery is None:
@@ -249,6 +278,14 @@ class ReadinessAlertMonitor:
     def _record_stale_outbox_snapshot(self, task_ids: list[str], observed_at: datetime) -> None:
         with _LOCAL_DB_LOCK, session_scope(self.session_factory) as session:
             ReadinessAlertRepository(session).record_stale_outbox_snapshot(
+                task_ids, observed_at=observed_at
+            )
+
+    def _record_terminal_reconciliation_snapshot(
+        self, task_ids: list[str], observed_at: datetime
+    ) -> None:
+        with _LOCAL_DB_LOCK, session_scope(self.session_factory) as session:
+            ReadinessAlertRepository(session).record_terminal_reconciliation_snapshot(
                 task_ids, observed_at=observed_at
             )
 

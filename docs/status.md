@@ -9,7 +9,8 @@ Temporal Server 1.24.2 / Python SDK 1.30.0 compatibility prerequisite,
 weekly dependency-review scheduling, opt-in Telegram readiness alerts,
 read-only operations dashboard visibility, and task-specific stuck-interaction
 and stale-outbox alerts are merged. Task-specific terminal-reconciliation
-alerts are the next M31 slice.
+alerts are implemented on the current task branch; remaining M31 alert
+categories are future slices.
 M30 is completed with authenticated GitHub event intake, issue/delivery timeline mapping,
 draft PR synchronization, issue task replay (`/code-agent replay`), and Temporal
 interaction primitives (Queries & Updates).
@@ -52,6 +53,10 @@ qualified; production routing remains static and M27 deferred.
   dependency readiness, degraded reasons, and safe recovery guidance
 - public dependency-aware `/ready` and authenticated outbox, worker freshness,
   stuck-wait, and terminal-reconciliation metrics
+- opt-in task-specific Telegram alerts for stuck interactions, stale Temporal
+  outbox commands, and terminal reconciliation divergence, with complete-set
+  observations, durable per-task recovery transitions, and authenticated state
+  and delivery visibility
 - an incremental M25.6 evidence collector that pins deployment identity,
   captures Postgres and Temporal proof, rejects duplicate cases, and emits a
   sanitized aggregate without changing routing automatically
@@ -244,10 +249,8 @@ Temporal migration and rollback record is in the
 
 ## Next slices only
 
-1. Scope and implement **M31 — Task-Specific Terminal-Reconciliation Alerts**
-   using the existing reconciliation signals and alert delivery infrastructure.
-   Define task-level transition and recovery rules before implementation. Other
-   alert scenarios and maintenance purposes remain future M31 slices.
+1. Continue **M31 — Proactive Operations and Safe Scheduled Work** with other
+   task-specific alert scenarios and maintenance purposes as future slices.
 2. Maintain completed M29 advisory report contracts and static production routing:
    a. all four canonical task-class/mode cells are qualified (`docs/read_only`, `feature/read_only`, `investigation/read_only`, `feature/mutation`);
    b. longitudinal 45-day split robustness remains calendar-gated on model-aware task age (expected ~2026-11-02 for Wave 2/3 tasks and ~2026-12-08 for `gpt-6-luna`);

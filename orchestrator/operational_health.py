@@ -172,32 +172,57 @@ def _reconciliation_metrics(
         logger.warning("Temporal terminal reconciliation probe failed", exc_info=exc)
         return TerminalReconciliationMetrics(status="unknown", checked_at=checked_at)
 
+    divergent = terminal_reconciliation_divergent_task_ids(
+        projections, workflow_statuses, checked_at=checked_at
+    )
+    affected, truncated = _bounded_task_ids(divergent)
+    return TerminalReconciliationMetrics(
+        status="degraded" if divergent else "ok",
+        divergence_count=len(divergent),
+        affected_task_ids=affected,
+        affected_task_ids_truncated=truncated,
+        checked_at=checked_at,
+    )
+
+
+def terminal_reconciliation_divergent_task_ids(
+    projections: dict[str, TemporalTaskProjection],
+    workflow_statuses: dict[str, str],
+    *,
+    checked_at: datetime,
+) -> list[str]:
+    """Return the complete, sorted set of task IDs that violate reconciliation policy."""
     grace_cutoff = checked_at - timedelta(seconds=TERMINAL_RECONCILIATION_GRACE_SECONDS)
-    divergent: list[str] = []
+    divergent: set[str] = set()
     for task_id, projection in projections.items():
         workflow_status = workflow_statuses.get(task_id)
         postgres_terminal = projection.status in _TERMINAL_STATUSES
         temporal_running = workflow_status in _TEMPORAL_RUNNING_STATUSES
         if postgres_terminal:
             if projection.task_updated_at <= grace_cutoff and temporal_running:
-                divergent.append(task_id)
+                divergent.add(task_id)
             continue
         if projection.start_delivered_at > grace_cutoff:
             continue
         if not temporal_running:
-            divergent.append(task_id)
+            divergent.add(task_id)
 
     for task_id, workflow_status in workflow_statuses.items():
         if workflow_status in _TEMPORAL_RUNNING_STATUSES and task_id not in projections:
-            divergent.append(task_id)
+            divergent.add(task_id)
 
-    affected, truncated = _bounded_task_ids(divergent)
-    return TerminalReconciliationMetrics(
-        status="degraded" if divergent else "ok",
-        divergence_count=len(set(divergent)),
-        affected_task_ids=affected,
-        affected_task_ids_truncated=truncated,
-        checked_at=checked_at,
+    return sorted(divergent)
+
+
+def get_terminal_reconciliation_task_ids(self: Any, observed_at: datetime) -> list[str]:
+    """Observe both stores and return the complete divergent task set for alerts."""
+    with session_scope(self.session_factory) as session:
+        repo = OperationalHealthRepository(session)
+        repo.ping(timeout_seconds=POSTGRES_PROBE_TIMEOUT_SECONDS)
+        projections = repo.temporal_task_projections()
+    workflow_statuses = _temporal_probe(self).list_task_workflow_statuses()
+    return terminal_reconciliation_divergent_task_ids(
+        projections, workflow_statuses, checked_at=observed_at
     )
 
 

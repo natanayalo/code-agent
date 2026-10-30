@@ -14,6 +14,7 @@ from repositories import ReadinessAlertRepository, session_scope
 from repositories.sqlalchemy_readiness_alerts import (
     INTERACTION_REASON_PREFIX,
     OUTBOX_STALE_REASON_PREFIX,
+    TERMINAL_RECONCILIATION_REASON_PREFIX,
 )
 
 router = APIRouter(
@@ -71,6 +72,11 @@ def _public_alert_identity(reason: str) -> tuple[str, str | None]:
         return "interaction_wait_stuck", reason.removeprefix(INTERACTION_REASON_PREFIX)
     if reason.startswith(OUTBOX_STALE_REASON_PREFIX):
         return "outbox_command_stale", reason.removeprefix(OUTBOX_STALE_REASON_PREFIX)
+    if reason.startswith(TERMINAL_RECONCILIATION_REASON_PREFIX):
+        return (
+            "terminal_reconciliation_divergent",
+            reason.removeprefix(TERMINAL_RECONCILIATION_REASON_PREFIX),
+        )
     return reason, None
 
 

@@ -16,7 +16,12 @@ MAX_DELIVERY_ATTEMPTS = 8
 DELIVERY_LEASE_SECONDS = 30
 INTERACTION_REASON_PREFIX = "interaction_wait_stuck|"
 OUTBOX_STALE_REASON_PREFIX = "outbox_command_stale|"
-TASK_REASON_PREFIXES = (INTERACTION_REASON_PREFIX, OUTBOX_STALE_REASON_PREFIX)
+TERMINAL_RECONCILIATION_REASON_PREFIX = "terminal_reconciliation_divergent|"
+TASK_REASON_PREFIXES = (
+    INTERACTION_REASON_PREFIX,
+    OUTBOX_STALE_REASON_PREFIX,
+    TERMINAL_RECONCILIATION_REASON_PREFIX,
+)
 
 
 def _utc_aware(value: datetime) -> datetime:
@@ -240,6 +245,16 @@ class ReadinessAlertRepository:
         """Persist stale-outbox transitions from one complete, successful observation."""
         self._record_task_snapshot(
             task_ids, observed_at=observed_at, reason_prefix=OUTBOX_STALE_REASON_PREFIX
+        )
+
+    def record_terminal_reconciliation_snapshot(
+        self, task_ids: list[str], *, observed_at: datetime | None = None
+    ) -> None:
+        """Persist per-task reconciliation transitions from a complete observation."""
+        self._record_task_snapshot(
+            task_ids,
+            observed_at=observed_at,
+            reason_prefix=TERMINAL_RECONCILIATION_REASON_PREFIX,
         )
 
     def _record_task_snapshot(
