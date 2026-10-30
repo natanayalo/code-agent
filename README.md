@@ -178,10 +178,30 @@ complete-set observation with no qualifying command for that task. Inspect the
 Temporal command outbox and worker dispatcher; the monitor evaluates every
 affected task even though `/metrics` caps its displayed task ID list.
 
+It also sends task-specific `terminal_reconciliation_divergent` alerts using
+the same 60-second grace period and comparison as authenticated `/metrics`.
+The monitor independently reads the complete PostgreSQL projection and
+Temporal workflow-status set; it never uses the metrics endpoint's bounded ID
+list. Recovery occurs only after a newer successful observation of both stores
+confirms that task's divergence is gone. A failed PostgreSQL or Temporal
+observation leaves that task's alert state unchanged. The policy includes a
+running Temporal workflow without a matching PostgreSQL projection as a
+divergence. Before alerting on apparent divergence, the monitor refreshes the
+PostgreSQL projection to account for task completion or start acknowledgement
+between observations. The monitor defers a still-undelivered start created within the
+60-second grace period, or with a dispatch claim that expires within or after
+that period. These unconfirmed observations cannot cause degradation or recovery.
+A newer observation reports the workflow if it remains unmatched after the
+grace period. Metrics retain their existing immediate workflow-only signal.
+Alerts are advisory: inspect the task and its Temporal workflow, then use the
+existing operator controls if a correction is needed; the monitor does not
+alter task or workflow state.
+
 Authenticated `GET /alerts/readiness` shows the latest reason state, and
 `GET /alerts/readiness/deliveries` shows recent delivery attempts and failures.
 Both endpoints include task-specific `interaction_wait_stuck` records with a
-`task_id` field and `outbox_command_stale` records with the same field.
+`task_id` field, `outbox_command_stale` records with the same field, and
+`terminal_reconciliation_divergent` records with the same field.
 Postgres coordinates transition creation and delivery leases across API
 instances. Telegram requests are bounded to five seconds, retried at most eight
 times with capped exponential backoff, and then retained as failed for operator

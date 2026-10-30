@@ -7,6 +7,7 @@ import logging
 import os
 from collections.abc import Coroutine
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Protocol, TypeVar
 
@@ -53,6 +54,14 @@ _TEMPORAL_RUNNING_STATUSES = {
     WorkflowExecutionStatus.CONTINUED_AS_NEW.name.lower(),
 }
 _T = TypeVar("_T")
+
+
+@dataclass(frozen=True, slots=True)
+class TerminalReconciliationAlertSnapshot:
+    """Complete alert observation, including task IDs that remain unconfirmed."""
+
+    divergent_task_ids: tuple[str, ...]
+    unconfirmed_task_ids: tuple[str, ...]
 
 
 class TemporalOperationalProbeProtocol(Protocol):
@@ -172,32 +181,84 @@ def _reconciliation_metrics(
         logger.warning("Temporal terminal reconciliation probe failed", exc_info=exc)
         return TerminalReconciliationMetrics(status="unknown", checked_at=checked_at)
 
+    divergent = terminal_reconciliation_divergent_task_ids(
+        projections, workflow_statuses, checked_at=checked_at
+    )
+    affected, truncated = _bounded_task_ids(divergent)
+    return TerminalReconciliationMetrics(
+        status="degraded" if divergent else "ok",
+        divergence_count=len(divergent),
+        affected_task_ids=affected,
+        affected_task_ids_truncated=truncated,
+        checked_at=checked_at,
+    )
+
+
+def terminal_reconciliation_divergent_task_ids(
+    projections: dict[str, TemporalTaskProjection],
+    workflow_statuses: dict[str, str],
+    *,
+    checked_at: datetime,
+) -> list[str]:
+    """Return the complete, sorted set of task IDs that violate reconciliation policy."""
     grace_cutoff = checked_at - timedelta(seconds=TERMINAL_RECONCILIATION_GRACE_SECONDS)
-    divergent: list[str] = []
+    divergent: set[str] = set()
     for task_id, projection in projections.items():
         workflow_status = workflow_statuses.get(task_id)
         postgres_terminal = projection.status in _TERMINAL_STATUSES
         temporal_running = workflow_status in _TEMPORAL_RUNNING_STATUSES
         if postgres_terminal:
             if projection.task_updated_at <= grace_cutoff and temporal_running:
-                divergent.append(task_id)
+                divergent.add(task_id)
             continue
         if projection.start_delivered_at > grace_cutoff:
             continue
         if not temporal_running:
-            divergent.append(task_id)
+            divergent.add(task_id)
 
     for task_id, workflow_status in workflow_statuses.items():
         if workflow_status in _TEMPORAL_RUNNING_STATUSES and task_id not in projections:
-            divergent.append(task_id)
+            divergent.add(task_id)
 
-    affected, truncated = _bounded_task_ids(divergent)
-    return TerminalReconciliationMetrics(
-        status="degraded" if divergent else "ok",
-        divergence_count=len(set(divergent)),
-        affected_task_ids=affected,
-        affected_task_ids_truncated=truncated,
-        checked_at=checked_at,
+    return sorted(divergent)
+
+
+def get_terminal_reconciliation_alert_snapshot(
+    self: Any, observed_at: datetime
+) -> TerminalReconciliationAlertSnapshot:
+    """Observe both stores and defer recent starts awaiting delivery acknowledgement."""
+    with session_scope(self.session_factory) as session:
+        repo = OperationalHealthRepository(session)
+        repo.ping(timeout_seconds=POSTGRES_PROBE_TIMEOUT_SECONDS)
+        projections = repo.temporal_task_projections()
+    workflow_statuses = _temporal_probe(self).list_task_workflow_statuses()
+    unmatched_running_workflows = {
+        task_id
+        for task_id, status in workflow_statuses.items()
+        if status in _TEMPORAL_RUNNING_STATUSES and task_id not in projections
+    }
+    unconfirmed_task_ids: set[str] = set()
+    apparent_divergence = terminal_reconciliation_divergent_task_ids(
+        projections, workflow_statuses, checked_at=observed_at
+    )
+    if apparent_divergence:
+        # A start acknowledgement or task completion can commit between the
+        # database and Temporal reads. Confirm before recording divergence.
+        with session_scope(self.session_factory) as session:
+            repo = OperationalHealthRepository(session)
+            repo.ping(timeout_seconds=POSTGRES_PROBE_TIMEOUT_SECONDS)
+            refreshed, pending = repo.reconciliation_start_snapshot(
+                now=observed_at,
+                grace_seconds=TERMINAL_RECONCILIATION_GRACE_SECONDS,
+            )
+            projections.update(refreshed)
+            unconfirmed_task_ids.update(pending & unmatched_running_workflows)
+    divergent_task_ids = terminal_reconciliation_divergent_task_ids(
+        projections, workflow_statuses, checked_at=observed_at
+    )
+    return TerminalReconciliationAlertSnapshot(
+        divergent_task_ids=tuple(sorted(set(divergent_task_ids) - unconfirmed_task_ids)),
+        unconfirmed_task_ids=tuple(sorted(unconfirmed_task_ids)),
     )
 
 

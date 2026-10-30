@@ -20,6 +20,7 @@ from repositories import (
     session_scope,
 )
 from repositories.sqlalchemy_operational_health import OperationalHealthRepository
+from repositories.sqlalchemy_readiness_alerts import TERMINAL_RECONCILIATION_REASON_PREFIX
 
 
 def _command(
@@ -109,3 +110,18 @@ def test_stale_outbox_alert_public_identity_exposes_stable_reason_and_task() -> 
         "outbox_command_stale",
         "task-safe-id",
     )
+
+
+def test_terminal_reconciliation_alert_format_and_identity_are_safe() -> None:
+    reason = f"{TERMINAL_RECONCILIATION_REASON_PREFIX}task-safe-id"
+
+    assert format_readiness_alert(reason, "degraded") == (
+        "Execution alert degraded: terminal_reconciliation_divergent\n"
+        "Task: task-safe-id\n"
+        "Next action: Inspect the task and its Temporal workflow."
+    )
+    assert _public_alert_identity(reason) == (
+        "terminal_reconciliation_divergent",
+        "task-safe-id",
+    )
+    assert "task text" not in format_readiness_alert(reason, "recovered")
