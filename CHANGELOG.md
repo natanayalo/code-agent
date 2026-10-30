@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: alert on worker provider prerequisites ([#459](https://github.com/natanayalo/code-agent/pull/459))
+
 - Feat: alert on terminal reconciliation divergence ([#448](https://github.com/natanayalo/code-agent/pull/448))
 
 - Feat: alert on task-specific stale outbox commands ([#446](https://github.com/natanayalo/code-agent/pull/446))
