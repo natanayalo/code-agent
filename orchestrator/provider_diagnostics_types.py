@@ -71,6 +71,7 @@ class DiagnosticCheckResult(BaseModel):
     remediation: str | None = None
     verification_scope: VerificationScope
     blocking: bool
+    probe_result: Literal["completed", "unverified", "error"] = "completed"
 
 
 class ProviderPreDispatchReport(BaseModel):

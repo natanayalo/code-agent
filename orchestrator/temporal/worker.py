@@ -14,6 +14,7 @@ from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 from apps.api.config import SystemConfig
 from db.enums import WorkerNodeStatus
 from orchestrator.operational_health import WORKER_HEARTBEAT_INTERVAL_SECONDS
+from orchestrator.provider_observations import observation_loop
 from orchestrator.temporal.activities import TaskExecutionActivities
 from orchestrator.temporal.command_dispatcher import TemporalCommandDispatcher
 from orchestrator.temporal.queues import CODEX_EXECUTION_TASK_QUEUE
@@ -149,7 +150,7 @@ async def start_temporal_worker(
     else:  # pragma: no cover - loop either breaks or raises
         raise RuntimeError("Temporal worker connection retries exhausted.") from last_error
 
-    worker_id, _ = _temporal_worker_identity()
+    worker_id, process_identity = _temporal_worker_identity()
     await _register_temporal_worker(task_service, worker_id=worker_id)
 
     workflow_worker, codex_execution_worker = _build_temporal_workers(
@@ -165,6 +166,7 @@ async def start_temporal_worker(
     )
     async with asyncio.TaskGroup() as task_group:
         task_group.create_task(_heartbeat_temporal_worker(task_service, worker_id=worker_id))
+        task_group.create_task(observation_loop(task_service, worker_id, process_identity))
         task_group.create_task(dispatcher.run_forever())
         task_group.create_task(workflow_worker.run())
         task_group.create_task(codex_execution_worker.run())

@@ -362,6 +362,7 @@ def check_codex_credentials(
     except Exception as exc:
         return DiagnosticCheckResult(
             name="credentials",
+            probe_result="completed" if isinstance(exc, ValueError) else "error",
             category="credentials",
             status="unready",
             detail=(
@@ -432,6 +433,7 @@ def check_antigravity_credentials(
     except Exception as exc:
         return DiagnosticCheckResult(
             name="credentials",
+            probe_result="completed" if isinstance(exc, ValueError) else "error",
             category="credentials",
             status="unready",
             detail=(f"Antigravity token file is unreadable: {_credential_error_category(exc)}"),

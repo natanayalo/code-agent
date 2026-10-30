@@ -15,6 +15,13 @@ function mount() {
 }
 
 describe('ReadinessAlertsSection', () => {
+  it('shows distinct worker capability incidents and fixed actions', async () => {
+    vi.mocked(api.listReadinessAlertStates).mockResolvedValue([{ reason: 'provider_capability', worker_node_id: 'worker-id', provider: 'codex', capability: 'credentials', next_action: 'Check credentials.', degraded: true, transition_number: 1, last_transition_at: '2026-10-27T12:00:00Z', last_checked_at: '2026-10-27T12:01:00Z' }]);
+    vi.mocked(api.listReadinessAlertDeliveries).mockResolvedValue([]);
+    mount();
+    expect(await screen.findByText(/worker worker-id · codex · credentials/)).toBeInTheDocument();
+    expect(screen.getByText('Next action: Check credentials.')).toBeInTheDocument();
+  });
   beforeEach(() => vi.clearAllMocks());
 
   it('shows independent loading states', () => {

@@ -1139,8 +1139,8 @@ describe('api service', () => {
     });
 
     it('reads readiness alert states and bounded delivery history', async () => {
-      const states = [{ reason: 'interaction_wait_stuck', task_id: 'task-42', degraded: true }];
-      const deliveries = [{ id: 'delivery-1', task_id: 'task-42', attempts: 2 }];
+      const states = [{ reason: 'provider_capability', worker_node_id: 'worker-id', provider: 'codex', capability: 'credentials', next_action: 'Check credentials.', degraded: true }];
+      const deliveries = [{ id: 'delivery-1', worker_node_id: 'worker-id', provider: 'codex', capability: 'credentials', next_action: 'Check credentials.', attempts: 2 }];
       for (const payload of [states, deliveries]) {
         mockFetch.mockResolvedValueOnce({ ok: true, status: 200, headers: new Map([['content-type', 'application/json']]), json: async () => payload });
       }

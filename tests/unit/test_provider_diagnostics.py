@@ -509,7 +509,33 @@ def test_openrouter_skips_cli_check() -> None:
     res = svc.check_cli_binary(ctx)
     assert res.status == "ready"
     assert not res.blocking
+    assert res.probe_result == "unverified"
     assert "CLI binary check skipped" in res.detail
+
+
+def test_container_cli_presence_is_unverified() -> None:
+    svc = ProviderDiagnosticsService()
+    result = svc.check_cli_binary(_make_context(provider="codex", is_container_execution=True))
+    assert result.status == "ready"
+    assert result.probe_result == "unverified"
+
+
+@pytest.mark.parametrize("provider", ["codex", "antigravity"])
+def test_credential_read_error_has_error_metadata(
+    provider: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from orchestrator import provider_diagnostics_credentials as credentials
+
+    path = tmp_path / "credential"
+    path.write_text("credential", encoding="utf-8")
+    resolver = (
+        "resolve_codex_auth_path" if provider == "codex" else "resolve_antigravity_token_path"
+    )
+    monkeypatch.setattr(credentials, resolver, lambda **kwargs: path)
+    monkeypatch.setattr(Path, "read_text", lambda *args, **kwargs: (_ for _ in ()).throw(OSError()))
+    result = ProviderDiagnosticsService().check_credentials(_make_context(provider=provider))
+    assert result.status == "unready"
+    assert result.probe_result == "error"
 
 
 @pytest.mark.asyncio
@@ -519,6 +545,7 @@ async def test_docker_daemon_responsive() -> None:
         mock_probe.return_value = (0, "24.0.7", "")
         res = await svc.check_docker_daemon()
         assert res.status == "ready"
+        assert res.probe_result == "completed"
         assert not res.blocking
         assert "version 24.0.7" in res.detail
 
@@ -530,6 +557,7 @@ async def test_docker_daemon_timeout_is_blocking() -> None:
         mock_probe.side_effect = TimeoutError("docker info timeout")
         res = await svc.check_docker_daemon()
         assert res.status == "unknown"
+        assert res.probe_result == "error"
         assert res.blocking
         assert "timed out" in res.detail
 
@@ -945,6 +973,7 @@ async def test_docker_daemon_generic_exception() -> None:
         mock_probe.side_effect = OSError("socket permission denied")
         res = await svc.check_docker_daemon()
     assert res.status == "unready"
+    assert res.probe_result == "error"
     assert res.blocking
     assert "OSError" in res.detail
 
@@ -1012,6 +1041,7 @@ async def test_check_executor_image_generic_exception() -> None:
         mock_inspect.side_effect = OSError("permission denied")
         res = await svc.check_executor_image("broken-image:latest")
     assert res.status == "unready"
+    assert res.probe_result == "error"
     assert res.blocking
     assert "OSError" in res.detail
 

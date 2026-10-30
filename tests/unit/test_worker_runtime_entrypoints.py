@@ -206,6 +206,9 @@ async def test_temporal_worker_groups_all_runtime_components(monkeypatch) -> Non
     async def heartbeat(_service: object, *, worker_id: str) -> None:
         calls.append(f"heartbeat:{worker_id}")
 
+    async def observe(_service: object, worker_id: str, process_identity: str) -> None:
+        calls.append(f"observe:{worker_id}:{process_identity}")
+
     class RuntimeWorker:
         def __init__(self, label: str) -> None:
             self.label = label
@@ -224,6 +227,7 @@ async def test_temporal_worker_groups_all_runtime_components(monkeypatch) -> Non
     monkeypatch.setattr(temporal_worker.Client, "connect", connect)
     monkeypatch.setattr(temporal_worker, "_register_temporal_worker", register)
     monkeypatch.setattr(temporal_worker, "_heartbeat_temporal_worker", heartbeat)
+    monkeypatch.setattr(temporal_worker, "observation_loop", observe)
     monkeypatch.setattr(
         temporal_worker,
         "_temporal_worker_identity",
@@ -246,6 +250,7 @@ async def test_temporal_worker_groups_all_runtime_components(monkeypatch) -> Non
         "connect:temporal:7233",
         "register:worker-id",
         "heartbeat:worker-id",
+        "observe:worker-id:host:1",
         "dispatcher",
         "workflow",
         "execution",
