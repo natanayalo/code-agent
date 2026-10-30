@@ -28,6 +28,7 @@ from repositories import (
     UserRepository,
     session_scope,
 )
+from repositories.sqlalchemy_operational_health import OperationalHealthRepository
 from repositories.sqlalchemy_readiness_alerts import TERMINAL_RECONCILIATION_REASON_PREFIX
 from tests.integration.task_endpoints_support import DEFAULT_SHARED_SECRET, _default_worker
 
@@ -182,10 +183,55 @@ def test_pending_start_stays_unconfirmed_only_until_grace_elapsed(session_factor
     assert pending_start.unconfirmed_task_ids == (task_id,)
 
     after_grace = get_terminal_reconciliation_alert_snapshot(
-        service, observed_at + timedelta(seconds=61)
+        service, observed_at + timedelta(seconds=81)
     )
     assert after_grace.divergent_task_ids == (task_id,)
     assert after_grace.unconfirmed_task_ids == ()
+
+
+def test_old_start_with_recent_claim_is_deferred_until_claim_grace_expires(session_factory) -> None:
+    observed_at = utc_now()
+    task_id, service = _pending_reconciliation_start(session_factory, observed_at)
+    with session_scope(session_factory) as session:
+        command = session.scalar(select(TemporalCommand).where(TemporalCommand.task_id == task_id))
+        assert command is not None
+        command.created_at = observed_at - timedelta(hours=1)
+
+    snapshot = get_terminal_reconciliation_alert_snapshot(service, observed_at)
+    assert snapshot.unconfirmed_task_ids == (task_id,)
+    assert snapshot.divergent_task_ids == ()
+    expired = get_terminal_reconciliation_alert_snapshot(
+        service, observed_at + timedelta(seconds=81)
+    )
+    assert expired.divergent_task_ids == (task_id,)
+    assert expired.unconfirmed_task_ids == ()
+
+
+def test_ack_after_confirmation_snapshot_does_not_create_false_alert(
+    session_factory, monkeypatch
+) -> None:
+    observed_at = utc_now()
+    task_id, service = _pending_reconciliation_start(session_factory, observed_at)
+    original = OperationalHealthRepository.reconciliation_start_snapshot
+
+    def acknowledge_after_read(repo, **kwargs):
+        snapshot = original(repo, **kwargs)
+        with session_scope(session_factory) as session:
+            command = session.scalar(
+                select(TemporalCommand).where(TemporalCommand.task_id == task_id)
+            )
+            assert command is not None
+            command.delivered_at = utc_now()
+            command.claim_token = None
+            command.claim_expires_at = None
+        return snapshot
+
+    monkeypatch.setattr(
+        OperationalHealthRepository, "reconciliation_start_snapshot", acknowledge_after_read
+    )
+    snapshot = get_terminal_reconciliation_alert_snapshot(service, observed_at)
+    assert snapshot.divergent_task_ids == ()
+    assert snapshot.unconfirmed_task_ids == (task_id,)
 
 
 def test_unconfirmed_task_observation_does_not_degrade_or_recover(session_factory) -> None:

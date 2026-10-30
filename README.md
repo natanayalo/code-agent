@@ -186,9 +186,9 @@ list. Recovery occurs only after a newer successful observation of both stores
 confirms that task's divergence is gone. A failed PostgreSQL or Temporal
 observation leaves that task's alert state unchanged. The policy includes a
 running Temporal workflow without a matching PostgreSQL projection as a
-divergence. If its start command is still undelivered and was created within the
-60-second grace period, the monitor defers that task's alert while delivery is
-pending; those unconfirmed observations cannot cause degradation or recovery.
+divergence. The monitor defers a still-undelivered start created within the
+60-second grace period, or with a dispatch claim that expires within or after
+that period. These unconfirmed observations cannot cause degradation or recovery.
 A newer observation reports the workflow if it remains unmatched after the
 grace period. Metrics retain their existing immediate workflow-only signal.
 Alerts are advisory: inspect the task and its Temporal workflow, then use the

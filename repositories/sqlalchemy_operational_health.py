@@ -254,24 +254,59 @@ class OperationalHealthRepository:
             if delivered_at is not None
         }
 
-    def unacknowledged_recent_start_task_ids(
+    def reconciliation_start_snapshot(
         self, *, now: datetime, grace_seconds: int
-    ) -> list[str]:
-        """Return tasks with a recent start command not yet acknowledged by Temporal."""
+    ) -> tuple[dict[str, TemporalTaskProjection], set[str]]:
+        """Read acknowledged and in-flight starts from one database snapshot."""
         cutoff = now - timedelta(seconds=grace_seconds)
-        return list(
-            self.session.scalars(
-                select(TemporalCommand.task_id)
-                .join(Task, Task.id == TemporalCommand.task_id)
-                .where(
-                    Task.orchestration_runtime == OrchestrationRuntime.TEMPORAL,
-                    TemporalCommand.command_type == "start",
-                    TemporalCommand.delivered_at.is_(None),
-                    TemporalCommand.dead_lettered_at.is_(None),
-                    TemporalCommand.superseded_at.is_(None),
-                    TemporalCommand.created_at > cutoff,
-                )
-                .distinct()
-                .order_by(TemporalCommand.task_id)
+        rows = self.session.execute(
+            select(
+                Task.id,
+                Task.status,
+                Task.updated_at,
+                TemporalCommand.delivered_at,
+                TemporalCommand.created_at,
+                TemporalCommand.claim_token,
+                TemporalCommand.claim_expires_at,
+                TemporalCommand.dead_lettered_at,
+                TemporalCommand.superseded_at,
+            )
+            .join(TemporalCommand, TemporalCommand.task_id == Task.id)
+            .where(
+                Task.orchestration_runtime == OrchestrationRuntime.TEMPORAL,
+                TemporalCommand.command_type == "start",
             )
         )
+        projections: dict[str, TemporalTaskProjection] = {}
+        pending: set[str] = set()
+        for (
+            task_id,
+            status,
+            updated_at,
+            delivered_at,
+            created_at,
+            token,
+            expires_at,
+            dead,
+            superseded,
+        ) in rows:
+            if delivered_at is not None:
+                projections[task_id] = TemporalTaskProjection(
+                    status=status.value if hasattr(status, "value") else str(status),
+                    start_delivered_at=_as_aware(delivered_at) or delivered_at,
+                    task_updated_at=_as_aware(updated_at) or updated_at,
+                )
+            elif (
+                dead is None
+                and superseded is None
+                and (
+                    (_as_aware(created_at) or now) > cutoff
+                    or (
+                        token is not None
+                        and expires_at is not None
+                        and (_as_aware(expires_at) or expires_at) > cutoff
+                    )
+                )
+            ):
+                pending.add(task_id)
+        return projections, pending - projections.keys()

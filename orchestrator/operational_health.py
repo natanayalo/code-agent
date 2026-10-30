@@ -244,16 +244,12 @@ def get_terminal_reconciliation_alert_snapshot(
         with session_scope(self.session_factory) as session:
             repo = OperationalHealthRepository(session)
             repo.ping(timeout_seconds=POSTGRES_PROBE_TIMEOUT_SECONDS)
-            projections.update(repo.temporal_task_projections())
-            unconfirmed_task_ids.update(
-                set(
-                    repo.unacknowledged_recent_start_task_ids(
-                        now=observed_at,
-                        grace_seconds=TERMINAL_RECONCILIATION_GRACE_SECONDS,
-                    )
-                )
-                & unmatched_running_workflows
+            refreshed, pending = repo.reconciliation_start_snapshot(
+                now=observed_at,
+                grace_seconds=TERMINAL_RECONCILIATION_GRACE_SECONDS,
             )
+            projections.update(refreshed)
+            unconfirmed_task_ids.update(pending & unmatched_running_workflows)
     divergent_task_ids = terminal_reconciliation_divergent_task_ids(
         projections, workflow_statuses, checked_at=observed_at
     )
