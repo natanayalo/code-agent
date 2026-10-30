@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: alert on task-specific stale outbox commands ([#446](https://github.com/natanayalo/code-agent/pull/446))
+
 - Feat: add task-specific stuck interaction alerts ([#444](https://github.com/natanayalo/code-agent/pull/444))
 
 - Feat(dashboard): add M31 operations visibility ([#442](https://github.com/natanayalo/code-agent/pull/442))
