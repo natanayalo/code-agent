@@ -1,10 +1,5 @@
-# Workflow: Start Task
+# Start task
 
-The triggerable task-start procedure now lives in [`.agents/skills/start-task/SKILL.md`](../skills/start-task/SKILL.md).
-
-Keep this workflow as a thin reference only.
-
-Use the skill when the user asks to:
-- start a new task
-- pick the next roadmap item
-- begin the next implementation slice or PR
+Use the [start-task skill](../skills/start-task/SKILL.md).
+Contributor policy remains in [AGENTS.md](../../AGENTS.md); this path is a
+compatibility entrypoint, not an independent workflow.

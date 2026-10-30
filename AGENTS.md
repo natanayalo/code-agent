@@ -132,7 +132,7 @@ Use those assets to execute common tasks consistently, but treat this `AGENTS.md
 
 Prefer triggerable skills over workflow docs when the user request clearly matches one.
 
-Current routing hints:
+Current routing hints (full index: [.agents/README.md](.agents/README.md)):
 - use the `start-task` skill when the user asks to start a new task, pick the next backlog item, or begin the next implementation slice
 - use the `address-review` skill, together with the GitHub review-comment skill when needed, when the user asks to inspect or address PR review feedback
 - use the `db-schema` skill for model or migration changes under `db/`
@@ -247,7 +247,7 @@ Project memory:
 - architecture notes
 - known pitfalls
 
-**Skeletal Skepticism (T-060)**:
+**Skeptical memory**:
 Memory is treated as a high-confidence "hint" rather than ground truth. Each entry must store:
 - `source`: where the memory came from
 - `confidence`: 0.0 to 1.0 score
@@ -255,7 +255,7 @@ Memory is treated as a high-confidence "hint" rather than ground truth. Each ent
 - `last_verified_at`: when the information was last proved correct in a sandbox
 - `requires_verification`: flag to force a skeptical re-check
 
-**Compact Session State (T-061)**:
+**Compact session state**:
 Preserves critical context across turns to maintain consistency:
 - `active_goal`: the specific outcome currently being pursued
 - `decisions_made`: key architectural or implementation choices recorded during the session
@@ -335,7 +335,7 @@ Priority order and active task tracking are maintained in [docs/status.md](docs/
 ## Commit guidance
 
 Commit messages should be specific and follow the commitizen format:
-- `feat: add langgraph task state and checkpoint store`
+- `feat: add temporal task workflow and recovery checks`
 - `feat: implement docker sandbox workspace runner`
 - `feat: add codex worker adapter for repo task execution`
 

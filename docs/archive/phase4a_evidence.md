@@ -1,0 +1,180 @@
+# Phase 4A validation evidence
+
+Historical qualification notes retained from `docs/status.md` during the
+2026-10-30 planning cleanup. These describe individual evaluated revisions and
+wave snapshots, not live deployment health. Later waves supersede earlier
+sample gaps; age statements are relative to each evaluation timestamp.
+
+Current priorities and evidence limitations live in [status](../status.md).
+Milestone scope lives in the [roadmap](../roadmap.md), operating procedures in
+the [runbook](../runbook.md), and merged history in the
+[changelog](../../CHANGELOG.md).
+
+The M28.5A reference to legacy ingress describes its original contract slice;
+M29 subsequently removed legacy raw-secret ingress (PR #406).
+
+## Qualification notes
+
+- The accepted M25.3 release covered the Temporal lifecycle, HITL, cancellation,
+  restart recovery, sequential DAGs, opt-in fan-out, outage recovery, history
+  replay, and terminal reconciliation.
+- The accepted M25.4 release added patch-aware Temporal completion-loop parity:
+  verifier and independent-review repair, retained-workspace execution, repair
+  restart/idempotency/cancellation handling, replay coverage, and one terminal
+  manual-follow-up projection when repair cannot complete.
+- The accepted M25.5 slice proves structured dependency failure and same-process
+  recovery, worker-owned dispatcher heartbeats, stale outbox gating,
+  task-specific degraded signals, dashboard recovery guidance, responsive
+  operator rendering, and a current-branch real-worker Temporal lifecycle.
+- The reviewed M25.6 real-worker baseline contains 20/20 valid captures across
+  monolithic read-only work, mutations, verifier and independent-review repair,
+  sequential DAGs, read-only fan-out, HITL, cancellation, worker restart, and
+  isolated Codex/Antigravity draft-PR delivery. Operator redaction review and
+  the forbidden-field validator passed for the public reports. The result does
+  not change routing automatically.
+- The completed M26 slice adds automated review-comment polling on open draft
+  PRs, structured prompt building for review comments, deduplicated reply
+  planning, immediate per-reply DB checkpointing, and GitHub GraphQL thread replies.
+- The M28.2 slice records typed task, route, approval, worker, verifier, and
+  review outcomes in compact session state, then makes that bounded advisory
+  context available to replayed and resumed workers.
+- The reviewed M28 real-worker matrix contains 8/8 valid Codex/Antigravity
+  pairs on the exact evaluated revision. It proves accepted project memory
+  reaches native prompts and is used where expected; irrelevant, stale, and
+  conflicting memory is rejected or suppressed as required. Questions and
+  interventions did not regress (all captures were zero); mixed completion
+  times are observations, not a timing-improvement claim.
+- The 25-case frozen evaluation remains a deterministic domain-logic regression
+  suite. It uses replayed worker outcomes and is not a real-provider Temporal
+  reliability baseline.
+- Performance routing currently consumes checked-in advisory metrics; it is not
+  refreshed from persisted live task outcomes.
+- Full-text memory retrieval passes the curated non-semantic regression cases
+  and retains known synonym gaps. Current evidence does not justify adding a
+  vector dependency.
+
+- The completed M28.5A slice defines the 7 trust boundaries, STRIDE threat
+  model, sandbox capability contracts (`SandboxCapabilityGrant`), broker-owned
+  secret definitions (`RegisteredSecretDefinition`), audience intersection rules,
+  and ingress secret stripping adapters (`LegacyIngressTaskRequest`,
+  `IngressMigrationAdapter`).
+- The completed M28.5C slice implements the provider-neutral `AgentEvent`
+  foundation with 11 canonical event variants, `CodexStreamNormalizer`,
+  `AntigravityStreamNormalizer`, stream capping, secret redaction, reasoning
+  suppression, opt-in `CODE_AGENT_NATIVE_EVENT_CAPTURE_ENABLED` flag wiring,
+  and `agent-events-v1.jsonl` artifact capture while preserving `WorkerResult`
+  contract compatibility and zero DB migration requirements.
+
+- The M29 provider reliability advisory report extracts real-task
+  Temporal/native-agent evidence from PostgreSQL, enforces a 90-day window and
+  10-task minimum per cell, computes 95% Wilson score confidence intervals,
+  requires >= 2 eligible compatible candidates for recommendations, and validates
+  public-field sanitization without modifying live routing. Following the discovery of
+  OpenAI's `gpt-5.4-mini` retirement, the evaluation architecture was reshaped to
+  enforce authoritative, model-aware execution cohorts (`provider`, `model`,
+  `reasoning_effort`) before aggregation. Wave 1 remains an immutable diagnostic
+  baseline, Wave 2 established `docs/read_only`, and Wave 3
+  (`artifacts/m29_evidence_bundle_wave3/bundle.json`, ignored/private) completed
+  40 frozen read-only cases (20 investigation and 20 feature; 10 per
+  provider/cell) at build `a32719d114fab93c8e63e81153229ac900748a5c`. All 40
+  cases reached immutable terminal outcomes (18 completed, 22 failed), with
+  zero changed files, zero unresolved interactions/gates, and Temporal/native
+  execution throughout. The fixed Wave 3 terminal timestamp is
+  `2026-09-19T21:32:22.562107Z`.
+
+  The Wave 3 canonical, operational, and robustness snapshot used that timestamp
+  and a 10,000-iteration bootstrap with seed 29. That historical canonical report qualifies
+  `feature/read_only` at $N=10$ vs $10$ (5/10 accepted for each provider) and
+  recommends `antigravity-native-executor-read-only` on lower successful-task
+  latency (202.93s versus 359.37s; terminal latency remains operational);
+  `investigation/read_only` remains insufficient-data because authoritative
+  `model_execution` identity is available for only $N=9$ Codex and $N=6$
+  Antigravity cases, so the fail-closed extractor does not infer or backfill
+  missing samples. The feature recommendation is a terminal-completion/latency
+  advisory rather than an independently verified quality claim because persisted
+  verification warnings yield a strict 0% verification-pass metric. The committed
+  sanitized case manifest and paired supplement bind outcomes to the suite/build
+  without exposing the private bundle. `feature/mutation` remains pending,
+  robustness is `partial` with no historical 45-day split, and M27 resumption
+  remains deferred. Production routing is static and unchanged.
+
+- Wave 4 closes the cumulative investigation/read-only sample-floor gap. The
+  final ignored/private bundle
+  `artifacts/m29_evidence_bundle_wave4_from_first_quota/bundle.json` contains 20
+  terminal outcomes (16 completed, 4 failed: 3 timeouts, 1 unknown), all
+  Temporal/native investigation cases with zero changed files, interactions,
+  or gate failures. Persisted identity verifies all 10 Antigravity cases
+  (`gemini-3.8-flash/medium`) and 7 Codex cases (`gpt-5.6-luna/high`); 3 Codex
+  cases are excluded as `unknown_execution_identity`, with no inferred identity.
+  The sanitized manifest also records one earlier verified Codex
+  `infra_verifier_unavailable` attempt for
+  `m29-w4-inv-02-repair-loop-codex`; it is included in the cumulative cohort,
+  not the final-bundle paired analysis.
+- At `2026-09-27T22:02:06.727893Z`, the refreshed cumulative canonical cohort
+  qualifies `investigation/read_only` at N=16 Antigravity (15 accepted) and N=17
+  Codex (9 accepted). Antigravity is recommended on the primary Wilson lower
+  bound ($0.7167$ vs $0.3096$); successful-task medians (504.25s vs 1012.65s)
+  are supporting evidence, not a tie-break. Exact accounting is Wave 3 baseline
+  + eligible final Wave 4 cases + the documented prior attempt: `6+10=16`
+  Antigravity and `9+7+1=17` Codex.
+- Across all 10 final-bundle pairs, 6 both completed and 4 were Antigravity-only.
+  Among 7 identity-complete pairs, 6 both completed and 1 was Antigravity-only
+  (0 Codex-only, 0 neither). The paired bootstrap is 10,000 iterations/seed 29.
+  Robustness ranks Antigravity
+  first in 30/60/90-day windows and has a 99.86% unpaired first-rank
+  probability, but remains `partial`: the historical 45-day cohort has zero
+  included tasks. `feature/mutation` remains N=0; routing and
+  `evaluation/routing_metrics.json` are unchanged.
+- The [`feature/mutation` evaluation contract](../../evaluation/m29_feature_mutation_contract.md)
+  is completed and published. The 20-case live `feature/mutation` wave evaluated
+  10 Codex and 10 Antigravity tasks on the frozen disposable taskboard fixture
+  revision `228071722c645e813af16053e56d007c25e9f127`. All 10 Codex tasks
+  completed (10/10 accepted); 9 Antigravity tasks completed (9/10 accepted; 1
+  terminal failure `tool_runtime` on `m29-mut-07-retry-delay-antigravity`). Runner-owned
+  read-only acceptance oracles and neutral review by local Ollama `qwen / qwen2.5-coder:7b`
+  confirmed post-terminal independent quality: 10/10 quality pass for Codex and
+  8/10 for Antigravity (1 task failure on `m29-mut-07-retry-delay-antigravity`, 1
+  acceptance oracle failure on `m29-mut-04-cursor-page-antigravity`).
+  Reconciled cumulative 90-day cohort accounting gives Codex $N=31$ (30 accepted,
+  Wilson lower bound $0.8381$, median successful latency $25.5\text{s}$) and
+  Antigravity $N=26$ (23 accepted, Wilson lower bound $0.7102$, median successful
+  latency $178.7\text{s}$). The advisory recommendation recommends `codex-native-executor`
+  for `feature/mutation` (92.11% bootstrap win probability). All four canonical
+  M29 cells (`docs/read_only`, `feature/read_only`, `investigation/read_only`,
+  and `feature/mutation`) are now empirically qualified with $\ge 10$ samples per
+  provider. Robustness remains `partial` because model-aware execution identity is
+  37 days old (<45-day historical split); M27 remains deferred and production routing
+  is static.
+
+
+## Report identities and closeout supplement
+
+The Wave 3 bundle also pins target `origin/master` revision
+`f0b4cb8139d1497857d1b67e106a6170cbbed05c`. The Wave 2 docs/read-only cohort
+accepted 10/10 Codex and 9/10 Antigravity tasks. Wave 3's tied feature/read-only
+Wilson lower bound was 0.2366, with a 58.61% Antigravity first-rank bootstrap
+probability; this is not independent quality verification. The Wave 4
+identity-complete paired bootstrap was descriptive: 66% Antigravity-higher
+acceptance, 34% tied, and a -480.76s median successful-latency delta across six
+pairs (10,000 iterations, seed 29).
+
+At the Wave 5 report timestamp, `2026-10-26T09:12:04.572097Z`, the operational
+view retained 90-day accounting across model vintages without active
+recommendations. Checked-in report contracts and snapshots:
+
+- [Canonical advisory report](../../evaluation/m29_provider_reliability_report.md)
+- [Operational diagnostic report](../../evaluation/m29_provider_reliability_operational_report.md)
+- [Robustness report](../../evaluation/m29_provider_reliability_robustness_report.md)
+- [Mutation paired analysis](../../evaluation/m29_provider_reliability_mutation_paired_analysis.md)
+
+All four canonical cells were qualified at closeout. Production routing stayed
+static; M27 remained deferred. A later refresh must evaluate actual cohort age
+and sample counts rather than reuse the relative age recorded above.
+
+The feature/mutation harness uses `evaluation/m29_mutation_fixture.py`,
+`evaluation/m29_mutation_oracles.py`, `evaluation/m29_mutation_verifier.py`, and
+`evaluation/m29_mutation_runner.py`. Its neutral evaluator is
+`DEFAULT_M29_NEUTRAL_EVALUATOR` (local Ollama `qwen / qwen2.5-coder:7b`), with
+suite SHA-256 `81ac140df0bbbd18cd243abde2d7b86fe74b250cf0ac02e2ec5ffc208e69e987`.
+The sanitized case accounting is published in
+`evaluation/m29_provider_reliability_mutation_manifest.json`.
