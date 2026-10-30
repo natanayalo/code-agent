@@ -248,13 +248,18 @@ class ReadinessAlertRepository:
         )
 
     def record_terminal_reconciliation_snapshot(
-        self, task_ids: list[str], *, observed_at: datetime | None = None
+        self,
+        task_ids: list[str],
+        *,
+        observed_at: datetime | None = None,
+        unconfirmed_task_ids: list[str] | None = None,
     ) -> None:
-        """Persist per-task reconciliation transitions from a complete observation."""
+        """Persist transitions while leaving unconfirmed per-task states unchanged."""
         self._record_task_snapshot(
             task_ids,
             observed_at=observed_at,
             reason_prefix=TERMINAL_RECONCILIATION_REASON_PREFIX,
+            unconfirmed_task_ids=unconfirmed_task_ids,
         )
 
     def _record_task_snapshot(
@@ -263,11 +268,13 @@ class ReadinessAlertRepository:
         *,
         observed_at: datetime | None,
         reason_prefix: str,
+        unconfirmed_task_ids: list[str] | None = None,
     ) -> None:
         """Persist one namespaced complete-set observation with its own watermark."""
         self._lock_state_updates()
         now = observed_at or utc_now()
         current = {f"{reason_prefix}{task_id}" for task_id in task_ids}
+        unconfirmed = {f"{reason_prefix}{task_id}" for task_id in (unconfirmed_task_ids or [])}
         watermark_key = f"{reason_prefix}__observation_watermark__"
         states = {
             state.reason: state
@@ -293,6 +300,8 @@ class ReadinessAlertRepository:
             watermark.last_checked_at = now
         states.pop(watermark_key, None)
         for reason in sorted(current | set(states)):
+            if reason in unconfirmed:
+                continue
             state = states.get(reason)
             if state is None:
                 state = ReadinessAlertState(

@@ -7,6 +7,7 @@ import logging
 import os
 from collections.abc import Coroutine
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Protocol, TypeVar
 
@@ -53,6 +54,14 @@ _TEMPORAL_RUNNING_STATUSES = {
     WorkflowExecutionStatus.CONTINUED_AS_NEW.name.lower(),
 }
 _T = TypeVar("_T")
+
+
+@dataclass(frozen=True, slots=True)
+class TerminalReconciliationAlertSnapshot:
+    """Complete alert observation, including task IDs that remain unconfirmed."""
+
+    divergent_task_ids: tuple[str, ...]
+    unconfirmed_task_ids: tuple[str, ...]
 
 
 class TemporalOperationalProbeProtocol(Protocol):
@@ -214,8 +223,10 @@ def terminal_reconciliation_divergent_task_ids(
     return sorted(divergent)
 
 
-def get_terminal_reconciliation_task_ids(self: Any, observed_at: datetime) -> list[str]:
-    """Observe both stores and return the complete divergent task set for alerts."""
+def get_terminal_reconciliation_alert_snapshot(
+    self: Any, observed_at: datetime
+) -> TerminalReconciliationAlertSnapshot:
+    """Observe both stores and defer recent starts awaiting delivery acknowledgement."""
     with session_scope(self.session_factory) as session:
         repo = OperationalHealthRepository(session)
         repo.ping(timeout_seconds=POSTGRES_PROBE_TIMEOUT_SECONDS)
@@ -226,6 +237,7 @@ def get_terminal_reconciliation_task_ids(self: Any, observed_at: datetime) -> li
         for task_id, status in workflow_statuses.items()
         if status in _TEMPORAL_RUNNING_STATUSES and task_id not in projections
     }
+    unconfirmed_task_ids: set[str] = set()
     if unmatched_running_workflows:
         # A just-started workflow can become visible before its outbox delivery
         # acknowledgement is committed. Recheck Postgres before alerting.
@@ -233,8 +245,21 @@ def get_terminal_reconciliation_task_ids(self: Any, observed_at: datetime) -> li
             repo = OperationalHealthRepository(session)
             repo.ping(timeout_seconds=POSTGRES_PROBE_TIMEOUT_SECONDS)
             projections.update(repo.temporal_task_projections())
-    return terminal_reconciliation_divergent_task_ids(
+            unconfirmed_task_ids.update(
+                set(
+                    repo.unacknowledged_recent_start_task_ids(
+                        now=observed_at,
+                        grace_seconds=TERMINAL_RECONCILIATION_GRACE_SECONDS,
+                    )
+                )
+                & unmatched_running_workflows
+            )
+    divergent_task_ids = terminal_reconciliation_divergent_task_ids(
         projections, workflow_statuses, checked_at=observed_at
+    )
+    return TerminalReconciliationAlertSnapshot(
+        divergent_task_ids=tuple(sorted(set(divergent_task_ids) - unconfirmed_task_ids)),
+        unconfirmed_task_ids=tuple(sorted(unconfirmed_task_ids)),
     )
 
 

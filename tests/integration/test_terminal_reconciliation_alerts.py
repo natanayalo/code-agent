@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import timedelta
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -17,7 +17,10 @@ from db.enums import OrchestrationRuntime
 from db.models import TemporalCommand
 from db.readiness_alert_models import ReadinessAlertDelivery, ReadinessAlertState
 from orchestrator.execution import TaskExecutionService
-from orchestrator.operational_health import get_terminal_reconciliation_task_ids
+from orchestrator.operational_health import (
+    TerminalReconciliationAlertSnapshot,
+    get_terminal_reconciliation_alert_snapshot,
+)
 from repositories import (
     ReadinessAlertRepository,
     SessionRepository,
@@ -135,9 +138,7 @@ def test_failed_and_stale_observations_do_not_change_task_alert_state(session_fa
         assert state.transition_number == 1
 
 
-def test_workflow_start_acknowledged_between_observations_is_not_a_divergence(
-    session_factory,
-) -> None:
+def _pending_reconciliation_start(session_factory, observed_at: datetime):
     with session_scope(session_factory) as session:
         user = UserRepository(session).create(external_user_id="reconciliation-race-user")
         conversation = SessionRepository(session).create(
@@ -158,10 +159,77 @@ def test_workflow_start_acknowledged_between_observations_is_not_a_divergence(
                 sequence_number=1,
                 command_key="reconciliation-race-start",
                 payload={},
+                created_at=observed_at,
+                claim_token="active-start-dispatch",
+                claim_expires_at=observed_at + timedelta(seconds=20),
             )
         )
 
-    class StartAcknowledgedAfterTemporalRead:
+    class StartRemainsPending:
+        def list_task_workflow_statuses(self) -> dict[str, str]:
+            return {task_id: "running"}
+
+    return task_id, SimpleNamespace(
+        session_factory=session_factory, temporal_operational_probe=StartRemainsPending()
+    )
+
+
+def test_pending_start_stays_unconfirmed_only_until_grace_elapsed(session_factory) -> None:
+    observed_at = utc_now()
+    task_id, service = _pending_reconciliation_start(session_factory, observed_at)
+    pending_start = get_terminal_reconciliation_alert_snapshot(service, observed_at)
+    assert pending_start.divergent_task_ids == ()
+    assert pending_start.unconfirmed_task_ids == (task_id,)
+
+    after_grace = get_terminal_reconciliation_alert_snapshot(
+        service, observed_at + timedelta(seconds=61)
+    )
+    assert after_grace.divergent_task_ids == (task_id,)
+    assert after_grace.unconfirmed_task_ids == ()
+
+
+def test_unconfirmed_task_observation_does_not_degrade_or_recover(session_factory) -> None:
+    observed_at = utc_now()
+    task_id, service = _pending_reconciliation_start(session_factory, observed_at)
+    pending_start = get_terminal_reconciliation_alert_snapshot(service, observed_at)
+
+    with session_scope(session_factory) as session:
+        repository = ReadinessAlertRepository(session)
+        repository.record_terminal_reconciliation_snapshot(
+            [task_id], observed_at=observed_at - timedelta(seconds=10)
+        )
+        state = session.get(
+            ReadinessAlertState, f"{TERMINAL_RECONCILIATION_REASON_PREFIX}{task_id}"
+        )
+        assert state is not None
+        prior_checked_at = state.last_checked_at
+
+    telegram = FakeTelegram()
+    observation_with_new_task = TerminalReconciliationAlertSnapshot(
+        divergent_task_ids=pending_start.divergent_task_ids,
+        unconfirmed_task_ids=(*pending_start.unconfirmed_task_ids, "task-never-alerted"),
+    )
+    monitor = _monitor(session_factory, telegram, lambda _service, _at: observation_with_new_task)
+    asyncio.run(monitor.run_once())
+    with session_scope(session_factory) as session:
+        state = session.get(
+            ReadinessAlertState, f"{TERMINAL_RECONCILIATION_REASON_PREFIX}{task_id}"
+        )
+        new_task_state = session.get(
+            ReadinessAlertState,
+            f"{TERMINAL_RECONCILIATION_REASON_PREFIX}task-never-alerted",
+        )
+    assert state is not None and state.degraded and state.transition_number == 1
+    assert state.last_checked_at == prior_checked_at
+    assert new_task_state is None
+    assert not any("recovered" in item["text"] for item in telegram.messages)
+
+
+def test_start_ack_after_initial_projection_read_clears_orphan_candidate(session_factory) -> None:
+    observed_at = utc_now()
+    task_id, _service = _pending_reconciliation_start(session_factory, observed_at)
+
+    class StartAcknowledgedAfterInitialRead:
         def list_task_workflow_statuses(self) -> dict[str, str]:
             with session_scope(session_factory) as session:
                 command = session.scalar(
@@ -171,12 +239,13 @@ def test_workflow_start_acknowledged_between_observations_is_not_a_divergence(
                 command.delivered_at = utc_now()
             return {task_id: "running"}
 
-    service = SimpleNamespace(
+    acknowledged_service = SimpleNamespace(
         session_factory=session_factory,
-        temporal_operational_probe=StartAcknowledgedAfterTemporalRead(),
+        temporal_operational_probe=StartAcknowledgedAfterInitialRead(),
     )
-
-    assert get_terminal_reconciliation_task_ids(service, utc_now()) == []
+    acknowledged = get_terminal_reconciliation_alert_snapshot(acknowledged_service, utc_now())
+    assert acknowledged.divergent_task_ids == ()
+    assert acknowledged.unconfirmed_task_ids == ()
 
 
 def test_task_alert_retry_and_authenticated_endpoint_identity(session_factory) -> None:

@@ -16,8 +16,9 @@ from sqlalchemy.orm import sessionmaker
 from db.base import utc_now
 from orchestrator.operational_health import (
     OUTBOX_STALE_SECONDS,
+    TerminalReconciliationAlertSnapshot,
     get_stuck_interaction_task_ids,
-    get_terminal_reconciliation_task_ids,
+    get_terminal_reconciliation_alert_snapshot,
 )
 from orchestrator.operational_health_types import READINESS_REASON_CODES
 from repositories import ReadinessAlertRepository, session_scope
@@ -125,7 +126,9 @@ class ReadinessAlertMonitor:
         readiness_probe: Callable[[Any], Any] | None = None,
         interaction_probe: Callable[[Any, datetime], list[str]] | None = None,
         outbox_probe: Callable[[Any, datetime], list[str]] | None = None,
-        reconciliation_probe: Callable[[Any, datetime], list[str]] | None = None,
+        reconciliation_probe: (
+            Callable[[Any, datetime], list[str] | TerminalReconciliationAlertSnapshot] | None
+        ) = None,
     ) -> None:
         self.task_service = task_service
         self.session_factory = session_factory
@@ -137,7 +140,9 @@ class ReadinessAlertMonitor:
         self.readiness_probe = readiness_probe or (lambda service: service.get_readiness())
         self.interaction_probe = interaction_probe or get_stuck_interaction_task_ids
         self.outbox_probe = outbox_probe or self._probe_stale_outbox_task_ids
-        self.reconciliation_probe = reconciliation_probe or get_terminal_reconciliation_task_ids
+        self.reconciliation_probe = (
+            reconciliation_probe or get_terminal_reconciliation_alert_snapshot
+        )
         self._task: asyncio.Task[None] | None = None
         self._unpersisted_snapshots: list[tuple[list[str], list[str], datetime]] = []
 
@@ -205,13 +210,20 @@ class ReadinessAlertMonitor:
             logger.warning("Stale outbox alert observation failed (%s)", type(exc).__name__)
         try:
             reconciliation_observed_at = utc_now()
-            task_ids = await asyncio.to_thread(
+            observation = await asyncio.to_thread(
                 self.reconciliation_probe, self.task_service, reconciliation_observed_at
             )
+            if isinstance(observation, TerminalReconciliationAlertSnapshot):
+                task_ids = list(observation.divergent_task_ids)
+                unconfirmed_task_ids = list(observation.unconfirmed_task_ids)
+            else:
+                task_ids = observation
+                unconfirmed_task_ids = []
             await asyncio.to_thread(
                 self._record_terminal_reconciliation_snapshot,
                 task_ids,
                 reconciliation_observed_at,
+                unconfirmed_task_ids,
             )
         except Exception as exc:
             logger.warning(
@@ -282,11 +294,16 @@ class ReadinessAlertMonitor:
             )
 
     def _record_terminal_reconciliation_snapshot(
-        self, task_ids: list[str], observed_at: datetime
+        self,
+        task_ids: list[str],
+        observed_at: datetime,
+        unconfirmed_task_ids: list[str] | None = None,
     ) -> None:
         with _LOCAL_DB_LOCK, session_scope(self.session_factory) as session:
             ReadinessAlertRepository(session).record_terminal_reconciliation_snapshot(
-                task_ids, observed_at=observed_at
+                task_ids,
+                observed_at=observed_at,
+                unconfirmed_task_ids=unconfirmed_task_ids,
             )
 
     async def _deliver(self, item: dict[str, Any]) -> None:
