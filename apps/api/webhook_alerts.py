@@ -108,16 +108,16 @@ def payload(item: dict) -> dict:
 class PinnedConnection(http.client.HTTPSConnection):
     def __init__(self, host: str, address: str, deadline: float) -> None:
         self.deadline = deadline
-        self.tls_context = ssl.create_default_context()
-        self.tls_context.minimum_version = ssl.TLSVersion.TLSv1_2
-        super().__init__(host, port=443, timeout=TIMEOUT, context=self.tls_context)
+        super().__init__(host, port=443, timeout=TIMEOUT)
         self.address = address
 
     def connect(self) -> None:
+        context = ssl.create_default_context()
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         sock = socket.create_connection((self.address, 443), remaining(self.deadline))
         try:
             sock.settimeout(remaining(self.deadline))
-            self.sock = self.tls_context.wrap_socket(sock, server_hostname=self.host)
+            self.sock = context.wrap_socket(sock, server_hostname=self.host)
         except BaseException:
             sock.close()
             raise

@@ -136,8 +136,8 @@ def test_pinned_connection_and_webhook_headers():
         patch("socket.create_connection", return_value=sock) as connect,
     ):
         connection = PinnedConnection("example.com", "8.8.8.8", 105.0)
-        assert context.minimum_version == ssl.TLSVersion.TLSv1_2
         connection.connect()
+        assert context.minimum_version == ssl.TLSVersion.TLSv1_2
         connect.assert_called_once_with(("8.8.8.8", 443), 5)
         context.wrap_socket.assert_called_once_with(sock, server_hostname="example.com")
     context.wrap_socket.side_effect = OSError("sensitive")
@@ -193,7 +193,14 @@ def test_dns_timeout_prevents_late_connection():
 def test_webhook_tls_requires_modern_protocol_and_verifies_peer():
     from apps.api.webhook_alerts import PinnedConnection
 
-    context = PinnedConnection("example.com", "8.8.8.8", 105.0).tls_context
+    context = ssl.create_default_context()
+    with (
+        patch("ssl.create_default_context", return_value=context),
+        patch("socket.create_connection"),
+        patch.object(ssl.SSLContext, "wrap_socket"),
+        patch("time.monotonic", return_value=100.0),
+    ):
+        PinnedConnection("example.com", "8.8.8.8", 105.0).connect()
     assert context.minimum_version == ssl.TLSVersion.TLSv1_2
     assert context.verify_mode == ssl.CERT_REQUIRED
     assert context.check_hostname
