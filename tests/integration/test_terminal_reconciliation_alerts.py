@@ -13,8 +13,8 @@ from apps.api.auth import ApiAuthConfig
 from apps.api.main import create_app
 from apps.api.readiness_alerts import ReadinessAlertMonitor
 from db.base import utc_now
-from db.enums import OrchestrationRuntime
-from db.models import TemporalCommand
+from db.enums import OrchestrationRuntime, TaskStatus
+from db.models import Task, TemporalCommand
 from db.readiness_alert_models import ReadinessAlertDelivery, ReadinessAlertState
 from orchestrator.execution import TaskExecutionService
 from orchestrator.operational_health import (
@@ -292,6 +292,106 @@ def test_start_ack_after_initial_projection_read_clears_orphan_candidate(session
     acknowledged = get_terminal_reconciliation_alert_snapshot(acknowledged_service, utc_now())
     assert acknowledged.divergent_task_ids == ()
     assert acknowledged.unconfirmed_task_ids == ()
+
+
+def test_completion_between_store_reads_does_not_send_false_alert(session_factory) -> None:
+    observed_at = utc_now()
+    task_id, service = _pending_reconciliation_start(session_factory, observed_at)
+    with session_scope(session_factory) as session:
+        command = session.scalar(select(TemporalCommand).where(TemporalCommand.task_id == task_id))
+        assert command is not None
+        command.delivered_at = observed_at - timedelta(minutes=2)
+
+    class CompletionDuringProbe:
+        def list_task_workflow_statuses(self) -> dict[str, str]:
+            with session_scope(session_factory) as session:
+                task = session.get(Task, task_id)
+                assert task is not None
+                task.status = TaskStatus.COMPLETED
+            return {task_id: "completed"}
+
+    service.temporal_operational_probe = CompletionDuringProbe()
+    telegram = FakeTelegram()
+    monitor = _monitor(
+        session_factory,
+        telegram,
+        lambda _service, at: get_terminal_reconciliation_alert_snapshot(service, at),
+    )
+    asyncio.run(monitor.run_once())
+    asyncio.run(monitor.run_once())
+    with session_scope(session_factory) as session:
+        state = session.get(
+            ReadinessAlertState, f"{TERMINAL_RECONCILIATION_REASON_PREFIX}{task_id}"
+        )
+    assert state is None
+    assert telegram.messages == []
+
+
+def test_confirmed_nonterminal_task_with_completed_workflow_sends_alert(session_factory) -> None:
+    observed_at = utc_now()
+    task_id, service = _pending_reconciliation_start(session_factory, observed_at)
+    with session_scope(session_factory) as session:
+        command = session.scalar(select(TemporalCommand).where(TemporalCommand.task_id == task_id))
+        assert command is not None
+        command.delivered_at = observed_at - timedelta(minutes=2)
+    service.temporal_operational_probe = SimpleNamespace(
+        list_task_workflow_statuses=lambda: {task_id: "completed"}
+    )
+    telegram = FakeTelegram()
+    monitor = _monitor(
+        session_factory,
+        telegram,
+        lambda _service, at: get_terminal_reconciliation_alert_snapshot(service, at),
+    )
+    asyncio.run(monitor.run_once())
+    with session_scope(session_factory) as session:
+        state = session.get(
+            ReadinessAlertState, f"{TERMINAL_RECONCILIATION_REASON_PREFIX}{task_id}"
+        )
+    assert state is not None and state.degraded
+    assert len(telegram.messages) == 1
+
+
+def test_failed_divergence_confirmation_preserves_alert_state(session_factory, monkeypatch) -> None:
+    observed_at = utc_now()
+    task_id, service = _pending_reconciliation_start(session_factory, observed_at)
+    with session_scope(session_factory) as session:
+        command = session.scalar(select(TemporalCommand).where(TemporalCommand.task_id == task_id))
+        assert command is not None
+        command.delivered_at = observed_at - timedelta(minutes=2)
+        ReadinessAlertRepository(session).record_terminal_reconciliation_snapshot(
+            [task_id], observed_at=observed_at - timedelta(seconds=1)
+        )
+    with session_scope(session_factory) as session:
+        prior = session.get(
+            ReadinessAlertState, f"{TERMINAL_RECONCILIATION_REASON_PREFIX}{task_id}"
+        )
+        assert prior is not None
+        prior_checked_at = prior.last_checked_at
+    service.temporal_operational_probe = SimpleNamespace(
+        list_task_workflow_statuses=lambda: {task_id: "completed"}
+    )
+
+    def fail_confirmation(*_args, **_kwargs):
+        raise ConnectionError("confirmation failed")
+
+    monkeypatch.setattr(
+        OperationalHealthRepository, "reconciliation_start_snapshot", fail_confirmation
+    )
+    telegram = FakeTelegram()
+    monitor = _monitor(
+        session_factory,
+        telegram,
+        lambda _service, at: get_terminal_reconciliation_alert_snapshot(service, at),
+    )
+    # The existing pending delivery is independent of the failed observation.
+    asyncio.run(monitor.run_once())
+    with session_scope(session_factory) as session:
+        state = session.get(
+            ReadinessAlertState, f"{TERMINAL_RECONCILIATION_REASON_PREFIX}{task_id}"
+        )
+    assert state is not None and state.degraded and state.transition_number == 1
+    assert state.last_checked_at == prior_checked_at
 
 
 def test_task_alert_retry_and_authenticated_endpoint_identity(session_factory) -> None:

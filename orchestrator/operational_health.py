@@ -238,9 +238,12 @@ def get_terminal_reconciliation_alert_snapshot(
         if status in _TEMPORAL_RUNNING_STATUSES and task_id not in projections
     }
     unconfirmed_task_ids: set[str] = set()
-    if unmatched_running_workflows:
-        # A just-started workflow can become visible before its outbox delivery
-        # acknowledgement is committed. Recheck Postgres before alerting.
+    apparent_divergence = terminal_reconciliation_divergent_task_ids(
+        projections, workflow_statuses, checked_at=observed_at
+    )
+    if apparent_divergence:
+        # A start acknowledgement or task completion can commit between the
+        # database and Temporal reads. Confirm before recording divergence.
         with session_scope(self.session_factory) as session:
             repo = OperationalHealthRepository(session)
             repo.ping(timeout_seconds=POSTGRES_PROBE_TIMEOUT_SECONDS)
