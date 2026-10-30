@@ -22,13 +22,15 @@ curl -sS -X POST "http://127.0.0.1:8000/webhook" \
   -H "Content-Type: application/json" \
   -d '{
     "task_text": "List top-level files.",
-    "repo_url": "https://github.com/natanayalo/code-agent",
+    "repo_key": "project",
     "branch": "master",
     "source": "manual"
   }'
 ```
 
-The response will contain a `task_id`.
+Replace project with a key already registered in CODE_AGENT_ALLOWED_REPOS.
+The response will contain a task_id. Inspect the current payload model in
+apps/api/routes/webhook.py when a field is unclear.
 
 ## 3. Tracking Progress
 
@@ -45,7 +47,7 @@ curl -sS -X GET "http://127.0.0.1:8000/tasks/$TASK_ID" \
 - `task_text`: The natural language description of the task.
 
 ### Common Optional Fields
-- `repo_url`: Repository URL to operate on.
+- `repo_key`: Key registered in CODE_AGENT_ALLOWED_REPOS; raw repo_url is not a supported ingress field.
 - `branch`: Git branch to checkout.
 - `source`: Label for the ingress source (defaults to `webhook`).
 - `external_user_id`: Caller's unique identity.
@@ -57,5 +59,5 @@ curl -sS -X GET "http://127.0.0.1:8000/tasks/$TASK_ID" \
 
 - **Session Channel**: Namespaced as `webhook:<source>`.
 - **User Identity**: Namespaced as `webhook:<source>:<external_user_id>` (or `anonymous` if missing).
-- **Default Repo**: Fallback to `CODE_AGENT_WEBHOOK_DEFAULT_REPO_URL` if `repo_url` is not provided.
+- **Default Repo**: Fallback to `CODE_AGENT_WEBHOOK_DEFAULT_REPO_KEY` if `repo_key` is not provided.
 - **SSRF Protection**: `callback_url` must be a public, non-reserved IP/domain.

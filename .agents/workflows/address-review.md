@@ -1,10 +1,5 @@
-# Workflow: Address Review
+# Address review
 
-The triggerable review-triage procedure now lives in [`.agents/skills/address-review/SKILL.md`](../skills/address-review/SKILL.md).
-
-Keep this workflow as a thin reference only.
-
-Use the skill when the user asks to:
-- inspect new PR review comments
-- address requested changes
-- decide which review feedback belongs in the current PR
+Use the [address-review skill](../skills/address-review/SKILL.md).
+Contributor policy remains in [AGENTS.md](../../AGENTS.md); this path is a
+compatibility entrypoint, not an independent workflow.

@@ -1,65 +1,38 @@
 ---
 name: db-schema
-description: Project-specific guidance for SQLAlchemy and Alembic schema work in this repository.
+description: Project-specific SQLAlchemy model and Alembic migration conventions for schema changes under db/.
 ---
 
-# DB Schema Skill
+# Database schema changes
 
-Use this skill when a task changes database models or migrations.
+Follow [AGENTS.md](../../../AGENTS.md) for ownership and required migration-path
+coverage. Inspect db/base.py, relevant models, migrations, and nearby tests first.
 
-## Canonical references
+- Keep schema/migrations in db/; schema-only work does not absorb repository or
+  application wiring.
+- Use Base, UUIDPrimaryKeyMixin, and TimestampMixin from db/base.py.
+- Keep explicit upgrade/downgrade behavior and compatibility assumptions
+  reviewable; do not rely on hidden autogeneration decisions.
+- Treat persisted status/enum changes as a current behavior contract: inspect
+  writers/readers and the active issue rather than routing to a historical task ID.
+- Add metadata-level coverage and migration upgrade plus write assertions;
+  exercise app/repository state behavior when affected.
 
-Read these first:
-- `AGENTS.md`
-- `docs/roadmap.md`
-- `docs/status.md`
-- `db/base.py`
-- `db/models.py`
-- `db/migrations/`
+Start with the affected tests and changed-file hooks:
 
-## Current conventions
+```bash
+.venv/bin/pytest tests/unit/test_db_models.py tests/integration/test_db_migrations.py
+.venv/bin/pre-commit run --files db/models.py
+```
 
-- Put schema and migration work under `db/` only.
-- Use `Base` from `db/base.py`.
-- Use `UUIDPrimaryKeyMixin` for string UUID primary keys.
-- Use `TimestampMixin` for `created_at` and `updated_at`.
-- Use explicit names and small model classes.
-- Prefer JSON columns for structured payloads already described by the architecture docs.
+Include any affected migration-specific integration tests. For local Postgres
+migration application, use the Compose migrate service or the API container;
+never rely on an implicit host DATABASE_URL, which can create a stray SQLite DB:
 
-## Migration conventions
+```bash
+docker compose up migrate
+docker compose run --rm api alembic upgrade head
+```
 
-- Create explicit Alembic migration files in `db/migrations/versions/`.
-- Keep upgrade and downgrade paths readable.
-- Avoid hidden autogeneration assumptions in reviewable PRs.
-- Preserve compatibility unless the task explicitly owns a breaking migration.
-
-## Test conventions
-
-For schema tasks, aim for:
-- one metadata-level unit test
-- one Alembic migration application test
-
-Only add runtime DB integration coverage when the task actually needs repository or app behavior.
-
-## Scope guardrails
-
-- Do not add repository layer code in schema-only tasks.
-- Do not add app DB wiring in schema-only tasks.
-- Do not decide new enum vocabularies casually.
-
-If the task touches persisted statuses or constrained value fields, check whether it belongs in `T-013` instead of absorbing the decision into the current PR.
-
-## Verification pattern
-
-Start with:
-- `pre-commit run --files <changed schema files>`
-- `pytest tests/unit/test_db_models.py tests/integration/test_db_migrations.py`
-
-If real Postgres compatibility matters or to apply migrations locally, use the Docker Compose `migrate` service:
-- `docker compose up migrate`
-
-Or manually via the container:
-- `docker compose run --rm api alembic upgrade head`
-
-> [!WARNING]
-> Do not run `alembic` directly on the host without explicitly passing a Postgres `DATABASE_URL`, as it will fall back to creating accidental local SQLite `.db` files that clutter the repository.
+These apply migrations to the selected stack; confirm that it is the intended
+local/test target and follow the task's authorization before changing its data.

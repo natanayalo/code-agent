@@ -134,8 +134,9 @@ The selected worker/profile/runtime metadata is persisted on task and worker-run
 
 The performance-routing mechanism currently reads checked-in advisory metrics
 from `evaluation/routing_metrics.json`. Those values are not refreshed from
-live task outcomes. M25.6 measures real Temporal runs before any routing-policy
-change is considered.
+live task outcomes. Completed M25.6/M29 evaluations provide advisory evidence;
+longitudinal robustness and any later policy proposal remain separately gated
+in [current status](status.md#evidence-gated-follow-up).
 
 ## 3) Sandbox + Tool Layer
 
@@ -381,8 +382,8 @@ replay, recovery, projection, and rollback behavior remain proven.
 **Current:** provider adapters accept `WorkerRequest` and return terminal
 `WorkerResult` from `workers/base.py`.
 
-**Planned M28.5C direction:** normalize Codex/Antigravity native streams into a
-versioned provider-neutral event model such as:
+**Implemented event capture:** Codex/Antigravity normalizers emit the versioned
+provider-neutral AgentEvent model alongside terminal WorkerResult compatibility:
 
 - `AgentStarted`
 - `AgentProgress`
@@ -394,11 +395,11 @@ versioned provider-neutral event model such as:
 - `AgentMessage`
 - `AgentFailed` and `AgentCompleted`
 
-The event stream should support live progress, audit, stuck detection,
-cancellation, memory evidence, budget/cost accounting, debugging, and provider
-reliability evaluation. `WorkerResult` remains a compatible terminal projection
-during migration. This is an observability/control boundary, not a custom
-provider-independent reasoning loop.
+Capture is opt-in through CODE_AGENT_NATIVE_EVENT_CAPTURE_ENABLED, with bounded,
+redacted agent-events-v1.jsonl artifacts. Normalizers suppress provider reasoning.
+WorkerResult remains the terminal contract. Broader live-progress, stuck-detection,
+budget, and control consumers are future uses of this event boundary; capture
+alone does not implement them.
 
 ### Versioned `ContextEnvelope`
 
@@ -505,6 +506,6 @@ used. Prompt text alone never enlarges the grant.
 For day-to-day operation and troubleshooting, pair this document with:
 
 - runbook: `docs/runbook.md`
-- current operational status: `docs/status.md`
+- current priorities and capability snapshot: `docs/status.md`
 - state ownership contract: `docs/architecture/state_ownership.md`
 - historical cutover and rollback record: `docs/archive/temporal_cutover.md`

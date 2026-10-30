@@ -1,10 +1,5 @@
-# Workflow: Schema Change
+# Schema change
 
-Schema work is already covered by the [`.agents/skills/db-schema/SKILL.md`](../skills/db-schema/SKILL.md) skill.
-
-Keep this workflow as a thin reference only.
-
-Use the `db-schema` skill for:
-- model and migration changes under `db/`
-- schema-only backlog items
-- Alembic review and migration test expectations
+Use the [db-schema skill](../skills/db-schema/SKILL.md).
+Contributor policy remains in [AGENTS.md](../../AGENTS.md); this path is a
+compatibility entrypoint, not an independent workflow.

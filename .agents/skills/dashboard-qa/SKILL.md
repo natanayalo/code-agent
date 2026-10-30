@@ -1,6 +1,6 @@
 ---
 name: dashboard-qa
-description: Use when auditing, testing, or polishing the code-agent dashboard UI with browser-based QA evidence. Prefer Codex `browser:control-in-app-browser` when available; otherwise use existing Playwright or equivalent rendered browser automation.
+description: Use when auditing, testing, or polishing the code-agent dashboard UI with browser-based QA evidence. Use an available rendered browser-control tool or existing Playwright automation.
 ---
 
 # Dashboard QA
@@ -9,7 +9,7 @@ Use this skill for repeatable visual and interaction QA of the `dashboard/` Reac
 
 ## Browser Surface
 
-Prefer Codex `browser:control-in-app-browser` for rendered dashboard verification when it is available. Read and follow that skill before browser work.
+Use the available browser-control tool and follow its own documentation for rendered dashboard verification; do not assume a particular browser skill is installed.
 
 If Codex browser is unavailable, use existing local Playwright, Puppeteer, or equivalent browser automation only when already present. Do not install new browser dependencies for QA.
 
@@ -41,5 +41,5 @@ npm run build
 Validate this skill after edits with:
 
 ```bash
-poetry run python ~/.codex/skills/.system/skill-creator/scripts/quick_validate.py .agents/skills/dashboard-qa
+.venv/bin/python ~/.codex/skills/.system/skill-creator/scripts/quick_validate.py .agents/skills/dashboard-qa
 ```

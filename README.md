@@ -113,7 +113,7 @@ Install dependencies with Poetry:
 
 ```bash
 poetry install
-poetry run pre-commit install --hook-type pre-commit --hook-type commit-msg
+.venv/bin/pre-commit install --hook-type pre-commit --hook-type commit-msg
 ```
 
 Run the API only (local dev mode):
@@ -124,7 +124,7 @@ export CODE_AGENT_RUN_WORKER="0"
 export CODE_AGENT_ENABLE_TASK_SERVICE="1"
 export CODE_AGENT_API_SHARED_SECRET="<shared-secret>"
 export DATABASE_URL="postgresql+psycopg://code_agent:<password>@localhost:5432/code_agent"
-poetry run python -m uvicorn apps.api.main:app --reload
+.venv/bin/python -m uvicorn apps.api.main:app --reload
 ```
 
 Run production-like local stack (`postgres + migrate + api + worker`):
@@ -357,14 +357,13 @@ Milestone M28.5C introduces a typed, provider-neutral `AgentEvent` foundation fo
 
 ## Verification Commands
 
-The repository coverage target is 90%. During post-Temporal coverage recovery,
-Python CI enforces a 90% coverage floor. Run the currently enforced checks from
+Python CI enforces the repository's 90% coverage target. Run the checks from
 the repository virtualenv:
 
 ```bash
-poetry run pytest -n 3 tests/unit tests/workers --cov=apps --cov=db --cov=memory --cov=orchestrator --cov=repositories --cov=sandbox --cov=tools --cov=workers --cov-branch --cov-report=term-missing --cov-report=xml
-poetry run pytest tests/integration
-poetry run pre-commit run --all-files
+.venv/bin/pytest -n 3 tests/unit tests/workers --cov=apps --cov=db --cov=memory --cov=orchestrator --cov=repositories --cov=sandbox --cov=tools --cov=workers --cov-branch --cov-report=term-missing --cov-report=xml
+.venv/bin/pytest tests/integration
+.venv/bin/pre-commit run --all-files
 # Dashboard checks
 cd dashboard && npm run test:coverage
 ```

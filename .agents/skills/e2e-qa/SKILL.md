@@ -1,44 +1,39 @@
 ---
 name: e2e-qa
-description: Learn how to perform an End-to-End (E2E) QA via the webhook API, validating the full system graph (API -> Orchestrator -> Worker) using a dummy repository.
+description: Run the live webhook-to-Temporal-to-worker happy path against a disposable repository, checking terminal task and sandbox evidence.
 ---
 
-# End-to-End (E2E) QA
+# Live end-to-end QA
 
-When validating major architecture changes, database schema migrations, or orchestrator state machine updates, you need to test the entire system from the outside in, just like a real user sending a request from Telegram or a dashboard.
+Use this for affected infrastructure/orchestration flows under the
+[AGENTS.md test gate](../../../AGENTS.md#testing-policy). The helper submits
+through /webhook, follows Temporal-backed task execution via /tasks/{task_id},
+and checks qa-hello.txt in the resulting sandbox workspace.
 
-This skill provides an automated E2E QA script that:
-1. Creates a local Git "dummy repo" (`dummy_repo`) to safely test edits without risking real codebases.
-2. Uses the local FastAPI server (`/webhook`) to schedule a task.
-3. Polls the `/tasks/{task_id}` endpoint while the LangGraph Orchestrator routes and processes the task.
-4. Waits for completion and verifies the actual Docker sandbox output on disk to ensure the AI's changes were successfully applied to the workspace.
+## Target and inputs
 
-## Prerequisites
+Inspect [the helper](scripts/run_e2e_qa.py) before running it. It recreates
+`dummy_repo` under the configured workspace root and invokes a real worker;
+use a disposable QA target, not an existing project directory.
 
-Before running this script, your local environment must be fully running via the project startup script:
+- Start the intended local QA stack with scripts/up.sh. The default API is
+  http://127.0.0.1:8000; CODE_AGENT_API_URL overrides it.
+- Set CODE_AGENT_API_SHARED_SECRET in the environment or .env without printing it.
+- CODE_AGENT_QA_REPO_KEY defaults to qa-dummy; the API/worker allowlist must map
+  it to the helper's disposable repository.
+- CODE_AGENT_WORKSPACE_ROOT must match the stack. The helper defaults to
+  ~/code-agent-workspaces; keep the path visible for Antigravity.
+- CODE_AGENT_WORKER_OVERRIDE selects the worker (default: antigravity).
+  CODE_AGENT_QA_TASK_TEXT can change the task; inspect the helper's acceptance
+  checks before changing the expected artifact.
+
+From the repository root:
+
 ```bash
-scripts/up.sh
+.venv/bin/python .agents/skills/e2e-qa/scripts/run_e2e_qa.py
 ```
-Ensure the API is listening on `http://127.0.0.1:8000` (which is the default).
 
-## Instructions
-
-1. **Navigate to the root of the repository.**
-   ```bash
-   cd /path/to/code-agent
-   ```
-
-2. **Run the E2E QA Script.**
-   ```bash
-   poetry run python .agents/skills/e2e-qa/scripts/run_e2e_qa.py
-   ```
-
-3. **Check the Output.**
-   - The script will announce `[+] Task ingested successfully. Task ID: <uuid>`.
-   - It will poll the status (e.g. `pending`, `in_progress`, `completed`).
-   - Once finished, it looks inside your local `~/code-agent-workspaces/` (or whatever `CODE_AGENT_WORKSPACE_ROOT` is set to in `.env`) to find the artifact `qa-hello.txt` created by the AI. The default must remain visible rather than nested below a hidden directory because Antigravity ignores hidden workspace URIs.
-   - If the artifact exists and contains the correct text, the QA passes!
-
-## Customizing the QA
-
-You can edit `.agents/skills/e2e-qa/scripts/run_e2e_qa.py` to test different worker profiles (e.g. Codex instead of Antigravity) by changing the `worker_override` in the JSON payload, or to test different failure scenarios (like providing an invalid repository URL).
+Report the task ID, terminal result, verification/artifact evidence, and any
+failure. A submitted task or healthy API alone is not a passing worker smoke.
+The helper also has bounded DAG/fan-out and delivery companions in scripts/;
+read the relevant helper and its inputs only when the affected flow requires it.

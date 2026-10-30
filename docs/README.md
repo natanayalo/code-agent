@@ -6,6 +6,7 @@
 | --- | --- |
 | [Status and current backlog](status.md) | Current phase, ordered implementation queue, maintenance/approval lanes, and evidence gates. Start here to select work. |
 | [Roadmap](roadmap.md) | Milestone goals, boundaries, exit criteria, and conditional future directions. |
+| [Agent procedure index](../.agents/README.md) | Task-specific skills and compatibility entrypoints. |
 | [Contributor guide](../AGENTS.md) | Canonical repository policy, ownership, safety, testing, and delivery requirements. |
 | [Changelog](../CHANGELOG.md) | Generated history of merged pull requests. |
 
@@ -26,6 +27,8 @@ queue; historical reports retain their evaluated revision and timestamp.
 
 ## Historical records
 
+- [Completed milestone specifications](archive/completed_milestones.md): original
+  scopes and exit criteria removed from the active roadmap.
 - [Phase 4A evidence](archive/phase4a_evidence.md): qualification notes and M29
   wave accounting; old sample gaps and relative ages are historical snapshots.
 - [Temporal cutover](archive/temporal_cutover.md): migration and rollback record.
