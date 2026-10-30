@@ -146,6 +146,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Documentation
 
+- Docs: refresh M31 alert priorities ([#447](https://github.com/natanayalo/code-agent/pull/447))
+
 - Docs: prioritize stale outbox alerts ([#445](https://github.com/natanayalo/code-agent/pull/445))
 
 - Docs: reconcile M31 dashboard progress ([#443](https://github.com/natanayalo/code-agent/pull/443))
