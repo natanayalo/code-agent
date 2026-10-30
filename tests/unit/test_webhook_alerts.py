@@ -1,6 +1,7 @@
 """Webhook URL, network, and payload security tests."""
 
 import socket
+import ssl
 from datetime import UTC, datetime
 from unittest.mock import patch
 
@@ -135,6 +136,7 @@ def test_pinned_connection_and_webhook_headers():
         patch("socket.create_connection", return_value=sock) as connect,
     ):
         connection = PinnedConnection("example.com", "8.8.8.8", 105.0)
+        assert context.minimum_version == ssl.TLSVersion.TLSv1_2
         connection.connect()
         connect.assert_called_once_with(("8.8.8.8", 443), 5)
         context.wrap_socket.assert_called_once_with(sock, server_hostname="example.com")
@@ -186,3 +188,12 @@ def test_dns_timeout_prevents_late_connection():
     ):
         send_webhook(target, {})
     connection.assert_not_called()
+
+
+def test_webhook_tls_requires_modern_protocol_and_verifies_peer():
+    from apps.api.webhook_alerts import PinnedConnection
+
+    context = PinnedConnection("example.com", "8.8.8.8", 105.0).tls_context
+    assert context.minimum_version == ssl.TLSVersion.TLSv1_2
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert context.check_hostname

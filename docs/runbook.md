@@ -1116,8 +1116,8 @@ opt in; optionally set `CODE_AGENT_READINESS_ALERT_WEBHOOK_TOKEN` for a bearer
 token. The URL must use port 443 and must not contain user information, a query,
 or a fragment. Each attempt resolves the host and requires all resolved
 addresses to be public; the connection is pinned to a validated address with
-TLS hostname verification and SNI. Redirects and environment proxies are not
-used. URL and token values are not included in delivery inspection or logs.
+TLS 1.2 or newer, hostname verification, and SNI. Redirects and environment
+proxies are not used. URL and token values are not included in delivery inspection or logs.
 
 Each POST contains JSON `version: 1`, `event_id`, `observed_at`,
 `transition_number`, `transition`, `reason`, `next_action`, and applicable
