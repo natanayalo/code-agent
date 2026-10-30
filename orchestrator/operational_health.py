@@ -221,6 +221,18 @@ def get_terminal_reconciliation_task_ids(self: Any, observed_at: datetime) -> li
         repo.ping(timeout_seconds=POSTGRES_PROBE_TIMEOUT_SECONDS)
         projections = repo.temporal_task_projections()
     workflow_statuses = _temporal_probe(self).list_task_workflow_statuses()
+    unmatched_running_workflows = {
+        task_id
+        for task_id, status in workflow_statuses.items()
+        if status in _TEMPORAL_RUNNING_STATUSES and task_id not in projections
+    }
+    if unmatched_running_workflows:
+        # A just-started workflow can become visible before its outbox delivery
+        # acknowledgement is committed. Recheck Postgres before alerting.
+        with session_scope(self.session_factory) as session:
+            repo = OperationalHealthRepository(session)
+            repo.ping(timeout_seconds=POSTGRES_PROBE_TIMEOUT_SECONDS)
+            projections.update(repo.temporal_task_projections())
     return terminal_reconciliation_divergent_task_ids(
         projections, workflow_statuses, checked_at=observed_at
     )

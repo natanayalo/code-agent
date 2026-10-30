@@ -13,9 +13,18 @@ from apps.api.auth import ApiAuthConfig
 from apps.api.main import create_app
 from apps.api.readiness_alerts import ReadinessAlertMonitor
 from db.base import utc_now
+from db.enums import OrchestrationRuntime
+from db.models import TemporalCommand
 from db.readiness_alert_models import ReadinessAlertDelivery, ReadinessAlertState
 from orchestrator.execution import TaskExecutionService
-from repositories import ReadinessAlertRepository, session_scope
+from orchestrator.operational_health import get_terminal_reconciliation_task_ids
+from repositories import (
+    ReadinessAlertRepository,
+    SessionRepository,
+    TaskRepository,
+    UserRepository,
+    session_scope,
+)
 from repositories.sqlalchemy_readiness_alerts import TERMINAL_RECONCILIATION_REASON_PREFIX
 from tests.integration.task_endpoints_support import DEFAULT_SHARED_SECRET, _default_worker
 
@@ -124,6 +133,50 @@ def test_failed_and_stale_observations_do_not_change_task_alert_state(session_fa
         session.flush()
         assert state.degraded is True
         assert state.transition_number == 1
+
+
+def test_workflow_start_acknowledged_between_observations_is_not_a_divergence(
+    session_factory,
+) -> None:
+    with session_scope(session_factory) as session:
+        user = UserRepository(session).create(external_user_id="reconciliation-race-user")
+        conversation = SessionRepository(session).create(
+            user_id=user.id,
+            channel="test",
+            external_thread_id="reconciliation-race-thread",
+        )
+        task = TaskRepository(session).create(
+            session_id=conversation.id,
+            task_text="task start race",
+            orchestration_runtime=OrchestrationRuntime.TEMPORAL,
+        )
+        task_id = task.id
+        session.add(
+            TemporalCommand(
+                task_id=task_id,
+                command_type="start",
+                sequence_number=1,
+                command_key="reconciliation-race-start",
+                payload={},
+            )
+        )
+
+    class StartAcknowledgedAfterTemporalRead:
+        def list_task_workflow_statuses(self) -> dict[str, str]:
+            with session_scope(session_factory) as session:
+                command = session.scalar(
+                    select(TemporalCommand).where(TemporalCommand.task_id == task_id)
+                )
+                assert command is not None
+                command.delivered_at = utc_now()
+            return {task_id: "running"}
+
+    service = SimpleNamespace(
+        session_factory=session_factory,
+        temporal_operational_probe=StartAcknowledgedAfterTemporalRead(),
+    )
+
+    assert get_terminal_reconciliation_task_ids(service, utc_now()) == []
 
 
 def test_task_alert_retry_and_authenticated_endpoint_identity(session_factory) -> None:
