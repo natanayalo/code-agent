@@ -21,6 +21,7 @@ from orchestrator.operational_health import (
     get_terminal_reconciliation_alert_snapshot,
 )
 from orchestrator.operational_health_types import READINESS_REASON_CODES
+from orchestrator.provider_observations import ACTIONS, alert_identity, fresh_observations
 from repositories import ReadinessAlertRepository, session_scope
 from repositories.sqlalchemy_operational_health import OperationalHealthRepository
 from repositories.sqlalchemy_readiness_alerts import (
@@ -72,6 +73,14 @@ def readiness_alert_configuration(
 
 def format_readiness_alert(reason: str, transition: str) -> str:
     """Format a bounded message from stable codes only; never include probe details."""
+    identity = alert_identity(reason)
+    if identity:
+        worker_id, provider, capability = identity
+        state = "degraded" if transition == "degraded" else "recovered"
+        return (
+            f"Provider capability {state}: {capability}\nWorker: {worker_id}"
+            f"\nProvider: {provider}\nNext action: {ACTIONS[capability]}"
+        )
     if reason.startswith(INTERACTION_REASON_PREFIX):
         task_id = reason.removeprefix(INTERACTION_REASON_PREFIX)
         state = "degraded" if transition == "degraded" else "recovered"
@@ -229,11 +238,21 @@ class ReadinessAlertMonitor:
             logger.warning(
                 "Terminal reconciliation alert observation failed (%s)", type(exc).__name__
             )
+        try:
+            await asyncio.to_thread(self._record_provider_observations)
+        except Exception as exc:
+            logger.warning("Provider alert observation failed (%s)", type(exc).__name__)
         for _ in range(MAX_DELIVERIES_PER_CYCLE):
             delivery = await asyncio.to_thread(self._claim_one)
             if delivery is None:
                 break
             await self._deliver(delivery)
+
+    def _record_provider_observations(self) -> None:
+        with _LOCAL_DB_LOCK, session_scope(self.session_factory) as session:
+            ReadinessAlertRepository(session).record_provider_observations(
+                fresh_observations(session, utc_now())
+            )
 
     def _buffer_snapshot(self, sample: tuple[list[str], list[str], datetime]) -> None:
         reasons, unknown_reasons, _observed_at = sample

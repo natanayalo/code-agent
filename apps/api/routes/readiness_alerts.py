@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session, sessionmaker
 
 from apps.api.dependencies import require_any_valid_auth
+from orchestrator.provider_observations import ACTIONS, alert_identity
 from repositories import ReadinessAlertRepository, session_scope
 from repositories.sqlalchemy_readiness_alerts import (
     INTERACTION_REASON_PREFIX,
@@ -31,6 +32,10 @@ class ReadinessAlertStateResponse(BaseModel):
 
     reason: str
     task_id: str | None = None
+    worker_node_id: str | None = None
+    provider: str | None = None
+    capability: str | None = None
+    next_action: str | None = None
     degraded: bool
     transition_number: int
     last_transition_at: datetime
@@ -45,6 +50,10 @@ class ReadinessAlertDeliveryResponse(BaseModel):
     id: str
     reason: str
     task_id: str | None = None
+    worker_node_id: str | None = None
+    provider: str | None = None
+    capability: str | None = None
+    next_action: str | None = None
     transition_number: int
     transition: str
     status: str
@@ -80,6 +89,22 @@ def _public_alert_identity(reason: str) -> tuple[str, str | None]:
     return reason, None
 
 
+def _public_fields(reason: str) -> dict[str, str | None]:
+    identity = alert_identity(reason)
+    if identity:
+        worker_id, provider, capability = identity
+        return {
+            "reason": "provider_capability",
+            "task_id": None,
+            "worker_node_id": worker_id,
+            "provider": provider,
+            "capability": capability,
+            "next_action": ACTIONS[capability],
+        }
+    public_reason, task_id = _public_alert_identity(reason)
+    return {"reason": public_reason, "task_id": task_id}
+
+
 @router.get("", response_model=list[ReadinessAlertStateResponse])
 def get_readiness_alert_states(request: Request) -> list[ReadinessAlertStateResponse]:
     """Return the persisted current state for observed readiness reasons."""
@@ -88,10 +113,7 @@ def get_readiness_alert_states(request: Request) -> list[ReadinessAlertStateResp
         states = ReadinessAlertRepository(session).list_states()
         return [
             ReadinessAlertStateResponse.model_validate(item).model_copy(
-                update={
-                    "reason": _public_alert_identity(item.reason)[0],
-                    "task_id": _public_alert_identity(item.reason)[1],
-                }
+                update=_public_fields(item.reason)
             )
             for item in states
         ]
@@ -108,10 +130,7 @@ def get_readiness_alert_deliveries(
         deliveries = ReadinessAlertRepository(session).list_deliveries(limit=limit)
         return [
             ReadinessAlertDeliveryResponse.model_validate(item).model_copy(
-                update={
-                    "reason": _public_alert_identity(item.reason)[0],
-                    "task_id": _public_alert_identity(item.reason)[1],
-                }
+                update=_public_fields(item.reason)
             )
             for item in deliveries
         ]

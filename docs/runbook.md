@@ -293,6 +293,21 @@ API to disable new alert monitoring. The monitor samples `/ready` policy every
 and transition metadata, and sends a fixed safe action without task text, secret
 values, or artifact paths.
 
+Workers independently sample configured default provider prerequisites at startup
+and every 30 seconds. The monitor creates per-worker, provider and capability
+incidents from observations at most 90 seconds old. Only a newer conclusive
+healthy observation can recover an incident; missing, unknown, stale or
+disabled observations leave it open. The worker UUID distinguishes incidents
+without exposing its host name. Credential checks establish local presence or
+structure, not remote validity; container binaries are not verified. Only the
+latest observations are retained, so an incident that begins and resolves
+between API polls may be missed. On activation, current degradations are
+reported without replaying resolved observations. Previously queued deliveries
+continue under the normal retry rules.
+
+For binary rollback, unset the alert chat ID and restart the API before
+reverting, so older readiness code cannot interpret provider incident keys.
+
 The monitor also evaluates the complete set of tasks with pending interactions
 older than the existing 24-hour threshold. It sends one `interaction_wait_stuck`
 degraded transition per task and sends recovery only after a successful

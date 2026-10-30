@@ -17,10 +17,12 @@ DELIVERY_LEASE_SECONDS = 30
 INTERACTION_REASON_PREFIX = "interaction_wait_stuck|"
 OUTBOX_STALE_REASON_PREFIX = "outbox_command_stale|"
 TERMINAL_RECONCILIATION_REASON_PREFIX = "terminal_reconciliation_divergent|"
+PROVIDER_REASON_PREFIX = "provider|"
 TASK_REASON_PREFIXES = (
     INTERACTION_REASON_PREFIX,
     OUTBOX_STALE_REASON_PREFIX,
     TERMINAL_RECONCILIATION_REASON_PREFIX,
+    PROVIDER_REASON_PREFIX,
 )
 
 
@@ -184,7 +186,9 @@ class ReadinessAlertRepository:
         """Persist ordered transitions, ignoring stale and currently unknown observations."""
         self._lock_state_updates()
         now = observed_at or utc_now()
-        active = set(degraded_reasons)
+        active = {
+            reason for reason in degraded_reasons if not reason.startswith(TASK_REASON_PREFIXES)
+        }
         unknown = set(unknown_reasons or ())
         states = {
             state.reason: state
@@ -238,6 +242,38 @@ class ReadinessAlertRepository:
         self._record_task_snapshot(
             task_ids, observed_at=observed_at, reason_prefix=INTERACTION_REASON_PREFIX
         )
+
+    def record_provider_observations(self, samples: list[tuple[str, bool, datetime]]) -> None:
+        """Apply only explicit, newer provider evidence; absence cannot recover an alert."""
+        self._lock_state_updates()
+        for reason, degraded, observed_at in samples:
+            state = self.session.get(ReadinessAlertState, reason, with_for_update=True)
+            if state is None:
+                if not degraded:
+                    continue
+                self.session.add(
+                    ReadinessAlertState(
+                        reason=reason,
+                        degraded=True,
+                        transition_number=1,
+                        last_transition_at=observed_at,
+                        last_checked_at=observed_at,
+                    )
+                )
+                self._enqueue(reason, 1, "degraded", observed_at)
+            elif _utc_aware(state.last_checked_at) < _utc_aware(observed_at):
+                state.last_checked_at = observed_at
+                if state.degraded != degraded:
+                    state.degraded = degraded
+                    state.transition_number += 1
+                    state.last_transition_at = observed_at
+                    self._enqueue(
+                        reason,
+                        state.transition_number,
+                        "degraded" if degraded else "recovered",
+                        observed_at,
+                    )
+            self.session.flush()
 
     def record_stale_outbox_snapshot(
         self, task_ids: list[str], *, observed_at: datetime | None = None

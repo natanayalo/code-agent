@@ -409,6 +409,7 @@ class ProviderDiagnosticsService:
         except TimeoutError:
             res = DiagnosticCheckResult(
                 name="docker_daemon",
+                probe_result="error",
                 category="container_runtime",
                 status="unknown",
                 detail=f"Docker daemon probe timed out after {self.docker_probe_timeout}s.",
@@ -419,6 +420,7 @@ class ProviderDiagnosticsService:
         except Exception as exc:
             res = DiagnosticCheckResult(
                 name="docker_daemon",
+                probe_result="error",
                 category="container_runtime",
                 status="unready",
                 detail=f"Docker daemon probe failed: {type(exc).__name__}",
@@ -483,6 +485,7 @@ class ProviderDiagnosticsService:
         except TimeoutError:
             res = DiagnosticCheckResult(
                 name="executor_image",
+                probe_result="error",
                 category="container_runtime",
                 status="unknown",
                 detail=(
@@ -496,6 +499,7 @@ class ProviderDiagnosticsService:
         except Exception as exc:
             res = DiagnosticCheckResult(
                 name="executor_image",
+                probe_result="error",
                 category="container_runtime",
                 status="unready",
                 detail=f"Image inspection failed: {type(exc).__name__}",
@@ -512,6 +516,7 @@ class ProviderDiagnosticsService:
         if context.provider == "openrouter":
             return DiagnosticCheckResult(
                 name="cli_binary",
+                probe_result="unverified",
                 category="cli_binary",
                 status="ready",
                 detail="OpenRouter uses HTTP API client; CLI binary check skipped.",
@@ -523,6 +528,7 @@ class ProviderDiagnosticsService:
         if context.is_container_execution:
             return DiagnosticCheckResult(
                 name="cli_binary",
+                probe_result="unverified",
                 category="cli_binary",
                 status="ready",
                 detail=(

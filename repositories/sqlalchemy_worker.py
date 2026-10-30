@@ -39,7 +39,9 @@ class WorkerNodeRepository:
         """Create or refresh a worker node, preserving explicit quarantines."""
         normalized_worker_type = coerce_worker_type(worker_type)
         bounded_capacity = max(1, capacity)
-        node = self.get_by_worker_id(worker_id)
+        node = self.session.scalar(
+            select(WorkerNode).where(WorkerNode.worker_id == worker_id).with_for_update()
+        )
         if node is None:
             node = WorkerNode(
                 worker_id=worker_id,

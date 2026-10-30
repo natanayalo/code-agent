@@ -38,16 +38,17 @@ scope and acceptance checklist; the roadmap holds milestone goals and boundaries
 Only the M31 table is the default implementation queue. Maintenance, approval,
 and evidence-gated lanes do not silently replace the next M31 slice.
 
-Status meanings: **Ready to scope** = next bounded task; **Planned** = ordered
+Status meanings: **Ready to scope** = next bounded task; **In progress** = work
+underway; **Planned** = ordered
 follow-up requiring its contract/design; **Evidence-gated** = eligibility must be
 proved; **Approval-gated** = external/security changes require operator approval.
-No implementation slice is currently claimed by this documentation cleanup.
+M31-1 is in progress on `codex/m31-provider-capability-alerts`.
 
 ### M31 implementation queue
 
 | Order | Slice | Status | Completion condition |
 | --- | --- | --- | --- |
-| 1 | [M31-1: Provider-capability alerts](https://github.com/natanayalo/code-agent/issues/450) | Ready to scope | Defined observations and recovery rules; durable sanitized alerts; failure, duplicate, and operator-flow coverage. |
+| 1 | [M31-1: Provider-capability alerts](https://github.com/natanayalo/code-agent/issues/450) | In progress | Defined observations and recovery rules; durable sanitized alerts; failure, duplicate, and operator-flow coverage. |
 | 2 | [M31-2: Generic webhook alert delivery](https://github.com/natanayalo/code-agent/issues/451) | Planned | Versioned opt-in delivery contract, bounded retries/order, visible failures, and approved destination/security design. |
 | 3 | [M31-3: Operator acknowledgment](https://github.com/natanayalo/code-agent/issues/452) | Planned | Authenticated acknowledgment distinct from observed recovery; auditable recurrence semantics and tested dashboard/API controls. |
 | 4 | [M31-4: Health-summary and evidence schedules](https://github.com/natanayalo/code-agent/issues/453) | Planned | Define both purposes; implement one purpose per PR, starting with health summaries; prove idempotency, cancellation, recovery, and terminal evidence. |
