@@ -269,13 +269,13 @@ class TestOpenRouterNeutralReviewerClient:
         assert outcome.fallback_attempted
         assert "evaluator_identity_mismatch" in str(outcome.reason)
 
-    def test_http_error_handling(self) -> None:
-        def handler(request: httpx.Request) -> httpx.Response:
-            return httpx.Response(status_code=502, text="Bad Gateway")
+    def test_http_error_handling(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        delays: list[float] = []
+        monkeypatch.setattr("evaluation.m29_mutation_reviewer_client.time.sleep", delays.append)
 
         client = OpenRouterNeutralReviewerClient(
             api_key="test-key",
-            httpx_client=httpx.Client(transport=httpx.MockTransport(handler)),
+            httpx_client=httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(502))),
         )
         req = BlindedNeutralReviewRequest(
             case_topic="sample",
@@ -288,6 +288,7 @@ class TestOpenRouterNeutralReviewerClient:
         assert not outcome.passed
         assert outcome.evaluator_identity_status == "unavailable"
         assert "http_status_502" in str(outcome.reason)
+        assert delays == [3, 6, 9, 12, 15]
 
     def test_missing_model_fails_closed_with_unavailable(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:

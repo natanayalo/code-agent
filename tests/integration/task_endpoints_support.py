@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import os
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner
 from temporalio.worker import Worker as TemporalWorker
 
+from orchestrator.provider_diagnostics import ProviderDiagnosticsService
 from orchestrator.temporal.activities import TaskExecutionActivities
 from orchestrator.temporal.command_dispatcher import TemporalCommandDispatcher
 from orchestrator.temporal.queues import CODEX_EXECUTION_TASK_QUEUE
 from orchestrator.temporal.workflows import TaskExecutionWorkflow
+from tests.integration.provider_diagnostics_support import ready_stub_provider
 from workers import Worker, WorkerRequest, WorkerResult
 
 DEFAULT_SHARED_SECRET = "a" * 32  # gitleaks:allow
@@ -79,7 +83,11 @@ def _run_one_temporal_task(client: TestClient) -> None:
                 handle = environment.client.get_workflow_handle(f"task-{commands[0].task_id}")
                 await handle.result()
 
-    asyncio.run(run())
+    with (
+        patch.dict(os.environ, {"CODE_AGENT_PRE_DISPATCH_DIAGNOSTICS_ENABLED": "1"}),
+        patch.object(ProviderDiagnosticsService, "evaluate_pre_dispatch", ready_stub_provider),
+    ):
+        asyncio.run(run())
 
 
 def _default_worker() -> StaticWorker:

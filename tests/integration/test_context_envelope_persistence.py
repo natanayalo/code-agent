@@ -37,6 +37,7 @@ from orchestrator.execution_outcome_service import (
 )
 from orchestrator.graph import _effective_input_evidence, build_await_result_node
 from orchestrator.node_execution import NodeActivityRequest, logical_activity_key
+from orchestrator.provider_diagnostics import ProviderDiagnosticsService
 from orchestrator.state import (
     DecomposedTaskNode,
     DecomposedTaskPlan,
@@ -53,6 +54,7 @@ from orchestrator.temporal.activities import (
 )
 from repositories import TemporalTaskStateRepository, session_scope
 from repositories.sqlalchemy_run import ArtifactRepository
+from tests.integration.provider_diagnostics_support import ready_stub_provider
 from workers.base import ArtifactReference, Worker, WorkerRequest, WorkerResult
 
 
@@ -83,6 +85,14 @@ class StubWorker(Worker):
                 )
             ],
         )
+
+
+@pytest.fixture(autouse=True)
+def _stub_provider_readiness(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exercise envelope delivery without depending on local provider installation."""
+
+    monkeypatch.setenv("CODE_AGENT_PRE_DISPATCH_DIAGNOSTICS_ENABLED", "1")
+    monkeypatch.setattr(ProviderDiagnosticsService, "evaluate_pre_dispatch", ready_stub_provider)
 
 
 @pytest.fixture
