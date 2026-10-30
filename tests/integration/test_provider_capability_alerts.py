@@ -4,6 +4,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from threading import Barrier
+from types import SimpleNamespace
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
@@ -11,10 +12,15 @@ from fastapi.testclient import TestClient
 from apps.api.auth import ApiAuthConfig
 from apps.api.main import create_app
 from apps.api.readiness_alerts import ReadinessAlertMonitor
+from apps.api.task_service_factory import _build_default_worker_profiles
 from db.base import utc_now
 from db.readiness_alert_models import ReadinessAlertState
 from orchestrator.execution import TaskExecutionService
-from orchestrator.provider_observations import fresh_observations, save_observations
+from orchestrator.provider_observations import (
+    fresh_observations,
+    observe_providers,
+    save_observations,
+)
 from repositories import ReadinessAlertRepository, WorkerNodeRepository, session_scope
 from tests.integration.task_endpoints_support import DEFAULT_SHARED_SECRET, _default_worker
 from tests.integration.test_readiness_alerts import FakeTelegram, _snapshot
@@ -191,6 +197,54 @@ def test_activation_uses_only_current_observation(session_factory):
     with session_scope(session_factory) as session:
         assert ReadinessAlertRepository(session).list_states() == []
         assert ReadinessAlertRepository(session).list_deliveries() == []
+
+
+def test_disabled_execution_profile_leaves_existing_incident_open(session_factory):
+    profiles = _build_default_worker_profiles(
+        include_gemini=True,
+        include_openrouter=False,
+        include_codex_legacy_tool_loop=False,
+        include_gemini_legacy_tool_loop=False,
+    )
+    service = SimpleNamespace(
+        session_factory=session_factory,
+        worker=SimpleNamespace(available_workers=lambda: {"antigravity": object()}),
+        enable_worker_profiles=True,
+        worker_profiles={
+            name: profile
+            for name, profile in profiles.items()
+            if profile.worker_type == "antigravity"
+            and profile.runtime_mode in {"planner_only", "reviewer_only"}
+        },
+    )
+    now = utc_now()
+    with session_scope(session_factory) as session:
+        node = WorkerNodeRepository(session).register_worker(
+            worker_id="test", worker_type="antigravity", process_identity="p", now=now
+        )
+        reason = f"provider|{node.id}|antigravity|credentials"
+        ReadinessAlertRepository(session).record_provider_observations([(reason, True, now)])
+    assert save_observations(service, "test", "p", asyncio.run(observe_providers(service)))
+    telegram = FakeTelegram()
+    monitor = ReadinessAlertMonitor(
+        task_service=service,
+        session_factory=session_factory,
+        telegram_client=telegram,
+        bot_token="secret",
+        chat_id="1",
+        readiness_probe=lambda _: _snapshot(),
+        interaction_probe=lambda *_: [],
+        outbox_probe=lambda *_: [],
+        reconciliation_probe=lambda *_: [],
+    )
+    asyncio.run(monitor.run_once())
+    with session_scope(session_factory) as session:
+        state = session.get(ReadinessAlertState, reason)
+        assert state.degraded and state.transition_number == 1
+        assert [
+            delivery.transition for delivery in ReadinessAlertRepository(session).list_deliveries()
+        ] == ["degraded"]
+    assert len(telegram.messages) == 1 and "recovered" not in telegram.messages[0]["text"]
 
 
 def test_concurrent_monitors_deduplicate_provider_transition(session_factory):

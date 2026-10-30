@@ -294,7 +294,9 @@ and transition metadata, and sends a fixed safe action without task text, secret
 values, or artifact paths.
 
 Workers independently sample configured default provider prerequisites at startup
-and every 30 seconds. The monitor creates per-worker, provider and capability
+and every 30 seconds. A provider needs both a concrete adapter and an enabled
+execution-capable profile; planning-only and review-only profiles do not qualify.
+The monitor creates per-worker, provider and capability
 incidents from observations at most 90 seconds old. Only a newer conclusive
 healthy observation can recover an incident; missing, unknown, stale or
 disabled observations leave it open. The worker UUID distinguishes incidents

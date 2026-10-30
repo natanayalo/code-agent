@@ -13,7 +13,7 @@ from sqlalchemy import select
 from db.base import utc_now
 from db.enums import WorkerNodeStatus
 from db.models import WorkerNode
-from orchestrator.execution_worker_service import _profile_worker_type
+from orchestrator.execution_worker_service import _profile_capability_tags, _profile_worker_type
 from orchestrator.provider_diagnostics import ProviderDiagnosticsService
 from repositories import session_scope
 
@@ -52,6 +52,14 @@ def selected_providers(service: Any) -> set[str]:
     profiles = getattr(service, "worker_profiles", {}) or {}
     configured = set()
     for name, profile in profiles.items():
+        runtime_mode = (
+            profile.get("runtime_mode")
+            if isinstance(profile, dict)
+            else getattr(profile, "runtime_mode", None)
+        )
+        tags = _profile_capability_tags(profile)
+        if runtime_mode not in {"native_agent", "tool_loop"} or (tags and "execution" not in tags):
+            continue
         try:
             configured.add(_profile_worker_type(name, profile).value)
         except ValueError:

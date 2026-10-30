@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from apps.api.task_service_factory import _build_default_worker_profiles
 from orchestrator import provider_observations as observations
 from orchestrator.provider_diagnostics_types import DiagnosticCheckResult
 
@@ -16,7 +17,10 @@ def service():
             available_workers=lambda: {"codex": object(), "shell": object(), "openrouter": object()}
         ),
         enable_worker_profiles=True,
-        worker_profiles={"codex": {"worker_type": "codex"}, "shell": {"worker_type": "shell"}},
+        worker_profiles={
+            "codex": {"worker_type": "codex", "runtime_mode": "native_agent"},
+            "shell": {"worker_type": "shell", "runtime_mode": "native_agent"},
+        },
     )
 
 
@@ -25,6 +29,46 @@ def test_selects_only_concrete_enabled_providers():
     assert observations.selected_providers(configured) == {"codex"}
     configured.enable_worker_profiles = False
     assert observations.selected_providers(configured) == set()
+
+
+def test_excludes_planning_and_review_profiles_until_execution_is_enabled():
+    profiles = _build_default_worker_profiles(
+        include_gemini=True,
+        include_openrouter=False,
+        include_codex_legacy_tool_loop=False,
+        include_gemini_legacy_tool_loop=False,
+    )
+    antigravity = {
+        name: profile for name, profile in profiles.items() if profile.worker_type == "antigravity"
+    }
+    configured = service()
+    configured.worker = SimpleNamespace(available_workers=lambda: {"antigravity": object()})
+    configured.worker_profiles = {
+        name: profile
+        for name, profile in antigravity.items()
+        if profile.runtime_mode in {"planner_only", "reviewer_only"}
+    }
+    assert observations.selected_providers(configured) == set()
+    configured.worker_profiles["executor"] = antigravity["antigravity-native-executor"]
+    assert observations.selected_providers(configured) == {"antigravity"}
+
+
+@pytest.mark.parametrize(
+    "runtime_mode,tags,expected",
+    [
+        ("native_agent", ["planning"], set()),
+        ("tool_loop", ["review"], set()),
+        ("reviewer_only", ["execution"], set()),
+        ("tool_loop", [], {"codex"}),
+        ("native_agent", ["execution"], {"codex"}),
+    ],
+)
+def test_profile_execution_eligibility(runtime_mode, tags, expected):
+    configured = service()
+    configured.worker_profiles = {
+        "codex": {"worker_type": "codex", "runtime_mode": runtime_mode, "capability_tags": tags}
+    }
+    assert observations.selected_providers(configured) == expected
 
 
 @pytest.mark.asyncio
