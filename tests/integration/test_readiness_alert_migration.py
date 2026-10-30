@@ -53,3 +53,48 @@ def test_readiness_alert_migration_upgrades_and_persists_transitions(tmp_path: P
             ).scalar_one()
             == 1
         )
+
+
+def test_webhook_migration_preserves_telegram_and_downgrades(tmp_path: Path) -> None:
+    db_path = tmp_path / "webhook.db"
+    config = Config(str(Path("alembic.ini").resolve()))
+    config.set_main_option("script_location", str(Path("db/migrations").resolve()))
+    config.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
+    command.upgrade(config, "20261027_0053")
+    engine = create_engine(f"sqlite:///{db_path}")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO readiness_alert_deliveries (id, reason, transition_number, "
+                "transition, "
+                "observed_at, status, attempts, next_attempt_at) VALUES "
+                "('telegram', 'temporal_unavailable', 1, 'degraded', CURRENT_TIMESTAMP, "
+                "'pending', 0, CURRENT_TIMESTAMP)"
+            )
+        )
+    command.upgrade(config, "head")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO webhook_alert_deliveries (id, destination_id, reason, "
+                "transition_number, "
+                "transition, observed_at, status, attempts, next_attempt_at) VALUES "
+                "('webhook', 'fingerprint', 'temporal_unavailable', 1, 'degraded', "
+                "CURRENT_TIMESTAMP, 'pending', 0, CURRENT_TIMESTAMP)"
+            )
+        )
+        assert (
+            connection.execute(text("SELECT count(*) FROM readiness_alert_deliveries")).scalar_one()
+            == 1
+        )
+        assert (
+            connection.execute(text("SELECT count(*) FROM webhook_alert_deliveries")).scalar_one()
+            == 1
+        )
+    command.downgrade(config, "20261027_0053")
+    assert "webhook_alert_deliveries" not in inspect(engine).get_table_names()
+    with engine.connect() as connection:
+        assert (
+            connection.execute(text("SELECT id FROM readiness_alert_deliveries")).scalar_one()
+            == "telegram"
+        )

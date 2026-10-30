@@ -1108,3 +1108,35 @@ After incidents:
 2. collect worker logs and artifacts
 3. classify failure (ingress, outbox/Temporal, worker runtime, sandbox, approval)
 4. replay only after root-cause hypothesis is documented
+
+### Webhook readiness alert delivery
+
+Set `CODE_AGENT_READINESS_ALERT_WEBHOOK_URL` to one public HTTPS endpoint to
+opt in; optionally set `CODE_AGENT_READINESS_ALERT_WEBHOOK_TOKEN` for a bearer
+token. The URL must use port 443 and must not contain user information, a query,
+or a fragment. Each attempt resolves the host and requires all resolved
+addresses to be public; the connection is pinned to a validated address with
+TLS hostname verification and SNI. Redirects and environment proxies are not
+used. URL and token values are not included in delivery inspection or logs.
+
+Each POST contains JSON `version: 1`, `event_id`, `observed_at`,
+`transition_number`, `transition`, `reason`, `next_action`, and applicable
+`task_id`, `worker_node_id`, `provider`, and `capability` fields. Delivery is
+at least once; receivers must deduplicate by `event_id`. Payload and event ID
+remain stable across retries. Only newly observed transitions are enqueued.
+
+A destination has up to 20 attempts per 30-second cycle and a five-second
+request timeout. Transport errors, 408, 429 and 5xx retry with exponential
+backoff up to eight attempts; other non-2xx responses fail immediately. Each
+incident's transitions are ordered; a permanent failure releases the next
+transition. Telegram and other incidents remain independent. Inspect the
+bounded authenticated `/alerts/readiness/deliveries` history, optionally using
+`?channel=webhook` or `?channel=telegram`. The webhook `destination_id` is an
+opaque fingerprint and failure evidence does not include response bodies.
+
+Token rotation retains pending deliveries. Changing the URL creates a new
+destination identity and never sends old pending records to the new endpoint.
+To roll back, remove the webhook URL configuration and restart the API; evidence
+is retained and attempts resume if the same URL is configured again. Downgrading
+the database migration explicitly deletes webhook delivery evidence, so retain
+it before downgrade if needed.

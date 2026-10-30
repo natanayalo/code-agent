@@ -61,19 +61,28 @@ logger = logging.getLogger(__name__)
 
 def _build_readiness_alert_monitor(app: FastAPI) -> ReadinessAlertMonitor | None:
     """Build the opt-in API monitor only when destination and existing credentials exist."""
+    from apps.api.webhook_alerts import webhook_configuration
+
     configured = readiness_alert_configuration()
+    webhook = webhook_configuration(os.environ)
     task_service = getattr(app.state, "task_service", None)
     clients = getattr(app.state, "outbound_http_clients", None)
     session_factory = getattr(task_service, "session_factory", None)
-    if configured is None or task_service is None or session_factory is None or clients is None:
+    if (
+        (configured is None and webhook is None)
+        or task_service is None
+        or session_factory is None
+        or clients is None
+    ):
         return None
-    chat_id, bot_token = configured
+    chat_id, bot_token = configured or ("", "")
     return ReadinessAlertMonitor(
         task_service=task_service,
         session_factory=session_factory,
         telegram_client=clients.telegram,
         bot_token=bot_token,
         chat_id=chat_id,
+        webhook_destination=webhook,
         api_base_url=os.environ.get("CODE_AGENT_TELEGRAM_API_BASE_URL", "https://api.telegram.org"),
     )
 
