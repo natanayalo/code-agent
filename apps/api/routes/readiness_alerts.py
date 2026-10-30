@@ -11,7 +11,10 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from apps.api.dependencies import require_any_valid_auth
 from repositories import ReadinessAlertRepository, session_scope
-from repositories.sqlalchemy_readiness_alerts import INTERACTION_REASON_PREFIX
+from repositories.sqlalchemy_readiness_alerts import (
+    INTERACTION_REASON_PREFIX,
+    OUTBOX_STALE_REASON_PREFIX,
+)
 
 router = APIRouter(
     prefix="/alerts/readiness",
@@ -66,6 +69,8 @@ def _session_factory(request: Request) -> sessionmaker[Session]:
 def _public_alert_identity(reason: str) -> tuple[str, str | None]:
     if reason.startswith(INTERACTION_REASON_PREFIX):
         return "interaction_wait_stuck", reason.removeprefix(INTERACTION_REASON_PREFIX)
+    if reason.startswith(OUTBOX_STALE_REASON_PREFIX):
+        return "outbox_command_stale", reason.removeprefix(OUTBOX_STALE_REASON_PREFIX)
     return reason, None
 
 

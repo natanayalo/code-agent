@@ -304,6 +304,15 @@ stable reason, task ID, transition, and fixed safe action; they omit task text
 and private paths. A failed observation leaves the last persisted task state
 unchanged.
 
+The same monitor observes the complete set of tasks with at least one
+undelivered, non-dead-lettered, non-superseded command that is eligible for
+delivery and more than 60 seconds old. It sends one `outbox_command_stale`
+transition per task, regardless of the number of qualifying commands. A newer
+successful complete-set observation with no qualifying command records
+recovery. Failed observations and observations older than the stored watermark
+leave task state unchanged. The alert instructs the operator to inspect the
+Temporal command outbox and worker dispatcher.
+
 Inspect authenticated `GET /alerts/readiness` for the current stored reason
 states and `GET /alerts/readiness/deliveries` for delivery attempts. A
 `pending` record retries up to eight attempts with a five-second initial delay
@@ -326,7 +335,8 @@ retry. If a newer healthy baseline arrives first, unreported stale degradations
 are retained as ordered degraded/recovered pairs, including multiple distinct
 outages; duplicate stale observations are ignored.
 Task alert state and delivery records appear in these same authenticated
-endpoints with `reason: interaction_wait_stuck` and a task-specific `task_id`.
+endpoints with `reason: interaction_wait_stuck` or
+`reason: outbox_command_stale` and a task-specific `task_id`.
 To roll back this alert slice, unset the existing alert chat ID and restart the
 API; readiness alerts also stop and task scheduling and execution continue.
 
@@ -350,6 +360,7 @@ Safe recovery guidance:
 | `command_retries_present` | Inspect retrying commands and worker logs; allow bounded retries to continue unless progress has stopped. |
 | `command_dead_letters_present` | Inspect the affected task and command error, correct the non-retryable cause, and use supported replay/operator controls instead of editing rows. |
 | `interaction_wait_stuck` | Answer, reject, or cancel the affected interaction through the dashboard or API. |
+| `outbox_command_stale` | Inspect the Temporal command outbox and worker dispatcher; do not edit or delete outbox rows directly. |
 | `terminal_state_divergence` | Compare the task timeline with Temporal workflow state, restore the worker if needed, and avoid direct terminal-state updates. |
 | `terminal_reconciliation_unknown` | Restore Temporal visibility before treating the divergence count as zero. |
 

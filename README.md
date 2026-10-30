@@ -171,10 +171,17 @@ ordering. Messages include the task ID and fixed safe action, never task text or
 private paths; the monitor evaluates the complete affected-task set even though
 `/metrics` caps its displayed ID list.
 
+The monitor also sends task-specific `outbox_command_stale` alerts when an
+eligible, undelivered Temporal command is more than 60 seconds old. Multiple
+commands on one task produce one alert. Recovery requires a newer successful
+complete-set observation with no qualifying command for that task. Inspect the
+Temporal command outbox and worker dispatcher; the monitor evaluates every
+affected task even though `/metrics` caps its displayed task ID list.
+
 Authenticated `GET /alerts/readiness` shows the latest reason state, and
 `GET /alerts/readiness/deliveries` shows recent delivery attempts and failures.
 Both endpoints include task-specific `interaction_wait_stuck` records with a
-`task_id` field.
+`task_id` field and `outbox_command_stale` records with the same field.
 Postgres coordinates transition creation and delivery leases across API
 instances. Telegram requests are bounded to five seconds, retried at most eight
 times with capped exponential backoff, and then retained as failed for operator

@@ -14,10 +14,14 @@ from typing import Any
 from sqlalchemy.orm import sessionmaker
 
 from db.base import utc_now
-from orchestrator.operational_health import get_stuck_interaction_task_ids
+from orchestrator.operational_health import OUTBOX_STALE_SECONDS, get_stuck_interaction_task_ids
 from orchestrator.operational_health_types import READINESS_REASON_CODES
 from repositories import ReadinessAlertRepository, session_scope
-from repositories.sqlalchemy_readiness_alerts import INTERACTION_REASON_PREFIX
+from repositories.sqlalchemy_operational_health import OperationalHealthRepository
+from repositories.sqlalchemy_readiness_alerts import (
+    INTERACTION_REASON_PREFIX,
+    OUTBOX_STALE_REASON_PREFIX,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +44,7 @@ _SAFE_ACTIONS = {
     "worker_unavailable": "Check the Temporal worker and its heartbeat.",
     "dispatcher_unavailable": "Check the worker command dispatcher heartbeat.",
     "dispatcher_backlog_stale": "Inspect the Temporal command outbox and worker dispatcher.",
+    "outbox_command_stale": "Inspect the Temporal command outbox and worker dispatcher.",
 }
 
 
@@ -67,6 +72,13 @@ def format_readiness_alert(reason: str, transition: str) -> str:
             f"Execution alert {state}: interaction_wait_stuck\nTask: {task_id}"
             "\nNext action: Answer, reject, or cancel the pending interaction "
             "through the dashboard or API."
+        )
+    if reason.startswith(OUTBOX_STALE_REASON_PREFIX):
+        task_id = reason.removeprefix(OUTBOX_STALE_REASON_PREFIX)
+        state = "degraded" if transition == "degraded" else "recovered"
+        return (
+            f"Execution alert {state}: outbox_command_stale\nTask: {task_id}"
+            "\nNext action: Inspect the Temporal command outbox and worker dispatcher."
         )
     action = _SAFE_ACTIONS.get(reason, "Inspect authenticated readiness status and /ready.")
     state = "degraded" if transition == "degraded" else "recovered"
@@ -99,6 +111,7 @@ class ReadinessAlertMonitor:
         interval_seconds: int = ALERT_INTERVAL_SECONDS,
         readiness_probe: Callable[[Any], Any] | None = None,
         interaction_probe: Callable[[Any, datetime], list[str]] | None = None,
+        outbox_probe: Callable[[Any, datetime], list[str]] | None = None,
     ) -> None:
         self.task_service = task_service
         self.session_factory = session_factory
@@ -109,6 +122,7 @@ class ReadinessAlertMonitor:
         self.interval_seconds = interval_seconds
         self.readiness_probe = readiness_probe or (lambda service: service.get_readiness())
         self.interaction_probe = interaction_probe or get_stuck_interaction_task_ids
+        self.outbox_probe = outbox_probe or self._probe_stale_outbox_task_ids
         self._task: asyncio.Task[None] | None = None
         self._unpersisted_snapshots: list[tuple[list[str], list[str], datetime]] = []
 
@@ -164,6 +178,16 @@ class ReadinessAlertMonitor:
             )
         except Exception as exc:
             logger.warning("Interaction alert observation failed (%s)", type(exc).__name__)
+        try:
+            outbox_observed_at = utc_now()
+            task_ids = await asyncio.to_thread(
+                self.outbox_probe, self.task_service, outbox_observed_at
+            )
+            await asyncio.to_thread(
+                self._record_stale_outbox_snapshot, task_ids, outbox_observed_at
+            )
+        except Exception as exc:
+            logger.warning("Stale outbox alert observation failed (%s)", type(exc).__name__)
         for _ in range(MAX_DELIVERIES_PER_CYCLE):
             delivery = await asyncio.to_thread(self._claim_one)
             if delivery is None:
@@ -212,6 +236,19 @@ class ReadinessAlertMonitor:
     def _record_interaction_snapshot(self, task_ids: list[str], observed_at: datetime) -> None:
         with _LOCAL_DB_LOCK, session_scope(self.session_factory) as session:
             ReadinessAlertRepository(session).record_interaction_snapshot(
+                task_ids, observed_at=observed_at
+            )
+
+    def _probe_stale_outbox_task_ids(self, task_service: Any, observed_at: datetime) -> list[str]:
+        """Read the complete stale eligible task set directly from the outbox table."""
+        with session_scope(task_service.session_factory) as session:
+            return OperationalHealthRepository(session).stale_outbox_task_ids(
+                now=observed_at, stale_seconds=OUTBOX_STALE_SECONDS
+            )
+
+    def _record_stale_outbox_snapshot(self, task_ids: list[str], observed_at: datetime) -> None:
+        with _LOCAL_DB_LOCK, session_scope(self.session_factory) as session:
+            ReadinessAlertRepository(session).record_stale_outbox_snapshot(
                 task_ids, observed_at=observed_at
             )
 

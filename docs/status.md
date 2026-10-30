@@ -5,10 +5,11 @@
 Phase 4A: Temporal stabilization, execution architecture foundation, and measured reliability.
 
 Active focus: **M31 — Proactive Operations and Safe Scheduled Work**. The
-Temporal Server 1.24.2 / Python SDK 1.30.0 compatibility prerequisite,
-weekly dependency-review scheduling, opt-in Telegram readiness alerts, and
+The Temporal Server 1.24.2 / Python SDK 1.30.0 compatibility prerequisite,
+weekly dependency-review scheduling, opt-in Telegram readiness alerts,
 read-only operations dashboard visibility, and task-specific stuck-interaction
-alerts are merged. The selected next slice is task-specific stale-outbox alerts.
+alerts are merged. Task-specific stale-outbox alerts are the current M31 slice
+and are in progress.
 M30 is completed with authenticated GitHub event intake, issue/delivery timeline mapping,
 draft PR synchronization, issue task replay (`/code-agent replay`), and Temporal
 interaction primitives (Queries & Updates).
