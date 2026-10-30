@@ -509,14 +509,17 @@ claim upstream maintenance support. The weekly dependency-review schedule and
 its management API foundation and the opt-in readiness-reason Telegram alert
 backend are merged. Read-only dashboard visibility for persisted alert state,
 delivery outcomes, schedule details, and submitted task history is also merged
-(PR #442). It does not expose schedule mutation controls. The next M31 slice
-has not yet been selected.
+(PR #442); it does not expose schedule mutation controls. Task-specific
+stuck-interaction and stale-outbox alerts are also merged (PRs #444 and #446).
+The next slice is task-specific terminal-reconciliation alerts; define their
+transition and recovery rules before implementation.
 
 ### Scope
 
 - notify through Telegram when an existing global execution-readiness reason
-  becomes degraded or recovers; task-specific outbox, wait, reconciliation,
-  provider-capability, and generic webhook alerts remain follow-ups
+  becomes degraded or recovers, and for task-specific stuck interactions and
+  stale outbox commands; task-specific reconciliation, provider-capability, and
+  generic webhook alerts remain follow-ups
 - deduplicate, throttle, acknowledge, and resolve alerts using stable reason
   codes and task references
 - add scheduled read-only tasks for health summaries, evidence collection,

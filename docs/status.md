@@ -5,11 +5,11 @@
 Phase 4A: Temporal stabilization, execution architecture foundation, and measured reliability.
 
 Active focus: **M31 — Proactive Operations and Safe Scheduled Work**. The
-The Temporal Server 1.24.2 / Python SDK 1.30.0 compatibility prerequisite,
+Temporal Server 1.24.2 / Python SDK 1.30.0 compatibility prerequisite,
 weekly dependency-review scheduling, opt-in Telegram readiness alerts,
 read-only operations dashboard visibility, and task-specific stuck-interaction
-alerts are merged. Task-specific stale-outbox alerts are the current M31 slice
-and are in progress.
+and stale-outbox alerts are merged. Task-specific terminal-reconciliation
+alerts are the next M31 slice.
 M30 is completed with authenticated GitHub event intake, issue/delivery timeline mapping,
 draft PR synchronization, issue task replay (`/code-agent replay`), and Temporal
 interaction primitives (Queries & Updates).
@@ -244,10 +244,10 @@ Temporal migration and rollback record is in the
 
 ## Next slices only
 
-1. Scope and implement **M31 — Task-Specific Stale-Outbox Alerts** using the
-   existing outbox health signals and alert delivery infrastructure. Define the
-   task-level transition and recovery rules before implementation. Other alert
-   scenarios and maintenance purposes remain future M31 slices.
+1. Scope and implement **M31 — Task-Specific Terminal-Reconciliation Alerts**
+   using the existing reconciliation signals and alert delivery infrastructure.
+   Define task-level transition and recovery rules before implementation. Other
+   alert scenarios and maintenance purposes remain future M31 slices.
 2. Maintain completed M29 advisory report contracts and static production routing:
    a. all four canonical task-class/mode cells are qualified (`docs/read_only`, `feature/read_only`, `investigation/read_only`, `feature/mutation`);
    b. longitudinal 45-day split robustness remains calendar-gated on model-aware task age (expected ~2026-11-02 for Wave 2/3 tasks and ~2026-12-08 for `gpt-6-luna`);
