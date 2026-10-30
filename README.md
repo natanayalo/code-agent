@@ -87,10 +87,11 @@ Detailed architecture: [`docs/architecture.md`](docs/architecture.md)
 
 ## Operator Docs
 
+- documentation map: [`docs/README.md`](docs/README.md)
 - runbook and troubleshooting: [`docs/runbook.md`](docs/runbook.md)
 - Temporal compatibility baseline and workflow-evolution procedure: [`docs/temporal_compatibility.md`](docs/temporal_compatibility.md)
 - forward plan: [`docs/roadmap.md`](docs/roadmap.md)
-- current snapshot/status: [`docs/status.md`](docs/status.md)
+- current priorities and ordered backlog: [`docs/status.md`](docs/status.md)
 - Temporal cutover and rollback archive: [`docs/archive/temporal_cutover.md`](docs/archive/temporal_cutover.md)
 - shipped changes: [`CHANGELOG.md`](CHANGELOG.md)
 

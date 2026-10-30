@@ -313,6 +313,16 @@ recovery. Failed observations and observations older than the stored watermark
 leave task state unchanged. The alert instructs the operator to inspect the
 Temporal command outbox and worker dispatcher.
 
+The monitor also sends task-specific `terminal_reconciliation_divergent`
+alerts after the existing 60-second grace period. It compares complete
+PostgreSQL projections with Temporal workflow status, including running workflows
+without a matching projection. Before alerting, it refreshes PostgreSQL to avoid
+races with completion or start acknowledgement; recent unconfirmed starts and
+active dispatch claims are deferred. A newer successful observation of both
+stores must confirm recovery. Failed observations leave alert state unchanged.
+Inspect the task and its Temporal workflow before using existing operator
+controls; the monitor does not alter task or workflow state.
+
 Inspect authenticated `GET /alerts/readiness` for the current stored reason
 states and `GET /alerts/readiness/deliveries` for delivery attempts. A
 `pending` record retries up to eight attempts with a five-second initial delay
@@ -335,8 +345,9 @@ retry. If a newer healthy baseline arrives first, unreported stale degradations
 are retained as ordered degraded/recovered pairs, including multiple distinct
 outages; duplicate stale observations are ignored.
 Task alert state and delivery records appear in these same authenticated
-endpoints with `reason: interaction_wait_stuck` or
-`reason: outbox_command_stale` and a task-specific `task_id`.
+endpoints with `reason: interaction_wait_stuck`,
+`reason: outbox_command_stale`, or
+`reason: terminal_reconciliation_divergent` and a task-specific `task_id`.
 To roll back this alert slice, unset the existing alert chat ID and restart the
 API; readiness alerts also stop and task scheduling and execution continue.
 
