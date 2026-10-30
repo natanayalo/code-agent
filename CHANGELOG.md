@@ -144,6 +144,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Documentation
 
+- Docs: prioritize stale outbox alerts ([#445](https://github.com/natanayalo/code-agent/pull/445))
+
 - Docs: reconcile M31 dashboard progress ([#443](https://github.com/natanayalo/code-agent/pull/443))
 
 - Docs: define M29 feature mutation evaluation contract ([#411](https://github.com/natanayalo/code-agent/pull/411))
