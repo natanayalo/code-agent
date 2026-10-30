@@ -17,6 +17,7 @@ from db.enums import TimelineEventType
 from db.models import Base, Task, TaskTimelineEvent, WorkerRun
 from orchestrator.execution import TaskExecutionService, TaskSubmission
 from orchestrator.nodes.verification_result import verify_result as evaluate_verification
+from orchestrator.provider_diagnostics import ProviderDiagnosticsService
 from orchestrator.schedule_spec import ScheduleSpec
 from orchestrator.state import OrchestratorState
 from orchestrator.temporal.activities import TaskExecutionActivities
@@ -25,9 +26,16 @@ from orchestrator.temporal.scheduled_review import ScheduledReviewActivities
 from orchestrator.temporal.workflows import TaskExecutionWorkflow
 from repositories import create_engine_from_url, create_session_factory, session_scope
 from sandbox import DockerShellCommandResult, DockerShellSession
+from tests.integration.provider_diagnostics_support import ready_stub_provider
 from tests.native_agent_test_doubles import LocalNativeAgentRunner
 from workers import CodexCliWorker, ShellWorker, WorkerFacade
 from workers.cli_runtime import CliRuntimeAdapter, CliRuntimeStep
+
+
+@pytest.fixture(autouse=True)
+def _stub_provider_readiness(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The scripted provider does not require a local provider installation."""
+    monkeypatch.setattr(ProviderDiagnosticsService, "evaluate_pre_dispatch", ready_stub_provider)
 
 
 def _run_git(command: list[str], *, cwd: Path) -> str:

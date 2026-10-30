@@ -36,6 +36,7 @@ from evaluation.provider_reliability_stages import check_task_stages
 from orchestrator.execution import TaskExecutionService, TaskSubmission
 from orchestrator.execution_types import InteractionResponse
 from orchestrator.nodes.verification_result import verify_result as evaluate_verification
+from orchestrator.provider_diagnostics import ProviderDiagnosticsService
 from orchestrator.state import OrchestratorState, VerificationReport, VerificationReportItem
 from orchestrator.temporal.activities import TaskExecutionActivities
 from orchestrator.temporal.command_dispatcher import TemporalCommandDispatcher
@@ -54,9 +55,16 @@ from repositories import (
     session_scope,
 )
 from sandbox import DockerShellCommandResult, DockerShellSession
+from tests.integration.provider_diagnostics_support import ready_stub_provider
 from tests.native_agent_test_doubles import LocalNativeAgentRunner
 from workers import CodexCliWorker, WorkerResult, WorkerTestResult
 from workers.cli_runtime import CliRuntimeAdapter, CliRuntimeStep
+
+
+@pytest.fixture(autouse=True)
+def _stub_provider_readiness(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep workflow tests independent of locally installed provider credentials."""
+    monkeypatch.setattr(ProviderDiagnosticsService, "evaluate_pre_dispatch", ready_stub_provider)
 
 
 def _run_git(command: list[str], *, cwd: Path) -> str:

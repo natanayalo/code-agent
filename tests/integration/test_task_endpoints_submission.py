@@ -67,7 +67,7 @@ def _assert_completed_task_response(
     artifacts_by_type = {
         artifact["artifact_type"]: artifact for artifact in latest_run["artifact_index"]
     }
-    assert set(artifacts_by_type) == {"workspace", "context_envelope"}
+    assert set(artifacts_by_type) == {"workspace", "context_envelope", "pre_dispatch_diagnostics"}
     workspace_artifact = artifacts_by_type["workspace"]
     assert workspace_artifact["name"] == "workspace"
     assert workspace_artifact["uri"] == "/tmp/workspace-task-44-1234"
@@ -80,10 +80,12 @@ def _assert_completed_task_response(
     assert set(canonical_artifacts) == {
         "workspace",
         "context_envelope",
+        "pre_dispatch_diagnostics",
     }
     canonical_envelope = canonical_artifacts["context_envelope"]
     assert canonical_envelope["artifact_metadata"]["schema_version"] == 1
     assert canonical_envelope["artifact_metadata"]["context_content_digest"]
+    assert canonical_artifacts["pre_dispatch_diagnostics"]["artifact_metadata"]["ready"]
 
     assert len(worker.requests) == 1
     assert worker.requests[0].session_id == payload["session_id"]
@@ -128,6 +130,7 @@ def _assert_task_persistence_records(session_factory, task_id: str, payload: dic
         assert {artifact.artifact_type for artifact in artifacts} == {
             ArtifactType.WORKSPACE,
             ArtifactType.CONTEXT_ENVELOPE,
+            ArtifactType.PRE_DISPATCH_DIAGNOSTICS,
         }
         envelope = next(
             artifact
