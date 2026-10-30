@@ -7,9 +7,8 @@ Phase 4A: Temporal stabilization, execution architecture foundation, and measure
 Active focus: **M31 — Proactive Operations and Safe Scheduled Work**. The
 Temporal Server 1.24.2 / Python SDK 1.30.0 compatibility prerequisite,
 weekly dependency-review scheduling, opt-in Telegram readiness alerts, and
-read-only operations dashboard visibility are merged. The selected next slice
-is M31 stuck-interaction alerts: opt-in Telegram degraded/recovered transitions
-per task, with complete-set observation and existing delivery semantics.
+read-only operations dashboard visibility, and task-specific stuck-interaction
+alerts are merged. The selected next slice is task-specific stale-outbox alerts.
 M30 is completed with authenticated GitHub event intake, issue/delivery timeline mapping,
 draft PR synchronization, issue task replay (`/code-agent replay`), and Temporal
 interaction primitives (Queries & Updates).
@@ -244,12 +243,10 @@ Temporal migration and rollback record is in the
 
 ## Next slices only
 
-1. Implement **M31 — Stuck Interaction Alerts**: evaluate the complete set of
-   pending human interactions past the existing threshold, persist deduplicated
-   per-task degraded/recovered transitions, and expose delivery outcomes in the
-   authenticated API and read-only operations dashboard. Preserve state when an
-   observation fails. Other alert scenarios and maintenance purposes remain
-   future M31 slices.
+1. Scope and implement **M31 — Task-Specific Stale-Outbox Alerts** using the
+   existing outbox health signals and alert delivery infrastructure. Define the
+   task-level transition and recovery rules before implementation. Other alert
+   scenarios and maintenance purposes remain future M31 slices.
 2. Maintain completed M29 advisory report contracts and static production routing:
    a. all four canonical task-class/mode cells are qualified (`docs/read_only`, `feature/read_only`, `investigation/read_only`, `feature/mutation`);
    b. longitudinal 45-day split robustness remains calendar-gated on model-aware task age (expected ~2026-11-02 for Wave 2/3 tasks and ~2026-12-08 for `gpt-6-luna`);
