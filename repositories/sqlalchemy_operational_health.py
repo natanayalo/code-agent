@@ -133,6 +133,30 @@ class OperationalHealthRepository:
             affected_task_ids=affected,
         )
 
+    def stale_outbox_task_ids(self, *, now: datetime, stale_seconds: int) -> list[str]:
+        """Return the complete task set with an old command currently eligible for delivery."""
+        cutoff = now - timedelta(seconds=stale_seconds)
+        eligible = (
+            TemporalCommand.delivered_at.is_(None),
+            TemporalCommand.dead_lettered_at.is_(None),
+            TemporalCommand.superseded_at.is_(None),
+            TemporalCommand.next_attempt_at <= now,
+            TemporalCommand.created_at < cutoff,
+            or_(
+                TemporalCommand.claim_token.is_(None),
+                TemporalCommand.claim_expires_at.is_(None),
+                TemporalCommand.claim_expires_at <= now,
+            ),
+        )
+        return list(
+            self.session.scalars(
+                select(TemporalCommand.task_id)
+                .where(*eligible)
+                .distinct()
+                .order_by(TemporalCommand.task_id)
+            )
+        )
+
     def worker_snapshot(self, *, now: datetime, fresh_seconds: int) -> WorkerOperationalSnapshot:
         nodes = list(self.session.scalars(select(WorkerNode)))
         cutoff = now - timedelta(seconds=fresh_seconds)

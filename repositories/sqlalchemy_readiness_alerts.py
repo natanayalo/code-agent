@@ -15,6 +15,8 @@ from orchestrator.operational_health_types import READINESS_REASON_CODES
 MAX_DELIVERY_ATTEMPTS = 8
 DELIVERY_LEASE_SECONDS = 30
 INTERACTION_REASON_PREFIX = "interaction_wait_stuck|"
+OUTBOX_STALE_REASON_PREFIX = "outbox_command_stale|"
+TASK_REASON_PREFIXES = (INTERACTION_REASON_PREFIX, OUTBOX_STALE_REASON_PREFIX)
 
 
 def _utc_aware(value: datetime) -> datetime:
@@ -55,7 +57,7 @@ class ReadinessAlertRepository:
         states = {
             state.reason: state
             for state in self.session.scalars(select(ReadinessAlertState).with_for_update()).all()
-            if not state.reason.startswith(INTERACTION_REASON_PREFIX)
+            if not state.reason.startswith(TASK_REASON_PREFIXES)
         }
         for reason, state in states.items():
             history = self.session.scalars(
@@ -142,7 +144,7 @@ class ReadinessAlertRepository:
         states = {
             state.reason: state
             for state in self.session.scalars(select(ReadinessAlertState).with_for_update()).all()
-            if not state.reason.startswith(INTERACTION_REASON_PREFIX)
+            if not state.reason.startswith(TASK_REASON_PREFIXES)
         }
         for reason, replayed_at in latest_replayed_at.items():
             baseline = captured.get(reason)
@@ -182,7 +184,7 @@ class ReadinessAlertRepository:
         states = {
             state.reason: state
             for state in self.session.scalars(select(ReadinessAlertState).with_for_update()).all()
-            if not state.reason.startswith(INTERACTION_REASON_PREFIX)
+            if not state.reason.startswith(TASK_REASON_PREFIXES)
         }
         observed_reasons = active | set(READINESS_REASON_CODES)
         observed_reasons.update(states)
@@ -228,15 +230,35 @@ class ReadinessAlertRepository:
         self, task_ids: list[str], *, observed_at: datetime | None = None
     ) -> None:
         """Persist per-task transitions from one complete, successful observation."""
+        self._record_task_snapshot(
+            task_ids, observed_at=observed_at, reason_prefix=INTERACTION_REASON_PREFIX
+        )
+
+    def record_stale_outbox_snapshot(
+        self, task_ids: list[str], *, observed_at: datetime | None = None
+    ) -> None:
+        """Persist stale-outbox transitions from one complete, successful observation."""
+        self._record_task_snapshot(
+            task_ids, observed_at=observed_at, reason_prefix=OUTBOX_STALE_REASON_PREFIX
+        )
+
+    def _record_task_snapshot(
+        self,
+        task_ids: list[str],
+        *,
+        observed_at: datetime | None,
+        reason_prefix: str,
+    ) -> None:
+        """Persist one namespaced complete-set observation with its own watermark."""
         self._lock_state_updates()
         now = observed_at or utc_now()
-        current = {f"{INTERACTION_REASON_PREFIX}{task_id}" for task_id in task_ids}
-        watermark_key = f"{INTERACTION_REASON_PREFIX}__observation_watermark__"
+        current = {f"{reason_prefix}{task_id}" for task_id in task_ids}
+        watermark_key = f"{reason_prefix}__observation_watermark__"
         states = {
             state.reason: state
             for state in self.session.scalars(
                 select(ReadinessAlertState)
-                .where(ReadinessAlertState.reason.like(f"{INTERACTION_REASON_PREFIX}%"))
+                .where(ReadinessAlertState.reason.like(f"{reason_prefix}%"))
                 .with_for_update()
             ).all()
         }
