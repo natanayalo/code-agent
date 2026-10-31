@@ -162,6 +162,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Dependencies
 
+- Chore(deps-dev): bump virtualenv from 21.2.4 to 21.14.13 ([#431](https://github.com/natanayalo/code-agent/pull/431))
+
 - Chore(deps-dev): bump undici from 7.29.1 to 7.30.1 in /dashboard ([#460](https://github.com/natanayalo/code-agent/pull/460))
 
 
