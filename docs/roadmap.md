@@ -155,8 +155,8 @@ Provider-capability alerts and opt-in generic webhook delivery are also merged
   collection, defining one read-only purpose per implementation slice
 - persist schedule identity, run history, next execution, final status, and
   artifacts through the existing task and Temporal model
-- retain shipped read-only alert/schedule visibility; scope schedule request
-  interpretation and management controls separately through the existing API
+- retain shipped read-only alert/schedule visibility; scope dashboard management
+  controls separately through the existing API; defer natural-language requests
 
 ### Boundaries
 

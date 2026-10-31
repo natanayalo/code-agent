@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   ClipboardList,
+  CalendarClock,
   Loader2,
   Radar,
   Send,
@@ -19,8 +20,9 @@ import {
 } from "../types/task";
 import { DashboardLayout } from "./layout/DashboardLayout";
 import { formatLabel } from "../utils/formatters";
+import { useSearchParams } from "react-router-dom";
+import { ScheduleCreateForm } from "./ScheduleCreateForm";
 
-type TriggerTab = "task" | "scout";
 type DashboardTaskType = Exclude<TaskSpecType, "scout">;
 type WorkerSelection = WorkerType | "";
 
@@ -74,7 +76,10 @@ function TriggerResult({
 
 export function TriggerActionsPage() {
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = React.useState<TriggerTab>("task");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedTab = searchParams.get("tab");
+  const activeTab = requestedTab === "scout" || requestedTab === "schedule" ? requestedTab : "task";
+  const setActiveTab = (tab: string) => setSearchParams(tab === "task" ? {} : { tab });
   const [taskText, setTaskText] = React.useState("");
   const [repoUrl, setRepoUrl] = React.useState("");
   const [branch, setBranch] = React.useState("");
@@ -259,6 +264,18 @@ export function TriggerActionsPage() {
             <Radar size={16} />
             <span>Scout</span>
           </button>
+          <button
+            type="button"
+            id="trigger-tab-schedule"
+            role="tab"
+            aria-selected={activeTab === "schedule"}
+            aria-controls="trigger-panel-schedule"
+            className={`trigger-tab-button ${activeTab === "schedule" ? "active" : ""}`}
+            onClick={() => setActiveTab("schedule")}
+          >
+            <CalendarClock size={16} />
+            <span>Schedule</span>
+          </button>
         </div>
 
         {activeTab === "task" ? (
@@ -373,7 +390,7 @@ export function TriggerActionsPage() {
               </div>
             </form>
           </section>
-        ) : (
+        ) : activeTab === "scout" ? (
           <section
             id="trigger-panel-scout"
             role="tabpanel"
@@ -494,7 +511,10 @@ export function TriggerActionsPage() {
               </div>
             </form>
           </section>
-        )}
+        ) : null}
+        <section id="trigger-panel-schedule" role="tabpanel" aria-labelledby="trigger-tab-schedule" hidden={activeTab !== "schedule"}>
+          <ScheduleCreateForm />
+        </section>
       </div>
     </DashboardLayout>
   );

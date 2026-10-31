@@ -2,8 +2,9 @@ import React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { TriggerActionsPage } from "./TriggerActionsPage";
+import { ScheduleVisibilitySection } from "./ScheduleVisibilitySection";
 import { api } from "../services/api";
 import { TaskSnapshot, TaskStatus } from "../types/task";
 
@@ -11,6 +12,7 @@ vi.mock("../services/api", () => ({
   api: {
     submitTask: vi.fn(),
     triggerScoutTask: vi.fn(),
+    listDependencyReviewSchedules: vi.fn(),
   },
 }));
 
@@ -30,7 +32,7 @@ const createTaskSnapshot = (
   ...overrides,
 });
 
-function renderPage() {
+function renderPage(initialPath = "/triggers") {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -40,7 +42,7 @@ function renderPage() {
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[initialPath]}>
         <TriggerActionsPage />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -50,6 +52,28 @@ function renderPage() {
 describe("TriggerActionsPage", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+  });
+
+  it("opens schedule creation directly and retains an unfinished request when switching tabs", () => {
+    renderPage('/triggers?tab=schedule');
+    expect(screen.getByRole('tab', { name: 'Schedule' })).toHaveAttribute('aria-selected', 'true');
+    fireEvent.change(screen.getByLabelText('Schedule ID'), { target: { value: 'weekly' } });
+    fireEvent.click(screen.getByRole('tab', { name: 'Task' }));
+    expect(screen.getByLabelText('Task text')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'Schedule' }));
+    expect(screen.getByLabelText('Schedule ID')).toHaveValue('weekly');
+  });
+
+  it("opens the schedule tab from the Metrics creation link", async () => {
+    vi.mocked(api.listDependencyReviewSchedules).mockResolvedValue([]);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><MemoryRouter initialEntries={["/metrics"]}><Routes>
+      <Route path="/metrics" element={<ScheduleVisibilitySection onOpenTask={vi.fn()} />} />
+      <Route path="/triggers" element={<TriggerActionsPage />} />
+    </Routes></MemoryRouter></QueryClientProvider>);
+    fireEvent.click(screen.getByRole('link', { name: 'Create a schedule in Triggers' }));
+    expect(screen.getByRole('tab', { name: 'Schedule' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByLabelText('Schedule ID')).toBeVisible();
   });
 
   it("submits a dashboard task payload and shows the queued task id", async () => {
