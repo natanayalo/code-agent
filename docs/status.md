@@ -55,7 +55,7 @@ M31-1, M31-2, and M31-3 were completed in [PR #459](https://github.com/natanayal
 | --- | --- | --- | --- |
 | 3 | [M31-3: Operator acknowledgment](https://github.com/natanayalo/code-agent/issues/452) | Complete | Authenticated acknowledgment distinct from observed recovery; auditable recurrence semantics and tested dashboard/API controls. |
 | 4 | [M31-4: Health-summary and evidence schedules](https://github.com/natanayalo/code-agent/issues/453) | Complete | Read-only health summaries and bounded operational evidence schedules with idempotency, cancellation, recovery, and terminal evidence. |
-| 5 | [M31-5: Schedule request and management UX](https://github.com/natanayalo/code-agent/issues/454) | Planned | Select the first request surface; preserve explicit intent and timezone; split natural-language input and dashboard controls into bounded slices. |
+| 5 | [M31-5: Schedule request and management UX](https://github.com/natanayalo/code-agent/issues/454) | In progress | Implement the separately scoped dashboard creation, management, and natural-language slices in the [request design](schedule_request_design.md); preserve explicit intent and timezone. |
 
 M31-3 defines acknowledgment as an auditable action for one degraded transition.
 It cancels pending degraded retries on Telegram and webhook, preserves recovery
@@ -68,7 +68,8 @@ Health-summary and evidence-collection schedules extend the structured schedule 
 `dependency_review`. The health-summary slice shipped in [PR #466](https://github.com/natanayalo/code-agent/pull/466),
 and evidence collection in [PR #467](https://github.com/natanayalo/code-agent/pull/467).
 Create/pause/resume/trigger APIs exist; dashboard schedule views are read-only.
-Natural-language schedule interpretation and dashboard management are planned,
+The dashboard is the selected first request surface; its structured creation,
+management controls, and natural-language interpretation are separately scoped,
 not shipped capabilities. Scheduled mutation remains disabled.
 
 M31 closes when every supported degraded scenario has actionable degradation and

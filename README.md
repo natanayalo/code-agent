@@ -33,6 +33,9 @@ The platform is built for one operator-first use case: reliable coding execution
 
 The authenticated schedules API creates read-only dependency reviews, service-health
 summaries, and operational evidence summaries in Temporal.
+The dashboard currently provides read-only schedule visibility. Its planned
+request and management controls are described in the
+[schedule request design](docs/schedule_request_design.md).
 Set the same `CODE_AGENT_ALLOWED_REPOS` registry on the API and worker; the worker
 checks the key again when each occurrence runs. Supply an explicit IANA timezone.
 For example, send a `PUT` to `/schedules/project-dependencies` with:
