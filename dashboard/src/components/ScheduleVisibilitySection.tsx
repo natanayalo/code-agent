@@ -27,17 +27,21 @@ function ScheduleCard({ schedule, onOpenTask, listUnavailable }: { schedule: Dep
   const updateControl = (changes: Partial<ControlState>) => {
     client.setQueryData<ControlState>(controlKey, (current) => ({ ...INITIAL_CONTROL_STATE, ...current, ...changes }));
   };
-  const updateSchedule = async (updated: DependencyReviewScheduleSnapshot) => {
+  const updateSchedule = async (updated: DependencyReviewScheduleSnapshot, expectedVersion: number | undefined): Promise<boolean> => {
+    // Reject snapshots superseded by any shared list update while the request was in flight.
+    if (client.getQueryState(SCHEDULES_KEY)?.dataUpdateCount !== expectedVersion) return false;
     // A list request started before this update must not restore an older state.
     await client.cancelQueries({ queryKey: SCHEDULES_KEY, exact: true });
     const query = client.getQueryCache().find<DependencyReviewScheduleSnapshot[]>({ queryKey: SCHEDULES_KEY, exact: true });
+    if (query?.state.dataUpdateCount !== expectedVersion) return false;
     if (query?.state.status === 'error') {
       // Updating one card does not repair a failed refresh of the whole list.
-      query.setState({ data: query.state.data?.map((item) => item.id === updated.id ? updated : item) });
-      return;
+      query.setState({ data: query.state.data?.map((item) => item.id === updated.id ? updated : item), dataUpdateCount: query.state.dataUpdateCount + 1 });
+      return true;
     }
     client.setQueryData<DependencyReviewScheduleSnapshot[]>(SCHEDULES_KEY, (current) =>
       current?.map((item) => item.id === updated.id ? updated : item));
+    return true;
   };
   const runs = useQuery({
     queryKey: ['scheduled-tasks', schedule.id, offset],
@@ -45,19 +49,19 @@ function ScheduleCard({ schedule, onOpenTask, listUnavailable }: { schedule: Dep
     refetchInterval: 60000,
   });
   const refresh = async (): Promise<boolean> => {
+    const version = client.getQueryState(SCHEDULES_KEY)?.dataUpdateCount;
     const [schedulesResult, runsResult] = await Promise.allSettled([
       api.listDependencyReviewSchedules(),
       api.listScheduledTasks(schedule.id, PAGE_SIZE, 0),
     ]);
     const updated = schedulesResult.status === 'fulfilled'
       ? schedulesResult.value.find((item) => item.id === schedule.id) : undefined;
-    if (updated) await updateSchedule(updated);
+    const applied = updated ? await updateSchedule(updated, version) : false;
     if (runsResult.status === 'fulfilled') {
       client.setQueryData(['scheduled-tasks', schedule.id, 0], runsResult.value);
       setOffset(0);
     }
-    return schedulesResult.status === 'fulfilled' &&
-      schedulesResult.value.some((item) => item.id === schedule.id) && runsResult.status === 'fulfilled';
+    return applied && runsResult.status === 'fulfilled';
   };
 
   const recover = async () => {
@@ -73,9 +77,10 @@ function ScheduleCard({ schedule, onOpenTask, listUnavailable }: { schedule: Dep
     const current = client.getQueryData<ControlState>(controlKey);
     if (current?.busy || current?.needsRefresh || listUnavailable) return;
     updateControl({ busy: true, message: '' });
+    const version = client.getQueryState(SCHEDULES_KEY)?.dataUpdateCount;
     try {
       const result = await api.manageSchedule(schedule.id, operation);
-      await updateSchedule(result);
+      await updateSchedule(result, version);
       const refreshed = await refresh();
       updateControl({ needsRefresh: !refreshed, message: refreshed
         ? `${operation} request completed. Schedule and runs refreshed.`

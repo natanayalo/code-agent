@@ -214,6 +214,24 @@ describe('ScheduleVisibilitySection', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Trigger now' })).toBeEnabled());
   });
 
+  it('does not apply a stale card refresh after a newer list arrives during run history loading', async () => {
+    let finishRuns!: (value: ScheduledTaskSnapshot[]) => void;
+    let runsCount = 0;
+    vi.mocked(api.listDependencyReviewSchedules).mockResolvedValue([schedule]);
+    vi.mocked(api.listScheduledTasks).mockImplementation(() => ++runsCount === 1
+      ? Promise.resolve([]) : new Promise((resolve) => { finishRuns = resolve; }));
+    vi.mocked(api.manageSchedule).mockResolvedValue(schedule);
+    const { client } = mount();
+    fireEvent.click(await screen.findByRole('button', { name: 'Trigger now' }));
+    await waitFor(() => expect(finishRuns).toBeDefined());
+    vi.mocked(api.listDependencyReviewSchedules).mockResolvedValue([{ ...schedule, paused: false }]);
+    await act(async () => { await client.refetchQueries({ queryKey: ['dependency-review-schedules'] }); });
+    expect(await screen.findByRole('button', { name: 'Pause' })).toBeDisabled();
+    await act(async () => finishRuns([]));
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeDisabled();
+    expect(await screen.findByRole('alert')).toHaveTextContent('refresh failed');
+  });
+
   it('discards a list request that began before an operation completed', async () => {
     let finishOldList!: (value: DependencyReviewScheduleSnapshot[]) => void;
     vi.mocked(api.listDependencyReviewSchedules).mockResolvedValueOnce([schedule])
@@ -231,6 +249,25 @@ describe('ScheduleVisibilitySection', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Pause' })).toBeEnabled());
     await act(async () => finishOldList([schedule]));
     expect(screen.getByRole('button', { name: 'Pause' })).toBeEnabled();
+  });
+
+  it('does not apply an operation response older than an already updated list', async () => {
+    let finishOperation!: (value: DependencyReviewScheduleSnapshot) => void;
+    let finishRuns!: (value: ScheduledTaskSnapshot[]) => void;
+    let runsCount = 0;
+    vi.mocked(api.listDependencyReviewSchedules).mockResolvedValue([schedule]);
+    vi.mocked(api.listScheduledTasks).mockImplementation(() => ++runsCount === 1
+      ? Promise.resolve([]) : new Promise((resolve) => { finishRuns = resolve; }));
+    vi.mocked(api.manageSchedule).mockReturnValue(new Promise((resolve) => { finishOperation = resolve; }));
+    const { client } = mount();
+    fireEvent.click(await screen.findByRole('button', { name: 'Trigger now' }));
+    vi.mocked(api.listDependencyReviewSchedules).mockResolvedValue([{ ...schedule, paused: false }]);
+    await act(async () => { await client.refetchQueries({ queryKey: ['dependency-review-schedules'] }); });
+    await act(async () => finishOperation(schedule));
+    await waitFor(() => expect(finishRuns).toBeDefined());
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeDisabled();
+    await act(async () => finishRuns([]));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Pause' })).toBeEnabled());
   });
 
   it('shows a failed background refresh and blocks controls until the list is refreshed', async () => {
