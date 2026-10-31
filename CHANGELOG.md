@@ -162,6 +162,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Dependencies
 
+- Chore(deps): bump urllib3 from 2.7.0 to 2.8.0 ([#415](https://github.com/natanayalo/code-agent/pull/415))
+
 - Chore(deps): bump anyio from 4.13.0 to 4.14.2 ([#405](https://github.com/natanayalo/code-agent/pull/405))
 
 - Chore(deps): bump pyjwt from 2.13.0 to 2.15.0 ([#413](https://github.com/natanayalo/code-agent/pull/413))
