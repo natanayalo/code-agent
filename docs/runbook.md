@@ -1133,6 +1133,8 @@ transition. Telegram and other incidents remain independent. Inspect the
 bounded authenticated `/alerts/readiness/deliveries` history, optionally using
 `?channel=webhook` or `?channel=telegram`. The webhook `destination_id` is an
 opaque fingerprint and failure evidence does not include response bodies.
+An unresponsive DNS resolver occupies at most one background resolver slot;
+subsequent attempts fail fast until that lookup finishes.
 
 Token rotation retains pending deliveries. Changing the URL creates a new
 destination identity and never sends old pending records to the new endpoint.

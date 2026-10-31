@@ -1,5 +1,6 @@
 """Webhook URL, network, and payload security tests."""
 
+import http.client
 import socket
 import ssl
 from datetime import UTC, datetime
@@ -133,18 +134,20 @@ def test_pinned_connection_and_webhook_headers():
     with (
         patch("ssl.create_default_context", return_value=context),
         patch("time.monotonic", return_value=100.0),
-        patch("socket.create_connection", return_value=sock) as connect,
+        patch("socket.socket", return_value=sock),
     ):
         connection = PinnedConnection("example.com", "8.8.8.8", 105.0)
         connection.connect()
         assert context.minimum_version == ssl.TLSVersion.TLSv1_2
-        connect.assert_called_once_with(("8.8.8.8", 443), 5)
-        context.wrap_socket.assert_called_once_with(sock, server_hostname="example.com")
+        sock.connect.assert_called_once_with(("8.8.8.8", 443))
+        context.wrap_socket.assert_called_once_with(
+            sock, server_hostname="example.com", do_handshake_on_connect=False
+        )
     context.wrap_socket.side_effect = OSError("sensitive")
     with (
         patch("ssl.create_default_context", return_value=context),
         patch("time.monotonic", return_value=100.0),
-        patch("socket.create_connection", return_value=sock),
+        patch("socket.socket", return_value=sock),
     ):
         with pytest.raises(OSError):
             PinnedConnection("example.com", "8.8.8.8", 105.0).connect()
@@ -196,7 +199,7 @@ def test_webhook_tls_requires_modern_protocol_and_verifies_peer():
     context = ssl.create_default_context()
     with (
         patch("ssl.create_default_context", return_value=context),
-        patch("socket.create_connection"),
+        patch("socket.socket"),
         patch.object(ssl.SSLContext, "wrap_socket"),
         patch("time.monotonic", return_value=100.0),
     ):
@@ -204,3 +207,71 @@ def test_webhook_tls_requires_modern_protocol_and_verifies_peer():
     assert context.minimum_version == ssl.TLSVersion.TLSv1_2
     assert context.verify_mode == ssl.CERT_REQUIRED
     assert context.check_hostname
+
+
+def test_trickled_headers_are_interrupted_at_absolute_deadline(monkeypatch):
+    import threading
+    import time
+
+    from apps.api.webhook_alerts import PinnedConnection, send_webhook
+
+    client, server = socket.socketpair()
+    stopped = threading.Event()
+
+    def trickle():
+        try:
+            server.recv(4096)
+            for byte in b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n":
+                server.send(bytes([byte]))
+                time.sleep(0.01)
+        except OSError:
+            pass
+        finally:
+            server.close()
+            stopped.set()
+
+    worker = threading.Thread(target=trickle, daemon=True)
+    worker.start()
+    monkeypatch.setattr("apps.api.webhook_alerts.TIMEOUT", 0.05)
+    monkeypatch.setattr("apps.api.webhook_alerts.public_addresses", lambda *_: ["8.8.8.8"])
+    monkeypatch.setattr(PinnedConnection, "connect", lambda self: self._set_socket(client))
+    target = webhook_configuration(
+        {"CODE_AGENT_READINESS_ALERT_WEBHOOK_URL": "https://example.com/"}
+    )
+    item = {
+        "id": "event",
+        "reason": "temporal_unavailable",
+        "transition": "degraded",
+        "transition_number": 1,
+        "observed_at": datetime.now(UTC),
+    }
+    started = time.monotonic()
+    with pytest.raises((OSError, TimeoutError, http.client.HTTPException)):
+        send_webhook(target, item)
+    assert time.monotonic() - started < 0.4
+    assert stopped.wait(1)
+    assert client.fileno() == -1
+
+
+def test_stalled_resolver_has_bounded_workers(monkeypatch):
+    import threading
+    import time
+
+    from apps.api.webhook_alerts import public_addresses
+
+    entered, release = threading.Event(), threading.Event()
+
+    def stall(*args, **kwargs):
+        entered.set()
+        assert release.wait(2)
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 443))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", stall)
+    try:
+        with pytest.raises(TimeoutError):
+            public_addresses("example.com", time.monotonic() + 0.05)
+        assert entered.is_set()
+        with pytest.raises(TimeoutError, match="busy"):
+            public_addresses("example.com", time.monotonic() + 0.05)
+    finally:
+        release.set()
