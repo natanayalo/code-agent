@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: add operator readiness alert acknowledgment ([#463](https://github.com/natanayalo/code-agent/pull/463))
+
 - Feat: add durable webhook delivery for operational alerts ([#461](https://github.com/natanayalo/code-agent/pull/461))
 
 - Feat: alert on worker provider prerequisites ([#459](https://github.com/natanayalo/code-agent/pull/459))
