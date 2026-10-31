@@ -1,12 +1,43 @@
 """Scheduled observations expose only bounded health data."""
 
+from datetime import timedelta
 from types import SimpleNamespace
 
 from db.base import Base, utc_now
 from db.readiness_alert_models import ReadinessAlertState
 from orchestrator.operational_health_types import ExecutionHealthMetrics, ReadinessSnapshot
-from orchestrator.scheduled_health import collect_health_snapshot
-from repositories import create_engine_from_url, create_session_factory, session_scope
+from orchestrator.scheduled_health import _incidents, collect_health_snapshot
+from repositories import (
+    ReadinessAlertRepository,
+    create_engine_from_url,
+    create_session_factory,
+    session_scope,
+)
+
+
+def test_incident_snapshot_reports_healthy_baseline_and_watermark(tmp_path):
+    engine = create_engine_from_url(f"sqlite+pysqlite:///{tmp_path / 'health.db'}")
+    Base.metadata.create_all(engine)
+    factory = create_session_factory(engine)
+    now = utc_now()
+    service = SimpleNamespace(session_factory=factory)
+    assert _incidents(service) == {
+        "status": "unknown",
+        "active_count": None,
+        "latest_observation_at": None,
+    }
+    with session_scope(factory) as session:
+        ReadinessAlertRepository(session).record_snapshot([], observed_at=now)
+    baseline = _incidents(service)
+    assert baseline["status"] == "observed"
+    assert baseline["active_count"] == 0
+    assert baseline["latest_observation_at"] is not None
+    later = now + timedelta(minutes=1)
+    with session_scope(factory) as session:
+        ReadinessAlertRepository(session).record_interaction_snapshot([], observed_at=later)
+    watermark = _incidents(service)
+    assert watermark["active_count"] == 0
+    assert watermark["latest_observation_at"].startswith(later.strftime("%Y-%m-%dT%H:%M:%S"))
 
 
 def test_snapshot_filters_private_data_and_aggregates_incidents(tmp_path):

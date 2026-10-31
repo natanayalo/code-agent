@@ -87,10 +87,13 @@ def _incidents(service: Any) -> dict[str, Any]:
     with session_scope(service.session_factory) as session:
         active, observed, latest = session.execute(
             select(
-                func.count().filter(ReadinessAlertState.degraded.is_(True)),
+                func.count().filter(
+                    ReadinessAlertState.degraded.is_(True),
+                    ReadinessAlertState.transition_number > 0,
+                ),
                 func.count(),
                 func.max(ReadinessAlertState.last_checked_at),
-            ).where(ReadinessAlertState.transition_number > 0)
+            )
         ).one()
     return {
         "status": "observed" if observed else "unknown",
