@@ -152,6 +152,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Documentation
 
+- Docs: reconcile M31 webhook delivery status ([#462](https://github.com/natanayalo/code-agent/pull/462))
+
 - Docs: consolidate planning history and agent instructions ([#458](https://github.com/natanayalo/code-agent/pull/458))
 
 - Docs: refresh M31 alert priorities ([#447](https://github.com/natanayalo/code-agent/pull/447))
