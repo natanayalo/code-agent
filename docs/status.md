@@ -41,17 +41,19 @@ Only the M31 table is the default implementation queue. Maintenance, approval,
 and evidence-gated lanes do not silently replace the next M31 slice.
 
 Status meanings: **Ready to scope** = next bounded task; **In progress** = work
-underway; **Planned** = ordered
-follow-up requiring its contract/design; **Evidence-gated** = eligibility must be
-proved; **Approval-gated** = external/security changes require operator approval.
-M31-1 and M31-2 were completed in [PR #459](https://github.com/natanayalo/code-agent/pull/459)
-and [PR #461](https://github.com/natanayalo/code-agent/pull/461), respectively.
+underway; **Complete** = merged and its completion condition is met;
+**Planned** = ordered follow-up requiring its contract/design;
+**Evidence-gated** = eligibility must be proved; **Approval-gated** =
+external/security changes require operator approval.
+M31-1, M31-2, and M31-3 were completed in [PR #459](https://github.com/natanayalo/code-agent/pull/459),
+[PR #461](https://github.com/natanayalo/code-agent/pull/461), and
+[PR #463](https://github.com/natanayalo/code-agent/pull/463), respectively.
 
 ### M31 implementation queue
 
 | Order | Slice | Status | Completion condition |
 | --- | --- | --- | --- |
-| 3 | [M31-3: Operator acknowledgment](https://github.com/natanayalo/code-agent/issues/452) | In progress | Authenticated acknowledgment distinct from observed recovery; auditable recurrence semantics and tested dashboard/API controls. |
+| 3 | [M31-3: Operator acknowledgment](https://github.com/natanayalo/code-agent/issues/452) | Complete | Authenticated acknowledgment distinct from observed recovery; auditable recurrence semantics and tested dashboard/API controls. |
 | 4 | [M31-4: Health-summary and evidence schedules](https://github.com/natanayalo/code-agent/issues/453) | Planned | Define both purposes; implement one purpose per PR, starting with health summaries; prove idempotency, cancellation, recovery, and terminal evidence. |
 | 5 | [M31-5: Schedule request and management UX](https://github.com/natanayalo/code-agent/issues/454) | Planned | Select the first request surface; preserve explicit intent and timezone; split natural-language input and dashboard controls into bounded slices. |
 
