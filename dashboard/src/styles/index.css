@@ -3139,9 +3139,13 @@ button {
 .schedule-create form { display: grid; gap: var(--spacing-sm); }
 .schedule-create form > label { display: grid; gap: var(--spacing-xs); }
 .schedule-create fieldset { display: flex; flex-wrap: wrap; gap: var(--spacing-sm); }
+.schedule-create .btn-secondary { padding: 8px 16px; border: 1px solid currentColor; border-radius: 8px; }
 .schedule-spec div { display: grid; grid-template-columns: minmax(100px, 0.4fr) 1fr; gap: var(--spacing-sm); }
 .schedule-spec dt { color: var(--color-text-muted); }
 .schedule-spec dd { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 480px) {
+  .schedule-spec div { grid-template-columns: 1fr; gap: 0; }
+}
 .schedule-pagination { display: flex; align-items: center; justify-content: space-between; gap: var(--spacing-sm); margin-top: var(--spacing-md); }
 
 .metric-detail-card {

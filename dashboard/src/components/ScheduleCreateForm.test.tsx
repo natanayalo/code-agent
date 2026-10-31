@@ -32,7 +32,7 @@ describe('ScheduleCreateForm', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('Select at least one weekday');
     fireEvent.click(screen.getByLabelText('monday'));
     fireEvent.click(screen.getByRole('button', { name: 'Review schedule' }));
-    expect(screen.getByText('operational_incidents · 48 hours')).toBeInTheDocument();
+    expect(screen.getByText('Operational incidents · 48 hours')).toBeInTheDocument();
     expect(api.createSchedule).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Create schedule' }));
     expect(await screen.findByRole('status')).toHaveTextContent('active');

@@ -53,9 +53,9 @@ export function ScheduleCreateForm() {
       <dl className="schedule-spec">
         <div><dt>Specification version</dt><dd>1</dd></div>
         <div><dt>Schedule ID</dt><dd>{id}</dd></div><div><dt>Repository key</dt><dd>{spec.repo_key}</dd></div>
-        <div><dt>Branch</dt><dd>{spec.branch || 'Default branch'}</dd></div><div><dt>Purpose</dt><dd>{spec.purpose}</dd></div>
+        <div><dt>Branch</dt><dd>{spec.branch || 'Default branch'}</dd></div><div><dt>Purpose</dt><dd>{spec.purpose.replaceAll('_', ' ')}</dd></div>
         <div><dt>Schedule</dt><dd>{days.join(', ')} at {time} ({timezone})</dd></div>
-        {spec.evidence ? <div><dt>Evidence</dt><dd>operational_incidents · {lookback} hours</dd></div> : null}
+        {spec.evidence ? <div><dt>Evidence</dt><dd>Operational incidents · {lookback} hours</dd></div> : null}
       </dl>
       <p>New schedules are created paused. Activation is a separate action.</p>
       {mutation.error ? <p role="alert">{mutation.error instanceof ApiError && mutation.error.status === 409 ? 'This schedule ID conflicts with an existing specification. Choose a different ID.' : mutation.error instanceof ApiError && [400, 422].includes(mutation.error.status) ? `Invalid request: ${mutation.error.message}` : 'The outcome is unknown. Refresh the schedule list or retry this same request.'}</p> : null}
