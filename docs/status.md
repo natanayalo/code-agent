@@ -55,8 +55,7 @@ M31-1, M31-2, and M31-3 were completed in [PR #459](https://github.com/natanayal
 | --- | --- | --- | --- |
 | 3 | [M31-3: Operator acknowledgment](https://github.com/natanayalo/code-agent/issues/452) | Complete | Authenticated acknowledgment distinct from observed recovery; auditable recurrence semantics and tested dashboard/API controls. |
 | 4 | [M31-4: Health-summary and evidence schedules](https://github.com/natanayalo/code-agent/issues/453) | Complete | Read-only health summaries and bounded operational evidence schedules with idempotency, cancellation, recovery, and terminal evidence. |
-| 5 | [M31-5: Schedule request and management UX](https://github.com/natanayalo/code-agent/issues/454) | In progress | Merge the structured dashboard creation and [request design](schedule_request_design.md); management is a separate follow-up and natural-language input is deferred. |
-| 6 | Dashboard schedule management controls | Planned | Scope and implement pause, resume, and trigger controls separately, with the coverage in the request design. |
+| 6 | [Dashboard schedule management controls](https://github.com/natanayalo/code-agent/issues/469) | Planned | Implement pause, resume, and trigger controls separately, with the coverage in the request design. |
 
 M31-3 defines acknowledgment as an auditable action for one degraded transition.
 It cancels pending degraded retries on Telegram and webhook, preserves recovery
@@ -69,8 +68,9 @@ Health-summary and evidence-collection schedules extend the structured schedule 
 `dependency_review`. The health-summary slice shipped in [PR #466](https://github.com/natanayalo/code-agent/pull/466),
 and evidence collection in [PR #467](https://github.com/natanayalo/code-agent/pull/467).
 Create/pause/resume/trigger APIs exist; the dashboard supports structured,
-paused creation and schedule visibility. Dashboard management controls remain
-planned; natural-language interpretation is deferred. Scheduled mutation remains disabled.
+paused creation and schedule visibility ([PR #468](https://github.com/natanayalo/code-agent/pull/468)).
+Dashboard management controls remain planned; natural-language interpretation
+is deferred. Scheduled mutation remains disabled.
 
 M31 closes when every supported degraded scenario has actionable degradation and
 recovery evidence, notification failure is inspectable without blocking task

@@ -62,7 +62,7 @@ lifecycle. They introduce neither a second scheduler nor unattended mutable
 work. Each slice updates operator documentation when shipped; the parent
 [M31-5 issue](https://github.com/natanayalo/code-agent/issues/454) covers the
 design and structured creation; management is a separate follow-up and
-natural-language input is deferred. Close M31-5 when its PR is merged.
+natural-language input is deferred.
 
 ## Acceptance and verification for implementation
 
