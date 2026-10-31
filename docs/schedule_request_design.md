@@ -51,7 +51,7 @@ requires a new ID.
    trigger can run while paused; require an explicit action for each operation.
    On errors or uncertain responses, retain the visible context, report the
    outcome as unknown where appropriate, and refresh before another action.
-3. **Natural-language requests:** allow a dashboard request to propose only the
+3. **Natural-language requests (deferred):** a future dashboard request may propose only the
    existing structured fields and purposes. Ask for missing or ambiguous values,
    preserve the operator's explicit timezone and intent, and route the proposal
    through the same editable review and explicit create action. Interpretation
@@ -60,8 +60,9 @@ requires a new ID.
 All slices retain the existing read-only scheduled purposes and Temporal
 lifecycle. They introduce neither a second scheduler nor unattended mutable
 work. Each slice updates operator documentation when shipped; the parent
-[M31-5 issue](https://github.com/natanayalo/code-agent/issues/454) remains open
-until its implementation acceptance criteria are met.
+[M31-5 issue](https://github.com/natanayalo/code-agent/issues/454) covers the
+design and structured creation; management is a separate follow-up and
+natural-language input is deferred. Close M31-5 when its PR is merged.
 
 ## Acceptance and verification for implementation
 
