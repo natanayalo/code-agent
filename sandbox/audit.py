@@ -85,9 +85,11 @@ def run_git_command(
     )
 
 
-def create_artifact_directory(workspace: WorkspaceHandle) -> Path:
+def create_artifact_directory(
+    workspace: WorkspaceHandle, *, artifact_root: Path | None = None
+) -> Path:
     """Create a unique artifact directory for one sandbox command result."""
-    artifact_dir = workspace.workspace_path / _ARTIFACT_ROOT_DIR
+    artifact_dir = artifact_root or workspace.workspace_path / _ARTIFACT_ROOT_DIR
     artifact_dir = artifact_dir / f"{_ARTIFACT_RUN_DIR_PREFIX}{uuid4().hex[:8]}"
     artifact_dir.mkdir(parents=True, exist_ok=False)
     return artifact_dir
@@ -107,7 +109,11 @@ def write_text_artifact(
     artifact_path.write_text(content, encoding="utf-8")
     return SandboxArtifact(
         name=filename,
-        uri=str(artifact_path.relative_to(workspace.workspace_path)),
+        uri=str(
+            artifact_path.relative_to(workspace.workspace_path)
+            if artifact_path.is_relative_to(workspace.workspace_path)
+            else artifact_path
+        ),
         artifact_type=artifact_type,
         artifact_metadata=artifact_metadata or {},
     )
@@ -281,9 +287,10 @@ def capture_audit_artifacts(
     stderr: str,
     exit_code: int,
     redactor: SecretRedactor | None = None,
+    artifact_root: Path | None = None,
 ) -> tuple[list[str], list[SandboxArtifact]]:
     """Persist command artifacts and snapshot workspace changes."""
-    artifact_dir = create_artifact_directory(workspace)
+    artifact_dir = create_artifact_directory(workspace, artifact_root=artifact_root)
     artifacts = [
         write_text_artifact(
             workspace,

@@ -197,7 +197,7 @@ def test_container_manager_start_reconnect_and_stop(
 
     manager = DockerSandboxContainerManager(command_runner=fake_runner)
     request = DockerSandboxContainerRequest(
-        workspace=workspace, scratch_namespace=scratch_namespace
+        workspace=workspace, scratch_namespace=scratch_namespace, read_only_workspace=True
     )
 
     container = manager.start(request)
@@ -206,6 +206,8 @@ def test_container_manager_start_reconnect_and_stop(
 
     assert container == reconnected
     assert container.container_name == build_container_name(workspace, scratch_namespace)
+    assert container.read_only_workspace
+    assert container.scratch_namespace == scratch_namespace
     assert calls == [
         (
             _build_docker_container_run_command(

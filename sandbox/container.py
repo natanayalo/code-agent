@@ -60,6 +60,8 @@ class DockerSandboxContainer(SandboxModel):
     network_enabled: bool = False
     memory_limit: str | None = "1g"
     cpu_limit: float | None = 1.0
+    read_only_workspace: bool = False
+    scratch_namespace: str | None = None
 
 
 class DockerSandboxContainerError(RuntimeError):
@@ -345,6 +347,8 @@ class DockerSandboxContainerManager:
             network_enabled=request.network_enabled,
             memory_limit=request.memory_limit,
             cpu_limit=request.cpu_limit,
+            read_only_workspace=request.read_only_workspace,
+            scratch_namespace=request.scratch_namespace,
         )
 
     def reconnect(self, container: DockerSandboxContainer) -> DockerSandboxContainer:
