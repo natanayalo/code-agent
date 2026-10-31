@@ -162,6 +162,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Dependencies
 
+- Chore(deps): bump certifi from 2026.2.25 to 2026.10.18 ([#435](https://github.com/natanayalo/code-agent/pull/435))
+
 - Chore(deps-dev): bump vite from 8.0.16 to 8.3.5 in /dashboard ([#427](https://github.com/natanayalo/code-agent/pull/427))
 
 - Chore(deps-dev): bump virtualenv from 21.2.4 to 21.14.13 ([#431](https://github.com/natanayalo/code-agent/pull/431))
