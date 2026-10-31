@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
@@ -25,7 +25,7 @@ const schedule: DependencyReviewScheduleSnapshot = {
 
 function mount(onOpenTask = vi.fn()) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return { ...render(<QueryClientProvider client={client}><MemoryRouter><ScheduleVisibilitySection onOpenTask={onOpenTask} /></MemoryRouter></QueryClientProvider>), onOpenTask };
+  return { ...render(<QueryClientProvider client={client}><MemoryRouter><ScheduleVisibilitySection onOpenTask={onOpenTask} /></MemoryRouter></QueryClientProvider>), onOpenTask, client };
 }
 
 describe('ScheduleVisibilitySection', () => {
@@ -132,7 +132,7 @@ describe('ScheduleVisibilitySection', () => {
     vi.mocked(api.manageSchedule).mockReturnValueOnce(new Promise((resolve) => { resolveOperation = resolve; }));
     mount();
     fireEvent.click(await screen.findByRole('button', { name: 'Resume' }));
-    expect(screen.getByRole('button', { name: 'Trigger now' })).toBeDisabled();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Trigger now' })).toBeDisabled());
     vi.mocked(api.listDependencyReviewSchedules).mockResolvedValue([{ ...schedule, paused: false }]);
     resolveOperation({ ...schedule, paused: false });
     expect(await screen.findByRole('button', { name: 'Pause' })).toBeEnabled();
@@ -178,4 +178,87 @@ describe('ScheduleVisibilitySection', () => {
     expect(screen.getByRole('button', { name: 'Pause' })).toBeDisabled();
   });
 
+  it('does not overwrite another schedule when overlapping refreshes finish out of order', async () => {
+    const other = { ...schedule, id: 'other' };
+    const active = { ...other, paused: false };
+    vi.mocked(api.listDependencyReviewSchedules).mockResolvedValueOnce([schedule, other]);
+    let finishFirstRuns!: (value: ScheduledTaskSnapshot[]) => void;
+    let projectRuns = 0;
+    vi.mocked(api.listScheduledTasks).mockImplementation((id) => id === 'project' && ++projectRuns > 1
+      ? new Promise((resolve) => { finishFirstRuns = resolve; }) : Promise.resolve([]));
+    vi.mocked(api.manageSchedule).mockImplementation((id) => Promise.resolve(id === 'other' ? active : schedule));
+    vi.mocked(api.listDependencyReviewSchedules).mockResolvedValueOnce([schedule, other]).mockResolvedValueOnce([schedule, active]);
+    mount();
+    const firstCard = (await screen.findByRole('heading', { name: 'dependency review · project' })).closest('article')!;
+    const secondCard = screen.getByRole('heading', { name: 'dependency review · other' }).closest('article')!;
+    fireEvent.click(within(firstCard).getByRole('button', { name: 'Trigger now' }));
+    await waitFor(() => expect(finishFirstRuns).toBeDefined());
+    fireEvent.click(within(secondCard).getByRole('button', { name: 'Resume' }));
+    await waitFor(() => expect(within(secondCard).getByRole('button', { name: 'Pause' })).toBeEnabled());
+    await act(async () => finishFirstRuns([]));
+    expect(within(secondCard).getByRole('button', { name: 'Pause' })).toBeEnabled();
+  });
+
+  it('retains an unknown outcome across navigation until recovery succeeds', async () => {
+    vi.mocked(api.listDependencyReviewSchedules).mockResolvedValue([schedule]);
+    vi.mocked(api.listScheduledTasks).mockResolvedValue([]);
+    vi.mocked(api.manageSchedule).mockRejectedValueOnce(new Error('response lost'));
+    const { unmount, client } = mount();
+    fireEvent.click(await screen.findByRole('button', { name: 'Trigger now' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('outcome is unknown');
+    unmount();
+    render(<QueryClientProvider client={client}><MemoryRouter><ScheduleVisibilitySection onOpenTask={vi.fn()} /></MemoryRouter></QueryClientProvider>);
+    expect(await screen.findByRole('alert')).toHaveTextContent('outcome is unknown');
+    expect(screen.getByRole('button', { name: 'Trigger now' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh schedule and runs' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Trigger now' })).toBeEnabled());
+  });
+
+  it('discards a list request that began before an operation completed', async () => {
+    let finishOldList!: (value: DependencyReviewScheduleSnapshot[]) => void;
+    vi.mocked(api.listDependencyReviewSchedules).mockResolvedValueOnce([schedule])
+      .mockReturnValueOnce(new Promise((resolve) => { finishOldList = resolve; }))
+      .mockResolvedValue([{ ...schedule, paused: false }]);
+    vi.mocked(api.listScheduledTasks).mockResolvedValue([]);
+    let finishOperation!: (value: DependencyReviewScheduleSnapshot) => void;
+    vi.mocked(api.manageSchedule).mockReturnValue(new Promise((resolve) => { finishOperation = resolve; }));
+    const { client } = mount();
+    fireEvent.click(await screen.findByRole('button', { name: 'Resume' }));
+    // Start a background list request before the operation response is applied.
+    await act(async () => { void client.refetchQueries({ queryKey: ['dependency-review-schedules'] }); });
+    await waitFor(() => expect(finishOldList).toBeDefined());
+    await act(async () => finishOperation({ ...schedule, paused: false }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Pause' })).toBeEnabled());
+    await act(async () => finishOldList([schedule]));
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeEnabled();
+  });
+
+  it('shows a failed background refresh and blocks controls until the list is refreshed', async () => {
+    vi.mocked(api.listDependencyReviewSchedules).mockResolvedValueOnce([schedule]).mockRejectedValueOnce(new Error('offline'));
+    vi.mocked(api.listScheduledTasks).mockResolvedValue([]);
+    const { client } = mount();
+    expect(await screen.findByRole('button', { name: 'Resume' })).toBeEnabled();
+    await act(async () => { await client.refetchQueries({ queryKey: ['dependency-review-schedules'] }); });
+    expect(await screen.findByRole('alert')).toHaveTextContent('Schedule refresh failed: offline');
+    expect(screen.getByRole('button', { name: 'Resume' })).toBeDisabled();
+    vi.mocked(api.listDependencyReviewSchedules).mockResolvedValue([{ ...schedule, paused: false }]);
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh schedules' }));
+    expect(await screen.findByRole('button', { name: 'Pause' })).toBeEnabled();
+  });
+
+  it('does not clear a list refresh error when a single card is recovered', async () => {
+    vi.mocked(api.listDependencyReviewSchedules).mockResolvedValue([schedule]);
+    vi.mocked(api.listScheduledTasks).mockResolvedValue([]);
+    vi.mocked(api.manageSchedule).mockRejectedValueOnce(new Error('response lost'));
+    const { client } = mount();
+    fireEvent.click(await screen.findByRole('button', { name: 'Trigger now' }));
+    expect(await screen.findByText(/outcome is unknown/)).toBeInTheDocument();
+    vi.mocked(api.listDependencyReviewSchedules).mockRejectedValueOnce(new Error('offline'));
+    await act(async () => { await client.refetchQueries({ queryKey: ['dependency-review-schedules'] }); });
+    expect(await screen.findByText(/Schedule refresh failed: offline/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh schedule and runs' }));
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Schedule and runs refreshed'));
+    expect(screen.getByText(/Schedule refresh failed: offline/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Resume' })).toBeDisabled();
+  });
 });
