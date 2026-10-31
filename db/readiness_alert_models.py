@@ -22,6 +22,21 @@ class ReadinessAlertState(TimestampMixin, Base):
     last_checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class ReadinessAlertAcknowledgment(TimestampMixin, Base):
+    """Auditable operator acknowledgment for one degraded transition."""
+
+    __tablename__ = "readiness_alert_acknowledgments"
+    __table_args__ = (
+        UniqueConstraint("reason", "transition_number", name="uq_readiness_ack_incident"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    reason: Mapped[str] = mapped_column(String(80), nullable=False)
+    transition_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    acknowledged_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    acknowledged_by: Mapped[str] = mapped_column(String(80), nullable=False)
+
+
 class ReadinessAlertDelivery(TimestampMixin, Base):
     """One durable Telegram delivery for a readiness state transition."""
 

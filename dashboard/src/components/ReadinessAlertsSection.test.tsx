@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../services/api';
@@ -7,6 +7,7 @@ import { ReadinessAlertsSection } from './ReadinessAlertsSection';
 vi.mock('../services/api', () => ({ api: {
   listReadinessAlertStates: vi.fn(),
   listReadinessAlertDeliveries: vi.fn(),
+  acknowledgeReadinessIncident: vi.fn(),
 } }));
 
 function mount() {
@@ -21,6 +22,22 @@ describe('ReadinessAlertsSection', () => {
     mount();
     expect(await screen.findByText(/worker worker-id · codex · credentials/)).toBeInTheDocument();
     expect(screen.getByText('Next action: Check credentials.')).toBeInTheDocument();
+  });
+
+  it('acknowledges only the active incident and refreshes its state', async () => {
+    const active = { reason: 'interaction_wait_stuck', task_id: 'task-42', acknowledgment_reason: 'interaction_wait_stuck|task-42', degraded: true, transition_number: 3, last_transition_at: '2026-10-27T12:00:00Z', last_checked_at: '2026-10-27T12:01:00Z' };
+    vi.mocked(api.listReadinessAlertStates).mockResolvedValueOnce([active]).mockResolvedValue([
+      { ...active, acknowledged_at: '2026-10-27T12:02:00Z', acknowledged_by: 'operator' },
+    ]);
+    vi.mocked(api.listReadinessAlertDeliveries).mockResolvedValue([]);
+    vi.mocked(api.acknowledgeReadinessIncident).mockResolvedValue({ reason: active.acknowledgment_reason, transition_number: 3, acknowledged_at: '2026-10-27T12:02:00Z', acknowledged_by: 'operator' });
+    mount();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Acknowledge' }));
+
+    await waitFor(() => expect(api.acknowledgeReadinessIncident).toHaveBeenCalledWith('interaction_wait_stuck|task-42', 3));
+    expect(await screen.findByText(/Acknowledged by operator:/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Acknowledge' })).not.toBeInTheDocument();
   });
   beforeEach(() => vi.clearAllMocks());
 

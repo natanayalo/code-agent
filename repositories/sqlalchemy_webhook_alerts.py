@@ -6,6 +6,7 @@ from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session, aliased
 
 from db.base import generate_uuid, utc_now
+from db.readiness_alert_models import ReadinessAlertAcknowledgment
 from db.webhook_alert_models import WebhookAlertDelivery as Delivery
 from repositories.sqlalchemy_readiness_alerts import DELIVERY_LEASE_SECONDS, MAX_DELIVERY_ATTEMPTS
 
@@ -87,6 +88,15 @@ class WebhookAlertRepository:
             item.last_failure_code = None
             return
         item.last_failure_code = "webhook_request_failed"
+        acknowledged = self.session.scalar(
+            select(ReadinessAlertAcknowledgment.id).where(
+                ReadinessAlertAcknowledgment.reason == item.reason,
+                ReadinessAlertAcknowledgment.transition_number == item.transition_number,
+            )
+        )
+        if acknowledged is not None:
+            item.status = "suppressed"
+            return
         retryable = status is None or status in (408, 429) or 500 <= status < 600
         if not retryable or item.attempts >= MAX_DELIVERY_ATTEMPTS:
             item.status = "failed"

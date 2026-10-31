@@ -1170,5 +1170,9 @@ class EphemeralSecret(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
 # Keep operational readiness alert tables in a focused module while registering
 # them on Base.metadata for create_all and Alembic autogeneration.
-from db.readiness_alert_models import ReadinessAlertDelivery, ReadinessAlertState  # noqa: E402,F401
+from db.readiness_alert_models import (  # noqa: E402,F401
+    ReadinessAlertAcknowledgment,
+    ReadinessAlertDelivery,
+    ReadinessAlertState,
+)
 from db.webhook_alert_models import WebhookAlertDelivery  # noqa: E402,F401

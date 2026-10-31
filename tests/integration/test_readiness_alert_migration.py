@@ -98,3 +98,37 @@ def test_webhook_migration_preserves_telegram_and_downgrades(tmp_path: Path) -> 
             connection.execute(text("SELECT id FROM readiness_alert_deliveries")).scalar_one()
             == "telegram"
         )
+
+
+def test_acknowledgment_migration_upgrades_and_persists_audit_evidence(tmp_path: Path) -> None:
+    db_path = tmp_path / "readiness_acknowledgment.db"
+    config = Config(str(Path("alembic.ini").resolve()))
+    config.set_main_option("script_location", str(Path("db/migrations").resolve()))
+    config.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
+    command.upgrade(config, "head")
+
+    engine = create_engine(f"sqlite:///{db_path}")
+    inspector = inspect(engine)
+    assert "readiness_alert_acknowledgments" in inspector.get_table_names()
+    assert inspector.get_unique_constraints("readiness_alert_acknowledgments")[0][
+        "column_names"
+    ] == [
+        "reason",
+        "transition_number",
+    ]
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO readiness_alert_acknowledgments "
+                "(id, reason, transition_number, acknowledged_at, acknowledged_by, "
+                "created_at, updated_at) VALUES "
+                "('ack-1', 'temporal_unavailable', 3, CURRENT_TIMESTAMP, 'operator', "
+                "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+            )
+        )
+        assert (
+            connection.execute(
+                text("SELECT acknowledged_by FROM readiness_alert_acknowledgments WHERE id='ack-1'")
+            ).scalar_one()
+            == "operator"
+        )
