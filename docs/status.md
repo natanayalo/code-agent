@@ -55,7 +55,7 @@ M31-1, M31-2, and M31-3 were completed in [PR #459](https://github.com/natanayal
 | --- | --- | --- | --- |
 | 3 | [M31-3: Operator acknowledgment](https://github.com/natanayalo/code-agent/issues/452) | Complete | Authenticated acknowledgment distinct from observed recovery; auditable recurrence semantics and tested dashboard/API controls. |
 | 4 | [M31-4: Health-summary and evidence schedules](https://github.com/natanayalo/code-agent/issues/453) | Complete | Read-only health summaries and bounded operational evidence schedules with idempotency, cancellation, recovery, and terminal evidence. |
-| 5 | [M31-5: Schedule request and management UX](https://github.com/natanayalo/code-agent/issues/454) | Planned | Select the first request surface; preserve explicit intent and timezone; split natural-language input and dashboard controls into bounded slices. |
+| 6 | [Dashboard schedule management controls](https://github.com/natanayalo/code-agent/issues/469) | Planned | Implement pause, resume, and trigger controls separately, with the coverage in the request design. |
 
 M31-3 defines acknowledgment as an auditable action for one degraded transition.
 It cancels pending degraded retries on Telegram and webhook, preserves recovery
@@ -67,9 +67,10 @@ rollback keeps the additive migration applied unless audit evidence is exported.
 Health-summary and evidence-collection schedules extend the structured schedule API beyond
 `dependency_review`. The health-summary slice shipped in [PR #466](https://github.com/natanayalo/code-agent/pull/466),
 and evidence collection in [PR #467](https://github.com/natanayalo/code-agent/pull/467).
-Create/pause/resume/trigger APIs exist; dashboard schedule views are read-only.
-Natural-language schedule interpretation and dashboard management are planned,
-not shipped capabilities. Scheduled mutation remains disabled.
+Create/pause/resume/trigger APIs exist; the dashboard supports structured,
+paused creation and schedule visibility ([PR #468](https://github.com/natanayalo/code-agent/pull/468)).
+Dashboard management controls remain planned; natural-language interpretation
+is deferred. Scheduled mutation remains disabled.
 
 M31 closes when every supported degraded scenario has actionable degradation and
 recovery evidence, notification failure is inspectable without blocking task
@@ -120,7 +121,7 @@ Detailed historical qualification notes are in the
 
 ## Future / conditional
 
-Durable child workflows, mutable parallel execution, isolated worktree/patch
+Natural-language schedule requests, durable child workflows, mutable parallel execution, isolated worktree/patch
 reconciliation, an operator-visible agent tree, evidence-backed procedural
 skills, checkpoint UX, remote sandbox scaling, deep-scout chaining, and semantic
 retrieval remain [conditional directions](roadmap.md#future--conditional-execution-architecture).

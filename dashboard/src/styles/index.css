@@ -3135,9 +3135,26 @@ button {
 .ops-list li strong { display: flex; align-items: center; gap: var(--spacing-xs); }
 .ops-list li small, .metric-note { color: var(--color-text-muted); }
 .schedule-spec { display: grid; gap: var(--spacing-sm); }
+.schedule-create { margin-bottom: var(--spacing-md); }
+.schedule-create h3 { margin-bottom: var(--spacing-lg); font-size: 1rem; color: var(--color-text-secondary); }
+.schedule-create .schedule-history-link { margin: calc(-1 * var(--spacing-sm)) 0 var(--spacing-lg); }
+.schedule-create .trigger-form label { display: flex; flex-direction: column; gap: var(--spacing-xs); min-width: 0; }
+.schedule-create fieldset { border: 0; min-width: 0; }
+.schedule-create legend { color: var(--color-text-secondary); font-size: 0.78rem; font-weight: 700; margin-bottom: var(--spacing-xs); }
+.schedule-create .schedule-weekdays { display: flex; flex-wrap: wrap; gap: var(--spacing-md); }
+.schedule-create .schedule-weekdays label { flex-direction: row; align-items: center; text-transform: capitalize; }
+.schedule-create .schedule-weekdays input { appearance: none; display: grid; place-content: center; width: 16px; height: 16px; min-height: 16px; padding: 0; border-radius: 4px; }
+.schedule-create .schedule-weekdays input:checked { background: rgba(56, 189, 248, 0.25); border-color: #38bdf8; }
+.schedule-create .schedule-weekdays input:checked::after { content: '✓'; color: #7dd3fc; font-size: 12px; line-height: 1; }
+.schedule-create input[type='time'] { color-scheme: dark; }
+.schedule-edit-button { border: 1px solid rgba(148, 163, 184, 0.35); color: var(--color-text-secondary); }
+.schedule-navigation-link { color: #38bdf8; text-decoration: underline; text-underline-offset: 3px; }
 .schedule-spec div { display: grid; grid-template-columns: minmax(100px, 0.4fr) 1fr; gap: var(--spacing-sm); }
 .schedule-spec dt { color: var(--color-text-muted); }
 .schedule-spec dd { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 480px) {
+  .schedule-spec div { grid-template-columns: 1fr; gap: 0; }
+}
 .schedule-pagination { display: flex; align-items: center; justify-content: space-between; gap: var(--spacing-sm); margin-top: var(--spacing-md); }
 
 .metric-detail-card {

@@ -119,17 +119,20 @@ export interface ReadinessAlertDeliverySnapshot {
   created_at: string;
 }
 
+export interface ScheduleSpec {
+  version: 1;
+  purpose: 'dependency_review' | 'health_summary' | 'evidence_collection';
+  repo_key: string;
+  branch: string | null;
+  weekdays: string[];
+  time: string;
+  timezone: string;
+  evidence?: { source: 'operational_incidents'; lookback_hours: number };
+}
+
 export interface DependencyReviewScheduleSnapshot {
   id: string;
-  spec: {
-    version: number;
-    purpose: string;
-    repo_key: string;
-    branch: string | null;
-    weekdays: string[];
-    time: string;
-    timezone: string;
-  };
+  spec: ScheduleSpec;
   paused: boolean;
   next_executions: string[];
   recent_actions: Array<{

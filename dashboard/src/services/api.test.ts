@@ -1178,6 +1178,22 @@ describe('api service', () => {
       expect(mockFetch.mock.calls[1][0]).toContain('/schedules/review%2Fproject/runs?limit=20&offset=40');
     });
 
+    it('creates a schedule with its exact spec and authenticated PUT', async () => {
+      const spec = { version: 1 as const, purpose: 'dependency_review' as const, repo_key: 'project', branch: null, weekdays: ['monday'], time: '09:00', timezone: 'Asia/Jerusalem' };
+      const result = { id: 'review', spec, paused: true };
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 200, headers: new Map([['content-type', 'application/json']]), json: async () => result });
+      await expect(api.createSchedule('review', spec)).resolves.toEqual(result);
+      const [url, options] = mockFetch.mock.calls[0];
+      expect(url).toContain('/schedules/review');
+      expect(options.method).toBe('PUT');
+      expect(options.credentials).toBe('include');
+      expect(JSON.parse(options.body)).toEqual(spec);
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockFetch.mockRejectedValueOnce(new Error('offline'));
+      await expect(api.createSchedule('review', spec)).rejects.toThrow('offline');
+      warn.mockRestore();
+    });
+
     it('getSystemTools returns array and falls back to [] for non-array payloads', async () => {
       const toolsPayload = [{ name: 'shell', description: 'Shell tool' }];
       mockFetch.mockResolvedValueOnce({
