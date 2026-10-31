@@ -162,6 +162,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Dependencies
 
+- Chore(deps): bump alembic from 1.18.5 to 1.20.1 ([#393](https://github.com/natanayalo/code-agent/pull/393))
+
 - Chore(deps): bump sqlalchemy from 2.0.51 to 2.1.6 ([#396](https://github.com/natanayalo/code-agent/pull/396))
 
 - Chore(deps): bump uvicorn from 0.51.0 to 0.54.0 ([#395](https://github.com/natanayalo/code-agent/pull/395))
