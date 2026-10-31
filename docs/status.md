@@ -9,6 +9,10 @@ tracked work, not the health or activation state of a deployed instance.
 **M31 — Proactive Operations and Safe Scheduled Work** is the only active
 milestone. M25.6, M26, M28, M28.5, M29, and M30 are complete.
 
+**M32 — Code Agent Bridge** is planned next in the
+[ordered bridge plan](m32_code_agent_bridge.md). It does not activate Hermes
+access or close M31; Local-hosting M2 security readiness gates live integration.
+
 M31 already includes the qualified Temporal compatibility baseline, weekly
 read-only dependency reviews and management API, read-only operations dashboard,
 opt-in Telegram readiness alerts, task-specific stuck-interaction,
@@ -37,8 +41,9 @@ The remaining work is below.
 
 This is the canonical execution order. GitHub issues hold each slice's detailed
 scope and acceptance checklist; the roadmap holds milestone goals and boundaries.
-Only the M31 table is the default implementation queue. Maintenance, approval,
-and evidence-gated lanes do not silently replace the next M31 slice.
+M31 remains the current default implementation queue; M32 is the planned next
+milestone and can be selected explicitly by slice ID. Maintenance, approval,
+and evidence-gated lanes do not silently replace the active milestone.
 
 Status meanings: **Ready to scope** = next bounded task; **In progress** = work
 underway; **Complete** = merged and its completion condition is met;
@@ -78,11 +83,33 @@ reconciliation, and supported read-only schedules are idempotent, inspectable,
 cancellable, and leave terminal evidence. Each remaining slice must add its
 required tests and operator documentation before being marked complete.
 
+### M32 planned implementation queue
+
+Execute one focused slice/PR at a time using the
+[M32 acceptance contracts](m32_code_agent_bridge.md#ordered-execution-slices).
+M32-0's repository gate precedes synthetic bridge development; its live evidence
+and explicit activation approval must also pass before M32-5. Existing M31
+schedules do not require a new scheduler or schedule access in this bridge.
+
+| Order | Slice | Status | Completion condition |
+| --- | --- | --- | --- |
+| 0 | M32-0: M2 readiness reconciliation | Ready to scope when selected | Reconcile #430 with current master, review hardening/regression evidence, and record remaining live gates. |
+| 1 | M32-1: Scoped client tokens | Planned | Operator-only token lifecycle; expiring, revocable, repository-scoped bearer access. |
+| 2 | M32-2: Safe task observation | Planned | Versioned sanitized task views with server-side repository filtering. |
+| 3 | M32-3: Attributed task commands | Planned | Atomic, idempotent scout/coding submissions and own-client cancellation. |
+| 4 | M32-4: MCP facade | Planned | Four scope-filtered tools over authenticated private MCP with pinned-client tests. |
+| 5 | M32-5: Hermes read-only integration | Planned / approval-gated | Approved private connection; existing local Telegram chat queries allowed tasks with a read-only token. |
+| 6 | M32-6: Confirmed write activation | Planned / approval-gated | Approved scope expansion; every submit/cancel confirmed; execution approvals remain with Code Agent. |
+
+No M32 implementation or runtime activation is claimed by adding this queue.
+Create/link each issue or PR when its slice is selected; scope and acceptance
+remain in the bridge plan until then.
+
 ### Maintenance and approval lane
 
 | Item | Status | Next action |
 | --- | --- | --- |
-| [Security closeout, PR #430](https://github.com/natanayalo/code-agent/pull/430) | Draft / approval-gated | Reconcile the draft with current master; review credential-refresh and isolation evidence plus activation/rollback gates. The PR's historical dependency-alert count is not a current security assessment. |
+| [Security closeout, PR #430](https://github.com/natanayalo/code-agent/pull/430) | Draft / approval-gated | M32-0 tracks reconciliation with current master; review credential-refresh and isolation evidence plus activation/rollback gates before M32-5. The PR's historical dependency-alert count is not a current security assessment. |
 | [OPS-1: Dependency PR triage](https://github.com/natanayalo/code-agent/issues/455) | Ready to scope | Review current advisories/CI and record a disposition per update; requalify Temporal compatibility before any SDK update. |
 | [OPS-2: Required compatibility check](https://github.com/natanayalo/code-agent/issues/457) | External follow-up | Inspect current branch rules; the workflow alone does not prove enforcement. Obtain explicit approval for any setting change. |
 
