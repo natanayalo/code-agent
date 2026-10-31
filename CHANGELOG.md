@@ -162,6 +162,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Dependencies
 
+- Chore(deps): bump anyio from 4.13.0 to 4.14.2 ([#405](https://github.com/natanayalo/code-agent/pull/405))
+
 - Chore(deps): bump pyjwt from 2.13.0 to 2.15.0 ([#413](https://github.com/natanayalo/code-agent/pull/413))
 
 - Chore(deps): bump certifi from 2026.2.25 to 2026.10.18 ([#435](https://github.com/natanayalo/code-agent/pull/435))
