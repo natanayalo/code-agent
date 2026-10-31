@@ -257,3 +257,46 @@ def test_telegram_failure_does_not_block_webhook(session_factory, monkeypatch, c
     asyncio.run(monitor.run_once())
     assert len(sent) == 1
     assert "private diagnostic" not in caplog.text
+
+
+def test_slow_completion_does_not_block_event_loop(session_factory, monkeypatch):
+    from threading import Event
+
+    from repositories.sqlalchemy_webhook_alerts import WebhookAlertRepository
+
+    entered, release = Event(), Event()
+    original = WebhookAlertRepository.complete
+
+    def slow_complete(self, *args, **kwargs):
+        entered.set()
+        assert release.wait(2)
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(WebhookAlertRepository, "complete", slow_complete)
+    target = destination()
+    with session_scope(session_factory) as session:
+        ReadinessAlertRepository(
+            session, webhook_destination_id=target.destination_id
+        ).record_snapshot(["worker_unavailable"])
+    monitor = ReadinessAlertMonitor(
+        task_service=object(),
+        session_factory=session_factory,
+        telegram_client=None,
+        bot_token="",
+        chat_id="",
+        webhook_destination=target,
+        webhook_sender=lambda *_: 200,
+    )
+    item = monitor._claim_webhook()
+
+    async def exercise():
+        task = asyncio.create_task(monitor._deliver_webhook(item))
+        try:
+            assert await asyncio.to_thread(entered.wait, 1)
+            await asyncio.wait_for(asyncio.sleep(0.01), timeout=0.5)
+            assert not task.done()
+        finally:
+            release.set()
+            await task
+
+    asyncio.run(exercise())

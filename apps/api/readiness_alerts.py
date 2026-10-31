@@ -291,7 +291,6 @@ class ReadinessAlertMonitor:
 
     async def _deliver_webhook(self, item: dict[str, Any]) -> None:
         from apps.api.webhook_alerts import TIMEOUT, send_webhook
-        from repositories.sqlalchemy_webhook_alerts import WebhookAlertRepository
 
         status = None
         try:
@@ -303,6 +302,11 @@ class ReadinessAlertMonitor:
             )
         except Exception:
             logger.warning("Readiness webhook delivery failed")
+        await asyncio.to_thread(self._complete_webhook, item, status)
+
+    def _complete_webhook(self, item: dict[str, Any], status: int | None) -> None:
+        from repositories.sqlalchemy_webhook_alerts import WebhookAlertRepository
+
         with session_scope(self.session_factory) as session:
             WebhookAlertRepository(session).complete(item["id"], item["lease_owner"], status)
 
