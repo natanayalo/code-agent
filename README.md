@@ -33,7 +33,8 @@ The platform is built for one operator-first use case: reliable coding execution
 
 The authenticated schedules API creates read-only dependency reviews, service-health
 summaries, and operational evidence summaries in Temporal.
-The dashboard provides schedule visibility and structured creation with review;
+The dashboard provides structured schedule creation with review in Triggers and
+schedule visibility in Metrics;
 new schedules start paused. Pause, resume, and trigger remain available through
 the API. Planned management and natural-language controls are described in the
 [schedule request design](docs/schedule_request_design.md).

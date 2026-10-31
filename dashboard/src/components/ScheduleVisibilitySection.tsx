@@ -2,7 +2,7 @@ import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../services/api';
 import { DependencyReviewScheduleSnapshot } from '../types/metrics';
-import { ScheduleCreateForm } from './ScheduleCreateForm';
+import { Link } from 'react-router-dom';
 
 const PAGE_SIZE = 20;
 
@@ -59,7 +59,7 @@ export function ScheduleVisibilitySection({ onOpenTask }: { onOpenTask: (taskId:
   const schedules = useQuery({ queryKey: ['dependency-review-schedules'], queryFn: api.listDependencyReviewSchedules, refetchInterval: 60000 });
   return <section className="metrics-page" aria-labelledby="schedule-visibility-heading">
     <div className="page-header"><h2 id="schedule-visibility-heading">Read-only schedules</h2><p className="page-subtitle">Schedule configuration and execution history</p></div>
-    <ScheduleCreateForm />
+    <p className="metric-note"><Link className="schedule-navigation-link" to="/triggers?tab=schedule">Create a schedule in Triggers</Link></p>
     {schedules.isLoading ? <p>Loading schedules…</p> : schedules.error ? <p role="alert">Schedule data unavailable: {(schedules.error as Error).message}</p> : <>
       <p className="metric-note">Schedule list last checked: {date(schedules.dataUpdatedAt ? new Date(schedules.dataUpdatedAt).toISOString() : null)}</p>
       {schedules.data?.length ? <div className="metrics-details-grid">{schedules.data.map((schedule) => <ScheduleCard key={schedule.id} schedule={schedule} onOpenTask={onOpenTask} />)}</div> : <p>No dependency review schedules are configured.</p>}

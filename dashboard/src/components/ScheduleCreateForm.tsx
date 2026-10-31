@@ -2,6 +2,7 @@ import React from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError } from '../services/api';
 import { ScheduleSpec } from '../types/metrics';
+import { Link } from 'react-router-dom';
 
 const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 
@@ -35,6 +36,7 @@ export function ScheduleCreateForm() {
   }
   return <div className="trigger-panel schedule-create">
     <h3>Create a schedule</h3>
+    <p className="metric-note schedule-history-link"><Link className="schedule-navigation-link" to="/metrics">View schedules in Metrics</Link></p>
     {!review ? <form className="trigger-form" onSubmit={submit}>
       <div className="trigger-form-row">
       <label>Schedule ID <input required maxLength={200} pattern="[A-Za-z0-9_.-]+" value={id} onChange={(e) => setId(e.target.value)} /></label>
@@ -64,8 +66,8 @@ export function ScheduleCreateForm() {
         {spec.evidence ? <div><dt>Evidence</dt><dd>Operational incidents · {lookback} hours</dd></div> : null}
       </dl>
       <p>New schedules are created paused. Activation is a separate action.</p>
-      {mutation.error ? <p role="alert">{mutation.error instanceof ApiError && mutation.error.status === 409 ? 'This schedule ID conflicts with an existing specification. Choose a different ID.' : mutation.error instanceof ApiError && [400, 422].includes(mutation.error.status) ? `Invalid request: ${mutation.error.message}` : 'The outcome is unknown. Refresh the schedule list or retry this same request.'}</p> : null}
-      {mutation.data ? <p role="status">Schedule {mutation.data.id} returned as {mutation.data.paused ? 'paused' : 'active'}. Check its details below.</p> : null}
+      {mutation.error ? <p role="alert">{mutation.error instanceof ApiError && mutation.error.status === 409 ? 'This schedule ID conflicts with an existing specification. Choose a different ID.' : mutation.error instanceof ApiError && [400, 422].includes(mutation.error.status) ? `Invalid request: ${mutation.error.message}` : 'The outcome is unknown. Check the schedule list or retry this same request.'}</p> : null}
+      {mutation.data ? <p role="status">Schedule {mutation.data.id} returned as {mutation.data.paused ? 'paused' : 'active'}.</p> : null}
       <div className="trigger-actions-footer"><button className="button schedule-edit-button" type="button" disabled={mutation.isPending} onClick={() => { setReview(false); mutation.reset(); }}>Edit</button>
       <button className="button button-success" type="button" disabled={mutation.isPending || Boolean(mutation.data)} onClick={() => mutation.mutate(spec)}>{mutation.isPending ? 'Creating…' : 'Create schedule'}</button></div>
     </div>}

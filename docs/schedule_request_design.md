@@ -3,7 +3,7 @@
 This is the M31-5 design and implementation sequence. The
 dashboard is the first request surface because it already shows authenticated
 schedule details and run history. Structured creation is implemented in the
-dashboard; management remains available through the
+dashboard's Triggers page, while schedule history remains in Metrics; management remains available through the
 [authenticated API](../README.md#read-only-schedules). Telegram schedule
 requests remain future work.
 

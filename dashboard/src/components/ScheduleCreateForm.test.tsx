@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
 import { api, ApiError } from '../services/api';
 import { ScheduleCreateForm } from './ScheduleCreateForm';
 
@@ -11,7 +12,7 @@ vi.mock('../services/api', async (importOriginal) => {
 
 function mount() {
   const client = new QueryClient({ defaultOptions: { mutations: { retry: false }, queries: { retry: false } } });
-  render(<QueryClientProvider client={client}><ScheduleCreateForm /></QueryClientProvider>);
+  render(<QueryClientProvider client={client}><MemoryRouter><ScheduleCreateForm /></MemoryRouter></QueryClientProvider>);
 }
 function fill() {
   fireEvent.change(screen.getByLabelText('Schedule ID'), { target: { value: 'weekly' } });
@@ -36,6 +37,7 @@ describe('ScheduleCreateForm', () => {
     expect(api.createSchedule).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Create schedule' }));
     expect(await screen.findByRole('status')).toHaveTextContent('active');
+    expect(screen.getByRole('link', { name: 'View schedules in Metrics' })).toHaveAttribute('href', '/metrics');
     expect(api.createSchedule).toHaveBeenCalledWith('weekly', { version: 1, purpose: 'evidence_collection', repo_key: 'project', branch: null, weekdays: ['monday'], time: '09:00', timezone: 'Asia/Jerusalem', evidence: { source: 'operational_incidents', lookback_hours: 48 } });
   });
 

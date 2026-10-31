@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
 import { api } from '../services/api';
 import { DependencyReviewScheduleSnapshot, ScheduledTaskSnapshot } from '../types/metrics';
 import { TaskStatus } from '../types/task';
@@ -23,7 +24,7 @@ const schedule: DependencyReviewScheduleSnapshot = {
 
 function mount(onOpenTask = vi.fn()) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return { ...render(<QueryClientProvider client={client}><ScheduleVisibilitySection onOpenTask={onOpenTask} /></QueryClientProvider>), onOpenTask };
+  return { ...render(<QueryClientProvider client={client}><MemoryRouter><ScheduleVisibilitySection onOpenTask={onOpenTask} /></MemoryRouter></QueryClientProvider>), onOpenTask };
 }
 
 describe('ScheduleVisibilitySection', () => {
@@ -35,7 +36,7 @@ describe('ScheduleVisibilitySection', () => {
     expect(screen.getByText('Loading schedules…')).toBeInTheDocument();
     vi.mocked(api.listDependencyReviewSchedules).mockRejectedValueOnce(new Error('Temporal unavailable'));
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(<QueryClientProvider client={client}><ScheduleVisibilitySection onOpenTask={vi.fn()} /></QueryClientProvider>);
+    render(<QueryClientProvider client={client}><MemoryRouter><ScheduleVisibilitySection onOpenTask={vi.fn()} /></MemoryRouter></QueryClientProvider>);
     expect(await screen.findByRole('alert')).toHaveTextContent('Temporal unavailable');
   });
 
@@ -43,6 +44,8 @@ describe('ScheduleVisibilitySection', () => {
     vi.mocked(api.listDependencyReviewSchedules).mockResolvedValue([]);
     mount();
     expect(await screen.findByText('No dependency review schedules are configured.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Create a schedule in Triggers' })).toHaveAttribute('href', '/triggers?tab=schedule');
+    expect(screen.queryByLabelText('Schedule ID')).not.toBeInTheDocument();
   });
 
   it('shows schedule details, expired history, pagination, and opens a submitted task', async () => {

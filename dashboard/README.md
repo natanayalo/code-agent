@@ -14,8 +14,9 @@ recent Temporal outcomes, skipped/missed counts, and paginated submitted tasks.
 Each source refreshes independently and displays its own loading, error, and
 last-checked state; expired Temporal history is presented as an unavailable
 outcome. Submitted tasks open in the existing task detail panel. These views
-include structured creation with review; new schedules start paused. Pause,
-resume, and trigger remain available through the authenticated API.
+remain read-only. The Triggers page provides structured schedule creation with
+review; new schedules start paused. Pause, resume, and trigger remain available
+through the authenticated API.
 
 ## Tech Stack
 
