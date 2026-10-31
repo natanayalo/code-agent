@@ -1151,6 +1151,23 @@ describe('api service', () => {
       expect(mockFetch.mock.calls[0][1].credentials).toBe('include');
     });
 
+    it('posts an incident-scoped readiness acknowledgment', async () => {
+      const acknowledgment = { reason: 'temporal_unavailable', transition_number: 3, acknowledged_at: '2026-10-27T12:00:00Z', acknowledged_by: 'operator' };
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Map([['content-type', 'application/json']]),
+        json: async () => acknowledgment,
+      });
+
+      await expect(api.acknowledgeReadinessIncident('temporal_unavailable', 3)).resolves.toEqual(acknowledgment);
+      const [url, options] = mockFetch.mock.calls[0];
+      expect(url).toContain('/alerts/readiness/acknowledgments');
+      expect(options.method).toBe('POST');
+      expect(JSON.parse(options.body)).toEqual({ reason: 'temporal_unavailable', transition_number: 3 });
+      expect(options.credentials).toBe('include');
+    });
+
     it('reads schedules and paginated scheduled tasks, normalizing unexpected empty payloads', async () => {
       mockFetch
         .mockResolvedValueOnce({ ok: true, status: 200, headers: new Map([['content-type', 'application/json']]), json: async () => [] })

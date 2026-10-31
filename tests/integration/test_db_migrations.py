@@ -37,6 +37,7 @@ EXPECTED_TABLES = {
     "readiness_alert_states",
     "readiness_alert_deliveries",
     "webhook_alert_deliveries",
+    "readiness_alert_acknowledgments",
 }
 
 EXPECTED_CHECK_CONSTRAINTS = {

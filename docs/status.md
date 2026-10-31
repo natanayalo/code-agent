@@ -51,13 +51,16 @@ and [PR #461](https://github.com/natanayalo/code-agent/pull/461), respectively.
 
 | Order | Slice | Status | Completion condition |
 | --- | --- | --- | --- |
-| 3 | [M31-3: Operator acknowledgment](https://github.com/natanayalo/code-agent/issues/452) | Planned | Authenticated acknowledgment distinct from observed recovery; auditable recurrence semantics and tested dashboard/API controls. |
+| 3 | [M31-3: Operator acknowledgment](https://github.com/natanayalo/code-agent/issues/452) | In progress | Authenticated acknowledgment distinct from observed recovery; auditable recurrence semantics and tested dashboard/API controls. |
 | 4 | [M31-4: Health-summary and evidence schedules](https://github.com/natanayalo/code-agent/issues/453) | Planned | Define both purposes; implement one purpose per PR, starting with health summaries; prove idempotency, cancellation, recovery, and terminal evidence. |
 | 5 | [M31-5: Schedule request and management UX](https://github.com/natanayalo/code-agent/issues/454) | Planned | Select the first request surface; preserve explicit intent and timezone; split natural-language input and dashboard controls into bounded slices. |
 
-Before M31-3 implementation, define whether acknowledgment affects delivery and
-how a new incident resets it. The first slice should establish those semantics
-and deliver the authenticated control with its required operator-flow coverage.
+M31-3 defines acknowledgment as an auditable action for one degraded transition.
+It cancels pending degraded retries on Telegram and webhook, preserves recovery
+notifications and delivery evidence, and leaves sends already in flight alone.
+Recovery ends the incident; each later degraded transition starts unacknowledged.
+The API and dashboard use the existing authenticated single-operator identity;
+rollback keeps the additive migration applied unless audit evidence is exported.
 
 Current scheduling supports only `dependency_review` via a structured API.
 Create/pause/resume/trigger APIs exist; dashboard schedule views are read-only.

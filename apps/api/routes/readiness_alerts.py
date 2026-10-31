@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select
+from sqlalchemy import select, tuple_
 from sqlalchemy.orm import Session, sessionmaker
 
 from apps.api.dependencies import require_any_valid_auth
+from db.readiness_alert_models import ReadinessAlertAcknowledgment
 from db.webhook_alert_models import WebhookAlertDelivery
 from orchestrator.provider_observations import ACTIONS, alert_identity
 from repositories import ReadinessAlertRepository, session_scope
@@ -18,6 +19,7 @@ from repositories.sqlalchemy_readiness_alerts import (
     INTERACTION_REASON_PREFIX,
     OUTBOX_STALE_REASON_PREFIX,
     TERMINAL_RECONCILIATION_REASON_PREFIX,
+    StaleReadinessIncidentError,
 )
 
 router = APIRouter(
@@ -42,6 +44,21 @@ class ReadinessAlertStateResponse(BaseModel):
     transition_number: int
     last_transition_at: datetime
     last_checked_at: datetime
+    acknowledgment_reason: str | None = None
+    acknowledged_at: datetime | None = None
+    acknowledged_by: str | None = None
+
+
+class AcknowledgeReadinessIncidentRequest(BaseModel):
+    reason: str
+    transition_number: int
+
+
+class ReadinessAlertAcknowledgmentResponse(BaseModel):
+    reason: str
+    transition_number: int
+    acknowledged_at: datetime
+    acknowledged_by: str
 
 
 class ReadinessAlertDeliveryResponse(BaseModel):
@@ -80,6 +97,11 @@ def _session_factory(request: Request) -> sessionmaker[Session]:
     return cast(sessionmaker[Session], factory)
 
 
+def _utc_response_time(value: datetime) -> datetime:
+    """Keep UTC timestamps stable when SQLite returns naive datetime values."""
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value
+
+
 def _public_alert_identity(reason: str) -> tuple[str, str | None]:
     if reason.startswith(INTERACTION_REASON_PREFIX):
         return "interaction_wait_stuck", reason.removeprefix(INTERACTION_REASON_PREFIX)
@@ -115,12 +137,81 @@ def get_readiness_alert_states(request: Request) -> list[ReadinessAlertStateResp
     factory = _session_factory(request)
     with session_scope(factory) as session:
         states = ReadinessAlertRepository(session).list_states()
-        return [
-            ReadinessAlertStateResponse.model_validate(item).model_copy(
-                update=_public_fields(item.reason)
+        acknowledgment_numbers = [
+            (
+                item.reason,
+                item.transition_number if item.degraded else item.transition_number - 1,
             )
             for item in states
         ]
+        acknowledgments = (
+            {
+                (item.reason, item.transition_number): item
+                for item in session.scalars(
+                    select(ReadinessAlertAcknowledgment).where(
+                        tuple_(
+                            ReadinessAlertAcknowledgment.reason,
+                            ReadinessAlertAcknowledgment.transition_number,
+                        ).in_(acknowledgment_numbers)
+                    )
+                ).all()
+            }
+            if acknowledgment_numbers
+            else {}
+        )
+        return [
+            ReadinessAlertStateResponse.model_validate(item).model_copy(
+                update={
+                    **_public_fields(item.reason),
+                    "acknowledgment_reason": item.reason,
+                    **(
+                        {
+                            "acknowledged_at": _utc_response_time(acknowledgment.acknowledged_at),
+                            "acknowledged_by": acknowledgment.acknowledged_by,
+                        }
+                        if (
+                            acknowledgment := acknowledgments.get(
+                                (
+                                    item.reason,
+                                    item.transition_number
+                                    if item.degraded
+                                    else item.transition_number - 1,
+                                )
+                            )
+                        )
+                        else {"acknowledged_at": None, "acknowledged_by": None}
+                    ),
+                }
+            )
+            for item in states
+        ]
+
+
+@router.post(
+    "/acknowledgments",
+    response_model=ReadinessAlertAcknowledgmentResponse,
+    status_code=status.HTTP_200_OK,
+)
+def acknowledge_readiness_incident(
+    request: Request, payload: AcknowledgeReadinessIncidentRequest
+) -> ReadinessAlertAcknowledgmentResponse:
+    """Acknowledge an active incident without changing its observed health state."""
+    factory = _session_factory(request)
+    with session_scope(factory) as session:
+        try:
+            acknowledgment = ReadinessAlertRepository(session).acknowledge_incident(
+                payload.reason,
+                payload.transition_number,
+                actor="operator",
+            )
+        except StaleReadinessIncidentError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return ReadinessAlertAcknowledgmentResponse(
+            reason=acknowledgment.reason,
+            transition_number=acknowledgment.transition_number,
+            acknowledged_at=_utc_response_time(acknowledgment.acknowledged_at),
+            acknowledged_by=acknowledgment.acknowledged_by,
+        )
 
 
 @router.get("/deliveries", response_model=list[ReadinessAlertDeliveryResponse])

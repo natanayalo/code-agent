@@ -79,6 +79,7 @@ export interface OperationalMetrics {
 
 export interface ReadinessAlertStateSnapshot {
   reason: string;
+  acknowledgment_reason?: string;
   task_id?: string | null;
   worker_node_id?: string | null;
   provider?: string | null;
@@ -88,6 +89,15 @@ export interface ReadinessAlertStateSnapshot {
   transition_number: number;
   last_transition_at: string;
   last_checked_at: string;
+  acknowledged_at?: string | null;
+  acknowledged_by?: string | null;
+}
+
+export interface ReadinessAlertAcknowledgmentSnapshot {
+  reason: string;
+  transition_number: number;
+  acknowledged_at: string;
+  acknowledged_by: string;
 }
 
 export interface ReadinessAlertDeliverySnapshot {

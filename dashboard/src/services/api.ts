@@ -10,6 +10,7 @@ import { SessionSnapshot } from '../types/session';
 import {
   DependencyReviewScheduleSnapshot,
   OperationalMetrics,
+  ReadinessAlertAcknowledgmentSnapshot,
   ReadinessAlertDeliverySnapshot,
   ReadinessAlertStateSnapshot,
   ReadinessSnapshot,
@@ -720,6 +721,21 @@ export const api = {
       return Array.isArray(data) ? data : [];
     } catch (error) {
       console.warn('Failed to fetch readiness alert deliveries', error);
+      throw error;
+    }
+  },
+
+  async acknowledgeReadinessIncident(
+    reason: string,
+    transitionNumber: number,
+  ): Promise<ReadinessAlertAcknowledgmentSnapshot> {
+    try {
+      return await fetchWithAuth('/alerts/readiness/acknowledgments', {
+        method: 'POST',
+        body: JSON.stringify({ reason, transition_number: transitionNumber }),
+      });
+    } catch (error) {
+      console.warn(`Failed to acknowledge readiness incident ${reason}`, error);
       throw error;
     }
   },

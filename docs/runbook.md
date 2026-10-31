@@ -368,6 +368,31 @@ endpoints with `reason: interaction_wait_stuck`,
 To roll back this alert slice, unset the existing alert chat ID and restart the
 API; readiness alerts also stop and task scheduling and execution continue.
 
+### Acknowledging an active readiness incident
+
+The dashboard's readiness alert panel offers **Acknowledge** for each active
+degraded incident. The authenticated `POST /alerts/readiness/acknowledgments`
+endpoint accepts `reason` and the displayed `transition_number`. Acknowledgment
+records the operator and time; it does not change observed health or recover the
+incident. The current single-operator authentication model records the actor as
+`operator`.
+
+Acknowledgment is idempotent for that degraded transition; repeating an
+acknowledgment returns its original audit record. A first request for a recovered
+incident or a different transition returns HTTP 409. Recovery remains an observed
+transition, and a later degradation has its own transition number and starts
+unacknowledged. Pending degraded retries for that incident are marked
+`suppressed` on Telegram and webhook delivery records. Recovery notifications
+and the delivery history remain available. A send claimed before the
+acknowledgment may finish; acknowledgment cannot retract a request already in
+flight.
+
+To roll back the application, deploy the previous API and dashboard versions;
+they ignore the additive acknowledgment table and suppressed delivery status,
+while existing alert monitoring continues. Keep the additive migration applied
+for a binary rollback. If a schema downgrade is required, first export the
+`readiness_alert_acknowledgments` audit records; downgrading removes that table.
+
 Useful commands:
 
 ```bash

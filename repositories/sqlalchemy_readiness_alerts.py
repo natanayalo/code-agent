@@ -5,13 +5,19 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import or_, select, text
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy import select, update
+from sqlalchemy.orm import Session
 
 from db.base import generate_uuid, utc_now
-from db.readiness_alert_models import ReadinessAlertDelivery, ReadinessAlertState
+from db.readiness_alert_models import (
+    ReadinessAlertAcknowledgment,
+    ReadinessAlertDelivery,
+    ReadinessAlertState,
+)
 from db.webhook_alert_models import WebhookAlertDelivery
 from orchestrator.operational_health_types import READINESS_REASON_CODES
+from repositories.readiness_alert_delivery_claims import claim_due_readiness_deliveries
+from repositories.readiness_alert_locks import lock_readiness_alert_updates
 
 MAX_DELIVERY_ATTEMPTS = 8
 DELIVERY_LEASE_SECONDS = 30
@@ -25,6 +31,10 @@ TASK_REASON_PREFIXES = (
     TERMINAL_RECONCILIATION_REASON_PREFIX,
     PROVIDER_REASON_PREFIX,
 )
+
+
+class StaleReadinessIncidentError(ValueError):
+    """Raised when acknowledgment does not target the active degraded transition."""
 
 
 def _utc_aware(value: datetime) -> datetime:
@@ -47,8 +57,7 @@ class ReadinessAlertRepository:
         self.telegram_enabled = telegram_enabled
 
     def _lock_state_updates(self) -> None:
-        if self.session.bind is not None and self.session.bind.dialect.name == "postgresql":
-            self.session.execute(text("SELECT pg_advisory_xact_lock(731004219)"))
+        lock_readiness_alert_updates(self.session)
 
     def capture_observed_states(self) -> dict[str, tuple[bool, datetime, datetime, int]]:
         """Capture latest known component states before replaying buffered samples."""
@@ -315,6 +324,64 @@ class ReadinessAlertRepository:
             unconfirmed_task_ids=unconfirmed_task_ids,
         )
 
+    def acknowledge_incident(
+        self,
+        reason: str,
+        transition_number: int,
+        *,
+        actor: str,
+        acknowledged_at: datetime | None = None,
+    ) -> ReadinessAlertAcknowledgment:
+        """Acknowledge one active incident and suppress its queued degraded retries."""
+        self._lock_state_updates()
+        existing = self.session.scalar(
+            select(ReadinessAlertAcknowledgment).where(
+                ReadinessAlertAcknowledgment.reason == reason,
+                ReadinessAlertAcknowledgment.transition_number == transition_number,
+            )
+        )
+        if existing is not None:
+            return existing
+
+        state = self.session.scalar(
+            select(ReadinessAlertState)
+            .where(ReadinessAlertState.reason == reason)
+            .with_for_update()
+        )
+        if state is None or not state.degraded or state.transition_number != transition_number:
+            raise StaleReadinessIncidentError("The readiness incident is no longer active.")
+
+        acknowledgment = ReadinessAlertAcknowledgment(
+            id=generate_uuid(),
+            reason=reason,
+            transition_number=transition_number,
+            acknowledged_at=acknowledged_at or utc_now(),
+            acknowledged_by=actor,
+        )
+        self.session.add(acknowledgment)
+        self.session.execute(
+            update(ReadinessAlertDelivery)
+            .where(
+                ReadinessAlertDelivery.reason == reason,
+                ReadinessAlertDelivery.transition_number == transition_number,
+                ReadinessAlertDelivery.transition == "degraded",
+                ReadinessAlertDelivery.status == "pending",
+            )
+            .values(status="suppressed", lease_expires_at=None)
+        )
+        self.session.execute(
+            update(WebhookAlertDelivery)
+            .where(
+                WebhookAlertDelivery.reason == reason,
+                WebhookAlertDelivery.transition_number == transition_number,
+                WebhookAlertDelivery.transition == "degraded",
+                WebhookAlertDelivery.status == "pending",
+            )
+            .values(status="suppressed", lease_owner=None, lease_expires_at=None)
+        )
+        self.session.flush()
+        return acknowledgment
+
     def _record_task_snapshot(
         self,
         task_ids: list[str],
@@ -439,37 +506,11 @@ class ReadinessAlertRepository:
 
     def claim_due(self, *, limit: int = 20) -> list[ReadinessAlertDelivery]:
         """Lease a bounded batch of due notifications for one API instance."""
-        now = utc_now()
-        earlier_unfinished = aliased(ReadinessAlertDelivery)
-        earlier_transition_exists = (
-            select(earlier_unfinished.id)
-            .where(
-                earlier_unfinished.reason == ReadinessAlertDelivery.reason,
-                earlier_unfinished.transition_number < ReadinessAlertDelivery.transition_number,
-                earlier_unfinished.status.in_(("pending", "processing")),
-            )
-            .exists()
+        return claim_due_readiness_deliveries(
+            self.session,
+            limit=limit,
+            lease_seconds=DELIVERY_LEASE_SECONDS,
         )
-        due = self.session.scalars(
-            select(ReadinessAlertDelivery)
-            .where(
-                or_(
-                    (ReadinessAlertDelivery.status == "pending")
-                    & (ReadinessAlertDelivery.next_attempt_at <= now),
-                    (ReadinessAlertDelivery.status == "processing")
-                    & (ReadinessAlertDelivery.lease_expires_at <= now),
-                ),
-                ~earlier_transition_exists,
-            )
-            .order_by(ReadinessAlertDelivery.created_at)
-            .limit(limit)
-            .with_for_update(skip_locked=True)
-        ).all()
-        for delivery in due:
-            delivery.status = "processing"
-            delivery.attempts += 1
-            delivery.lease_expires_at = now + timedelta(seconds=DELIVERY_LEASE_SECONDS)
-        return list(due)
 
     def mark_delivered(self, delivery_id: str, *, http_status: int, now: Any = None) -> None:
         delivery = self.session.get(ReadinessAlertDelivery, delivery_id)
@@ -484,6 +525,7 @@ class ReadinessAlertRepository:
     def mark_failed(
         self, delivery_id: str, *, http_status: int | None = None, now: Any = None
     ) -> None:
+        lock_readiness_alert_updates(self.session)
         delivery = self.session.get(ReadinessAlertDelivery, delivery_id)
         if delivery is None:
             return
@@ -491,6 +533,17 @@ class ReadinessAlertRepository:
         delivery.last_failure_code = "telegram_request_failed"
         delivery.last_http_status = http_status
         delivery.lease_expires_at = None
+        if (
+            self.session.scalar(
+                select(ReadinessAlertAcknowledgment.id).where(
+                    ReadinessAlertAcknowledgment.reason == delivery.reason,
+                    ReadinessAlertAcknowledgment.transition_number == delivery.transition_number,
+                )
+            )
+            is not None
+        ):
+            delivery.status = "suppressed"
+            return
         if delivery.attempts >= MAX_DELIVERY_ATTEMPTS:
             delivery.status = "failed"
             return
