@@ -33,21 +33,27 @@ export function ScheduleCreateForm() {
     setReview(true);
     mutation.reset();
   }
-  return <div className="metric-detail-card card schedule-create">
+  return <div className="trigger-panel schedule-create">
     <h3>Create a schedule</h3>
-    {!review ? <form onSubmit={submit}>
+    {!review ? <form className="trigger-form" onSubmit={submit}>
+      <div className="trigger-form-row">
       <label>Schedule ID <input required maxLength={200} pattern="[A-Za-z0-9_.-]+" value={id} onChange={(e) => setId(e.target.value)} /></label>
       <label>Repository key <input required maxLength={255} pattern="\S+" value={repo} onChange={(e) => setRepo(e.target.value)} /></label>
+      </div>
+      <div className="trigger-form-row">
       <label>Branch (optional) <input maxLength={255} pattern="\S+" value={branch} onChange={(e) => setBranch(e.target.value)} /></label>
       <label>Purpose <select required value={purpose} onChange={(e) => setPurpose(e.target.value as ScheduleSpec['purpose'] | '')}>
         <option value="">Choose a purpose</option><option value="dependency_review">Dependency review</option><option value="health_summary">Health summary</option><option value="evidence_collection">Evidence collection</option>
       </select></label>
+      </div>
       {purpose === 'evidence_collection' ? <label>Incident lookback (hours) <input type="number" required min="1" max="168" step="1" value={lookback} onChange={(e) => setLookback(e.target.value)} /></label> : null}
-      <fieldset><legend>Weekdays</legend>{DAYS.map((day) => <label key={day}><input type="checkbox" checked={days.includes(day)} onChange={(e) => setDays(e.target.checked ? [...days, day] : days.filter((item) => item !== day))} /> {day}</label>)}</fieldset>
+      <fieldset><legend>Weekdays</legend><div className="schedule-weekdays">{DAYS.map((day) => <label key={day}><input type="checkbox" checked={days.includes(day)} onChange={(e) => setDays(e.target.checked ? [...days, day] : days.filter((item) => item !== day))} /> {day}</label>)}</div></fieldset>
       {dayError ? <p role="alert">Select at least one weekday.</p> : null}
+      <div className="trigger-form-row">
       <label>Local time <input type="time" required value={time} onChange={(e) => setTime(e.target.value)} /></label>
       <label>IANA timezone <input required maxLength={255} value={timezone} onChange={(e) => setTimezone(e.target.value)} placeholder="Asia/Jerusalem" /></label>
-      <button className="btn-secondary" type="submit">Review schedule</button>
+      </div>
+      <div className="trigger-actions-footer"><button className="button button-success" type="submit">Review schedule</button></div>
     </form> : <div>
       <h4>Review schedule</h4>
       <dl className="schedule-spec">
@@ -60,8 +66,8 @@ export function ScheduleCreateForm() {
       <p>New schedules are created paused. Activation is a separate action.</p>
       {mutation.error ? <p role="alert">{mutation.error instanceof ApiError && mutation.error.status === 409 ? 'This schedule ID conflicts with an existing specification. Choose a different ID.' : mutation.error instanceof ApiError && [400, 422].includes(mutation.error.status) ? `Invalid request: ${mutation.error.message}` : 'The outcome is unknown. Refresh the schedule list or retry this same request.'}</p> : null}
       {mutation.data ? <p role="status">Schedule {mutation.data.id} returned as {mutation.data.paused ? 'paused' : 'active'}. Check its details below.</p> : null}
-      <button className="btn-secondary" type="button" disabled={mutation.isPending} onClick={() => { setReview(false); mutation.reset(); }}>Edit</button>{' '}
-      <button className="btn-primary" type="button" disabled={mutation.isPending || Boolean(mutation.data)} onClick={() => mutation.mutate(spec)}>{mutation.isPending ? 'Creating…' : 'Create schedule'}</button>
+      <div className="trigger-actions-footer"><button className="button schedule-edit-button" type="button" disabled={mutation.isPending} onClick={() => { setReview(false); mutation.reset(); }}>Edit</button>
+      <button className="button button-success" type="button" disabled={mutation.isPending || Boolean(mutation.data)} onClick={() => mutation.mutate(spec)}>{mutation.isPending ? 'Creating…' : 'Create schedule'}</button></div>
     </div>}
   </div>;
 }
