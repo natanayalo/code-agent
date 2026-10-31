@@ -16,6 +16,7 @@ from apps.api.config import SystemConfig
 from orchestrator.execution_submission_service import ScheduledSessionBusyError
 from orchestrator.execution_types import DeliveryKey
 from orchestrator.schedule_spec import ScheduleSpec
+from orchestrator.scheduled_evidence import collect_evidence
 from orchestrator.scheduled_health import collect_health_snapshot
 from orchestrator.scheduled_submission import build_scheduled_submission
 
@@ -57,12 +58,38 @@ class ScheduledReviewActivities:
                 if spec.purpose == "health_summary"
                 else None
             )
+            evidence_snapshot = None
+            if spec.purpose == "evidence_collection":
+                assert spec.evidence is not None
+                evidence_snapshot = await asyncio.to_thread(
+                    collect_evidence,
+                    self.service,
+                    activity.info().scheduled_time,
+                    spec.evidence.lookback_hours,
+                )
+                logger.info(
+                    "Scheduled evidence collected",
+                    extra={
+                        "schedule_id": schedule_id,
+                        "occurrence_id": occurrence_id,
+                        "sources": {
+                            name: {
+                                "status": source["status"],
+                                "count": len(source["records"]),
+                                "omitted_count": source["omitted_count"],
+                            }
+                            for name, source in evidence_snapshot["sources"].items()
+                        },
+                        "truncated": evidence_snapshot["truncated"],
+                    },
+                )
             submission = build_scheduled_submission(
                 schedule_id=schedule_id,
                 spec=spec,
                 repo_url=repo_url,
                 occurrence_id=occurrence_id,
                 health_snapshot=health_snapshot,
+                evidence_snapshot=evidence_snapshot,
             )
             identity = f"{schedule_id}\0{occurrence_id}".encode()
             key = DeliveryKey(channel="schedule", delivery_id=hashlib.sha256(identity).hexdigest())

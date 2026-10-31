@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -22,7 +23,10 @@ from orchestrator.schedule_spec import ScheduleSpec
 from orchestrator.state import OrchestratorState
 from orchestrator.temporal.activities import TaskExecutionActivities
 from orchestrator.temporal.command_dispatcher import TemporalCommandDispatcher
-from orchestrator.temporal.scheduled_review import ScheduledReviewActivities
+from orchestrator.temporal.scheduled_review import (
+    ScheduledReviewActivities,
+    ScheduledReviewWorkflow,
+)
 from orchestrator.temporal.workflows import TaskExecutionWorkflow
 from repositories import create_engine_from_url, create_session_factory, session_scope
 from sandbox import DockerShellCommandResult, DockerShellSession
@@ -72,6 +76,32 @@ class _ScriptedAdapter(CliRuntimeAdapter):
         return self._steps.pop(0)
 
 
+async def _trigger_evidence_schedule(client, review, spec, config):
+    from apps.api.routes.schedules import create_schedule, manage_schedule
+    from orchestrator.temporal.queues import DEFAULT_TEMPORAL_TASK_QUEUE
+    from tests.integration.test_temporal_schedules_compatibility import _wait_for_scheduled_result
+
+    schedule_id = "vertical-evidence"
+    handle = client.get_schedule_handle(f"dependency-review:{schedule_id}")
+    try:
+        created = await create_schedule(schedule_id, spec, config, client)
+        assert created["paused"]
+        async with TemporalWorker(
+            client,
+            task_queue=DEFAULT_TEMPORAL_TASK_QUEUE,
+            workflows=[ScheduledReviewWorkflow],
+            activities=[review.submit],
+            workflow_runner=UnsandboxedWorkflowRunner(),
+        ):
+            await manage_schedule(schedule_id, "trigger", client)
+            result = await _wait_for_scheduled_result(client, handle)
+        assert result["outcome"] == "submitted"
+        assert (await manage_schedule(schedule_id, "pause", client))["paused"]
+        return result
+    finally:
+        await handle.delete()
+
+
 @pytest.fixture
 def session_factory(tmp_path: Path):
     """Create a test session factory with an initialized schema."""
@@ -89,7 +119,9 @@ def session_factory(tmp_path: Path):
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("scheduled", [False, "dependency_review", "health_summary"])
+@pytest.mark.parametrize(
+    "scheduled", [False, "dependency_review", "health_summary", "evidence_collection"]
+)
 async def test_vertical_slice_e2e_happy_path(
     session_factory, tmp_path: Path, monkeypatch, scheduled
 ):
@@ -107,6 +139,8 @@ async def test_vertical_slice_e2e_happy_path(
                 final_output=(
                     "Service health: observations unavailable; limitations apply."
                     if scheduled == "health_summary"
+                    else "Operational evidence summary with limitations."
+                    if scheduled == "evidence_collection"
                     else "Dependency review completed with limitations."
                 ),
             )
@@ -192,24 +226,34 @@ async def test_vertical_slice_e2e_happy_path(
 
     async with await WorkflowEnvironment.start_time_skipping() as environment:
         if scheduled:
-            review = ScheduledReviewActivities(
-                service,
-                SystemConfig(
-                    default_image="test",
-                    workspace_root=str(tmp_path),
-                    allowed_repos={"repo": repo_url},
-                ),
+            config = SystemConfig(
+                default_image="test",
+                workspace_root=str(tmp_path),
+                allowed_repos={"repo": repo_url},
             )
+            review = ScheduledReviewActivities(service, config)
             spec = ScheduleSpec(
                 version=1,
                 purpose=scheduled,
+                evidence={"source": "operational_incidents", "lookback_hours": 24}
+                if scheduled == "evidence_collection"
+                else None,
                 repo_key="repo",
                 branch="master",
                 weekdays=("monday",),
                 time="09:00",
                 timezone="UTC",
             )
-            outcome = await review.submit("weekly", "occurrence", spec.model_dump(mode="json"))
+            from temporalio.testing import ActivityEnvironment
+
+            if scheduled == "evidence_collection" and os.getenv("TEMPORAL_COMPATIBILITY_ADDRESS"):
+                from tests.integration.test_temporal_compatibility import _connect
+
+                outcome = await _trigger_evidence_schedule(await _connect(), review, spec, config)
+            else:
+                outcome = await ActivityEnvironment().run(
+                    review.submit, "weekly", "occurrence", spec.model_dump(mode="json")
+                )
             task_id = outcome["task_id"]
             assert task_id is not None
             snapshot = service.get_task(task_id)
@@ -257,6 +301,16 @@ async def test_vertical_slice_e2e_happy_path(
         assert workflow_result["status"] == "completed", (
             snapshot.model_dump_json() if snapshot else str(workflow_result),
         )
+        if scheduled == "evidence_collection":
+            assert snapshot and snapshot.latest_run
+            evidence = next(
+                item
+                for item in snapshot.latest_run.artifacts
+                if item.name == "operational-evidence.json"
+            )
+            assert evidence.artifact_metadata["operational_evidence"]["source"] == (
+                "operational_incidents"
+            )
 
     # 4. Verify the outcome
     with session_scope(session_factory) as session:
@@ -277,8 +331,14 @@ async def test_vertical_slice_e2e_happy_path(
         assert run.status == "success"
         if scheduled:
             assert (
-                "Service health" if scheduled == "health_summary" else "Dependency review"
+                "Service health"
+                if scheduled == "health_summary"
+                else "Operational evidence"
+                if scheduled == "evidence_collection"
+                else "Dependency review"
             ) in run.summary
+            if scheduled == "evidence_collection":
+                assert any(a.name == "operational-evidence.json" for a in run.artifacts)
             assert run.files_changed_count == 0
             assert run.files_changed == []
             assert _run_git(["git", "status", "--porcelain"], cwd=repo_path) == ""

@@ -51,11 +51,13 @@ class FailAfterCommit:
     def __init__(self, service):
         self.service = service
         self.attempts = 0
+        self.snapshots = []
 
     def __getattr__(self, name):
         return getattr(self.service, name)
 
     def create_task_outcome(self, *args, **kwargs):
+        self.snapshots.append(args[0].constraints.get("operational_evidence"))
         result = self.service.create_task_outcome(*args, **kwargs)
         self.attempts += 1
         if self.attempts == 1:
@@ -63,8 +65,14 @@ class FailAfterCommit:
         return result
 
 
+def _assert_evidence_retry(service, result, wrapper):
+    saved = service.get_task(result["task_id"])
+    assert saved.constraints["operational_evidence"] == wrapper.snapshots[0]
+    assert wrapper.snapshots[0]["interval"] == wrapper.snapshots[1]["interval"]
+
+
 @pytest.mark.anyio
-@pytest.mark.parametrize("purpose", ["dependency_review", "health_summary"])
+@pytest.mark.parametrize("purpose", ["dependency_review", "health_summary", "evidence_collection"])
 async def test_weekly_review_recovers_worker_and_deduplicates_submission_retry(
     tmp_path, purpose
 ) -> None:
@@ -79,6 +87,9 @@ async def test_weekly_review_recovers_worker_and_deduplicates_submission_retry(
     spec = ReviewSpec(
         version=1,
         purpose=purpose,
+        evidence={"source": "operational_incidents", "lookback_hours": 24}
+        if purpose == "evidence_collection"
+        else None,
         repo_key="repo",
         weekdays=("monday",),
         time="09:00",
@@ -121,6 +132,8 @@ async def test_weekly_review_recovers_worker_and_deduplicates_submission_retry(
             assert result["outcome"] == "duplicate"
             assert wrapper.attempts >= 2
             assert len(service.list_tasks()) == 1
+            if purpose == "evidence_collection":
+                _assert_evidence_retry(service, result, wrapper)
             view = await get_schedule(schedule_id, client)
             assert view["recent_actions"][-1]["outcome"] == "duplicate"
             await manage_schedule(schedule_id, "trigger", client)
@@ -141,8 +154,27 @@ async def test_weekly_review_recovers_worker_and_deduplicates_submission_retry(
         await handle.delete()
 
 
+def _submit_for_history(service, schedule_id, spec, purpose):
+    submission = build_scheduled_submission(
+        schedule_id=schedule_id,
+        spec=ReviewSpec.model_validate(spec),
+        repo_url="https://example.com/repo",
+        occurrence_id="occurrence",
+        health_snapshot={"readiness": {"status": "unknown"}}
+        if purpose == "health_summary"
+        else None,
+        evidence_snapshot={"version": 1} if purpose == "evidence_collection" else None,
+    )
+    created = service.create_task_outcome(
+        submission,
+        delivery_key=DeliveryKey(channel="schedule", delivery_id="occurrence"),
+        skip_if_session_busy=True,
+    )
+    return created
+
+
 @pytest.mark.anyio
-@pytest.mark.parametrize("purpose", ["dependency_review", "health_summary"])
+@pytest.mark.parametrize("purpose", ["dependency_review", "health_summary", "evidence_collection"])
 async def test_schedule_http_management_requires_auth_and_is_idempotent(tmp_path, purpose) -> None:
     temporal = await _connect()
     schedule_id = f"m31-api-{uuid.uuid4().hex}"
@@ -168,6 +200,11 @@ async def test_schedule_http_management_requires_auth_and_is_idempotent(tmp_path
         "time": "09:00",
         "timezone": "UTC",
     }
+    spec.update(
+        {"evidence": {"source": "operational_incidents", "lookback_hours": 24}}
+        if purpose == "evidence_collection"
+        else {}
+    )
     headers = {"X-Webhook-Token": "test-secret"}  # gitleaks:allow
     handle = temporal.get_schedule_handle(f"dependency-review:{schedule_id}")
     try:
@@ -197,20 +234,7 @@ async def test_schedule_http_management_requires_auth_and_is_idempotent(tmp_path
                 for item in (await http.get("/schedules", headers=headers)).json()
             )
             assert (await http.get(f"/schedules/{schedule_id}/runs", headers=headers)).json() == []
-            submission = build_scheduled_submission(
-                schedule_id=schedule_id,
-                spec=ReviewSpec.model_validate(spec),
-                repo_url="https://example.com/repo",
-                occurrence_id="occurrence",
-                health_snapshot={"readiness": {"status": "unknown"}}
-                if purpose == "health_summary"
-                else None,
-            )
-            created = service.create_task_outcome(
-                submission,
-                delivery_key=DeliveryKey(channel="schedule", delivery_id="occurrence"),
-                skip_if_session_busy=True,
-            )
+            created = _submit_for_history(service, schedule_id, spec, purpose)
             runs = (await http.get(f"/schedules/{schedule_id}/runs", headers=headers)).json()
             assert len(runs) == 1 and runs[0]["task"]["task_id"] == created.task_snapshot.task_id
             assert (await http.get(runs[0]["timeline_url"], headers=headers)).status_code == 200

@@ -152,12 +152,21 @@ def test_postgres_concurrent_occurrences_only_create_one_task(request):
 
 
 @pytest.mark.usefixtures("postgres_session_factory")
-def test_postgres_concurrent_duplicate_delivery_creates_one_task(request):
+@pytest.mark.parametrize("purpose", ["dependency_review", "evidence_collection"])
+def test_postgres_concurrent_duplicate_delivery_creates_one_task(request, purpose):
     factory = request.getfixturevalue("postgres_session_factory")
     service = TaskExecutionService(session_factory=factory, worker=_StaticWorker())
     schedule_id = f"test-{uuid4()}"
     submission = build_scheduled_submission(
-        schedule_id=schedule_id, spec=valid_spec(), repo_url="https://example.com/repo"
+        schedule_id=schedule_id,
+        spec=valid_spec(
+            purpose=purpose,
+            evidence={"source": "operational_incidents", "lookback_hours": 24}
+            if purpose == "evidence_collection"
+            else None,
+        ),
+        repo_url="https://example.com/repo",
+        evidence_snapshot={"version": 1} if purpose == "evidence_collection" else None,
     )
     key = DeliveryKey(channel="schedule", delivery_id=schedule_id)
     barrier = Barrier(2)
