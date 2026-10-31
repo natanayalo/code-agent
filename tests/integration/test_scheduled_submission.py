@@ -23,13 +23,19 @@ from tests.unit.task_execution_service_support import _StaticWorker
 from tests.unit.test_schedule_spec import valid_spec
 
 
-def test_duplicate_precedes_busy_and_terminal_run_allows_next(tmp_path):
+@pytest.mark.parametrize("purpose", ["dependency_review", "health_summary"])
+def test_duplicate_precedes_busy_and_terminal_run_allows_next(tmp_path, purpose):
     engine = create_engine_from_url(f"sqlite+pysqlite:///{tmp_path / 'schedule.db'}")
     Base.metadata.create_all(engine)
     factory = create_session_factory(engine)
     service = TaskExecutionService(session_factory=factory, worker=_StaticWorker())
     submission = build_scheduled_submission(
-        schedule_id="weekly", spec=valid_spec(), repo_url="https://example.com/repo"
+        schedule_id="weekly",
+        spec=valid_spec(purpose=purpose),
+        repo_url="https://example.com/repo",
+        health_snapshot={"readiness": {"status": "unknown"}}
+        if purpose == "health_summary"
+        else None,
     )
     first_key = DeliveryKey(channel="schedule", delivery_id="first")
     first = service.create_task_outcome(
@@ -91,14 +97,20 @@ def test_concurrent_occurrences_only_create_one_task(tmp_path):
     assert len(service.list_tasks()) == 1
 
 
-def test_scheduled_task_can_be_cancelled_before_dispatch(tmp_path):
+@pytest.mark.parametrize("purpose", ["dependency_review", "health_summary"])
+def test_scheduled_task_can_be_cancelled_before_dispatch(tmp_path, purpose):
     engine = create_engine_from_url(f"sqlite+pysqlite:///{tmp_path / 'schedule.db'}")
     Base.metadata.create_all(engine)
     service = TaskExecutionService(
         session_factory=create_session_factory(engine), worker=_StaticWorker()
     )
     submission = build_scheduled_submission(
-        schedule_id="weekly", spec=valid_spec(), repo_url="https://example.com/repo"
+        schedule_id="weekly",
+        spec=valid_spec(purpose=purpose),
+        repo_url="https://example.com/repo",
+        health_snapshot={"readiness": {"status": "unknown"}}
+        if purpose == "health_summary"
+        else None,
     )
     outcome = service.create_task_outcome(
         submission,

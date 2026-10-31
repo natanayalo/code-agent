@@ -52,6 +52,9 @@ class FailAfterCommit:
         self.service = service
         self.attempts = 0
 
+    def __getattr__(self, name):
+        return getattr(self.service, name)
+
     def create_task_outcome(self, *args, **kwargs):
         result = self.service.create_task_outcome(*args, **kwargs)
         self.attempts += 1
@@ -61,7 +64,10 @@ class FailAfterCommit:
 
 
 @pytest.mark.anyio
-async def test_weekly_review_recovers_worker_and_deduplicates_submission_retry(tmp_path) -> None:
+@pytest.mark.parametrize("purpose", ["dependency_review", "health_summary"])
+async def test_weekly_review_recovers_worker_and_deduplicates_submission_retry(
+    tmp_path, purpose
+) -> None:
     """The real server persists paused schedules and retries one logical occurrence."""
     client = await _connect()
     schedule_id = f"m31-{uuid.uuid4().hex}"
@@ -72,7 +78,7 @@ async def test_weekly_review_recovers_worker_and_deduplicates_submission_retry(t
     )
     spec = ReviewSpec(
         version=1,
-        purpose="dependency_review",
+        purpose=purpose,
         repo_key="repo",
         weekdays=("monday",),
         time="09:00",
@@ -136,7 +142,8 @@ async def test_weekly_review_recovers_worker_and_deduplicates_submission_retry(t
 
 
 @pytest.mark.anyio
-async def test_schedule_http_management_requires_auth_and_is_idempotent(tmp_path) -> None:
+@pytest.mark.parametrize("purpose", ["dependency_review", "health_summary"])
+async def test_schedule_http_management_requires_auth_and_is_idempotent(tmp_path, purpose) -> None:
     temporal = await _connect()
     schedule_id = f"m31-api-{uuid.uuid4().hex}"
     engine = create_engine_from_url(f"sqlite+pysqlite:///{tmp_path / 'tasks.db'}")
@@ -155,7 +162,7 @@ async def test_schedule_http_management_requires_auth_and_is_idempotent(tmp_path
     app.dependency_overrides[get_schedule_client] = lambda: temporal
     spec = {
         "version": 1,
-        "purpose": "dependency_review",
+        "purpose": purpose,
         "repo_key": "repo",
         "weekdays": ["monday"],
         "time": "09:00",
@@ -195,6 +202,9 @@ async def test_schedule_http_management_requires_auth_and_is_idempotent(tmp_path
                 spec=ReviewSpec.model_validate(spec),
                 repo_url="https://example.com/repo",
                 occurrence_id="occurrence",
+                health_snapshot={"readiness": {"status": "unknown"}}
+                if purpose == "health_summary"
+                else None,
             )
             created = service.create_task_outcome(
                 submission,
