@@ -50,6 +50,8 @@ function ScheduleCard({ schedule, onOpenTask, listUnavailable }: { schedule: Dep
   });
   const refresh = async (): Promise<boolean> => {
     const version = client.getQueryState(SCHEDULES_KEY)?.dataUpdateCount;
+    const runsKey = ['scheduled-tasks', schedule.id, 0];
+    const runsVersion = client.getQueryState(runsKey)?.dataUpdateCount;
     const [schedulesResult, runsResult] = await Promise.allSettled([
       api.listDependencyReviewSchedules(),
       api.listScheduledTasks(schedule.id, PAGE_SIZE, 0),
@@ -57,11 +59,17 @@ function ScheduleCard({ schedule, onOpenTask, listUnavailable }: { schedule: Dep
     const updated = schedulesResult.status === 'fulfilled'
       ? schedulesResult.value.find((item) => item.id === schedule.id) : undefined;
     const applied = updated ? await updateSchedule(updated, version) : false;
-    if (runsResult.status === 'fulfilled') {
-      client.setQueryData(['scheduled-tasks', schedule.id, 0], runsResult.value);
-      setOffset(0);
+    let runsApplied = false;
+    // Preserve newer history and prevent an older in-flight query from replacing recovery evidence.
+    if (runsResult.status === 'fulfilled' && client.getQueryState(runsKey)?.dataUpdateCount === runsVersion) {
+      await client.cancelQueries({ queryKey: runsKey, exact: true });
+      if (client.getQueryState(runsKey)?.dataUpdateCount === runsVersion) {
+        client.setQueryData(runsKey, runsResult.value);
+        setOffset(0);
+        runsApplied = true;
+      }
     }
-    return applied && runsResult.status === 'fulfilled';
+    return applied && runsApplied;
   };
 
   const recover = async () => {

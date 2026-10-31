@@ -214,6 +214,46 @@ describe('ScheduleVisibilitySection', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Trigger now' })).toBeEnabled());
   });
 
+  it('keeps recovered run evidence when an older history request finishes later', async () => {
+    const task = { task_id: 'new-run', session_id: 'session-1', status: TaskStatus.COMPLETED, task_text: 'Triggered review', created_at: '2026-10-26T07:01:00Z', updated_at: '2026-10-26T07:02:00Z', priority: 0 };
+    const row = { task, status_url: '', timeline_url: '', artifacts_url: '' };
+    let finishOldRuns!: (value: ScheduledTaskSnapshot[]) => void;
+    vi.mocked(api.listDependencyReviewSchedules).mockResolvedValue([schedule]);
+    vi.mocked(api.listScheduledTasks).mockReturnValueOnce(new Promise((resolve) => { finishOldRuns = resolve; })).mockResolvedValue([row]);
+    vi.mocked(api.manageSchedule).mockRejectedValueOnce(new Error('response lost'));
+    const { client } = mount();
+    fireEvent.click(await screen.findByRole('button', { name: 'Trigger now' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('outcome is unknown');
+    const oldQuery = client.getQueryCache().find({ queryKey: ['scheduled-tasks', 'project', 0] })?.promise;
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh schedule and runs' }));
+    expect(await screen.findByText('Triggered review')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Trigger now' })).toBeEnabled());
+    await act(async () => { finishOldRuns([]); await oldQuery?.catch(() => undefined); });
+    expect(client.getQueryData(['scheduled-tasks', 'project', 0])).toEqual([row]);
+    expect(screen.getByText('Triggered review')).toBeInTheDocument();
+  });
+
+  it('requires another recovery if newer run history arrives while recovery is in flight', async () => {
+    const task = { task_id: 'new-run', session_id: 'session-1', status: TaskStatus.COMPLETED, task_text: 'Newer review', created_at: '2026-10-26T07:01:00Z', updated_at: '2026-10-26T07:02:00Z', priority: 0 };
+    const row = { task, status_url: '', timeline_url: '', artifacts_url: '' };
+    let finishRecovery!: (value: ScheduledTaskSnapshot[]) => void;
+    vi.mocked(api.listDependencyReviewSchedules).mockResolvedValue([schedule]);
+    vi.mocked(api.listScheduledTasks).mockResolvedValueOnce([])
+      .mockReturnValueOnce(new Promise((resolve) => { finishRecovery = resolve; }))
+      .mockResolvedValue([row]);
+    vi.mocked(api.manageSchedule).mockRejectedValueOnce(new Error('response lost'));
+    const { client } = mount();
+    fireEvent.click(await screen.findByRole('button', { name: 'Trigger now' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('outcome is unknown');
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh schedule and runs' }));
+    await waitFor(() => expect(finishRecovery).toBeDefined());
+    await act(async () => { await client.refetchQueries({ queryKey: ['scheduled-tasks', 'project', 0] }); });
+    await act(async () => finishRecovery([]));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Refresh failed');
+    expect(screen.getByText('Newer review')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Trigger now' })).toBeDisabled();
+  });
+
   it('does not apply a stale card refresh after a newer list arrives during run history loading', async () => {
     let finishRuns!: (value: ScheduledTaskSnapshot[]) => void;
     let runsCount = 0;
