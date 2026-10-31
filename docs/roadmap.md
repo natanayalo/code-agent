@@ -138,15 +138,16 @@ delivery outcomes, schedule details, and submitted task history is also merged
 (PR #442); it does not expose schedule mutation controls. Task-specific
 stuck-interaction and stale-outbox alerts are also merged (PRs #444 and #446).
 Task-specific terminal-reconciliation alerts are merged as well (PR #448).
-Provider-capability alerts are the next slice to scope; the ordered queue and
-acceptance conditions are in [status](status.md#current-backlog).
+Provider-capability alerts and opt-in generic webhook delivery are also merged
+(PRs #459 and #461). The ordered queue and acceptance conditions are in
+[status](status.md#current-backlog).
 
 ### Scope
 
 - notify through Telegram when an existing global execution-readiness reason
   becomes degraded or recovers, and for task-specific stuck interactions,
-  stale outbox commands, and terminal reconciliation divergence; provider-capability
-  alerts and generic webhook notification delivery remain follow-ups
+  stale outbox commands, terminal reconciliation divergence, and provider capability
+  degradation; optionally deliver sanitized transitions through a generic webhook
 - retain durable deduplication, bounded delivery, and observed recovery using
   stable reason codes and task references; define operator acknowledgment
   separately from observed recovery before adding controls

@@ -1,6 +1,6 @@
 # Status
 
-Planning snapshot: **2026-10-30**. This describes repository capabilities and
+Planning snapshot: **2026-10-31**. This describes repository capabilities and
 tracked work, not the health or activation state of a deployed instance.
 
 ## Current phase
@@ -12,7 +12,8 @@ milestone. M25.6, M26, M28, M28.5, M29, and M30 are complete.
 M31 already includes the qualified Temporal compatibility baseline, weekly
 read-only dependency reviews and management API, read-only operations dashboard,
 opt-in Telegram readiness alerts, task-specific stuck-interaction,
-stale-outbox, and terminal-reconciliation alerts, and provider-capability alerts.
+stale-outbox, and terminal-reconciliation alerts, provider-capability alerts,
+and opt-in generic webhook delivery.
 The remaining work is below.
 
 ## Current capabilities
@@ -43,18 +44,20 @@ Status meanings: **Ready to scope** = next bounded task; **In progress** = work
 underway; **Planned** = ordered
 follow-up requiring its contract/design; **Evidence-gated** = eligibility must be
 proved; **Approval-gated** = external/security changes require operator approval.
-M31-1 was completed in [PR #459](https://github.com/natanayalo/code-agent/pull/459).
-M31-2 is in progress on `codex/m31-webhook-alert-delivery`.
+M31-1 and M31-2 were completed in [PR #459](https://github.com/natanayalo/code-agent/pull/459)
+and [PR #461](https://github.com/natanayalo/code-agent/pull/461), respectively.
 
 ### M31 implementation queue
 
 | Order | Slice | Status | Completion condition |
 | --- | --- | --- | --- |
-| 1 | [M31-1: Provider-capability alerts](https://github.com/natanayalo/code-agent/issues/450) | Complete | Defined observations and recovery rules; durable sanitized alerts; failure, duplicate, and operator-flow coverage. |
-| 2 | [M31-2: Generic webhook alert delivery](https://github.com/natanayalo/code-agent/issues/451) | In progress | Versioned opt-in delivery contract, bounded retries/order, visible failures, and approved destination/security design. |
 | 3 | [M31-3: Operator acknowledgment](https://github.com/natanayalo/code-agent/issues/452) | Planned | Authenticated acknowledgment distinct from observed recovery; auditable recurrence semantics and tested dashboard/API controls. |
 | 4 | [M31-4: Health-summary and evidence schedules](https://github.com/natanayalo/code-agent/issues/453) | Planned | Define both purposes; implement one purpose per PR, starting with health summaries; prove idempotency, cancellation, recovery, and terminal evidence. |
 | 5 | [M31-5: Schedule request and management UX](https://github.com/natanayalo/code-agent/issues/454) | Planned | Select the first request surface; preserve explicit intent and timezone; split natural-language input and dashboard controls into bounded slices. |
+
+Before M31-3 implementation, define whether acknowledgment affects delivery and
+how a new incident resets it. The first slice should establish those semantics
+and deliver the authenticated control with its required operator-flow coverage.
 
 Current scheduling supports only `dependency_review` via a structured API.
 Create/pause/resume/trigger APIs exist; dashboard schedule views are read-only.
