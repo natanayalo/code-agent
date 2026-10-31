@@ -1,5 +1,5 @@
 import React from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/api';
 import { DependencyReviewScheduleSnapshot } from '../types/metrics';
 import { Link } from 'react-router-dom';
@@ -14,15 +14,71 @@ function date(value: string | null | undefined): string {
 
 function ScheduleCard({ schedule, onOpenTask }: { schedule: DependencyReviewScheduleSnapshot; onOpenTask: (taskId: string) => void }) {
   const [offset, setOffset] = React.useState(0);
+  const [busy, setBusy] = React.useState(false);
+  const [needsRefresh, setNeedsRefresh] = React.useState(false);
+  const [message, setMessage] = React.useState('');
+  const client = useQueryClient();
   const runs = useQuery({
     queryKey: ['scheduled-tasks', schedule.id, offset],
     queryFn: () => api.listScheduledTasks(schedule.id, PAGE_SIZE, offset),
     refetchInterval: 60000,
   });
+  const refresh = async (): Promise<boolean> => {
+    const [schedulesResult, runsResult] = await Promise.allSettled([
+      api.listDependencyReviewSchedules(),
+      api.listScheduledTasks(schedule.id, PAGE_SIZE, 0),
+    ]);
+    if (schedulesResult.status === 'fulfilled' && schedulesResult.value.some((item) => item.id === schedule.id)) {
+      client.setQueryData(['dependency-review-schedules'], schedulesResult.value);
+    }
+    if (runsResult.status === 'fulfilled') {
+      client.setQueryData(['scheduled-tasks', schedule.id, 0], runsResult.value);
+      setOffset(0);
+    }
+    return schedulesResult.status === 'fulfilled' &&
+      schedulesResult.value.some((item) => item.id === schedule.id) && runsResult.status === 'fulfilled';
+  };
+
+  const recover = async () => {
+    setBusy(true);
+    const refreshed = await refresh();
+    setNeedsRefresh(!refreshed);
+    setMessage(refreshed
+      ? 'Schedule and runs refreshed. If a trigger outcome was unknown, inspect recent outcomes and submitted tasks before retrying.'
+      : 'Refresh failed. Schedule actions remain disabled; try refreshing again.');
+    setBusy(false);
+  };
+
+  const manage = async (operation: 'pause' | 'resume' | 'trigger') => {
+    setBusy(true);
+    setMessage('');
+    try {
+      const result = await api.manageSchedule(schedule.id, operation);
+      client.setQueryData<DependencyReviewScheduleSnapshot[]>(['dependency-review-schedules'], (current) =>
+        current?.map((item) => item.id === result.id ? result : item));
+      const refreshed = await refresh();
+      setNeedsRefresh(!refreshed);
+      setMessage(refreshed
+        ? `${operation} request completed. Schedule and runs refreshed.`
+        : `${operation} request completed, but refresh failed. Refresh before another action.`);
+    } catch (error) {
+      setNeedsRefresh(true);
+      setMessage(`${operation} outcome is unknown and may have succeeded: ${(error as Error).message}. Refresh and inspect recent outcomes and submitted tasks before retrying.`);
+    } finally {
+      setBusy(false);
+    }
+  };
   const spec = schedule.spec;
   return <article className="metric-detail-card card schedule-visibility-card">
     <h3>{schedule.spec.purpose.replaceAll('_', ' ')} · {schedule.id}</h3>
     <p className="metric-note">{schedule.paused ? 'Paused' : 'Active'} · Task history last checked: {date(runs.dataUpdatedAt ? new Date(runs.dataUpdatedAt).toISOString() : null)}</p>
+    <div className="schedule-controls" aria-label={`Manage schedule ${schedule.id}`}>
+      <button className="health-refresh-button" disabled={busy || needsRefresh} onClick={() => void manage(schedule.paused ? 'resume' : 'pause')}>{schedule.paused ? 'Resume' : 'Pause'}</button>
+      <button className="health-refresh-button" disabled={busy || needsRefresh} onClick={() => void manage('trigger')}>Trigger now</button>
+      {needsRefresh ? <button className="health-refresh-button" disabled={busy} onClick={() => void recover()}>Refresh schedule and runs</button> : null}
+    </div>
+    <p className="metric-note">A manual trigger can run while the schedule is paused.</p>
+    {message ? <p role={needsRefresh ? 'alert' : 'status'}>{message}</p> : null}
     <dl className="schedule-spec">
       <div><dt>Repository key</dt><dd>{spec.repo_key}</dd></div>
       <div><dt>Branch</dt><dd>{spec.branch || 'Default branch'}</dd></div>
@@ -60,7 +116,7 @@ export function ScheduleVisibilitySection({ onOpenTask }: { onOpenTask: (taskId:
   return <section className="metrics-page" aria-labelledby="schedule-visibility-heading">
     <div className="page-header"><h2 id="schedule-visibility-heading">Read-only schedules</h2><p className="page-subtitle">Schedule configuration and execution history</p></div>
     <p className="metric-note"><Link className="schedule-navigation-link" to="/triggers?tab=schedule">Create a schedule in Triggers</Link></p>
-    {schedules.isLoading ? <p>Loading schedules…</p> : schedules.error ? <p role="alert">Schedule data unavailable: {(schedules.error as Error).message}</p> : <>
+    {schedules.isLoading ? <p>Loading schedules…</p> : schedules.error && !schedules.data ? <p role="alert">Schedule data unavailable: {(schedules.error as Error).message}</p> : <>
       <p className="metric-note">Schedule list last checked: {date(schedules.dataUpdatedAt ? new Date(schedules.dataUpdatedAt).toISOString() : null)}</p>
       {schedules.data?.length ? <div className="metrics-details-grid">{schedules.data.map((schedule) => <ScheduleCard key={schedule.id} schedule={schedule} onOpenTask={onOpenTask} />)}</div> : <p>No dependency review schedules are configured.</p>}
     </>}

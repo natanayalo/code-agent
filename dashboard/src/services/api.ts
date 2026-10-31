@@ -762,6 +762,15 @@ export const api = {
     }
   },
 
+  async manageSchedule(id: string, operation: 'pause' | 'resume' | 'trigger'): Promise<DependencyReviewScheduleSnapshot> {
+    try {
+      return await fetchWithAuth(`/schedules/${encodeURIComponent(id)}/${operation}`, { method: 'POST' });
+    } catch (error) {
+      console.warn(`Failed to ${operation} schedule`, error);
+      throw error;
+    }
+  },
+
   async listScheduledTasks(scheduleId: string, limit: number = 50, offset: number = 0): Promise<ScheduledTaskSnapshot[]> {
     try {
       const query = new URLSearchParams({ limit: String(limit), offset: String(offset) });

@@ -13,10 +13,12 @@ review schedules show their specification, pause state, upcoming executions,
 recent Temporal outcomes, skipped/missed counts, and paginated submitted tasks.
 Each source refreshes independently and displays its own loading, error, and
 last-checked state; expired Temporal history is presented as an unavailable
-outcome. Submitted tasks open in the existing task detail panel. These views
-remain read-only. The Triggers page provides structured schedule creation with
-review; new schedules start paused. Pause, resume, and trigger remain available
-through the authenticated API.
+outcome. Submitted tasks open in the existing task detail panel. The Triggers page provides structured schedule creation with review; new
+schedules start paused. On the metrics page, use Pause or Resume to change the
+schedule state, or Trigger now to request a run even while paused. After an
+uncertain outcome or failed refresh, refresh the schedule and runs before
+another action; inspect recent outcomes and submitted tasks before retrying a
+trigger, since it may already have run.
 
 ## Tech Stack
 

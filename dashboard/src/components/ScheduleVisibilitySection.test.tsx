@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
@@ -10,6 +10,7 @@ import { ScheduleVisibilitySection } from './ScheduleVisibilitySection';
 vi.mock('../services/api', () => ({ api: {
   listDependencyReviewSchedules: vi.fn(),
   listScheduledTasks: vi.fn(),
+  manageSchedule: vi.fn(),
 } }));
 
 const schedule: DependencyReviewScheduleSnapshot = {
@@ -124,4 +125,57 @@ describe('ScheduleVisibilitySection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Previous' }));
     expect(await screen.findByText('Tasks 1–20')).toBeInTheDocument();
   });
+  it('resumes, pauses, and triggers a paused schedule with returned state and refreshed history', async () => {
+    vi.mocked(api.listDependencyReviewSchedules).mockResolvedValue([schedule]);
+    vi.mocked(api.listScheduledTasks).mockResolvedValue([]);
+    let resolveOperation!: (value: DependencyReviewScheduleSnapshot) => void;
+    vi.mocked(api.manageSchedule).mockReturnValueOnce(new Promise((resolve) => { resolveOperation = resolve; }));
+    mount();
+    fireEvent.click(await screen.findByRole('button', { name: 'Resume' }));
+    expect(screen.getByRole('button', { name: 'Trigger now' })).toBeDisabled();
+    vi.mocked(api.listDependencyReviewSchedules).mockResolvedValue([{ ...schedule, paused: false }]);
+    resolveOperation({ ...schedule, paused: false });
+    expect(await screen.findByRole('button', { name: 'Pause' })).toBeEnabled();
+    expect(api.manageSchedule).toHaveBeenCalledWith('project', 'resume');
+    expect(api.listScheduledTasks).toHaveBeenCalledTimes(2);
+    vi.mocked(api.manageSchedule).mockResolvedValueOnce(schedule);
+    vi.mocked(api.listDependencyReviewSchedules).mockResolvedValue([schedule]);
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }));
+    expect(await screen.findByRole('button', { name: 'Resume' })).toBeEnabled();
+    expect(api.manageSchedule).toHaveBeenCalledWith('project', 'pause');
+    vi.mocked(api.manageSchedule).mockResolvedValueOnce(schedule);
+    fireEvent.click(screen.getByRole('button', { name: 'Trigger now' }));
+    await waitFor(() => expect(api.manageSchedule).toHaveBeenCalledWith('project', 'trigger'));
+    expect(await screen.findByText(/trigger request completed/)).toBeInTheDocument();
+    expect(screen.getByText(/manual trigger can run while the schedule is paused/i)).toBeInTheDocument();
+  });
+
+  it('retains context and blocks actions until both refreshes recover after an unknown outcome', async () => {
+    vi.mocked(api.listDependencyReviewSchedules).mockResolvedValue([schedule]);
+    vi.mocked(api.listScheduledTasks).mockResolvedValue([]);
+    vi.mocked(api.manageSchedule).mockRejectedValueOnce(new Error('Temporal unavailable'));
+    mount();
+    fireEvent.click(await screen.findByRole('button', { name: 'Trigger now' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('outcome is unknown');
+    expect(screen.getByRole('button', { name: 'Resume' })).toBeDisabled();
+    vi.mocked(api.listScheduledTasks).mockRejectedValueOnce(new Error('offline'));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh schedule and runs' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Refresh failed');
+    expect(screen.getByText('Repository key', { selector: 'dt' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Trigger now' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh schedule and runs' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('inspect recent outcomes');
+    expect(screen.getByRole('button', { name: 'Trigger now' })).toBeEnabled();
+  });
+
+  it('keeps the returned state and requires recovery if the post-action refresh fails', async () => {
+    vi.mocked(api.listDependencyReviewSchedules).mockResolvedValueOnce([schedule]).mockRejectedValueOnce(new Error('offline'));
+    vi.mocked(api.listScheduledTasks).mockResolvedValue([]);
+    vi.mocked(api.manageSchedule).mockResolvedValue({ ...schedule, paused: false });
+    mount();
+    fireEvent.click(await screen.findByRole('button', { name: 'Resume' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('request completed, but refresh failed');
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeDisabled();
+  });
+
 });

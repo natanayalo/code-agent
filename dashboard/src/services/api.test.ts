@@ -1194,6 +1194,20 @@ describe('api service', () => {
       warn.mockRestore();
     });
 
+    it.each(['pause', 'resume', 'trigger'] as const)('sends authenticated %s and returns its snapshot', async (operation) => {
+      const snapshot = { id: 'review/project', paused: true };
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 200, headers: new Map([['content-type', 'application/json']]), json: async () => snapshot });
+      await expect(api.manageSchedule('review/project', operation)).resolves.toEqual(snapshot);
+      const [url, options] = mockFetch.mock.calls[0];
+      expect(url).toContain(`/schedules/review%2Fproject/${operation}`);
+      expect(options.method).toBe('POST');
+      expect(options.credentials).toBe('include');
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockFetch.mockRejectedValueOnce(new Error('offline'));
+      await expect(api.manageSchedule('review/project', operation)).rejects.toThrow('offline');
+      warn.mockRestore();
+    });
+
     it('getSystemTools returns array and falls back to [] for non-array payloads', async () => {
       const toolsPayload = [{ name: 'shell', description: 'Shell tool' }];
       mockFetch.mockResolvedValueOnce({
