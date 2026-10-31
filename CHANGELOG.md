@@ -162,6 +162,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Dependencies
 
+- Chore(deps-dev): bump filelock from 3.28.0 to 4.2.1 ([#439](https://github.com/natanayalo/code-agent/pull/439))
+
 - Chore(deps): bump alembic from 1.18.5 to 1.20.1 ([#393](https://github.com/natanayalo/code-agent/pull/393))
 
 - Chore(deps): bump sqlalchemy from 2.0.51 to 2.1.6 ([#396](https://github.com/natanayalo/code-agent/pull/396))
