@@ -3135,6 +3135,10 @@ button {
 .ops-list li strong { display: flex; align-items: center; gap: var(--spacing-xs); }
 .ops-list li small, .metric-note { color: var(--color-text-muted); }
 .schedule-spec { display: grid; gap: var(--spacing-sm); }
+.schedule-create { margin-bottom: var(--spacing-md); }
+.schedule-create form { display: grid; gap: var(--spacing-sm); }
+.schedule-create form > label { display: grid; gap: var(--spacing-xs); }
+.schedule-create fieldset { display: flex; flex-wrap: wrap; gap: var(--spacing-sm); }
 .schedule-spec div { display: grid; grid-template-columns: minmax(100px, 0.4fr) 1fr; gap: var(--spacing-sm); }
 .schedule-spec dt { color: var(--color-text-muted); }
 .schedule-spec dd { margin: 0; overflow-wrap: anywhere; }

@@ -68,7 +68,7 @@ describe('ScheduleVisibilitySection', () => {
     vi.mocked(api.listScheduledTasks).mockRejectedValue(new Error('history expired'));
     mount();
     expect(await screen.findByText(/Task history unavailable: history expired/)).toBeInTheDocument();
-    expect(screen.getByText('Repository key')).toBeInTheDocument();
+    expect(screen.getByText('Repository key', { selector: 'dt' })).toBeInTheDocument();
   });
 
   it('shows empty temporal history, null branch, skipped actions, and empty task results', async () => {

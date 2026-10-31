@@ -2,6 +2,7 @@ import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../services/api';
 import { DependencyReviewScheduleSnapshot } from '../types/metrics';
+import { ScheduleCreateForm } from './ScheduleCreateForm';
 
 const PAGE_SIZE = 20;
 
@@ -20,12 +21,13 @@ function ScheduleCard({ schedule, onOpenTask }: { schedule: DependencyReviewSche
   });
   const spec = schedule.spec;
   return <article className="metric-detail-card card schedule-visibility-card">
-    <h3>Dependency review · {schedule.id}</h3>
+    <h3>{schedule.spec.purpose.replaceAll('_', ' ')} · {schedule.id}</h3>
     <p className="metric-note">{schedule.paused ? 'Paused' : 'Active'} · Task history last checked: {date(runs.dataUpdatedAt ? new Date(runs.dataUpdatedAt).toISOString() : null)}</p>
     <dl className="schedule-spec">
       <div><dt>Repository key</dt><dd>{spec.repo_key}</dd></div>
       <div><dt>Branch</dt><dd>{spec.branch || 'Default branch'}</dd></div>
       <div><dt>Schedule</dt><dd>{spec.weekdays.join(', ')} at {spec.time} ({spec.timezone})</dd></div>
+      {spec.evidence ? <div><dt>Evidence</dt><dd>{spec.evidence.source} · {spec.evidence.lookback_hours} hours</dd></div> : null}
     </dl>
     <h4>Upcoming executions</h4>
     {schedule.next_executions.length ? <ul>{schedule.next_executions.map((item) => <li key={item}>{date(item)}</li>)}</ul> : <p>No upcoming executions returned.</p>}
@@ -56,7 +58,8 @@ function ScheduleCard({ schedule, onOpenTask }: { schedule: DependencyReviewSche
 export function ScheduleVisibilitySection({ onOpenTask }: { onOpenTask: (taskId: string) => void }) {
   const schedules = useQuery({ queryKey: ['dependency-review-schedules'], queryFn: api.listDependencyReviewSchedules, refetchInterval: 60000 });
   return <section className="metrics-page" aria-labelledby="schedule-visibility-heading">
-    <div className="page-header"><h2 id="schedule-visibility-heading">Dependency review schedules</h2><p className="page-subtitle">Read-only schedule and execution history</p></div>
+    <div className="page-header"><h2 id="schedule-visibility-heading">Read-only schedules</h2><p className="page-subtitle">Schedule configuration and execution history</p></div>
+    <ScheduleCreateForm />
     {schedules.isLoading ? <p>Loading schedules…</p> : schedules.error ? <p role="alert">Schedule data unavailable: {(schedules.error as Error).message}</p> : <>
       <p className="metric-note">Schedule list last checked: {date(schedules.dataUpdatedAt ? new Date(schedules.dataUpdatedAt).toISOString() : null)}</p>
       {schedules.data?.length ? <div className="metrics-details-grid">{schedules.data.map((schedule) => <ScheduleCard key={schedule.id} schedule={schedule} onOpenTask={onOpenTask} />)}</div> : <p>No dependency review schedules are configured.</p>}

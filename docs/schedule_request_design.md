@@ -1,14 +1,15 @@
 # Schedule request and management design
 
-This is the M31-5 design, not a description of shipped dashboard controls. The
+This is the M31-5 design and implementation sequence. The
 dashboard is the first request surface because it already shows authenticated
-schedule details and run history. Today, creation and management are available
-through the [authenticated API](../README.md#read-only-schedules); the dashboard
-view is read-only. Telegram schedule requests remain future work.
+schedule details and run history. Structured creation is implemented in the
+dashboard; management remains available through the
+[authenticated API](../README.md#read-only-schedules). Telegram schedule
+requests remain future work.
 
 ## Request to schedule
 
-The first implementation slice will use a structured dashboard form. The
+The first implementation slice uses a structured dashboard form. The
 operator supplies a schedule ID and an explicit, allowlisted repository key,
 purpose, one or more weekdays, local time and IANA timezone. An optional branch
 may be supplied. The supported purposes are `dependency_review`,
@@ -42,8 +43,8 @@ requires a new ID.
 
 ## Separate implementation slices
 
-1. **Structured creation:** implement the form, review step, and paused creation
-   using the existing API. Keep management controls out of this slice.
+1. **Structured creation:** implemented with the form, review step, and paused
+   creation using the existing API. Management controls remain separate.
 2. **Management controls:** add distinct pause, resume, and trigger actions to
    the schedule view using the existing authenticated endpoints. Show the
    returned state and refresh schedule and run data. Explain that a manual

@@ -15,6 +15,7 @@ import {
   ReadinessAlertStateSnapshot,
   ReadinessSnapshot,
   ScheduledTaskSnapshot,
+  ScheduleSpec,
 } from '../types/metrics';
 import {
   KnowledgeBaseStatsSnapshot,
@@ -746,6 +747,17 @@ export const api = {
       return Array.isArray(data) ? data : [];
     } catch (error) {
       console.warn('Failed to fetch dependency review schedules', error);
+      throw error;
+    }
+  },
+
+  async createSchedule(id: string, spec: ScheduleSpec): Promise<DependencyReviewScheduleSnapshot> {
+    try {
+      return await fetchWithAuth(`/schedules/${encodeURIComponent(id)}`, {
+        method: 'PUT', body: JSON.stringify(spec),
+      });
+    } catch (error) {
+      console.warn('Failed to create schedule', error);
       throw error;
     }
   },
