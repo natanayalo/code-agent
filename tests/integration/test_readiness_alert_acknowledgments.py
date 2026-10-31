@@ -2,10 +2,20 @@
 
 from __future__ import annotations
 
+import os
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
+from pathlib import Path
+from threading import Event
+from uuid import uuid4
 
+import pytest
+from alembic import command
+from alembic.config import Config
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import select, text
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import OperationalError
 
 from apps.api.auth import ApiAuthConfig
 from apps.api.main import create_app
@@ -16,7 +26,12 @@ from db.readiness_alert_models import (
 )
 from db.webhook_alert_models import WebhookAlertDelivery
 from orchestrator.execution import TaskExecutionService
-from repositories import ReadinessAlertRepository, session_scope
+from repositories import (
+    ReadinessAlertRepository,
+    create_engine_from_url,
+    create_session_factory,
+    session_scope,
+)
 from repositories.sqlalchemy_webhook_alerts import WebhookAlertRepository
 from tests.integration.task_endpoints_support import DEFAULT_SHARED_SECRET, _default_worker
 
@@ -31,6 +46,51 @@ def _app(session_factory):
 
 def _headers() -> dict[str, str]:
     return {"X-Webhook-Token": DEFAULT_SHARED_SECRET}
+
+
+@pytest.fixture
+def postgres_session_factory():
+    """Create an isolated migrated database for transaction-lock regressions."""
+    database_url = os.getenv("CODE_AGENT_TEST_POSTGRES_URL")
+    if not database_url:
+        pytest.skip("CODE_AGENT_TEST_POSTGRES_URL is not set; skipping PostgreSQL race test.")
+    base_url = make_url(database_url)
+    admin_engine = create_engine_from_url(
+        base_url.set(database="postgres").render_as_string(hide_password=False),
+        isolation_level="AUTOCOMMIT",
+    )
+    database_name = f"code_agent_ack_test_{uuid4().hex}"
+    engine = None
+    database_created = False
+    try:
+        try:
+            with admin_engine.connect() as connection:
+                connection.exec_driver_sql(f"CREATE DATABASE {database_name}")
+            database_created = True
+        except OperationalError as exc:
+            pytest.skip(f"PostgreSQL unavailable for acknowledgment race test: {exc}")
+
+        test_url = base_url.set(database=database_name).render_as_string(hide_password=False)
+        config = Config(str(Path("alembic.ini").resolve()))
+        config.set_main_option("script_location", str(Path("db/migrations").resolve()))
+        config.set_main_option("sqlalchemy.url", test_url)
+        command.upgrade(config, "head")
+        engine = create_engine_from_url(test_url)
+        yield create_session_factory(engine)
+    finally:
+        if engine is not None:
+            engine.dispose()
+        if database_created:
+            with admin_engine.connect() as connection:
+                connection.execute(
+                    text(
+                        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                        "WHERE datname = :database_name AND pid <> pg_backend_pid()"
+                    ),
+                    {"database_name": database_name},
+                )
+                connection.exec_driver_sql(f"DROP DATABASE IF EXISTS {database_name}")
+        admin_engine.dispose()
 
 
 def test_acknowledgment_auth_idempotency_suppression_and_recurrence(session_factory) -> None:
@@ -177,3 +237,56 @@ def test_acknowledgment_suppresses_crashed_delivery_after_lease_expiry(session_f
         assert next_webhook.transition == "recovered"
         assert session.get(ReadinessAlertDelivery, telegram_id).status == "suppressed"
         assert session.get(WebhookAlertDelivery, webhook_id).status == "suppressed"
+
+
+def test_postgres_acknowledgment_serializes_concurrent_delivery_failures(
+    postgres_session_factory,
+) -> None:
+    task_id = f"ack-race-{uuid4()}"
+    reason = f"interaction_wait_stuck|{task_id}"
+    with session_scope(postgres_session_factory) as session:
+        repository = ReadinessAlertRepository(session, webhook_destination_id="destination")
+        repository.record_interaction_snapshot([task_id])
+        telegram = repository.claim_due(limit=1)[0]
+        webhook = WebhookAlertRepository(session).claim_one("destination")
+        assert webhook is not None
+        telegram_id = telegram.id
+        webhook_id = webhook.id
+        webhook_owner = webhook.lease_owner
+
+    acknowledgment_written = Event()
+    allow_acknowledgment_commit = Event()
+    failure_started = Event()
+    failure_finished = Event()
+
+    def acknowledge_and_hold_transaction() -> None:
+        with session_scope(postgres_session_factory) as session:
+            ReadinessAlertRepository(session).acknowledge_incident(reason, 1, actor="operator")
+            acknowledgment_written.set()
+            assert allow_acknowledgment_commit.wait(timeout=5)
+
+    def fail_both_deliveries() -> None:
+        assert acknowledgment_written.wait(timeout=5)
+        failure_started.set()
+        with session_scope(postgres_session_factory) as session:
+            ReadinessAlertRepository(session).mark_failed(telegram_id, http_status=503)
+            WebhookAlertRepository(session).complete(webhook_id, webhook_owner, 503)
+        failure_finished.set()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        acknowledgment = executor.submit(acknowledge_and_hold_transaction)
+        failure = executor.submit(fail_both_deliveries)
+        try:
+            assert acknowledgment_written.wait(timeout=5)
+            assert failure_started.wait(timeout=5)
+            assert not failure_finished.wait(timeout=0.2)
+        finally:
+            allow_acknowledgment_commit.set()
+        acknowledgment.result(timeout=5)
+        failure.result(timeout=5)
+
+    with session_scope(postgres_session_factory) as session:
+        telegram_row = session.get(ReadinessAlertDelivery, telegram_id)
+        webhook_row = session.get(WebhookAlertDelivery, webhook_id)
+    assert telegram_row is not None and telegram_row.status == "suppressed"
+    assert webhook_row is not None and webhook_row.status == "suppressed"

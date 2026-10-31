@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select, text, update
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from db.base import generate_uuid, utc_now
@@ -17,6 +17,7 @@ from db.readiness_alert_models import (
 from db.webhook_alert_models import WebhookAlertDelivery
 from orchestrator.operational_health_types import READINESS_REASON_CODES
 from repositories.readiness_alert_delivery_claims import claim_due_readiness_deliveries
+from repositories.readiness_alert_locks import lock_readiness_alert_updates
 
 MAX_DELIVERY_ATTEMPTS = 8
 DELIVERY_LEASE_SECONDS = 30
@@ -56,8 +57,7 @@ class ReadinessAlertRepository:
         self.telegram_enabled = telegram_enabled
 
     def _lock_state_updates(self) -> None:
-        if self.session.bind is not None and self.session.bind.dialect.name == "postgresql":
-            self.session.execute(text("SELECT pg_advisory_xact_lock(731004219)"))
+        lock_readiness_alert_updates(self.session)
 
     def capture_observed_states(self) -> dict[str, tuple[bool, datetime, datetime, int]]:
         """Capture latest known component states before replaying buffered samples."""
@@ -525,6 +525,7 @@ class ReadinessAlertRepository:
     def mark_failed(
         self, delivery_id: str, *, http_status: int | None = None, now: Any = None
     ) -> None:
+        lock_readiness_alert_updates(self.session)
         delivery = self.session.get(ReadinessAlertDelivery, delivery_id)
         if delivery is None:
             return

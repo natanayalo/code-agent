@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, aliased
 from db.base import generate_uuid, utc_now
 from db.readiness_alert_models import ReadinessAlertAcknowledgment
 from db.webhook_alert_models import WebhookAlertDelivery as Delivery
+from repositories.readiness_alert_locks import lock_readiness_alert_updates
 from repositories.sqlalchemy_readiness_alerts import DELIVERY_LEASE_SECONDS, MAX_DELIVERY_ATTEMPTS
 
 
@@ -87,6 +88,7 @@ class WebhookAlertRepository:
         return item
 
     def complete(self, delivery_id: str, owner: str, status: int | None) -> None:
+        lock_readiness_alert_updates(self.session)
         item = self.session.scalar(
             select(Delivery)
             .where(
