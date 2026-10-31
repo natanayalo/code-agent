@@ -38,10 +38,14 @@ def _reason(value: str) -> str:
     return prefix if prefix in REASONS else "other"
 
 
-def _record(row: Any, name: str) -> dict[str, Any]:
+def _record(row: Any, name: str, reason_references: dict[str, str]) -> dict[str, Any]:
+    reason_reference = reason_references.setdefault(
+        row.reason, f"reason-{len(reason_references) + 1}"
+    )
     data = {
         "reference": row.id,
         "reason_category": _reason(row.reason),
+        "reason_reference": reason_reference,
         "transition_number": row.transition_number,
     }
     if name == "acknowledgments":
@@ -83,6 +87,7 @@ def collect_evidence(service: Any, cutoff: datetime, lookback_hours: int) -> dic
             "retention and channel configuration limit coverage.",
             "Current delivery status may have changed after the interval.",
             "Concurrent changes and overwritten monitoring state may limit the snapshot.",
+            "Reason references are scoped to this snapshot and cannot correlate across snapshots.",
         ],
     }
     try:
@@ -91,11 +96,12 @@ def collect_evidence(service: Any, cutoff: datetime, lookback_hours: int) -> dic
     except Exception:
         logger.warning("Scheduled evidence observation timestamp unavailable")
         payload["limitations"].append("Latest monitoring observation unavailable.")
+    reason_references: dict[str, str] = {}
     for name in SOURCES:
         try:
             with session_scope(service.session_factory) as session:
                 rows, total = read_source(session, name, start, cutoff)
-                records = [_record(row, name) for row in rows]
+                records = [_record(row, name, reason_references) for row in rows]
             omitted = max(total - len(records), 0)
             payload["sources"][name] = {
                 "status": "truncated" if omitted else "observed" if total else "empty",

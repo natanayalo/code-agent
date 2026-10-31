@@ -82,7 +82,10 @@ records, omitted counts, truncation status, and limitations. Each history is cap
 channel configuration and retention and are not a complete incident ledger; missing
 or unavailable evidence does not establish health. Statuses may change after the
 interval. No task text, destinations, operator identities, raw errors or private paths
-are exported. Pause evidence schedules and drain or cancel submitted tasks before
+are exported. A snapshot-scoped `reason_reference` links records for the same reason
+across channels without exposing its identity; pair it with `transition_number` to
+match a transition. These references are not stable across snapshots. Pause evidence
+schedules and drain or cancel submitted tasks before
 reverting to a version that does not recognize this purpose.
 
 This repo intentionally focuses on coding execution infrastructure. It is not currently a multi-tenant SaaS, app-store mobile product, or autonomous self-modifying platform.
