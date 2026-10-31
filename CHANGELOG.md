@@ -160,6 +160,11 @@ completed-task ledger; keep completed work here instead.
 - Refactor: retire legacy task execution runtime ([#340](https://github.com/natanayalo/code-agent/pull/340))
 
 
+### Dependencies
+
+- Chore(deps-dev): bump undici from 7.29.1 to 7.30.1 in /dashboard ([#460](https://github.com/natanayalo/code-agent/pull/460))
+
+
 ### Documentation
 
 - Docs: mark M31-3 complete ([#464](https://github.com/natanayalo/code-agent/pull/464))
