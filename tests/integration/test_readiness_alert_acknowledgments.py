@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from apps.api.auth import ApiAuthConfig
 from apps.api.main import create_app
+from db.base import utc_now
 from db.readiness_alert_models import (
     ReadinessAlertAcknowledgment,
     ReadinessAlertDelivery,
@@ -144,3 +147,33 @@ def test_acknowledgment_suppresses_retries_when_in_flight_deliveries_fail(sessio
     assert webhook_row is not None and webhook_row.status == "suppressed"
     assert telegram_row.last_failure_code == "telegram_request_failed"
     assert webhook_row.last_failure_code == "webhook_request_failed"
+
+
+def test_acknowledgment_suppresses_crashed_delivery_after_lease_expiry(session_factory) -> None:
+    with session_scope(session_factory) as session:
+        repository = ReadinessAlertRepository(session, webhook_destination_id="destination")
+        repository.record_snapshot(["temporal_unavailable"])
+        telegram = repository.claim_due(limit=10)[0]
+        webhook = WebhookAlertRepository(session).claim_one("destination")
+        assert webhook is not None
+        telegram_id = telegram.id
+        webhook_id = webhook.id
+
+    with session_scope(session_factory) as session:
+        repository = ReadinessAlertRepository(session, webhook_destination_id="destination")
+        repository.acknowledge_incident("temporal_unavailable", 1, actor="operator")
+        repository.record_snapshot([])
+        expired_at = utc_now() - timedelta(seconds=1)
+        telegram_row = session.get(ReadinessAlertDelivery, telegram_id)
+        webhook_row = session.get(WebhookAlertDelivery, webhook_id)
+        assert telegram_row is not None and webhook_row is not None
+        telegram_row.lease_expires_at = expired_at
+        webhook_row.lease_expires_at = expired_at
+
+        next_telegram = repository.claim_due(limit=10)
+        next_webhook = WebhookAlertRepository(session).claim_one("destination")
+        assert next_webhook is not None
+        assert [item.transition for item in next_telegram] == ["recovered"]
+        assert next_webhook.transition == "recovered"
+        assert session.get(ReadinessAlertDelivery, telegram_id).status == "suppressed"
+        assert session.get(WebhookAlertDelivery, webhook_id).status == "suppressed"

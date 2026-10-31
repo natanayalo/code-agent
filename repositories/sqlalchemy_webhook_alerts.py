@@ -17,6 +17,25 @@ class WebhookAlertRepository:
 
     def claim_one(self, destination_id: str) -> Delivery | None:
         now = utc_now()
+        acknowledged_incident = (
+            select(ReadinessAlertAcknowledgment.id)
+            .where(
+                ReadinessAlertAcknowledgment.reason == Delivery.reason,
+                ReadinessAlertAcknowledgment.transition_number == Delivery.transition_number,
+            )
+            .exists()
+        )
+        self.session.execute(
+            update(Delivery)
+            .where(
+                Delivery.destination_id == destination_id,
+                Delivery.transition == "degraded",
+                Delivery.status == "processing",
+                Delivery.lease_expires_at <= now,
+                acknowledged_incident,
+            )
+            .values(status="suppressed", lease_owner=None, lease_expires_at=None)
+        )
         earlier = aliased(Delivery)
         blocked = (
             select(earlier.id)

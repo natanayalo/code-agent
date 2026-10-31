@@ -5,8 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import or_, select, text, update
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy import select, text, update
+from sqlalchemy.orm import Session
 
 from db.base import generate_uuid, utc_now
 from db.readiness_alert_models import (
@@ -16,6 +16,7 @@ from db.readiness_alert_models import (
 )
 from db.webhook_alert_models import WebhookAlertDelivery
 from orchestrator.operational_health_types import READINESS_REASON_CODES
+from repositories.readiness_alert_delivery_claims import claim_due_readiness_deliveries
 
 MAX_DELIVERY_ATTEMPTS = 8
 DELIVERY_LEASE_SECONDS = 30
@@ -505,37 +506,11 @@ class ReadinessAlertRepository:
 
     def claim_due(self, *, limit: int = 20) -> list[ReadinessAlertDelivery]:
         """Lease a bounded batch of due notifications for one API instance."""
-        now = utc_now()
-        earlier_unfinished = aliased(ReadinessAlertDelivery)
-        earlier_transition_exists = (
-            select(earlier_unfinished.id)
-            .where(
-                earlier_unfinished.reason == ReadinessAlertDelivery.reason,
-                earlier_unfinished.transition_number < ReadinessAlertDelivery.transition_number,
-                earlier_unfinished.status.in_(("pending", "processing")),
-            )
-            .exists()
+        return claim_due_readiness_deliveries(
+            self.session,
+            limit=limit,
+            lease_seconds=DELIVERY_LEASE_SECONDS,
         )
-        due = self.session.scalars(
-            select(ReadinessAlertDelivery)
-            .where(
-                or_(
-                    (ReadinessAlertDelivery.status == "pending")
-                    & (ReadinessAlertDelivery.next_attempt_at <= now),
-                    (ReadinessAlertDelivery.status == "processing")
-                    & (ReadinessAlertDelivery.lease_expires_at <= now),
-                ),
-                ~earlier_transition_exists,
-            )
-            .order_by(ReadinessAlertDelivery.created_at)
-            .limit(limit)
-            .with_for_update(skip_locked=True)
-        ).all()
-        for delivery in due:
-            delivery.status = "processing"
-            delivery.attempts += 1
-            delivery.lease_expires_at = now + timedelta(seconds=DELIVERY_LEASE_SECONDS)
-        return list(due)
 
     def mark_delivered(self, delivery_id: str, *, http_status: int, now: Any = None) -> None:
         delivery = self.session.get(ReadinessAlertDelivery, delivery_id)
