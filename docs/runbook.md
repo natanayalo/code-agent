@@ -377,10 +377,11 @@ records the operator and time; it does not change observed health or recover the
 incident. The current single-operator authentication model records the actor as
 `operator`.
 
-Acknowledgment is idempotent for that degraded transition. A request for a
-recovered incident or a newer/older transition returns HTTP 409. Recovery remains
-an observed transition, and a later degradation has its own transition number
-and starts unacknowledged. Pending degraded retries for that incident are marked
+Acknowledgment is idempotent for that degraded transition; repeating an
+acknowledgment returns its original audit record. A first request for a recovered
+incident or a different transition returns HTTP 409. Recovery remains an observed
+transition, and a later degradation has its own transition number and starts
+unacknowledged. Pending degraded retries for that incident are marked
 `suppressed` on Telegram and webhook delivery records. Recovery notifications
 and the delivery history remain available. A send claimed before the
 acknowledgment may finish; acknowledgment cannot retract a request already in
