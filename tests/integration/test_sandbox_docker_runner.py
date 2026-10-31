@@ -124,7 +124,10 @@ def test_docker_sandbox_runner_executes_command_in_container(tmp_path: Path) -> 
     )
 
 
-def test_persistent_shell_session_preserves_state_across_commands(tmp_path: Path) -> None:
+@pytest.mark.parametrize("scratch_namespace", [None, "node-activity:v1:plan:first:1"])
+def test_persistent_shell_session_preserves_state_across_commands(
+    tmp_path: Path, scratch_namespace: str | None
+) -> None:
     """A long-lived shell session should preserve env, cwd, and filesystem state."""
     image = os.environ.get("CODE_AGENT_TEST_DOCKER_IMAGE", "python:3.12-slim")
     if not _docker_and_image_available(image):
@@ -137,7 +140,9 @@ def test_persistent_shell_session_preserves_state_across_commands(tmp_path: Path
     )
 
     container_manager = DockerSandboxContainerManager(default_image=image)
-    container = container_manager.start(DockerSandboxContainerRequest(workspace=workspace))
+    container = container_manager.start(
+        DockerSandboxContainerRequest(workspace=workspace, scratch_namespace=scratch_namespace)
+    )
 
     try:
         reconnected = container_manager.reconnect(container)
@@ -159,6 +164,10 @@ def test_persistent_shell_session_preserves_state_across_commands(tmp_path: Path
         )
     finally:
         container_manager.stop(container)
+    inspect = subprocess.run(
+        ["docker", "inspect", container.container_name], capture_output=True, check=False
+    )
+    assert inspect.returncode != 0
 
 
 def test_docker_sandbox_runner_read_only_workspace(

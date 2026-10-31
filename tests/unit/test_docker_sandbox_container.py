@@ -177,7 +177,10 @@ def test_build_docker_container_run_command_skips_user_mapping_on_windows(
     assert "--user" not in command
 
 
-def test_container_manager_start_reconnect_and_stop(tmp_path: Path) -> None:
+@pytest.mark.parametrize("scratch_namespace", [None, "node-activity:v1:plan:first:1"])
+def test_container_manager_start_reconnect_and_stop(
+    tmp_path: Path, scratch_namespace: str | None
+) -> None:
     """Container lifecycle commands should be issued in the expected order."""
     workspace = _workspace_handle(tmp_path)
     calls: list[tuple[list[str], int]] = []
@@ -193,13 +196,16 @@ def test_container_manager_start_reconnect_and_stop(tmp_path: Path) -> None:
         raise AssertionError(f"Unexpected docker command: {command}")
 
     manager = DockerSandboxContainerManager(command_runner=fake_runner)
-    request = DockerSandboxContainerRequest(workspace=workspace)
+    request = DockerSandboxContainerRequest(
+        workspace=workspace, scratch_namespace=scratch_namespace
+    )
 
     container = manager.start(request)
     reconnected = manager.reconnect(container)
     manager.stop(container)
 
     assert container == reconnected
+    assert container.container_name == build_container_name(workspace, scratch_namespace)
     assert calls == [
         (
             _build_docker_container_run_command(

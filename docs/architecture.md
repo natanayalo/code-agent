@@ -150,6 +150,9 @@ Responsibilities:
 - redact sensitive data in captured outputs
 - capture command/test/diff artifacts and retention metadata
 
+Persistent sandbox containers use a distinct name for each scratch namespace;
+the same name is used for shell sessions, reconnection, and cleanup.
+
 Primary modules:
 
 - `sandbox/`
