@@ -7,6 +7,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Added
 
+- Feat: collect scheduled operational evidence ([#467](https://github.com/natanayalo/code-agent/pull/467))
+
 - Feat: add scheduled service health summaries ([#466](https://github.com/natanayalo/code-agent/pull/466))
 
 - Feat: add operator readiness alert acknowledgment ([#463](https://github.com/natanayalo/code-agent/pull/463))
