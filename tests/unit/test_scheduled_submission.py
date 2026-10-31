@@ -44,3 +44,15 @@ def test_health_summary_requires_snapshot():
         build_scheduled_submission(
             schedule_id="health", spec=valid_spec(purpose="health_summary"), repo_url="repo"
         )
+
+
+def test_evidence_collection_requires_snapshot():
+    with pytest.raises(ValueError, match="requires a snapshot"):
+        build_scheduled_submission(
+            schedule_id="evidence",
+            spec=valid_spec(
+                purpose="evidence_collection",
+                evidence={"source": "operational_incidents", "lookback_hours": 24},
+            ),
+            repo_url="repo",
+        )

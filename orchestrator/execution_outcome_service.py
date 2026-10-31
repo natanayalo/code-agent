@@ -828,7 +828,21 @@ def _persist_execution_outcome(
 
         result = state.result
         artifacts = result.artifacts if result is not None else []
+        evidence = (task.constraints or {}).get("operational_evidence")
+        if isinstance(evidence, dict):
+            artifacts = [
+                artifact for artifact in artifacts if artifact.name != "operational-evidence.json"
+            ]
         artifact_index, review_artifact_entries = _build_artifact_index(state, artifacts)
+        if isinstance(evidence, dict):
+            entry = {
+                "name": "operational-evidence.json",
+                "uri": "inline://operational-evidence.json",
+                "artifact_type": ArtifactType.RESULT_SUMMARY.value,
+                "artifact_metadata": {"operational_evidence": evidence},
+            }
+            artifact_index.append(entry)
+            review_artifact_entries.append((ArtifactType.RESULT_SUMMARY.value, entry))
 
         worker_run = _create_worker_run(
             worker_run_repo=worker_run_repo,

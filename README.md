@@ -31,8 +31,8 @@ The platform is built for one operator-first use case: reliable coding execution
 
 ### Read-only schedules
 
-The authenticated schedules API creates read-only dependency reviews and service-health
-summaries in Temporal.
+The authenticated schedules API creates read-only dependency reviews, service-health
+summaries, and operational evidence summaries in Temporal.
 Set the same `CODE_AGENT_ALLOWED_REPOS` registry on the API and worker; the worker
 checks the key again when each occurrence runs. Supply an explicit IANA timezone.
 For example, send a `PUT` to `/schedules/project-dependencies` with:
@@ -66,14 +66,27 @@ reverting the worker. Scheduling controls require the existing API credentials.
 Pause all `health_summary` schedules before reverting to a version that does not
 recognize that purpose; retain or inspect the existing task history as needed.
 
-Evidence-collection schedules are a separate planned purpose. Their input will be an
-operator-selected, allowlisted evidence source and time window; their output will be
-a bounded, sanitized evidence artifact with source, collection time, and limitations.
-Acceptance requires a traceable source, explicit missing or truncated evidence, and
-no unsupported conclusions. Raw task text, credentials, connection errors, and
-private artifact paths must not be exposed. Exact sources and artifact format remain
-to be specified in the separate implementation. This purpose does not authorize
-scheduled mutation or access to additional secret scopes.
+For a 24-hour service-wide operational evidence summary, create a paused schedule with:
+
+```json
+{"version":1,"purpose":"evidence_collection","evidence":{"source":"operational_incidents","lookback_hours":24},"repo_key":"project","branch":"main","weekdays":["monday"],"time":"09:00","timezone":"Asia/Jerusalem"}
+```
+
+The repository selects the read-only execution workspace; it does not filter incidents.
+The interval is `[scheduled activity time − lookback, scheduled activity time)`. The
+accepted snapshot is retained in task history and, when a run is created, in the inline
+`operational-evidence.json` artifact (category `result_summary`). Its versioned JSON
+contains source, interval, collection time, latest monitoring observation, sanitized
+records, omitted counts, truncation status, and limitations. Each history is capped at
+100 records and the snapshot at 64 KiB. The available delivery records depend on
+channel configuration and retention and are not a complete incident ledger; missing
+or unavailable evidence does not establish health. Statuses may change after the
+interval. No task text, destinations, operator identities, raw errors or private paths
+are exported. A snapshot-scoped `reason_reference` links records for the same reason
+across channels without exposing its identity; pair it with `transition_number` to
+match a transition. These references are not stable across snapshots. Pause evidence
+schedules and drain or cancel submitted tasks before
+reverting to a version that does not recognize this purpose.
 
 This repo intentionally focuses on coding execution infrastructure. It is not currently a multi-tenant SaaS, app-store mobile product, or autonomous self-modifying platform.
 
