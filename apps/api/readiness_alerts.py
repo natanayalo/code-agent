@@ -135,10 +135,14 @@ class ReadinessAlertMonitor:
         readiness_probe: Callable[[Any], Any] | None = None,
         interaction_probe: Callable[[Any, datetime], list[str]] | None = None,
         outbox_probe: Callable[[Any, datetime], list[str]] | None = None,
+        webhook_destination: Any = None,
+        webhook_sender: Callable[[Any, dict], int] | None = None,
         reconciliation_probe: (
             Callable[[Any, datetime], list[str] | TerminalReconciliationAlertSnapshot] | None
         ) = None,
     ) -> None:
+        self.webhook_destination = webhook_destination
+        self.webhook_sender = webhook_sender
         self.task_service = task_service
         self.session_factory = session_factory
         self.telegram_client = telegram_client
@@ -242,17 +246,80 @@ class ReadinessAlertMonitor:
             await asyncio.to_thread(self._record_provider_observations)
         except Exception as exc:
             logger.warning("Provider alert observation failed (%s)", type(exc).__name__)
-        for _ in range(MAX_DELIVERIES_PER_CYCLE):
+        results = await asyncio.gather(
+            self._deliver_telegram_batch(), self._deliver_webhook_batch(), return_exceptions=True
+        )
+        for result in results:
+            if isinstance(result, Exception):
+                logger.warning("Readiness alert delivery batch failed")
+
+    async def _deliver_telegram_batch(self) -> None:
+        for _ in range(MAX_DELIVERIES_PER_CYCLE if self.bot_token and self.chat_id else 0):
             delivery = await asyncio.to_thread(self._claim_one)
             if delivery is None:
                 break
             await self._deliver(delivery)
 
+    async def _deliver_webhook_batch(self) -> None:
+        if self.webhook_destination:
+            for _ in range(MAX_DELIVERIES_PER_CYCLE):
+                item = await asyncio.to_thread(self._claim_webhook)
+                if item is None:
+                    break
+                await self._deliver_webhook(item)
+
+    def _claim_webhook(self) -> dict[str, Any] | None:
+        from repositories.sqlalchemy_webhook_alerts import WebhookAlertRepository
+
+        with _LOCAL_DB_LOCK, session_scope(self.session_factory) as session:
+            item = WebhookAlertRepository(session).claim_one(
+                self.webhook_destination.destination_id
+            )
+            if item is None:
+                return None
+            return {
+                key: getattr(item, key)
+                for key in (
+                    "id",
+                    "reason",
+                    "transition",
+                    "transition_number",
+                    "observed_at",
+                    "lease_owner",
+                )
+            }
+
+    async def _deliver_webhook(self, item: dict[str, Any]) -> None:
+        from apps.api.webhook_alerts import TIMEOUT, send_webhook
+
+        status = None
+        try:
+            status = await asyncio.wait_for(
+                asyncio.to_thread(
+                    self.webhook_sender or send_webhook, self.webhook_destination, item
+                ),
+                timeout=TIMEOUT,
+            )
+        except Exception:
+            logger.warning("Readiness webhook delivery failed")
+        await asyncio.to_thread(self._complete_webhook, item, status)
+
+    def _complete_webhook(self, item: dict[str, Any], status: int | None) -> None:
+        from repositories.sqlalchemy_webhook_alerts import WebhookAlertRepository
+
+        with session_scope(self.session_factory) as session:
+            WebhookAlertRepository(session).complete(item["id"], item["lease_owner"], status)
+
+    def _webhook_id(self) -> str | None:
+        return self.webhook_destination.destination_id if self.webhook_destination else None
+
     def _record_provider_observations(self) -> None:
         with _LOCAL_DB_LOCK, session_scope(self.session_factory) as session:
-            ReadinessAlertRepository(session).record_provider_observations(
-                fresh_observations(session, utc_now())
-            )
+            ReadinessAlertRepository(
+                session,
+                webhook_destination_id=self._webhook_id(),
+                telegram_enabled=bool(self.bot_token and self.chat_id),
+            ).record_provider_observations(fresh_observations(session, utc_now()))
 
     def _buffer_snapshot(self, sample: tuple[list[str], list[str], datetime]) -> None:
         reasons, unknown_reasons, _observed_at = sample
@@ -268,7 +335,11 @@ class ReadinessAlertMonitor:
     def _record_snapshots(self, samples: list[tuple[list[str], list[str], datetime]]) -> None:
         """Persist the buffered replay atomically to keep its transitions ordered."""
         with _LOCAL_DB_LOCK, session_scope(self.session_factory) as session:
-            repository = ReadinessAlertRepository(session)
+            repository = ReadinessAlertRepository(
+                session,
+                webhook_destination_id=self._webhook_id(),
+                telegram_enabled=bool(self.bot_token and self.chat_id),
+            )
             latest_states = repository.capture_observed_states()
             repository.record_earlier_incidents(samples, captured=latest_states)
             latest_replayed_at: dict[str, datetime] = {}
@@ -295,9 +366,11 @@ class ReadinessAlertMonitor:
 
     def _record_interaction_snapshot(self, task_ids: list[str], observed_at: datetime) -> None:
         with _LOCAL_DB_LOCK, session_scope(self.session_factory) as session:
-            ReadinessAlertRepository(session).record_interaction_snapshot(
-                task_ids, observed_at=observed_at
-            )
+            ReadinessAlertRepository(
+                session,
+                webhook_destination_id=self._webhook_id(),
+                telegram_enabled=bool(self.bot_token and self.chat_id),
+            ).record_interaction_snapshot(task_ids, observed_at=observed_at)
 
     def _probe_stale_outbox_task_ids(self, task_service: Any, observed_at: datetime) -> list[str]:
         """Read the complete stale eligible task set directly from the outbox table."""
@@ -308,9 +381,11 @@ class ReadinessAlertMonitor:
 
     def _record_stale_outbox_snapshot(self, task_ids: list[str], observed_at: datetime) -> None:
         with _LOCAL_DB_LOCK, session_scope(self.session_factory) as session:
-            ReadinessAlertRepository(session).record_stale_outbox_snapshot(
-                task_ids, observed_at=observed_at
-            )
+            ReadinessAlertRepository(
+                session,
+                webhook_destination_id=self._webhook_id(),
+                telegram_enabled=bool(self.bot_token and self.chat_id),
+            ).record_stale_outbox_snapshot(task_ids, observed_at=observed_at)
 
     def _record_terminal_reconciliation_snapshot(
         self,
@@ -319,7 +394,11 @@ class ReadinessAlertMonitor:
         unconfirmed_task_ids: list[str] | None = None,
     ) -> None:
         with _LOCAL_DB_LOCK, session_scope(self.session_factory) as session:
-            ReadinessAlertRepository(session).record_terminal_reconciliation_snapshot(
+            ReadinessAlertRepository(
+                session,
+                webhook_destination_id=self._webhook_id(),
+                telegram_enabled=bool(self.bot_token and self.chat_id),
+            ).record_terminal_reconciliation_snapshot(
                 task_ids,
                 observed_at=observed_at,
                 unconfirmed_task_ids=unconfirmed_task_ids,

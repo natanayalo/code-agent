@@ -55,6 +55,7 @@ EXPECTED_TABLES = {
     "ephemeral_secret_records",
     "readiness_alert_states",
     "readiness_alert_deliveries",
+    "webhook_alert_deliveries",
 }
 
 

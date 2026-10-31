@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import cast
+from typing import Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from apps.api.dependencies import require_any_valid_auth
+from db.webhook_alert_models import WebhookAlertDelivery
 from orchestrator.provider_observations import ACTIONS, alert_identity
 from repositories import ReadinessAlertRepository, session_scope
 from repositories.sqlalchemy_readiness_alerts import (
@@ -48,6 +50,8 @@ class ReadinessAlertDeliveryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
+    channel: Literal["telegram", "webhook"] = "telegram"
+    destination_id: str | None = None
     reason: str
     task_id: str | None = None
     worker_node_id: str | None = None
@@ -123,14 +127,42 @@ def get_readiness_alert_states(request: Request) -> list[ReadinessAlertStateResp
 def get_readiness_alert_deliveries(
     request: Request,
     limit: int = Query(default=100, ge=1, le=500),
+    channel: Literal["telegram", "webhook"] | None = None,
 ) -> list[ReadinessAlertDeliveryResponse]:
     """Return recent delivery outcomes and bounded retry metadata."""
     factory = _session_factory(request)
     with session_scope(factory) as session:
-        deliveries = ReadinessAlertRepository(session).list_deliveries(limit=limit)
+        telegram = (
+            ReadinessAlertRepository(session).list_deliveries(limit=limit)
+            if channel != "webhook"
+            else []
+        )
+        webhooks = (
+            list(
+                session.scalars(
+                    select(WebhookAlertDelivery)
+                    .order_by(
+                        WebhookAlertDelivery.created_at.desc(), WebhookAlertDelivery.id.desc()
+                    )
+                    .limit(limit)
+                )
+            )
+            if channel != "telegram"
+            else []
+        )
+        deliveries = [(item, "telegram") for item in telegram] + [
+            (item, "webhook") for item in webhooks
+        ]
+        deliveries.sort(key=lambda pair: (pair[0].created_at, pair[0].id), reverse=True)
         return [
             ReadinessAlertDeliveryResponse.model_validate(item).model_copy(
-                update=_public_fields(item.reason)
+                update={
+                    **_public_fields(item.reason),
+                    "channel": kind,
+                    "destination_id": item.destination_id
+                    if isinstance(item, WebhookAlertDelivery)
+                    else None,
+                }
             )
-            for item in deliveries
+            for item, kind in deliveries[:limit]
         ]

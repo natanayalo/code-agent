@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, aliased
 
 from db.base import generate_uuid, utc_now
 from db.readiness_alert_models import ReadinessAlertDelivery, ReadinessAlertState
+from db.webhook_alert_models import WebhookAlertDelivery
 from orchestrator.operational_health_types import READINESS_REASON_CODES
 
 MAX_DELIVERY_ATTEMPTS = 8
@@ -34,8 +35,16 @@ def _utc_aware(value: datetime) -> datetime:
 class ReadinessAlertRepository:
     """Record readiness transitions and coordinate bounded delivery retries."""
 
-    def __init__(self, session: Session) -> None:
+    def __init__(
+        self,
+        session: Session,
+        *,
+        webhook_destination_id: str | None = None,
+        telegram_enabled: bool = True,
+    ) -> None:
         self.session = session
+        self.webhook_destination_id = webhook_destination_id
+        self.telegram_enabled = telegram_enabled
 
     def _lock_state_updates(self) -> None:
         if self.session.bind is not None and self.session.bind.dialect.name == "postgresql":
@@ -72,14 +81,22 @@ class ReadinessAlertRepository:
                 .where(ReadinessAlertDelivery.reason == reason)
                 .order_by(ReadinessAlertDelivery.observed_at)
             ).all()
-            if not history:
+            webhook_history = self.session.scalars(
+                select(WebhookAlertDelivery)
+                .where(WebhookAlertDelivery.reason == reason)
+                .order_by(WebhookAlertDelivery.observed_at)
+            ).all()
+            events = sorted(
+                {(_utc_aware(item.observed_at), item.transition) for item in history}
+                | {(_utc_aware(item.observed_at), item.transition) for item in webhook_history}
+            )
+            if not events:
                 baseline = captured.get(reason)
                 if baseline is not None and not baseline[0] and baseline[3] == 0:
                     self._record_before_initial_baseline(
                         reason, state, samples, _utc_aware(baseline[1])
                     )
                 continue
-            events = [(_utc_aware(item.observed_at), item.transition) for item in history]
             started: datetime | None = None
             for reasons, unknown, observed_at in samples:
                 if reason in unknown:
@@ -392,18 +409,33 @@ class ReadinessAlertRepository:
         )
 
     def _enqueue(self, reason: str, number: int, transition: str, now: Any) -> None:
-        self.session.add(
-            ReadinessAlertDelivery(
-                id=generate_uuid(),
-                reason=reason,
-                transition_number=number,
-                transition=transition,
-                observed_at=now,
-                status="pending",
-                attempts=0,
-                next_attempt_at=now,
+        if self.webhook_destination_id:
+            self.session.add(
+                WebhookAlertDelivery(
+                    id=generate_uuid(),
+                    destination_id=self.webhook_destination_id,
+                    reason=reason,
+                    transition_number=number,
+                    transition=transition,
+                    observed_at=now,
+                    status="pending",
+                    attempts=0,
+                    next_attempt_at=now,
+                )
             )
-        )
+        if self.telegram_enabled:
+            self.session.add(
+                ReadinessAlertDelivery(
+                    id=generate_uuid(),
+                    reason=reason,
+                    transition_number=number,
+                    transition=transition,
+                    observed_at=now,
+                    status="pending",
+                    attempts=0,
+                    next_attempt_at=now,
+                )
+            )
 
     def claim_due(self, *, limit: int = 20) -> list[ReadinessAlertDelivery]:
         """Lease a bounded batch of due notifications for one API instance."""
