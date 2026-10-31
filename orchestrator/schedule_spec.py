@@ -19,7 +19,7 @@ class ScheduleSpec(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     version: Literal[1]
-    purpose: Literal["dependency_review"]
+    purpose: Literal["dependency_review", "health_summary"]
     repo_key: str = Field(min_length=1, max_length=255, pattern=r"^\S+$")
     branch: str | None = Field(default=None, min_length=1, max_length=255, pattern=r"^\S+$")
     weekdays: tuple[Weekday, ...] = Field(min_length=1, max_length=7)

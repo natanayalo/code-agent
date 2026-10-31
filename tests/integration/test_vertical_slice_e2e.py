@@ -89,7 +89,7 @@ def session_factory(tmp_path: Path):
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("scheduled", [False, True])
+@pytest.mark.parametrize("scheduled", [False, "dependency_review", "health_summary"])
 async def test_vertical_slice_e2e_happy_path(
     session_factory, tmp_path: Path, monkeypatch, scheduled
 ):
@@ -101,7 +101,16 @@ async def test_vertical_slice_e2e_happy_path(
 
     # 1. Setup real components with mocked turns
     adapter = _ScriptedAdapter(
-        [CliRuntimeStep(kind="final", final_output="Dependency review completed with limitations.")]
+        [
+            CliRuntimeStep(
+                kind="final",
+                final_output=(
+                    "Service health: observations unavailable; limitations apply."
+                    if scheduled == "health_summary"
+                    else "Dependency review completed with limitations."
+                ),
+            )
+        ]
         if scheduled
         else [
             CliRuntimeStep(
@@ -193,7 +202,7 @@ async def test_vertical_slice_e2e_happy_path(
             )
             spec = ScheduleSpec(
                 version=1,
-                purpose="dependency_review",
+                purpose=scheduled,
                 repo_key="repo",
                 branch="master",
                 weekdays=("monday",),
@@ -267,7 +276,9 @@ async def test_vertical_slice_e2e_happy_path(
         assert run is not None
         assert run.status == "success"
         if scheduled:
-            assert "Dependency review" in run.summary
+            assert (
+                "Service health" if scheduled == "health_summary" else "Dependency review"
+            ) in run.summary
             assert run.files_changed_count == 0
             assert run.files_changed == []
             assert _run_git(["git", "status", "--porcelain"], cwd=repo_path) == ""

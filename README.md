@@ -29,9 +29,10 @@ The platform is built for one operator-first use case: reliable coding execution
 
 ## Product Boundaries
 
-### Weekly dependency reviews
+### Read-only schedules
 
-The authenticated schedules API creates read-only dependency reviews in Temporal.
+The authenticated schedules API creates read-only dependency reviews and service-health
+summaries in Temporal.
 Set the same `CODE_AGENT_ALLOWED_REPOS` registry on the API and worker; the worker
 checks the key again when each occurrence runs. Supply an explicit IANA timezone.
 For example, send a `PUT` to `/schedules/project-dependencies` with:
@@ -39,6 +40,14 @@ For example, send a `PUT` to `/schedules/project-dependencies` with:
 ```json
 {"version":1,"purpose":"dependency_review","repo_key":"project","branch":"main","weekdays":["monday"],"time":"09:00","timezone":"Asia/Jerusalem"}
 ```
+
+Use `"purpose":"health_summary"` with the same fields to summarize service readiness,
+aggregate execution health, and the count of persisted active incidents. Each run
+captures observation timestamps; unavailable sources are reported as unavailable.
+Incident counts reflect stored alert observations, which may be stale or absent when
+monitoring is disabled. Task history contains the sanitized snapshot and generated
+summary. The snapshot excludes task identifiers, task text, secrets, raw errors, and
+artifact paths; it can be sent to the configured coding worker.
 
 New schedules are paused. Use `POST /schedules/{id}/resume`, `/pause`, or
 `/trigger` (manual triggers also work while paused). Identical `PUT` retries
@@ -54,6 +63,17 @@ also expire under the Temporal namespace's workflow retention policy. Task
 history follows the existing task retention policy. To roll back, pause each
 schedule and drain or cancel submitted tasks using existing task controls before
 reverting the worker. Scheduling controls require the existing API credentials.
+Pause all `health_summary` schedules before reverting to a version that does not
+recognize that purpose; retain or inspect the existing task history as needed.
+
+Evidence-collection schedules are a separate planned purpose. Their input will be an
+operator-selected, allowlisted evidence source and time window; their output will be
+a bounded, sanitized evidence artifact with source, collection time, and limitations.
+Acceptance requires a traceable source, explicit missing or truncated evidence, and
+no unsupported conclusions. Raw task text, credentials, connection errors, and
+private artifact paths must not be exposed. Exact sources and artifact format remain
+to be specified in the separate implementation. This purpose does not authorize
+scheduled mutation or access to additional secret scopes.
 
 This repo intentionally focuses on coding execution infrastructure. It is not currently a multi-tenant SaaS, app-store mobile product, or autonomous self-modifying platform.
 

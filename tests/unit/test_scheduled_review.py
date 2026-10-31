@@ -61,3 +61,31 @@ async def test_activity_surfaces_busy_skip():
     )
     result = await activity.submit("schedule", "occurrence", valid_spec().model_dump(mode="json"))
     assert result == {"outcome": "skipped_busy", "task_id": None}
+
+
+@pytest.mark.anyio
+async def test_health_activity_submits_observation_with_same_occurrence_key(monkeypatch):
+    calls = []
+
+    class Service:
+        def create_task_outcome(self, submission, **kwargs):
+            calls.append((submission, kwargs))
+            return SimpleNamespace(
+                duplicate=len(calls) > 1, task_snapshot=SimpleNamespace(task_id="task")
+            )
+
+    monkeypatch.setattr(
+        "orchestrator.temporal.scheduled_review.collect_health_snapshot",
+        lambda service: {"readiness": {"status": "unknown"}},
+    )
+    activity = ScheduledReviewActivities(
+        Service(),
+        SystemConfig(
+            default_image="test", workspace_root="/tmp", allowed_repos={"project": "repo"}
+        ),
+    )
+    spec = valid_spec(purpose="health_summary").model_dump(mode="json")
+    assert (await activity.submit("health", "occurrence", spec))["outcome"] == "submitted"
+    assert (await activity.submit("health", "occurrence", spec))["outcome"] == "duplicate"
+    assert calls[0][1]["delivery_key"] == calls[1][1]["delivery_key"]
+    assert '"unknown"' in calls[0][0].task_text

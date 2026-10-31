@@ -16,6 +16,7 @@ from apps.api.config import SystemConfig
 from orchestrator.execution_submission_service import ScheduledSessionBusyError
 from orchestrator.execution_types import DeliveryKey
 from orchestrator.schedule_spec import ScheduleSpec
+from orchestrator.scheduled_health import collect_health_snapshot
 from orchestrator.scheduled_submission import build_scheduled_submission
 
 logger = logging.getLogger(__name__)
@@ -51,8 +52,17 @@ class ScheduledReviewActivities:
             repo_url = self.config.resolve_repo_key(spec.repo_key)
             if not repo_url:
                 raise ApplicationError("Repository is no longer allowlisted", non_retryable=True)
+            health_snapshot = (
+                await asyncio.to_thread(collect_health_snapshot, self.service)
+                if spec.purpose == "health_summary"
+                else None
+            )
             submission = build_scheduled_submission(
-                schedule_id=schedule_id, spec=spec, repo_url=repo_url, occurrence_id=occurrence_id
+                schedule_id=schedule_id,
+                spec=spec,
+                repo_url=repo_url,
+                occurrence_id=occurrence_id,
+                health_snapshot=health_snapshot,
             )
             identity = f"{schedule_id}\0{occurrence_id}".encode()
             key = DeliveryKey(channel="schedule", delivery_id=hashlib.sha256(identity).hexdigest())
