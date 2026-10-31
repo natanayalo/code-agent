@@ -124,7 +124,10 @@ def test_docker_sandbox_runner_executes_command_in_container(tmp_path: Path) -> 
     )
 
 
-def test_persistent_shell_session_preserves_state_across_commands(tmp_path: Path) -> None:
+@pytest.mark.parametrize("scratch_namespace", [None, "node-activity:v1:plan:first:1"])
+def test_persistent_shell_session_preserves_state_across_commands(
+    tmp_path: Path, scratch_namespace: str | None
+) -> None:
     """A long-lived shell session should preserve env, cwd, and filesystem state."""
     image = os.environ.get("CODE_AGENT_TEST_DOCKER_IMAGE", "python:3.12-slim")
     if not _docker_and_image_available(image):
@@ -137,7 +140,9 @@ def test_persistent_shell_session_preserves_state_across_commands(tmp_path: Path
     )
 
     container_manager = DockerSandboxContainerManager(default_image=image)
-    container = container_manager.start(DockerSandboxContainerRequest(workspace=workspace))
+    container = container_manager.start(
+        DockerSandboxContainerRequest(workspace=workspace, scratch_namespace=scratch_namespace)
+    )
 
     try:
         reconnected = container_manager.reconnect(container)
@@ -159,6 +164,47 @@ def test_persistent_shell_session_preserves_state_across_commands(tmp_path: Path
         )
     finally:
         container_manager.stop(container)
+    inspect = subprocess.run(
+        ["docker", "inspect", container.container_name], capture_output=True, check=False
+    )
+    assert inspect.returncode != 0
+
+
+@pytest.mark.parametrize("scratch_namespace", [None, "node-activity:v1:plan:first:1"])
+def test_read_only_session_stores_audit_outside_repository(
+    tmp_path: Path, scratch_namespace: str | None
+) -> None:
+    """Auditing a read-only shell command must not modify the repository."""
+    image = os.environ.get("CODE_AGENT_TEST_DOCKER_IMAGE", "python:3.12-slim")
+    if not _docker_and_image_available(image):
+        pytest.skip(f"Docker daemon or image {image!r} is unavailable")
+    source_repo = _create_local_repo(tmp_path)
+    manager = WorkspaceManager(tmp_path / "workspaces")
+    workspace = manager.create_workspace(
+        WorkspaceRequest(task_id="read-only-audit", repo_url=str(source_repo))
+    )
+    containers = DockerSandboxContainerManager(default_image=image)
+    container = containers.start(
+        DockerSandboxContainerRequest(
+            workspace=workspace, read_only_workspace=True, scratch_namespace=scratch_namespace
+        )
+    )
+    try:
+        with DockerShellSession(container) as session:
+            result = session.execute("printf 'audit test'")
+        assert result.exit_code == 0
+        stdout = next(artifact for artifact in result.artifacts if artifact.name == "stdout.log")
+        path = Path(stdout.uri)
+        assert path.is_relative_to(node_artifacts_root(workspace.workspace_path, scratch_namespace))
+        assert path.read_text(encoding="utf-8") == "audit test"
+        assert (
+            _run_git(
+                ["git", "status", "--porcelain", "--untracked-files=all"], cwd=workspace.repo_path
+            )
+            == ""
+        )
+    finally:
+        containers.stop(container)
 
 
 def test_docker_sandbox_runner_read_only_workspace(

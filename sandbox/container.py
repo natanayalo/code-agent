@@ -60,6 +60,8 @@ class DockerSandboxContainer(SandboxModel):
     network_enabled: bool = False
     memory_limit: str | None = "1g"
     cpu_limit: float | None = 1.0
+    read_only_workspace: bool = False
+    scratch_namespace: str | None = None
 
 
 class DockerSandboxContainerError(RuntimeError):
@@ -304,6 +306,7 @@ class DockerSandboxContainerManager:
     def start(self, request: DockerSandboxContainerRequest) -> DockerSandboxContainer:
         """Start a named long-lived Docker container for a sandbox workspace."""
         image = request.image or self.default_image
+        container_name = build_container_name(request.workspace, request.scratch_namespace)
         docker_command = _build_docker_container_run_command(
             request,
             image=image,
@@ -315,7 +318,7 @@ class DockerSandboxContainerManager:
             extra={
                 "workspace_id": request.workspace.workspace_id,
                 "task_id": request.workspace.task_id,
-                "container_name": build_container_name(request.workspace),
+                "container_name": container_name,
                 "image": image,
             },
         )
@@ -328,8 +331,7 @@ class DockerSandboxContainerManager:
             stdout = completed.stdout.strip()
             message = stderr or stdout or "docker run failed without output"
             raise DockerSandboxContainerError(
-                f"Failed to start persistent sandbox container "
-                f"({build_container_name(request.workspace)}): {message}"
+                f"Failed to start persistent sandbox container ({container_name}): {message}"
             )
 
         working_dir = request.working_dir
@@ -338,13 +340,15 @@ class DockerSandboxContainerManager:
 
         return DockerSandboxContainer(
             workspace=request.workspace,
-            container_name=build_container_name(request.workspace),
+            container_name=container_name,
             image=image,
             working_dir=working_dir,
             environment=dict(request.environment),
             network_enabled=request.network_enabled,
             memory_limit=request.memory_limit,
             cpu_limit=request.cpu_limit,
+            read_only_workspace=request.read_only_workspace,
+            scratch_namespace=request.scratch_namespace,
         )
 
     def reconnect(self, container: DockerSandboxContainer) -> DockerSandboxContainer:

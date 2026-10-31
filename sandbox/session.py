@@ -29,6 +29,7 @@ from sandbox.redact import (
     redact_and_truncate_output,
     sanitize_command,
 )
+from sandbox.scratch import node_artifacts_root
 from sandbox.streams import MAX_OUTPUT_SIZE_BYTES, decode_bounded, read_stream_bounded
 from sandbox.workspace import SandboxArtifact, SandboxModel
 
@@ -324,6 +325,14 @@ class DockerShellSession:
                     stderr="",
                     exit_code=exit_code,
                     redactor=self.redactor,
+                    artifact_root=(
+                        node_artifacts_root(
+                            self.container.workspace.workspace_path,
+                            self.container.scratch_namespace,
+                        )
+                        if self.container.read_only_workspace
+                        else None
+                    ),
                 )
 
             return DockerShellCommandResult(

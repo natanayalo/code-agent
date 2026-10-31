@@ -150,6 +150,11 @@ Responsibilities:
 - redact sensitive data in captured outputs
 - capture command/test/diff artifacts and retention metadata
 
+Persistent sandbox containers use a distinct name for each scratch namespace;
+the same name is used for shell sessions, reconnection, and cleanup.
+Read-only shell sessions store command audit artifacts in external scratch space
+so audit capture does not modify the repository under inspection.
+
 Primary modules:
 
 - `sandbox/`
