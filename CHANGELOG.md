@@ -162,6 +162,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Dependencies
 
+- Chore(deps): bump mako from 1.3.12 to 1.4.2 ([#474](https://github.com/natanayalo/code-agent/pull/474))
+
 - Chore(deps): bump psycopg from 3.3.4 to 3.3.6 ([#397](https://github.com/natanayalo/code-agent/pull/397))
 
 - Chore(deps-dev): bump filelock from 3.28.0 to 4.2.1 ([#439](https://github.com/natanayalo/code-agent/pull/439))
