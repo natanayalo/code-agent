@@ -197,6 +197,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Documentation
 
+- Docs: plan m32 code agent bridge execution slices ([#471](https://github.com/natanayalo/code-agent/pull/471))
+
 - Docs: mark M31-3 complete ([#464](https://github.com/natanayalo/code-agent/pull/464))
 
 - Docs: reconcile M31 webhook delivery status ([#462](https://github.com/natanayalo/code-agent/pull/462))
