@@ -25,12 +25,10 @@ def test_explicit_agy_auth_directory_precedes_adapter_home(tmp_path, monkeypatch
     assert _antigravity_provider_dir(adapter) == configured
 
 
-def test_unmounted_host_auth_path_falls_back_to_available_adapter_path(tmp_path, monkeypatch):
+def test_unmounted_explicit_auth_path_does_not_select_another_account(tmp_path, monkeypatch):
     worker, _ = _make_worker(tmp_path)
     monkeypatch.setenv("CODE_AGENT_ANTIGRAVITY_AUTH_DIR", str(tmp_path / "absent-host-path"))
-    assert _antigravity_provider_dir(worker.runtime_adapter) == Path(
-        worker.runtime_adapter.env["GEMINI_HOME"]
-    )
+    assert _antigravity_provider_dir(worker.runtime_adapter) == tmp_path / "absent-host-path"
 
 
 @pytest.mark.parametrize("payload", ["not-json", "[]", "{}", '{"token":false}'])

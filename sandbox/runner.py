@@ -28,6 +28,8 @@ from sandbox.container import (
     append_workspace_mount_options,
     build_container_name,
 )
+from sandbox.legacy_egress import LegacyEgress, legacy_proxy_environment
+from sandbox.legacy_security import append_legacy_security, prepare_legacy_workspace
 from sandbox.policy import PathPolicy
 from sandbox.redact import (
     SecretRedactor,
@@ -38,6 +40,7 @@ from sandbox.redact import (
 from sandbox.redact import (
     mask_url_credentials as _mask_url_credentials,
 )
+from sandbox.scratch import node_artifacts_root
 from sandbox.streams import MAX_OUTPUT_SIZE_BYTES, decode_bounded, read_stream_bounded
 from sandbox.workspace import (
     SandboxArtifact,
@@ -159,6 +162,7 @@ def _build_docker_run_command(
     *,
     image: str,
     docker_binary: str = "docker",
+    network_name: str | None = None,
 ) -> list[str]:
     if request.path_policy:
         if not request.path_policy.check_path(request.working_dir):
@@ -178,6 +182,7 @@ def _build_docker_run_command(
         command.extend(["--memory", request.memory_limit])
     if request.cpu_limit:
         command.extend(["--cpus", str(request.cpu_limit)])
+    append_legacy_security(command)
     workspace_path = request.workspace.workspace_path.resolve()
     if "," in str(workspace_path):
         raise DockerSandboxRunnerError(
@@ -188,14 +193,17 @@ def _build_docker_run_command(
     workspace_path, working_dir = _append_workspace_mount(command, request, workspace_path)
     _append_user_options(command)
 
-    if not request.network_enabled:
-        command.extend(["--network", "none"])
+    if request.network_enabled and not network_name:
+        raise DockerSandboxRunnerError("Networked sandbox requires a task-private egress proxy")
+    command.extend(["--network", network_name or "none"])
 
     # Inject W3C trace context from the current context if available, enabling
     # unified tracing across service/sandbox boundaries.
     effective_env = inject_w3c_trace_context_env(request.environment)
     if "HOME" not in effective_env:
-        effective_env["HOME"] = working_dir
+        effective_env["HOME"] = (
+            f"{working_dir}/.agent_home" if request.read_only_workspace else working_dir
+        )
 
     for key, value in sorted(effective_env.items()):
         command.extend(["--env", f"{key}={value}"])
@@ -387,11 +395,37 @@ class DockerSandboxRunner:
 
     def run(self, request: DockerSandboxCommand) -> DockerSandboxResult:
         """Run the requested command in a sandboxed container."""
+        egress = None
+        if request.network_enabled:
+            if request.secrets:
+                raise DockerSandboxRunnerError("Networked legacy secrets require native grants")
+            egress = LegacyEgress.start(
+                environment=request.environment,
+                artifact_root=node_artifacts_root(request.workspace.workspace_path, None),
+                task_id=request.workspace.task_id,
+                docker_binary=self.docker_binary,
+            )
+            request = request.model_copy(
+                update={"environment": legacy_proxy_environment(request.environment)}
+            )
+        try:
+            return self._run_container(request, egress=egress)
+        finally:
+            if egress:
+                egress.close()
+
+    def _run_container(
+        self, request: DockerSandboxCommand, *, egress: LegacyEgress | None
+    ) -> DockerSandboxResult:
         image = request.image or self.default_image
         docker_command = _build_docker_run_command(
             request,
             image=image,
             docker_binary=self.docker_binary,
+            network_name=egress.network if egress else None,
+        )
+        prepare_legacy_workspace(
+            request.workspace.workspace_path, read_only=request.read_only_workspace
         )
 
         redactor = SecretRedactor(list(request.secrets.values())) if request.secrets else None
