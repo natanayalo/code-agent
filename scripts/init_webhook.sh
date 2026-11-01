@@ -12,7 +12,9 @@ case "$enabled" in
 esac
 fail() { echo "Telegram webhook registration: $1" >&2; exit 1; }
 secret=${CODE_AGENT_TELEGRAM_WEBHOOK_SECRET_TOKEN:-}
-[ "${#secret}" -ge 32 ] && [ "${#secret}" -le 256 ] || fail "invalid secret length"
+if [ "${#secret}" -lt 32 ] || [ "${#secret}" -gt 256 ]; then
+  fail "invalid secret length"
+fi
 case "$secret" in *[!a-zA-Z0-9_-]*) fail "invalid secret format" ;; esac
 [ -n "${CODE_AGENT_TELEGRAM_BOT_TOKEN:-}" ] || fail "bot token is required"
 printf '%s\n' "$CODE_AGENT_TELEGRAM_BOT_TOKEN" | grep -Eq '^[0-9]+:[a-zA-Z0-9_-]+$' \
