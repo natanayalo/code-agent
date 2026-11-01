@@ -10,7 +10,7 @@ readme = {file = "README.md", content-type = "text/markdown"}
 requires-python = ">=3.12,<4.0"
 dependencies = [
     "SQLAlchemy>=2.1.6,<3.0",
-    "fastapi>=0.141.1,<1.0",
+    "fastapi>=0.162.0,<1.0",
     "httpx>=0.28,<1.0",
     "uvicorn>=0.54.0,<1.0",
     "cryptography>=48.0.1,<49.0",
