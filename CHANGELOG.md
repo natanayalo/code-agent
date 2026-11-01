@@ -162,6 +162,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Dependencies
 
+- Chore(deps-dev): bump fast-uri from 3.1.7 to 3.1.9 in /dashboard ([#473](https://github.com/natanayalo/code-agent/pull/473))
+
 - Chore(deps): bump serialize-javascript from 7.0.5 to 7.1.4 in /dashboard ([#472](https://github.com/natanayalo/code-agent/pull/472))
 
 - Chore(deps): bump mako from 1.3.12 to 1.4.2 ([#474](https://github.com/natanayalo/code-agent/pull/474))
