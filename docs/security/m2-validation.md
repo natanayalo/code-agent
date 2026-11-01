@@ -14,6 +14,23 @@ checks. The repaired M29 test also passed. These are synthetic results; the
 live-provider, credential-refresh, external-access, rollback and activation
 gates remain open.
 
+An isolated checkout at candidate commit `1e7db5404e410273d04c6ec0107f55f6dee152b1`
+also passed the real pinned ingress proxy, disposable PostgreSQL backup/restore,
+and read-only allowlisted local-source mount tests (3 passed). These used the
+current non-root user and cached images; they did not exercise the root-equivalent
+credential staging case or the direct-egress cases. The checkout's synthetic
+receipt is separate from the earlier local receipt.
+
+```sh
+CODE_AGENT_M2_DOCKER_TESTS=1 CODE_AGENT_PRE_DISPATCH_DIAGNOSTICS_ENABLED=0 \
+  /mnt/c/Users/Natan/Dev/code-agent/.venv/bin/python -m pytest -q \
+  tests/integration/test_m2_docker_security.py::test_real_proxy_rejects_noncanonical_requests_before_upstream \
+  tests/integration/test_m2_postgres_rollback.py
+CODE_AGENT_M2_DOCKER_TESTS=1 CODE_AGENT_PRE_DISPATCH_DIAGNOSTICS_ENABLED=0 \
+  /mnt/c/Users/Natan/Dev/code-agent/.venv/bin/python -m pytest -q \
+  tests/integration/test_m2_docker_security.py::test_allowlisted_local_source_is_immutable
+```
+
 ```sh
 CODE_AGENT_PRE_DISPATCH_DIAGNOSTICS_ENABLED=0 .venv/bin/pytest -n 4 -q tests/integration \
   -k 'not test_live_adapters_e2e_stack_with_watchdog'
