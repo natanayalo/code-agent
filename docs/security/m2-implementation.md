@@ -28,6 +28,8 @@ API access. Its official multi-platform image index was resolved on 24 October:
 This is reproducible identity, not a vulnerability-scan or release waiver.
 The proxy refreshes the API address through Docker's embedded DNS every five
 seconds, so an API container replacement does not require an ingress restart.
+The egress proxy runs as the broker-selected non-root identity and can append
+to its task audit file, including when a root broker prepares the artifact root.
 
 The explicitly supported public CA file `cert.pem` remains an image build input;
 private keys and local `.env*`/authentication variants are excluded. Do not put

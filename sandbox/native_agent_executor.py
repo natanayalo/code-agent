@@ -21,6 +21,7 @@ from typing import Any, Final, Literal, Protocol
 from uuid import uuid4
 
 from sandbox.capability import FileSystemAccessPolicy, NetworkEgressPolicy
+from sandbox.legacy_security import legacy_identity, prepare_proxy_audit_root
 from sandbox.redact import SecretRedactor
 from sandbox.scratch import node_agent_home, node_scratch_root
 from sandbox.trusted_context import TrustedSandboxExecutionContext
@@ -398,6 +399,8 @@ class DockerNativeAgentExecutor:
         network_policy: str,
         allowed_hosts: list[str],
     ) -> str:
+        uid, gid = legacy_identity()
+        prepare_proxy_audit_root(artifact_root, uid, gid)
         proxy_name = f"native-egress-{uuid4().hex[:20]}"
         try:
             created = self._docker(["network", "create", "--internal", network_name])
@@ -419,6 +422,8 @@ class DockerNativeAgentExecutor:
             network_name,
             "--network-alias",
             "native-egress-proxy",
+            "--user",
+            f"{uid}:{gid}",
             "--read-only",
             "--cap-drop",
             "ALL",
@@ -446,7 +451,6 @@ class DockerNativeAgentExecutor:
 
         if allowed_hosts:
             docker_args.extend(["--env", f"CODE_AGENT_ALLOWED_HOSTS={','.join(allowed_hosts)}"])
-
         docker_args.extend(
             [
                 self.image,

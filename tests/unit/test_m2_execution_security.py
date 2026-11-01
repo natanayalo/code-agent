@@ -15,7 +15,11 @@ from sandbox.container import (
     _build_docker_container_run_command,
 )
 from sandbox.legacy_egress import LegacyEgress
-from sandbox.legacy_security import legacy_identity, prepare_legacy_workspace
+from sandbox.legacy_security import (
+    legacy_identity,
+    prepare_legacy_workspace,
+    prepare_proxy_audit_root,
+)
 from sandbox.native_agent_executor import DockerNativeAgentExecutor
 from sandbox.provider_stager import ProviderCredentialStager, provider_credential_path
 from sandbox.runner import DockerSandboxCommand, DockerSandboxRunner, _build_docker_run_command
@@ -240,6 +244,58 @@ def test_proxy_failure_never_leaves_owned_network_untracked(
         assert cleanup.call_args.kwargs["network_name"] == "owned-network"
         proxy = cleanup.call_args.kwargs["proxy_name"]
         assert proxy is None if phase == "create" else proxy.startswith("native-egress-")
+
+
+def test_proxy_uses_broker_identity_and_prepares_audit(tmp_path, monkeypatch):
+    executor = DockerNativeAgentExecutor()
+    commands = []
+    prepare = MagicMock()
+    monkeypatch.setattr("sandbox.native_agent_executor.legacy_identity", lambda: (123, 456))
+    monkeypatch.setattr("sandbox.native_agent_executor.prepare_proxy_audit_root", prepare)
+    monkeypatch.setattr(
+        executor,
+        "_docker",
+        lambda args: commands.append(args) or subprocess.CompletedProcess([], 0),
+    )
+    executor._start_proxy(
+        network_name="owned-network",
+        artifact_root=tmp_path,
+        task_id="m2",
+        network_policy="public_https_proxy",
+        allowed_hosts=[],
+    )
+    prepare.assert_called_once_with(tmp_path, 123, 456)
+    run = next(command for command in commands if command[0] == "run")
+    assert run[run.index("--user") + 1] == "123:456"
+
+
+@pytest.mark.skipif(not hasattr(os, "O_NOFOLLOW"), reason="requires Linux file descriptor flags")
+def test_proxy_audit_ownership_uses_open_descriptors(tmp_path, monkeypatch):
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+    chown = MagicMock()
+    monkeypatch.setattr(os, "fchown", chown)
+    audit = tmp_path / "egress-audit.jsonl"
+    audit.write_text("existing audit\n")
+    prepare_proxy_audit_root(tmp_path, 123, 456)
+    assert chown.call_count == 2
+    assert all(call.args[1:] == (123, 456) for call in chown.call_args_list)
+    assert audit.read_text() == "existing audit\n"
+
+
+@pytest.mark.skipif(not hasattr(os, "O_NOFOLLOW"), reason="requires Linux file descriptor flags")
+def test_proxy_audit_ownership_rejects_links(tmp_path, monkeypatch):
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+    audit = tmp_path / "egress-audit.jsonl"
+    target = tmp_path / "target"
+    target.write_text("preserve")
+    audit.symlink_to(target)
+    with pytest.raises(OSError):
+        prepare_proxy_audit_root(tmp_path, 123, 456)
+    assert target.read_text() == "preserve"
+    audit.unlink()
+    os.link(target, audit)
+    with pytest.raises(ValueError, match="linked"):
+        prepare_proxy_audit_root(tmp_path, 123, 456)
 
 
 def test_failed_legacy_cleanup_is_visible(caplog):

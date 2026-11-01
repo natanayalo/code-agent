@@ -24,6 +24,7 @@ from sandbox.native_agent_executor import (
 )
 from sandbox.provider_bootstrap import ProviderBootstrap
 from sandbox.runner import DockerSandboxCommand, DockerSandboxRunner
+from sandbox.scratch import node_artifacts_root
 from sandbox.secrets import ResolvedSecret, SecretScope
 from sandbox.trusted_context import TrustedSandboxExecutionContext
 from tests.unit.test_m2_execution_security import workspace
@@ -354,6 +355,42 @@ def test_native_auth_is_immutable_and_siblings_unavailable(
     assert (handle.repo_path / "synthetic-result.txt").read_text() == "ok"
 
 
+def test_native_proxy_writes_existing_audit_file(tmp_path, synthetic_image):
+    artifact_root = tmp_path / "artifacts"
+    artifact_root.mkdir(mode=0o755)
+    audit = artifact_root / "egress-audit.jsonl"
+    audit.write_text('{"outcome":"existing"}\n')
+    network = "m2-native-proxy-" + uuid4().hex[:12]
+    executor = DockerNativeAgentExecutor(image=synthetic_image)
+    proxy = executor._start_proxy(
+        network_name=network,
+        artifact_root=artifact_root,
+        task_id="native-audit-test",
+        network_policy="public_https_proxy",
+        allowed_hosts=[],
+    )
+    try:
+        script = (
+            "import socket,time\n"
+            "for attempt in range(30):\n"
+            " try:\n"
+            "  conn=socket.create_connection(('native-egress-proxy',8080),timeout=1);break\n"
+            " except OSError:time.sleep(0.1)\n"
+            "else:raise AssertionError('proxy unavailable')\n"
+            "with conn:\n"
+            " conn.sendall(b'CONNECT 127.0.0.1:443 HTTP/1.1\\r\\n'"
+            " b'Host: 127.0.0.1:443\\r\\n\\r\\n')\n"
+            " assert conn.recv(1024).startswith(b'HTTP/1.1 403 ')\n"
+        )
+        docker("run", "--rm", "--network", network, synthetic_image, "python", "-c", script)
+        events = [json.loads(line) for line in audit.read_text().splitlines()]
+        assert events[0]["outcome"] == "existing"
+        assert events[-1]["task_id"] == "native-audit-test"
+        assert events[-1]["outcome"] == "blocked"
+    finally:
+        assert executor._cleanup_network(network_name=network, proxy_name=proxy) == "removed"
+
+
 @pytest.mark.parametrize("persistent", [False, True])
 def test_legacy_real_privileges_and_task_network(
     tmp_path, synthetic_image, monkeypatch, persistent, protected_volume
@@ -361,7 +398,7 @@ def test_legacy_real_privileges_and_task_network(
     monkeypatch.setenv("CODE_AGENT_SANDBOX_IMAGE", synthetic_image)
     handle = workspace(tmp_path)
     script = (
-        "import os,pathlib,socket,urllib.request\n"
+        "import os,pathlib,socket\n"
         "assert os.getuid()!=0\n"
         "assert not pathlib.Path('/var/run/docker.sock').exists()\n"
         f"assert not pathlib.Path('/var/lib/docker/volumes/{protected_volume}').exists()\n"
@@ -374,11 +411,9 @@ def test_legacy_real_privileges_and_task_network(
         "  socket.create_connection((host,port),timeout=1).close()\n"
         "  raise AssertionError('direct egress')\n"
         " except OSError:pass\n"
-        "proxy=urllib.request.ProxyHandler({'https':os.environ['HTTPS_PROXY']})\n"
-        "try:\n"
-        " urllib.request.build_opener(proxy).open('https://127.0.0.1/',timeout=3)\n"
-        " raise AssertionError('private proxy target')\n"
-        "except OSError:pass\n"
+        "with socket.create_connection(('native-egress-proxy',8080),timeout=3) as proxy:\n"
+        " proxy.sendall(b'CONNECT 127.0.0.1:443 HTTP/1.1\\r\\nHost: 127.0.0.1:443\\r\\n\\r\\n')\n"
+        " assert proxy.recv(1024).startswith(b'HTTP/1.1 403 '), 'proxy did not reject target'\n"
         "pathlib.Path('legacy-result.txt').write_text('ok')\nprint('M2_LEGACY_PASS')\n"
     )
     if persistent:
@@ -400,6 +435,12 @@ def test_legacy_real_privileges_and_task_network(
         assert result.exit_code == 0, result.stderr
         assert "M2_LEGACY_PASS" in result.stdout
     assert (handle.repo_path / "legacy-result.txt").read_text() == "ok"
+    audit = node_artifacts_root(handle.workspace_path, None) / "egress-audit.jsonl"
+    events = [json.loads(line) for line in audit.read_text().splitlines()]
+    assert any(
+        event["destination_host"] == "127.0.0.1" and event["outcome"] == "blocked"
+        for event in events
+    )
 
 
 def test_allowlisted_local_source_is_immutable(tmp_path, synthetic_image, monkeypatch):
