@@ -6,6 +6,7 @@
 | --- | --- |
 | [Status and current backlog](status.md) | Current phase, ordered implementation queue, maintenance/approval lanes, and evidence gates. Start here to select work. |
 | [Roadmap](roadmap.md) | Milestone goals, boundaries, exit criteria, and conditional future directions. |
+| [M32 Code Agent Bridge](m32_code_agent_bridge.md) | Ordered M2-readiness, scoped-token, MCP, and staged Hermes integration slices with acceptance and activation gates. |
 | [Agent procedure index](../.agents/README.md) | Task-specific skills and compatibility entrypoints. |
 | [Contributor guide](../AGENTS.md) | Canonical repository policy, ownership, safety, testing, and delivery requirements. |
 | [Changelog](../CHANGELOG.md) | Generated history of merged pull requests. |

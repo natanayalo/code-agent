@@ -33,6 +33,7 @@ M28.5, M29, and M30 are complete. M31 is active.
 Committed/current priority:
 
 1. M31: Proactive Operations and Safe Scheduled Work
+2. M32: Code Agent Bridge (planned; M2 security readiness gates live integration)
 
 Deferred / evidence-gated:
 
@@ -45,7 +46,8 @@ Future / conditional:
   number
 
 Milestone numbers are stable identifiers; the committed/current sequence above
-is the authoritative execution order. M28.5 is the only numbering addition.
+is the authoritative execution order. M32's bounded implementation sequence is
+documented in the [bridge plan](m32_code_agent_bridge.md).
 M27 stays deferred: it requires broader repeated evidence from M29 and later
 operational work and cannot resume from the 20-task baseline alone.
 
@@ -177,6 +179,26 @@ Provider-capability alerts and opt-in generic webhook delivery are also merged
   terminal evidence
 - operators can determine what happened and the safe next action without
   starting with container logs
+
+## M32 — Code Agent Bridge
+
+Connect the existing Hermes local Telegram assistant as a scoped client of Code
+Agent: task observation first, then confirmed scout/coding submission and
+own-client cancellation. Code Agent keeps execution, sandbox policy, approvals,
+persistence and delivery ownership.
+
+The [M32 execution plan](m32_code_agent_bridge.md) defines M32-0 through M32-6,
+including M2 hardening reconciliation from
+[PR #430](https://github.com/natanayalo/code-agent/pull/430), scoped tokens,
+sanitized task contracts, attribution/idempotency, the MCP facade, and two
+separately gated integration stages. The [status queue](status.md#current-backlog)
+owns priority and current slice state; adding the plan does not close M31.
+
+Live entry requires accepted M2 evidence and explicit activation approval.
+Exit requires tested read-only and confirmed-write flows, server-enforced
+repository/scope boundaries, immediate revocation, preserved operator approval
+gates, and verified rollback. Schedule access, approval decisions, automatic
+merge/deploy, and stronger FamilyFin host-isolation claims are outside M32.
 
 ## Deferred milestone
 
