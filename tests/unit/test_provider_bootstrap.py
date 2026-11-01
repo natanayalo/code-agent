@@ -48,11 +48,10 @@ def test_codex_auth_resolution_uses_fallback_directory_consistently(tmp_path, mo
     monkeypatch.setenv("CODEX_HOME", str(codex_home))
 
     resolved_dir = resolve_codex_provider_dir()
-    assert resolved_dir == codex_home
-    assert resolve_codex_auth_path() == codex_home / "auth.json"
-    assert ProviderBootstrapLoader.load(resolved_dir, provider="codex").ref_names == (
-        "codex_auth_json",
-    )
+    assert resolved_dir == configured
+    assert resolve_codex_auth_path() == configured / "auth.json"
+    with pytest.raises(ProviderBootstrapError):
+        ProviderBootstrapLoader.load(resolved_dir, provider="codex")
 
 
 def test_codex_custom_directory_stages_auth_file_with_explicit_provider(
@@ -110,11 +109,11 @@ def test_antigravity_auth_resolution_uses_fallback_directory_consistently(
     monkeypatch.setenv("CODE_AGENT_GEMINI_AUTH_DIR", str(fallback))
     adapter = AntigravityCliRuntimeAdapter(env={})
 
-    assert resolve_antigravity_provider_dir() == fallback
+    assert resolve_antigravity_provider_dir() == configured
     assert resolve_antigravity_token_path() == (
-        fallback / "antigravity-cli/antigravity-oauth-token"
+        configured / "antigravity-cli/antigravity-oauth-token"
     )
-    assert _antigravity_provider_dir(adapter) == fallback
+    assert _antigravity_provider_dir(adapter) == configured
 
 
 def test_codex_api_key_mode_does_not_mount_oauth_auth_file(tmp_path) -> None:

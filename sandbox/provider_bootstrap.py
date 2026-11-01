@@ -58,6 +58,9 @@ def resolve_codex_provider_dir(
     """Resolve the Codex directory used by diagnostics and native execution."""
     process_env = os.environ if environ is None else environ
     adapter_values = adapter_env or {}
+    configured = process_env.get("CODE_AGENT_CODEX_AUTH_DIR", "").strip()
+    if configured:
+        return Path(configured).expanduser()
     candidates: list[Path] = []
     _append_candidate(candidates, process_env.get("CODE_AGENT_CODEX_AUTH_DIR"))
     _append_candidate(candidates, adapter_values.get("CODEX_HOME"))
@@ -78,6 +81,9 @@ def resolve_antigravity_provider_dir(
     """Resolve the Antigravity token directory used by diagnostics and execution."""
     process_env = os.environ if environ is None else environ
     adapter_values = adapter_env or {}
+    configured = process_env.get("CODE_AGENT_ANTIGRAVITY_AUTH_DIR", "").strip()
+    if configured:
+        return Path(configured).expanduser()
     candidates: list[Path] = []
     _append_candidate(candidates, process_env.get("CODE_AGENT_ANTIGRAVITY_AUTH_DIR"))
     _append_candidate(candidates, adapter_values.get("GEMINI_HOME"))

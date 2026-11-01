@@ -177,7 +177,10 @@ def test_proxy_public_egress_rejects_private_and_dns_rebinding_addresses() -> No
     assert not is_public_egress_host("rebound.example", ["104.18.33.45", "10.0.0.8"])
 
 
-def test_executor_auth_staging_failure_writes_startup_manifest(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize("error_type", [OSError, ValueError])
+def test_executor_auth_staging_failure_writes_startup_manifest(
+    tmp_path: Path, monkeypatch, error_type
+) -> None:
     workspace_root = tmp_path / "task"
     repo = workspace_root / "repo"
     artifacts = tmp_path / "artifacts"
@@ -185,7 +188,7 @@ def test_executor_auth_staging_failure_writes_startup_manifest(tmp_path: Path, m
     artifacts.mkdir()
     monkeypatch.setattr(
         "sandbox.provider_stager.ProviderCredentialStager.stage",
-        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("staging denied")),
+        lambda *args, **kwargs: (_ for _ in ()).throw(error_type("staging denied")),
     )
     monkeypatch.setattr("os.chown", lambda path, uid, gid: None)
     monkeypatch.setattr("os.chmod", lambda path, mode: None)

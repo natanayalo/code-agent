@@ -33,29 +33,40 @@ from orchestrator.execution import TemporalUnavailableError
 
 def test_telegram_webhook_route():
     task_service = MagicMock()
+    auth_config = ApiAuthConfig(
+        telegram_allowed_user_ids=frozenset({200}), telegram_allowed_chat_ids=frozenset({100})
+    )
     config = SystemConfig(
         default_image="img", workspace_root="/tmp", telegram_default_repo_key="main"
     )
 
     # Update with no message
     up1 = TelegramUpdate(update_id=1)
-    res1 = receive_telegram_update(up1, None, task_service, config)
+    res1 = receive_telegram_update(up1, None, task_service, config, auth_config)
     assert res1.ok is True and res1.detail == "no_message"
 
     # Message with no text
     up2 = TelegramUpdate(
-        update_id=2, message=TelegramMessage(message_id=10, chat=TelegramChat(id=100))
+        update_id=2,
+        message=TelegramMessage(
+            message_id=10, chat=TelegramChat(id=100, type="private"), from_=TelegramUser(id=200)
+        ),
     )
-    res2 = receive_telegram_update(up2, None, task_service, config)
+    res2 = receive_telegram_update(up2, None, task_service, config, auth_config)
     assert res2.ok is True and res2.detail == "no_text"
 
     # Message with text > 10000 chars
     long_text = "a" * 10001
     up3 = TelegramUpdate(
         update_id=3,
-        message=TelegramMessage(message_id=11, chat=TelegramChat(id=100), text=long_text),
+        message=TelegramMessage(
+            message_id=11,
+            chat=TelegramChat(id=100, type="private"),
+            from_=TelegramUser(id=200),
+            text=long_text,
+        ),
     )
-    res3 = receive_telegram_update(up3, None, task_service, config)
+    res3 = receive_telegram_update(up3, None, task_service, config, auth_config)
     assert res3.ok is True and res3.detail == "text_too_long"
 
     # Normal message
@@ -63,7 +74,7 @@ def test_telegram_webhook_route():
         update_id=4,
         message=TelegramMessage(
             message_id=12,
-            chat=TelegramChat(id=100),
+            chat=TelegramChat(id=100, type="private"),
             from_=TelegramUser(id=200, first_name="John", last_name="Doe"),
             text="Hello bot",
         ),
@@ -74,7 +85,7 @@ def test_telegram_webhook_route():
     outcome.task_snapshot.session_id = "s1"
     task_service.create_task_outcome.return_value = outcome
 
-    res4 = receive_telegram_update(up4, None, task_service, config)
+    res4 = receive_telegram_update(up4, None, task_service, config, auth_config)
     assert res4.ok is True and res4.task_id == "t1"
 
     # Channel post (no from_)
@@ -84,13 +95,13 @@ def test_telegram_webhook_route():
             message_id=13, chat=TelegramChat(id=101), text="Channel announcement"
         ),
     )
-    res5 = receive_telegram_update(up5, None, task_service, config)
+    res5 = receive_telegram_update(up5, None, task_service, config, auth_config)
     assert res5.ok is True
 
     # Temporal error
     task_service.create_task_outcome.side_effect = TemporalUnavailableError("Down")
     with pytest.raises(HTTPException) as exc:
-        receive_telegram_update(up4, None, task_service, config)
+        receive_telegram_update(up4, None, task_service, config, auth_config)
     assert exc.value.status_code == 503
 
 
