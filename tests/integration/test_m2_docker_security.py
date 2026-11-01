@@ -253,6 +253,47 @@ def test_real_proxy_rejects_noncanonical_requests_before_upstream(ingress_pair):
     assert docker("logs", api).stdout.count("UPSTREAM_POST") == 1
 
 
+def test_real_proxy_recovers_when_api_address_changes(
+    ingress_pair: tuple[str, str], synthetic_image: str
+) -> None:
+    base, api = ingress_pair
+    assert httpx.post(base + "/telegram/webhook", content=b"{}").status_code == 200
+    metadata = json.loads(docker("inspect", api).stdout)[0]
+    network, details = next(iter(metadata["NetworkSettings"]["Networks"].items()))
+    old_ip = details["IPAddress"]
+    blocker, replacement = api + "-blocker", api + "-replacement"
+    try:
+        docker("network", "disconnect", network, api)
+        docker("run", "-d", "--name", blocker, "--network", network, synthetic_image, "sleep", "60")
+        docker(
+            "run",
+            "-d",
+            "--name",
+            replacement,
+            "--network",
+            network,
+            "--network-alias",
+            "api",
+            synthetic_image,
+            "python",
+            "-c",
+            UPSTREAM_SERVER,
+        )
+        replacement_info = json.loads(docker("inspect", replacement).stdout)[0]
+        assert replacement_info["NetworkSettings"]["Networks"][network]["IPAddress"] != old_ip
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            if httpx.post(base + "/telegram/webhook", content=b"{}", timeout=2).status_code == 200:
+                break
+            time.sleep(0.5)
+        else:
+            pytest.fail("proxy did not recover after the API address changed")
+        assert "UPSTREAM_POST" in docker("logs", replacement).stdout
+    finally:
+        for name in (replacement, blocker):
+            subprocess.run(["docker", "rm", "-f", name], capture_output=True)
+
+
 def test_native_auth_is_immutable_and_siblings_unavailable(
     tmp_path, synthetic_image, protected_volume
 ):

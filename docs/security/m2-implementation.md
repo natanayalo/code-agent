@@ -26,6 +26,8 @@ infrastructure component, directly required to reject unrelated routes before
 API access. Its official multi-platform image index was resolved on 24 October:
 `nginx:stable-alpine@sha256:47928bf67eb62a1863cb08d9ecb52d3e704304ba614eaee17884204677702951`.
 This is reproducible identity, not a vulnerability-scan or release waiver.
+The proxy refreshes the API address through Docker's embedded DNS every five
+seconds, so an API container replacement does not require an ingress restart.
 
 The explicitly supported public CA file `cert.pem` remains an image build input;
 private keys and local `.env*`/authentication variants are excluded. Do not put
