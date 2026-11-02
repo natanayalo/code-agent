@@ -23,6 +23,7 @@ from apps.api.auth import (
     decode_dashboard_token,
 )
 from apps.api.config import SystemConfig
+from apps.api.github_body import read_github_body
 from orchestrator.execution import TaskExecutionService
 
 logger = logging.getLogger(__name__)
@@ -226,7 +227,7 @@ async def require_github_webhook_auth(request: Request) -> bytes:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Missing {GITHUB_WEBHOOK_SIGNATURE_HEADER} header.",
         )
-    body = await request.body()
+    body = await read_github_body(request)
     expected_mac = hmac.new(
         auth_config.github_webhook_secret.encode("utf-8"),
         body,
