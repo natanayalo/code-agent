@@ -181,8 +181,18 @@ services:
     restart: on-failure
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ${CODE_AGENT_CODEX_AUTH_DIR?Please set CODE_AGENT_CODEX_AUTH_DIR in env}:/root/.codex:ro
-      - ${CODE_AGENT_ANTIGRAVITY_AUTH_DIR?Please set CODE_AGENT_ANTIGRAVITY_AUTH_DIR in env}:/root/.gemini:ro
+      - type: bind
+        source: ${CODE_AGENT_CODEX_AUTH_DIR?Please set CODE_AGENT_CODEX_AUTH_DIR in env}/auth.json
+        target: /root/.codex/auth.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${CODE_AGENT_ANTIGRAVITY_AUTH_DIR?Please set CODE_AGENT_ANTIGRAVITY_AUTH_DIR in env}/antigravity-cli/antigravity-oauth-token
+        target: /root/.gemini/antigravity-cli/antigravity-oauth-token
+        read_only: true
+        bind:
+          create_host_path: false
       - ${CODE_AGENT_WORKSPACE_ROOT:-/tmp/code-agent-workspaces}:${CODE_AGENT_WORKSPACE_ROOT:-/tmp/code-agent-workspaces}
   phoenix:
     image: arizephoenix/phoenix:latest
