@@ -510,6 +510,7 @@ class ReadinessAlertRepository:
             self.session,
             limit=limit,
             lease_seconds=DELIVERY_LEASE_SECONDS,
+            max_attempts=MAX_DELIVERY_ATTEMPTS,
         )
 
     def mark_delivered(self, delivery_id: str, *, http_status: int, now: Any = None) -> None:
