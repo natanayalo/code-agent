@@ -51,15 +51,42 @@ def extract_delivery_identifiers(
     return None, None, None
 
 
-def sync_pr_metadata(meta: dict[str, Any], pr: dict[str, Any]) -> None:
-    """Update delivery_metadata dictionary from a pull_request payload."""
+def sync_pr_metadata(
+    meta: dict[str, Any],
+    pr: dict[str, Any],
+    *,
+    is_pending: bool = False,
+) -> bool:
+    """Update delivery_metadata dictionary from a pull_request payload.
+
+    Returns True if the PR metadata was applied, False if ignored as older/superseded.
+    """
+    head_sha = (pr.get("head") or {}).get("sha")
+    incoming_updated_at = pr.get("updated_at")
+    current_updated_at = meta.get("pr_updated_at")
+
+    if incoming_updated_at and current_updated_at and incoming_updated_at < current_updated_at:
+        logger.info("Ignoring pull_request event older than current pr_updated_at")
+        return False
+
+    current_head = meta.get("head_sha")
+    head_history = list(meta.get("head_history") or [])
+
+    if current_head and head_sha and head_sha != current_head:
+        if is_pending or head_sha in head_history:
+            logger.info("Ignoring pull_request event for an older or superseded head")
+            return False
+
     meta["pr_number"] = pr.get("number")
     meta["pr_url"] = pr.get("html_url")
     meta["pr_node_id"] = pr.get("node_id")
     meta["pr_state"] = "merged" if pr.get("merged") else pr.get("state")
     meta["pr_draft"] = pr.get("draft", False)
-    if head_sha := (pr.get("head") or {}).get("sha"):
-        if meta.get("head_sha") != head_sha:
+    if incoming_updated_at:
+        meta["pr_updated_at"] = incoming_updated_at
+
+    if head_sha:
+        if current_head != head_sha:
             meta["check_runs"] = [
                 c for c in (meta.get("check_runs") or []) if c.get("head_sha") == head_sha
             ]
@@ -67,10 +94,15 @@ def sync_pr_metadata(meta: dict[str, Any], pr: dict[str, Any]) -> None:
             meta["ci_failed_jobs"] = []
             meta["ci_last_checked_at"] = None
         meta["head_sha"] = head_sha
+        if head_sha not in head_history:
+            head_history.append(head_sha)
+        meta["head_history"] = head_history
+
     if branch_name := (pr.get("head") or {}).get("ref"):
         meta["branch_name"] = branch_name
     if base_branch := (pr.get("base") or {}).get("ref"):
         meta["base_branch"] = base_branch
+    return True
 
 
 def build_check_entry(payload: dict[str, Any], event: str, head_sha: str | None) -> dict[str, Any]:
@@ -294,6 +326,8 @@ def _apply_worker_run_delivery_update(
     payload: dict[str, Any],
     head_sha: str | None,
     task: Task | None = None,
+    *,
+    is_pending: bool = False,
 ) -> tuple[dict[str, Any] | None, bool]:
     """Update worker_run delivery metadata and return check_entry and applied status."""
     if worker_run is None:
@@ -312,7 +346,7 @@ def _apply_worker_run_delivery_update(
     check_entry: dict[str, Any] | None = None
     applied = True
     if event == "pull_request":
-        sync_pr_metadata(meta, payload.get("pull_request") or {})
+        applied = sync_pr_metadata(meta, payload.get("pull_request") or {}, is_pending=is_pending)
     else:
         check_entry = build_check_entry(payload, event, head_sha)
         applied = upsert_check_run(meta, check_entry)
@@ -338,6 +372,12 @@ def _record_delivery_claim(
             repository.attach_task_if_unassigned(
                 channel="github", delivery_id=delivery_id, task_id=task_id
             )
+
+
+def _sync_result(
+    status: str, task_id: str | None, run: WorkerRun | None, msg: str
+) -> tuple[bool, str, bool, str | None, str | None, str | None]:
+    return True, status, False, task_id, run.id if run else None, msg
 
 
 def handle_delivery_sync(
@@ -379,19 +419,17 @@ def handle_delivery_sync(
         if task is None or worker_run is None or not worker_run.delivery_metadata:
             _record_delivery_claim(session, delivery_repo, delivery_id, task_id=None)
             logger.info("GitHub delivery awaiting persisted worker metadata")
-            return True, "pending", False, None, None, "Redeliver after worker metadata persists."
+            return _sync_result("pending", None, None, "Redeliver after worker metadata persists.")
 
+        is_pending = existing is not None and existing.task_id is None
         check_entry, applied = _apply_worker_run_delivery_update(
-            worker_run, event, payload, head_sha, task=task
+            worker_run, event, payload, head_sha, task=task, is_pending=is_pending
         )
         if not applied:
-            return (
-                True,
-                "ignored",
-                False,
-                task.id,
-                worker_run.id if worker_run else None,
-                f"Ignored {event} for a noncurrent or unknown head.",
+            if is_pending:
+                _record_delivery_claim(session, delivery_repo, delivery_id, task_id=task.id)
+            return _sync_result(
+                "ignored", task.id, worker_run, f"Ignored older or noncurrent {event} event."
             )
 
         record_delivery_timeline_event(
@@ -409,12 +447,6 @@ def handle_delivery_sync(
         )
 
         _record_delivery_claim(session, delivery_repo, delivery_id, task_id=task.id)
-
-        return (
-            True,
-            "synced",
-            False,
-            task.id,
-            worker_run.id if worker_run else None,
-            f"Synchronized {event} event onto task {task.id}.",
+        return _sync_result(
+            "synced", task.id, worker_run, f"Synchronized {event} event onto task {task.id}."
         )

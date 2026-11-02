@@ -14,6 +14,21 @@ session_factory = support.session_factory
 webhook_client = support.webhook_client
 
 
+def _post_event(client, secret: str, event: str, payload: dict, delivery: str) -> dict:
+    body = json.dumps({"repository": {"full_name": "octocat/code-agent"}, **payload}).encode()
+    response = client.post(
+        "/github/webhook",
+        content=body,
+        headers={
+            "X-Hub-Signature-256": support._sign(body, secret),
+            "X-GitHub-Event": event,
+            "X-GitHub-Delivery": delivery,
+        },
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
 @pytest.mark.parametrize("metadata_late", [False, True])
 def test_redelivery_after_metadata_persistence(webhook_client, session_factory, metadata_late):
     client, secret, _ = webhook_client
@@ -119,3 +134,70 @@ def test_prior_run_without_delivery_metadata_remains_pending_until_delivered_run
             channel="github", delivery_id="early-pr-attempt2"
         )
         assert attached is not None and attached.task_id == task_id
+
+
+def test_pending_pr_redelivery_cannot_regress_newer_pr_and_ci_state(
+    webhook_client, session_factory
+):
+    client, secret, _ = webhook_client
+    _, data = support._post_issue_labeled(client, secret, "order-issue")
+    task_id = data["task_id"]
+
+    pr_a = {
+        "action": "opened",
+        "pull_request": {
+            "number": 105,
+            "state": "open",
+            "head": {"sha": "sha-A", "ref": "github/issue-42"},
+            "updated_at": "2026-11-02T10:00:00Z",
+        },
+    }
+    pending = _post_event(client, secret, "pull_request", pr_a, "delivery-pr-A")
+    assert pending["status"] == "pending"
+
+    support._create_delivered_worker_run(session_factory, task_id)
+
+    pr_b = {
+        "action": "synchronize",
+        "pull_request": {
+            "number": 105,
+            "state": "open",
+            "head": {"sha": "sha-B", "ref": "github/issue-42"},
+            "updated_at": "2026-11-02T11:00:00Z",
+        },
+    }
+    sync_b = _post_event(client, secret, "pull_request", pr_b, "delivery-pr-B")
+    assert sync_b["status"] == "synced"
+
+    check_b = {
+        "action": "completed",
+        "check_run": {
+            "id": 901,
+            "name": "unit",
+            "status": "completed",
+            "conclusion": "success",
+            "head_sha": "sha-B",
+            "pull_requests": [{"number": 105}],
+        },
+    }
+    check_res = _post_event(client, secret, "check_run", check_b, "delivery-check-B")
+    assert check_res["status"] == "synced"
+
+    # Redelivery of original A event
+    redeliver_a = _post_event(client, secret, "pull_request", pr_a, "delivery-pr-A")
+    assert redeliver_a["status"] == "ignored"
+
+    snapshot = client.get(f"/tasks/{task_id}", headers={"X-Webhook-Token": "a" * 32}).json()
+    assert snapshot["delivery_metadata"]["head_sha"] == "sha-B"
+    assert snapshot["delivery_metadata"]["ci_status"] == "passed"
+    assert snapshot["delivery_metadata"]["ci_failed_jobs"] == []
+    assert len(snapshot["delivery_metadata"]["check_runs"]) == 1
+
+    with session_scope(session_factory) as session:
+        inbound = InboundDeliveryRepository(session).get_by_channel_delivery(
+            channel="github", delivery_id="delivery-pr-A"
+        )
+        assert inbound is not None and inbound.task_id == task_id
+
+    dup = _post_event(client, secret, "pull_request", pr_a, "delivery-pr-A")
+    assert dup["status"] == "duplicate" and dup["duplicate"] is True

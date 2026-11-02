@@ -105,3 +105,32 @@ def test_authoritative_new_head_invalidates_old_ci():
     assert meta["ci_status"] == "pending"
     assert meta["ci_failed_jobs"] == []
     assert meta["check_runs"] == []
+
+
+def test_sync_pr_metadata_ignores_older_updated_at():
+    meta = {
+        "head_sha": "B",
+        "pr_updated_at": "2026-11-02T12:00:00Z",
+    }
+    pr = {
+        "number": 10,
+        "head": {"sha": "A"},
+        "updated_at": "2026-11-02T11:00:00Z",
+    }
+    applied = sync_pr_metadata(meta, pr)
+    assert applied is False
+    assert meta["head_sha"] == "B"
+
+
+def test_sync_pr_metadata_ignores_pending_superseded_head():
+    meta = {
+        "head_sha": "B",
+        "head_history": ["A", "B"],
+    }
+    pr = {
+        "number": 10,
+        "head": {"sha": "A"},
+    }
+    applied = sync_pr_metadata(meta, pr, is_pending=True)
+    assert applied is False
+    assert meta["head_sha"] == "B"
