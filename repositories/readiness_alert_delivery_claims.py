@@ -1,6 +1,7 @@
 """Lease due Telegram readiness deliveries in transition order."""
 
-from datetime import timedelta
+import logging
+from datetime import datetime, timedelta
 
 from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session, aliased
@@ -8,9 +9,11 @@ from sqlalchemy.orm import Session, aliased
 from db.base import utc_now
 from db.readiness_alert_models import ReadinessAlertAcknowledgment, ReadinessAlertDelivery
 
+logger = logging.getLogger(__name__)
+
 
 def claim_due_readiness_deliveries(
-    session: Session, *, limit: int, lease_seconds: int
+    session: Session, *, limit: int, lease_seconds: int, max_attempts: int
 ) -> list[ReadinessAlertDelivery]:
     """Suppress expired acknowledged incidents, then lease the next due deliveries."""
     now = utc_now()
@@ -33,6 +36,7 @@ def claim_due_readiness_deliveries(
         )
         .values(status="suppressed", lease_expires_at=None)
     )
+    _fail_exhausted_deliveries(session, now=now, max_attempts=max_attempts)
     earlier_unfinished = aliased(ReadinessAlertDelivery)
     earlier_transition_exists = (
         select(earlier_unfinished.id)
@@ -63,3 +67,27 @@ def claim_due_readiness_deliveries(
         delivery.attempts += 1
         delivery.lease_expires_at = now + timedelta(seconds=lease_seconds)
     return list(due)
+
+
+def _fail_exhausted_deliveries(session: Session, *, now: datetime, max_attempts: int) -> None:
+    """Finish spent deliveries before checking per-reason transition ordering."""
+    exhausted = session.execute(
+        update(ReadinessAlertDelivery)
+        .where(
+            ReadinessAlertDelivery.attempts >= max_attempts,
+            or_(
+                ReadinessAlertDelivery.status == "pending",
+                (ReadinessAlertDelivery.status == "processing")
+                & (ReadinessAlertDelivery.lease_expires_at <= now),
+            ),
+        )
+        .values(
+            status="failed",
+            lease_expires_at=None,
+            last_failure_code="telegram_attempts_exhausted",
+        )
+    )
+    if exhausted.rowcount:
+        logger.warning(
+            "Readiness Telegram delivery retry budget exhausted count=%s", exhausted.rowcount
+        )
