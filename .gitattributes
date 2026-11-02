@@ -1,0 +1,3 @@
+# These scripts are bind-mounted into Linux containers from Windows checkouts.
+scripts/init_webhook.sh text eol=lf
+scripts/up.sh text eol=lf
