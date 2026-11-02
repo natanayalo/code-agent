@@ -36,7 +36,7 @@ def _auth_context(tmp_path):
     )
 
 
-def test_agy_auth_copy_can_refresh_without_changing_source(tmp_path: Path):
+def test_broker_can_update_staged_agy_copy_without_changing_source(tmp_path: Path):
     source, context = _auth_context(tmp_path)
     original = source.read_bytes()
     bootstrap = context.provider_bootstrap
@@ -60,7 +60,7 @@ def test_agy_auth_copy_can_refresh_without_changing_source(tmp_path: Path):
 
 
 @pytest.mark.skipif(not _is_docker_available(), reason="Docker worker image unavailable")
-def test_agy_auth_readable_and_refreshable_by_container_user(tmp_path: Path):
+def test_agy_auth_readable_and_immutable_by_container_user(tmp_path: Path):
     source, context = _auth_context(tmp_path)
     original = source.read_bytes()
     workspace = _make_workspace(tmp_path)
@@ -75,7 +75,11 @@ def test_agy_auth_readable_and_refreshable_by_container_user(tmp_path: Path):
                 "assert os.getuid()==65532; assert not p.is_symlink(); "
                 "assert stat.S_IMODE(p.stat().st_mode)==0o600; "
                 "assert json.loads(p.read_text())['token']['refresh_token']=='fake-refresh'; "
-                "p.write_text('refreshed-fake'); print('provider-copy-ok')"
+                "\ntry:\n"
+                " p.write_text('refreshed-fake')\n"
+                " raise AssertionError('provider credential is writable')\n"
+                "except OSError:\n pass\n"
+                "print('provider-copy-ok')"
             ),
         ],
         prompt=None,
