@@ -53,10 +53,10 @@ async def test_require_github_webhook_auth_invalid_signature():
     request.app.state.api_auth_config = ApiAuthConfig(github_webhook_secret=secret)
     request.headers = {"X-Hub-Signature-256": "sha256=invalid"}
 
-    async def _body():
-        return body
+    async def _stream():
+        yield body
 
-    request.body = _body
+    request.stream = _stream
     with pytest.raises(HTTPException) as exc:
         await require_github_webhook_auth(request)
     assert exc.value.status_code == 403
@@ -72,10 +72,10 @@ async def test_require_github_webhook_auth_valid():
     request.app.state.api_auth_config = ApiAuthConfig(github_webhook_secret=secret)
     request.headers = {"X-Hub-Signature-256": valid_sig}
 
-    async def _body():
-        return body
+    async def _stream():
+        yield body
 
-    request.body = _body
+    request.stream = _stream
     res = await require_github_webhook_auth(request)
     assert res == body
 
