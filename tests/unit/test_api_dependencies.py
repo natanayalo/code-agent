@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from fastapi import HTTPException
+from starlette.datastructures import Headers
 
 from apps.api.auth import ApiAuthConfig, create_dashboard_token
 from apps.api.dependencies import (
@@ -121,12 +122,18 @@ def test_require_any_valid_auth():
 def test_require_telegram_webhook_auth():
     req = MagicMock()
     req.app.state.api_auth_config = ApiAuthConfig(telegram_webhook_secret=None)
-    require_telegram_webhook_auth(req)
+    with pytest.raises(HTTPException, match="404"):
+        require_telegram_webhook_auth(req)
 
-    req.app.state.api_auth_config = ApiAuthConfig(telegram_webhook_secret="tgsecret")
-    req.headers = {}
+    req.app.state.api_auth_config = ApiAuthConfig(
+        telegram_webhook_enabled=True,
+        telegram_webhook_secret="a" * 32,
+        telegram_allowed_user_ids=frozenset({1}),
+        telegram_allowed_chat_ids=frozenset({1}),
+    )
+    req.headers = Headers()
     with pytest.raises(HTTPException, match="401"):
         require_telegram_webhook_auth(req)
 
-    req.headers = {"X-Telegram-Bot-Api-Secret-Token": "tgsecret"}
+    req.headers = Headers({"X-Telegram-Bot-Api-Secret-Token": "a" * 32})
     require_telegram_webhook_auth(req)

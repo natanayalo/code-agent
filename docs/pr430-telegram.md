@@ -1,0 +1,3 @@
+# PR #430 split: Telegram security
+
+Depends on the sandbox extraction because the retained real Docker regression module covers both boundaries. Telegram intake is disabled by default and requires authenticated headers, explicit numeric operator/chat allowlists and direct private messages. Nginx exposes only the canonical POST /telegram/webhook, bounds bodies and re-resolves the API via Docker DNS. Other services bind loopback; credential mount changes belong to the prerequisite. Webhook registration preserves pending updates and is opt-in. No tunnel or webhook is activated by extracting this code. Existing source-bound deployment/rollback gates remain open. Roll back this PR before its sandbox prerequisite.
