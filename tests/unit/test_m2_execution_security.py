@@ -341,3 +341,29 @@ def test_stop_failure_still_closes_legacy_egress(tmp_path, monkeypatch):
     with pytest.raises(OSError):
         manager.stop(container)
     cleanup.assert_called_once_with(network_name="owned-network", proxy_name="owned-proxy")
+
+
+@pytest.mark.parametrize("value", ["synthetic-secret", "false", "TRUE", "true "])
+def test_poetry_setting_cannot_carry_unscoped_values(tmp_path, monkeypatch, value):
+    start = MagicMock()
+    monkeypatch.setattr(DockerNativeAgentExecutor, "_start_proxy", start)
+    with pytest.raises(ValueError, match="unscoped"):
+        LegacyEgress.start(
+            environment={"POETRY_VIRTUALENVS_IN_PROJECT": value},
+            artifact_root=tmp_path,
+            task_id="m2",
+            docker_binary="docker",
+        )
+    start.assert_not_called()
+
+
+def test_poetry_project_venv_setting_is_explicit_safe_value(tmp_path, monkeypatch):
+    start = MagicMock(return_value="owned-proxy")
+    monkeypatch.setattr(DockerNativeAgentExecutor, "_start_proxy", start)
+    egress = LegacyEgress.start(
+        environment={"POETRY_VIRTUALENVS_IN_PROJECT": "true"},
+        artifact_root=tmp_path,
+        task_id="m2",
+        docker_binary="docker",
+    )
+    assert egress.proxy == "owned-proxy"
