@@ -27,7 +27,7 @@ from sandbox.runner import DockerSandboxCommand, DockerSandboxRunner
 from sandbox.scratch import node_artifacts_root
 from sandbox.secrets import ResolvedSecret, SecretScope
 from sandbox.trusted_context import TrustedSandboxExecutionContext
-from tests.unit.test_m2_execution_security import workspace
+from tests.unit.test_m2_execution_security import workspace as unit_workspace
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("CODE_AGENT_M2_DOCKER_TESTS") != "1",
@@ -39,10 +39,17 @@ NGINX = (
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def docker(*args):
-    return subprocess.run(
-        ["docker", *args], check=True, capture_output=True, text=True, timeout=180
+def workspace(tmp_path):
+    identity = "m2-" + uuid4().hex[:12]
+    return unit_workspace(tmp_path).model_copy(
+        update={"workspace_id": identity, "task_id": identity}
     )
+
+
+def docker(*args):
+    result = subprocess.run(["docker", *args], capture_output=True, text=True, timeout=180)
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    return result
 
 
 def await_http(url):
