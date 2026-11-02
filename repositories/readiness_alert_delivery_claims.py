@@ -71,23 +71,28 @@ def claim_due_readiness_deliveries(
 
 def _fail_exhausted_deliveries(session: Session, *, now: datetime, max_attempts: int) -> None:
     """Finish spent deliveries before checking per-reason transition ordering."""
-    exhausted = session.execute(
-        update(ReadinessAlertDelivery)
-        .where(
-            ReadinessAlertDelivery.attempts >= max_attempts,
-            or_(
-                ReadinessAlertDelivery.status == "pending",
-                (ReadinessAlertDelivery.status == "processing")
-                & (ReadinessAlertDelivery.lease_expires_at <= now),
-            ),
+    exhausted = (
+        session.execute(
+            update(ReadinessAlertDelivery)
+            .where(
+                ReadinessAlertDelivery.attempts >= max_attempts,
+                or_(
+                    ReadinessAlertDelivery.status == "pending",
+                    (ReadinessAlertDelivery.status == "processing")
+                    & (ReadinessAlertDelivery.lease_expires_at <= now),
+                ),
+            )
+            .values(
+                status="failed",
+                lease_expires_at=None,
+                last_failure_code="telegram_attempts_exhausted",
+            )
+            .returning(ReadinessAlertDelivery.id)
         )
-        .values(
-            status="failed",
-            lease_expires_at=None,
-            last_failure_code="telegram_attempts_exhausted",
-        )
+        .scalars()
+        .all()
     )
-    if exhausted.rowcount:
+    if exhausted:
         logger.warning(
-            "Readiness Telegram delivery retry budget exhausted count=%s", exhausted.rowcount
+            "Readiness Telegram delivery retry budget exhausted count=%s", len(exhausted)
         )
