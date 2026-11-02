@@ -322,14 +322,22 @@ def _apply_worker_run_delivery_update(
     return check_entry, applied
 
 
-def _safe_record_inbound_delivery(
-    repo: InboundDeliveryRepository, session: Session, delivery_id: str, task_id: str | None
+def _record_delivery_claim(
+    session: Session,
+    repository: InboundDeliveryRepository,
+    delivery_id: str,
+    *,
+    task_id: str | None,
 ) -> None:
+    """Retain pending claims and attach reconciled tasks without duplicate inserts."""
     try:
         with session.begin_nested():
-            repo.create(channel="github", delivery_id=delivery_id, task_id=task_id)
+            repository.create(channel="github", delivery_id=delivery_id, task_id=task_id)
     except IntegrityError:
-        pass
+        if task_id is not None:
+            repository.attach_task_if_unassigned(
+                channel="github", delivery_id=delivery_id, task_id=task_id
+            )
 
 
 def handle_delivery_sync(
@@ -349,7 +357,7 @@ def handle_delivery_sync(
     with session_scope(task_service.session_factory) as session:
         delivery_repo = InboundDeliveryRepository(session)
         existing = delivery_repo.get_by_channel_delivery(channel="github", delivery_id=delivery_id)
-        if existing is not None:
+        if existing is not None and existing.task_id is not None:
             return (
                 True,
                 "duplicate",
@@ -368,9 +376,10 @@ def handle_delivery_sync(
             branch_name=branch_name,
         )
 
-        if task is None:
-            _safe_record_inbound_delivery(delivery_repo, session, delivery_id, None)
-            return True, "ignored", False, None, None, "No matching code-agent task found."
+        if task is None or worker_run is None or not worker_run.delivery_metadata:
+            _record_delivery_claim(session, delivery_repo, delivery_id, task_id=None)
+            logger.info("GitHub delivery awaiting persisted worker metadata")
+            return True, "pending", False, None, None, "Redeliver after worker metadata persists."
 
         check_entry, applied = _apply_worker_run_delivery_update(
             worker_run, event, payload, head_sha, task=task
@@ -399,7 +408,8 @@ def handle_delivery_sync(
             pr_payload=payload.get("pull_request") or {},
         )
 
-        _safe_record_inbound_delivery(delivery_repo, session, delivery_id, task.id)
+        _record_delivery_claim(session, delivery_repo, delivery_id, task_id=task.id)
+
         return (
             True,
             "synced",
