@@ -45,6 +45,7 @@ from evaluation.m29_mutation_suite import (
 )
 from evaluation.m29_mutation_verifier import ReadOnlyExternalEvaluator
 from evaluation.m29_mutation_watchdog import EvaluationRetentionWatchdog
+from orchestrator.execution_types import TaskSnapshot
 from orchestrator.state import MemoryContext
 from sandbox.workspace import WorkspaceCleanupPolicy, WorkspaceHandle, WorkspaceManager
 from scripts.e2e.run_m29_mutation_wave import _save_run_results
@@ -67,7 +68,7 @@ def _make_valid_smoke_result() -> ExtractorStageSmokeResult:
 
 
 def _build_task_snapshot(
-    task_id: str, ws_id: str, case: M29MutationCase, task_text: str
+    task_id: str, ws_id: str, case: M29MutationCase, task_text: str, completed_at: datetime
 ) -> dict[str, Any]:
     is_codex = "codex" in case.worker_profile
     return {
@@ -96,7 +97,13 @@ def _build_task_snapshot(
             },
         },
         "pending_interactions": [],
-        "timeline": [],
+        "timeline": [
+            {
+                "id": f"evt-{task_id}",
+                "event_type": "task_completed",
+                "created_at": completed_at.isoformat(),
+            }
+        ],
     }
 
 
@@ -105,6 +112,7 @@ def _create_mock_stack_client(
     ws_root: Path,
     watchdog: EvaluationRetentionWatchdog,
     suite: M29MutationSuite,
+    completed_at: datetime,
 ) -> httpx.Client:
     def api_handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -137,7 +145,9 @@ def _create_mock_stack_client(
             data = json.loads(request.content.decode("utf-8"))
             return httpx.Response(
                 status_code=202,
-                json=_build_task_snapshot(task_id, ws_id, case, data.get("task_text", "")),
+                json=_build_task_snapshot(
+                    task_id, ws_id, case, data.get("task_text", ""), completed_at
+                ),
             )
 
         # GET /tasks/{task_id}
@@ -147,10 +157,20 @@ def _create_mock_stack_client(
         case = suite.cases[task_num - 1]
         return httpx.Response(
             status_code=200,
-            json=_build_task_snapshot(task_id, f"ws-{task_id}", case, case.prompt),
+            json=_build_task_snapshot(task_id, f"ws-{task_id}", case, case.prompt, completed_at),
         )
 
     return httpx.Client(transport=httpx.MockTransport(api_handler))
+
+
+def test_mock_snapshot_has_fixed_terminal_event() -> None:
+    completed_at = datetime.now(UTC)
+    case = build_m29_mutation_suite().cases[0]
+    snapshot = TaskSnapshot.model_validate(
+        _build_task_snapshot("task-1", "ws-1", case, case.prompt, completed_at)
+    )
+    assert snapshot.timeline[0].event_type == "task_completed"
+    assert snapshot.timeline[0].created_at == completed_at
 
 
 def _seed_e2e_db_task(session: Session, raw: RawCaseManifestEntry) -> None:
@@ -298,7 +318,8 @@ def test_live_adapters_e2e_stack_with_watchdog(tmp_path: Path) -> None:
 
     suite = build_m29_mutation_suite()
     watchdog = EvaluationRetentionWatchdog(bundle_dir, retention_seconds=3600)
-    mock_client = _create_mock_stack_client(fixture_dir, ws_root, watchdog, suite)
+    completed_at = datetime.now(UTC)
+    mock_client = _create_mock_stack_client(fixture_dir, ws_root, watchdog, suite, completed_at)
 
     db_path = tmp_path / "test_runner.db"
     db_url = f"sqlite:///{db_path}"
@@ -317,7 +338,7 @@ def test_live_adapters_e2e_stack_with_watchdog(tmp_path: Path) -> None:
     )
     evaluator = ReadOnlyExternalEvaluator(reviewer_client=reviewer)
     verifier_sha = compute_verifier_source_sha256()
-    as_of = datetime.now(UTC) + timedelta(minutes=5)
+    as_of = completed_at + timedelta(minutes=5)
 
     runner = M29MutationRunner(
         suite=suite,
