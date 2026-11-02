@@ -1,0 +1,2778 @@
+{
+  "source_sha": "77f3a35027776e00b65d3957a7ecfa922c11a18a",
+  "target_sha": "03d0e8a735912e0aca8365709fe9f6b4eab590ca",
+  "github_stale_base_sha": "036bde95c74d517f80c17e6bf32e92d300e3b873",
+  "merge_base_sha": "03d0e8a735912e0aca8365709fe9f6b4eab590ca",
+  "graph": {
+    "A": {
+      "base": "master",
+      "scope": "M29 deterministic fixture and report LF attributes"
+    },
+    "B": {
+      "base": "master",
+      "scope": "sandbox/credential security and read-only Compose credential mounts"
+    },
+    "C": {
+      "base": "codex/pr430-b-sandbox",
+      "scope": "Telegram security, ingress/deployment and Docker regressions"
+    },
+    "D": {
+      "base": "master",
+      "scope": "GitHub bounded signed ingress and Compose configuration"
+    },
+    "E": {
+      "base": "master",
+      "scope": "GitHub stale CI head ordering"
+    },
+    "F": {
+      "base": "codex/pr430-e-github-ci",
+      "scope": "GitHub redelivery reconciliation after metadata persistence"
+    },
+    "G": {
+      "base": "master",
+      "scope": "readiness exhausted leases and webhook Compose configuration"
+    },
+    "H": {
+      "base": "master",
+      "scope": "source evidence, preservation utility, split tracking and reconciliation"
+    }
+  },
+  "merge_strategy": "Merge commits for B before C and E before F; squash prerequisite requires a fresh successor branch, never force-push.",
+  "original_inventory": [
+    {
+      "path": ".agents/README.md",
+      "disposition": "already on pinned master",
+      "source_blob": "f79083b6f67787ea6a57ecc56e9b86c135c9560d",
+      "master_blob": "f79083b6f67787ea6a57ecc56e9b86c135c9560d"
+    },
+    {
+      "path": ".agents/rules/development.md",
+      "disposition": "already on pinned master",
+      "source_blob": "cb1de726314f3e4be6d5f7a267ddee38dbf11d59",
+      "master_blob": "cb1de726314f3e4be6d5f7a267ddee38dbf11d59"
+    },
+    {
+      "path": ".agents/skills/dashboard-qa/SKILL.md",
+      "disposition": "already on pinned master",
+      "source_blob": "37a34cf61bbff0617213b68d037f9d4835b189b6",
+      "master_blob": "37a34cf61bbff0617213b68d037f9d4835b189b6"
+    },
+    {
+      "path": ".agents/skills/dashboard/SKILL.md",
+      "disposition": "already on pinned master",
+      "source_blob": "676bd056df2dc1accd7c108053366e134059d8c6",
+      "master_blob": "676bd056df2dc1accd7c108053366e134059d8c6"
+    },
+    {
+      "path": ".agents/skills/db-schema/SKILL.md",
+      "disposition": "already on pinned master",
+      "source_blob": "b89f622653b7598a3aaaad8857f4a4290253412c",
+      "master_blob": "b89f622653b7598a3aaaad8857f4a4290253412c"
+    },
+    {
+      "path": ".agents/skills/e2e-qa/SKILL.md",
+      "disposition": "already on pinned master",
+      "source_blob": "b62d200bbe98214c944fea59fb464fad9e356028",
+      "master_blob": "b62d200bbe98214c944fea59fb464fad9e356028"
+    },
+    {
+      "path": ".agents/skills/scout-e2e-qa/SKILL.md",
+      "disposition": "already on pinned master",
+      "source_blob": "1cb2923ae50544113038d1d1510bf015a2f9efdf",
+      "master_blob": "1cb2923ae50544113038d1d1510bf015a2f9efdf"
+    },
+    {
+      "path": ".agents/skills/start-task/SKILL.md",
+      "disposition": "already on pinned master",
+      "source_blob": "44ebc1656f0c0fb07b15caff83ea256d98900ce0",
+      "master_blob": "44ebc1656f0c0fb07b15caff83ea256d98900ce0"
+    },
+    {
+      "path": ".agents/skills/tracing/SKILL.md",
+      "disposition": "already on pinned master",
+      "source_blob": "471fe4f03a495081d8f1a57c4b86bb76b6d9bdc8",
+      "master_blob": "471fe4f03a495081d8f1a57c4b86bb76b6d9bdc8"
+    },
+    {
+      "path": ".agents/skills/webhooks/SKILL.md",
+      "disposition": "already on pinned master",
+      "source_blob": "24d87a2d2a1846c5e6384c044a4f24c94fdc270c",
+      "master_blob": "24d87a2d2a1846c5e6384c044a4f24c94fdc270c"
+    },
+    {
+      "path": ".agents/workflows/address-review.md",
+      "disposition": "already on pinned master",
+      "source_blob": "e756524956a5ba8f0aa724a20ce1cbd832180dc0",
+      "master_blob": "e756524956a5ba8f0aa724a20ce1cbd832180dc0"
+    },
+    {
+      "path": ".agents/workflows/schema-change.md",
+      "disposition": "already on pinned master",
+      "source_blob": "d67f308c357d549feb7f2e40d33aa633b2b88a5c",
+      "master_blob": "d67f308c357d549feb7f2e40d33aa633b2b88a5c"
+    },
+    {
+      "path": ".agents/workflows/start-task.md",
+      "disposition": "already on pinned master",
+      "source_blob": "58969e9a111e11a9054bfcd6efb8e3a168a9ee0d",
+      "master_blob": "58969e9a111e11a9054bfcd6efb8e3a168a9ee0d"
+    },
+    {
+      "path": ".dockerignore",
+      "disposition": "B",
+      "source_blob": "b26b3c830d98383e9de16fabc4b3b922c23c9664",
+      "master_blob": "b471d74d361e94ebd784679f1402fa3295af5760"
+    },
+    {
+      "path": ".env.example",
+      "disposition": "C",
+      "source_blob": "147ba7a7c2bb1288cf806eb4252c0807d50d7af1",
+      "master_blob": "4e857081aeb26a8b710cded96022d02af6013a0c"
+    },
+    {
+      "path": ".gitattributes",
+      "disposition": "A+C (report attributes / shell attributes)",
+      "source_blob": "b5d227a9477538759fddee2d059b8508060d9fb4",
+      "master_blob": null
+    },
+    {
+      "path": ".github/workflows/pytest.yml",
+      "disposition": "already on pinned master",
+      "source_blob": "6828c66ce8b320c6e55721dab200b2a2284fc024",
+      "master_blob": "6828c66ce8b320c6e55721dab200b2a2284fc024"
+    },
+    {
+      "path": ".sizecheck-exceptions.yaml",
+      "disposition": "already on pinned master",
+      "source_blob": "66977561facaa9e7fdb2fb5376b96216bcb3926c",
+      "master_blob": "66977561facaa9e7fdb2fb5376b96216bcb3926c"
+    },
+    {
+      "path": "AGENTS.md",
+      "disposition": "already on pinned master",
+      "source_blob": "9005ab609c506a22ca5a6edeb0e864bc565f9ebb",
+      "master_blob": "9005ab609c506a22ca5a6edeb0e864bc565f9ebb"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "disposition": "already on pinned master",
+      "source_blob": "73808577263d2fa5a8248fce244feb9a667ee084",
+      "master_blob": "73808577263d2fa5a8248fce244feb9a667ee084"
+    },
+    {
+      "path": "README.md",
+      "disposition": "already on pinned master",
+      "source_blob": "4d97c80fa73bbe9090b3baa663a65d01f4a541e8",
+      "master_blob": "4d97c80fa73bbe9090b3baa663a65d01f4a541e8"
+    },
+    {
+      "path": "apps/api/auth.py",
+      "disposition": "C",
+      "source_blob": "b9f9650a45759dfbdfdee9a0ca854706371ddb37",
+      "master_blob": "9d5325198da2b4ac952a187f379128043f2ac222"
+    },
+    {
+      "path": "apps/api/config.py",
+      "disposition": "already on pinned master",
+      "source_blob": "c54d00988251c9dee0f45cb1d7a3a28272a7ada0",
+      "master_blob": "c54d00988251c9dee0f45cb1d7a3a28272a7ada0"
+    },
+    {
+      "path": "apps/api/dependencies.py",
+      "disposition": "C",
+      "source_blob": "73e660c1c35f24276e39b919c6d680511a8be46b",
+      "master_blob": "f284b0a6f802f0c5d9074b3ebdd42a908d9c5e2f"
+    },
+    {
+      "path": "apps/api/main.py",
+      "disposition": "C",
+      "source_blob": "d29e766fdf1de8c80a20bd987f2aceaf1a3ff34d",
+      "master_blob": "d4def65a33b9d0d5681ef582c3f93b64aca7251d"
+    },
+    {
+      "path": "apps/api/readiness_alerts.py",
+      "disposition": "already on pinned master",
+      "source_blob": "14327c6834a86ccfd7aa5eff1609e70ccdac165b",
+      "master_blob": "14327c6834a86ccfd7aa5eff1609e70ccdac165b"
+    },
+    {
+      "path": "apps/api/routes/github.py",
+      "disposition": "already on pinned master",
+      "source_blob": "9afc2c1f23d96f464f68b6e77b621c3ea3181c1d",
+      "master_blob": "9afc2c1f23d96f464f68b6e77b621c3ea3181c1d"
+    },
+    {
+      "path": "apps/api/routes/readiness_alerts.py",
+      "disposition": "already on pinned master",
+      "source_blob": "aa284787a4fc6161ebbf2a863d0bec97366da968",
+      "master_blob": "aa284787a4fc6161ebbf2a863d0bec97366da968"
+    },
+    {
+      "path": "apps/api/routes/schedules.py",
+      "disposition": "already on pinned master",
+      "source_blob": "5bd91a421688575018d9385f7132295b4e43bf5c",
+      "master_blob": "5bd91a421688575018d9385f7132295b4e43bf5c"
+    },
+    {
+      "path": "apps/api/routes/telegram.py",
+      "disposition": "C",
+      "source_blob": "2e163f40efde155d09a71f4e01d6b0a1d6ef0301",
+      "master_blob": "377018d4e9490ee916ecf1934248d835370ee61e"
+    },
+    {
+      "path": "apps/api/telegram_body.py",
+      "disposition": "C",
+      "source_blob": "2d61ef4574c0e40aaf8c4173b79948bf9e1c3b0e",
+      "master_blob": null
+    },
+    {
+      "path": "apps/api/telegram_security.py",
+      "disposition": "C",
+      "source_blob": "49b7e8ef8b934c46f47d1480e722f055085e7a6e",
+      "master_blob": null
+    },
+    {
+      "path": "apps/api/webhook_alerts.py",
+      "disposition": "already on pinned master",
+      "source_blob": "10581de1791300624f90e30934ce860a8111e4f6",
+      "master_blob": "10581de1791300624f90e30934ce860a8111e4f6"
+    },
+    {
+      "path": "apps/worker/main.py",
+      "disposition": "already on pinned master",
+      "source_blob": "530683b61081ec55eac79999d41ffcb7bbc16546",
+      "master_blob": "530683b61081ec55eac79999d41ffcb7bbc16546"
+    },
+    {
+      "path": "dashboard/README.md",
+      "disposition": "already on pinned master",
+      "source_blob": "826c7b3a2849beb50cf3b8d296bf91d447b46472",
+      "master_blob": "826c7b3a2849beb50cf3b8d296bf91d447b46472"
+    },
+    {
+      "path": "dashboard/package-lock.json",
+      "disposition": "already on pinned master",
+      "source_blob": "8c23895fd12ee0467fa0c9ce3eb9dde76d74d09f",
+      "master_blob": "8c23895fd12ee0467fa0c9ce3eb9dde76d74d09f"
+    },
+    {
+      "path": "dashboard/package.json",
+      "disposition": "already on pinned master",
+      "source_blob": "7c1bfdbed59131d4d0c928d93d49cd03327d8f88",
+      "master_blob": "7c1bfdbed59131d4d0c928d93d49cd03327d8f88"
+    },
+    {
+      "path": "dashboard/src/App.tsx",
+      "disposition": "already on pinned master",
+      "source_blob": "a35067df4cac883ef3d046c07eea012353573073",
+      "master_blob": "a35067df4cac883ef3d046c07eea012353573073"
+    },
+    {
+      "path": "dashboard/src/components/MetricsPage.test.tsx",
+      "disposition": "already on pinned master",
+      "source_blob": "6b031d5fa82f3431beee72b7380adb71688cf607",
+      "master_blob": "6b031d5fa82f3431beee72b7380adb71688cf607"
+    },
+    {
+      "path": "dashboard/src/components/MetricsPage.tsx",
+      "disposition": "already on pinned master",
+      "source_blob": "d52559046df4bd2fa8b3faf693ee12a6d0b1f8bd",
+      "master_blob": "d52559046df4bd2fa8b3faf693ee12a6d0b1f8bd"
+    },
+    {
+      "path": "dashboard/src/components/OperatorInbox.test.tsx",
+      "disposition": "already on pinned master",
+      "source_blob": "e839d15658d5a527b055ab2ceb170a8168d570ab",
+      "master_blob": "e839d15658d5a527b055ab2ceb170a8168d570ab"
+    },
+    {
+      "path": "dashboard/src/components/OperatorInbox.tsx",
+      "disposition": "already on pinned master",
+      "source_blob": "44e0b50ef9dc79e486060f4858ce9c005f12f617",
+      "master_blob": "44e0b50ef9dc79e486060f4858ce9c005f12f617"
+    },
+    {
+      "path": "dashboard/src/components/ReadinessAlertsSection.test.tsx",
+      "disposition": "already on pinned master",
+      "source_blob": "2d33107186d72c217a5ed8e5a27f253d3849f838",
+      "master_blob": "2d33107186d72c217a5ed8e5a27f253d3849f838"
+    },
+    {
+      "path": "dashboard/src/components/ReadinessAlertsSection.tsx",
+      "disposition": "already on pinned master",
+      "source_blob": "5c398c51004a69ae0b4f266708ed09fa4e5ba575",
+      "master_blob": "5c398c51004a69ae0b4f266708ed09fa4e5ba575"
+    },
+    {
+      "path": "dashboard/src/components/ScheduleCreateForm.test.tsx",
+      "disposition": "already on pinned master",
+      "source_blob": "188cec8ad40cffe3754da1ce9546d5950dcabe27",
+      "master_blob": "188cec8ad40cffe3754da1ce9546d5950dcabe27"
+    },
+    {
+      "path": "dashboard/src/components/ScheduleCreateForm.tsx",
+      "disposition": "already on pinned master",
+      "source_blob": "8b4c1fef4afe4533395238eef76bccc55287b89d",
+      "master_blob": "8b4c1fef4afe4533395238eef76bccc55287b89d"
+    },
+    {
+      "path": "dashboard/src/components/ScheduleVisibilitySection.test.tsx",
+      "disposition": "already on pinned master",
+      "source_blob": "df4daa09c5704c801a1fc4ef215becd73c2e1fcd",
+      "master_blob": "df4daa09c5704c801a1fc4ef215becd73c2e1fcd"
+    },
+    {
+      "path": "dashboard/src/components/ScheduleVisibilitySection.tsx",
+      "disposition": "already on pinned master",
+      "source_blob": "87bc90f3aef00735a46eaca7028c08687542f8af",
+      "master_blob": "87bc90f3aef00735a46eaca7028c08687542f8af"
+    },
+    {
+      "path": "dashboard/src/components/TaskCard.test.tsx",
+      "disposition": "already on pinned master",
+      "source_blob": "773dda2df04d3d7f54b0a3993727f192f0845d11",
+      "master_blob": "773dda2df04d3d7f54b0a3993727f192f0845d11"
+    },
+    {
+      "path": "dashboard/src/components/TaskCard.tsx",
+      "disposition": "already on pinned master",
+      "source_blob": "22a1d207eb7cbc71ba654d4d5a178fee97936e64",
+      "master_blob": "22a1d207eb7cbc71ba654d4d5a178fee97936e64"
+    },
+    {
+      "path": "dashboard/src/components/TaskDetailPanel.test.tsx",
+      "disposition": "already on pinned master",
+      "source_blob": "341452730bdfb2aa3f3833df1ac0bfc441e7c774",
+      "master_blob": "341452730bdfb2aa3f3833df1ac0bfc441e7c774"
+    },
+    {
+      "path": "dashboard/src/components/TaskDetailPanel.tsx",
+      "disposition": "already on pinned master",
+      "source_blob": "122274b3cfdf68b59a70d18966ccd417e6d51a65",
+      "master_blob": "122274b3cfdf68b59a70d18966ccd417e6d51a65"
+    },
+    {
+      "path": "dashboard/src/components/TriggerActionsPage.test.tsx",
+      "disposition": "already on pinned master",
+      "source_blob": "fd834ca80fcfe3ad6a05648776db0ce02fb6aaad",
+      "master_blob": "fd834ca80fcfe3ad6a05648776db0ce02fb6aaad"
+    },
+    {
+      "path": "dashboard/src/components/TriggerActionsPage.tsx",
+      "disposition": "already on pinned master",
+      "source_blob": "c892abc6887e3796becb0acbd2e8ebaa9fdef85f",
+      "master_blob": "c892abc6887e3796becb0acbd2e8ebaa9fdef85f"
+    },
+    {
+      "path": "dashboard/src/services/api.test.ts",
+      "disposition": "already on pinned master",
+      "source_blob": "72f50ec1d171ff8b221ab7108fc86a400301cd85",
+      "master_blob": "72f50ec1d171ff8b221ab7108fc86a400301cd85"
+    },
+    {
+      "path": "dashboard/src/services/api.ts",
+      "disposition": "already on pinned master",
+      "source_blob": "67d9b0fd33882ad2533b1f8dcbb18a8e478c51d0",
+      "master_blob": "67d9b0fd33882ad2533b1f8dcbb18a8e478c51d0"
+    },
+    {
+      "path": "dashboard/src/styles/index.css",
+      "disposition": "already on pinned master",
+      "source_blob": "f105294444173305fa06cc7cbb176583f605fedb",
+      "master_blob": "f105294444173305fa06cc7cbb176583f605fedb"
+    },
+    {
+      "path": "dashboard/src/types/metrics.ts",
+      "disposition": "already on pinned master",
+      "source_blob": "6ed0d76034e9bf88bfad51e19d2abf1466ddf0d0",
+      "master_blob": "6ed0d76034e9bf88bfad51e19d2abf1466ddf0d0"
+    },
+    {
+      "path": "dashboard/src/types/task.ts",
+      "disposition": "already on pinned master",
+      "source_blob": "8b7c936602bd071c4eecaaa893e4c82a8acd67ae",
+      "master_blob": "8b7c936602bd071c4eecaaa893e4c82a8acd67ae"
+    },
+    {
+      "path": "dashboard/src/utils/formatters.test.ts",
+      "disposition": "already on pinned master",
+      "source_blob": "600eba9d077c6277f65ac47a5315ab768fb1dcf4",
+      "master_blob": "600eba9d077c6277f65ac47a5315ab768fb1dcf4"
+    },
+    {
+      "path": "dashboard/src/utils/formatters.ts",
+      "disposition": "already on pinned master",
+      "source_blob": "b84161ec10942a2786db1d7bb1ca1ca9627be353",
+      "master_blob": "b84161ec10942a2786db1d7bb1ca1ca9627be353"
+    },
+    {
+      "path": "db/migrations/versions/20261027_0053_readiness_alerts.py",
+      "disposition": "already on pinned master",
+      "source_blob": "f02a14553c09921dea8925ec5ab469599af74f35",
+      "master_blob": "f02a14553c09921dea8925ec5ab469599af74f35"
+    },
+    {
+      "path": "db/migrations/versions/20261030_0054_webhook_alerts.py",
+      "disposition": "already on pinned master",
+      "source_blob": "043ded46639864e8a99c61ac2cd58639c4d15af2",
+      "master_blob": "043ded46639864e8a99c61ac2cd58639c4d15af2"
+    },
+    {
+      "path": "db/migrations/versions/20261031_0055_readiness_acknowledgments.py",
+      "disposition": "already on pinned master",
+      "source_blob": "9af1a61c5c222cc298dafd971de613589109df6a",
+      "master_blob": "9af1a61c5c222cc298dafd971de613589109df6a"
+    },
+    {
+      "path": "db/models.py",
+      "disposition": "already on pinned master",
+      "source_blob": "a8f7bc7a9cd5bb4db777743e8c62fbc4005fd83b",
+      "master_blob": "a8f7bc7a9cd5bb4db777743e8c62fbc4005fd83b"
+    },
+    {
+      "path": "db/readiness_alert_models.py",
+      "disposition": "already on pinned master",
+      "source_blob": "77344bc9e2b60b3db0798311913e45f68b8177d6",
+      "master_blob": "77344bc9e2b60b3db0798311913e45f68b8177d6"
+    },
+    {
+      "path": "db/webhook_alert_models.py",
+      "disposition": "already on pinned master",
+      "source_blob": "fd0af227495184774498d014dbe2b6e9855f8f34",
+      "master_blob": "fd0af227495184774498d014dbe2b6e9855f8f34"
+    },
+    {
+      "path": "deploy/telegram/nginx.conf",
+      "disposition": "C",
+      "source_blob": "9833df6183dbc5a79e5df3df687fd0e312a9afb6",
+      "master_blob": null
+    },
+    {
+      "path": "docker-compose.temporal-compatibility.yml",
+      "disposition": "already on pinned master",
+      "source_blob": "4c1357cde37c4fd1b51f6676331746203a820618",
+      "master_blob": "4c1357cde37c4fd1b51f6676331746203a820618"
+    },
+    {
+      "path": "docker-compose.yml",
+      "disposition": "B+C (credential mounts / remaining ingress and logging hunks)",
+      "source_blob": "50456bc8264d4ea1641505c8a5258ae1dffd7e2b",
+      "master_blob": "e281d952e6f635163f81dc673b7a8999a8454e75"
+    },
+    {
+      "path": "docs/README.md",
+      "disposition": "already on pinned master",
+      "source_blob": "7084e3220bb8788c51beab4cff3c38698ceb7152",
+      "master_blob": "7084e3220bb8788c51beab4cff3c38698ceb7152"
+    },
+    {
+      "path": "docs/architecture.md",
+      "disposition": "already on pinned master",
+      "source_blob": "133ceb746b59bb89bcf15410012c9116b21c62e3",
+      "master_blob": "133ceb746b59bb89bcf15410012c9116b21c62e3"
+    },
+    {
+      "path": "docs/architecture/state_ownership.md",
+      "disposition": "already on pinned master",
+      "source_blob": "291dd5c30b6cfad762bbf187c31528406f2e7601",
+      "master_blob": "291dd5c30b6cfad762bbf187c31528406f2e7601"
+    },
+    {
+      "path": "docs/archive/completed_milestones.md",
+      "disposition": "already on pinned master",
+      "source_blob": "e1728a31df80d3dfff4a10bac34e8185e2e0e59f",
+      "master_blob": "e1728a31df80d3dfff4a10bac34e8185e2e0e59f"
+    },
+    {
+      "path": "docs/archive/phase4a_evidence.md",
+      "disposition": "already on pinned master",
+      "source_blob": "02b8a33bd9ae9b3a5d9ff7c7e56e4bef6d656bba",
+      "master_blob": "02b8a33bd9ae9b3a5d9ff7c7e56e4bef6d656bba"
+    },
+    {
+      "path": "docs/m32_code_agent_bridge.md",
+      "disposition": "already on pinned master",
+      "source_blob": "e82ec2b2805e16aa37e16fbf41d226b53fcd3077",
+      "master_blob": "e82ec2b2805e16aa37e16fbf41d226b53fcd3077"
+    },
+    {
+      "path": "docs/roadmap.md",
+      "disposition": "already on pinned master",
+      "source_blob": "b9020333fe495c500440ee3a2ceda495f277929d",
+      "master_blob": "b9020333fe495c500440ee3a2ceda495f277929d"
+    },
+    {
+      "path": "docs/runbook.md",
+      "disposition": "already on pinned master",
+      "source_blob": "d369ed03320fe7f41f20b4ec067a9ae9265a9a79",
+      "master_blob": "d369ed03320fe7f41f20b4ec067a9ae9265a9a79"
+    },
+    {
+      "path": "docs/schedule_request_design.md",
+      "disposition": "already on pinned master",
+      "source_blob": "88e6f3ce6e19f507936bb66f297a5f9c606f4753",
+      "master_blob": "88e6f3ce6e19f507936bb66f297a5f9c606f4753"
+    },
+    {
+      "path": "docs/security/m2-audit.md",
+      "disposition": "H",
+      "source_blob": "116d2eba8c41c0a050f40551601c52d763bf8568",
+      "master_blob": null
+    },
+    {
+      "path": "docs/security/m2-closeout.md",
+      "disposition": "H",
+      "source_blob": "6c42dc5a0bb720f1e12ef84d08bd1b904e33ac7f",
+      "master_blob": null
+    },
+    {
+      "path": "docs/security/m2-implementation.md",
+      "disposition": "H",
+      "source_blob": "1353a2983965b013281576831fb11727b9ed231b",
+      "master_blob": null
+    },
+    {
+      "path": "docs/security/m2-operations.md",
+      "disposition": "H",
+      "source_blob": "8b2c08b82da3f1ad645c44577b97ab8bf74b40a9",
+      "master_blob": null
+    },
+    {
+      "path": "docs/security/m2-threat-model.md",
+      "disposition": "H",
+      "source_blob": "7108b9df2a5dfae37261112f65aa16a86d939682",
+      "master_blob": null
+    },
+    {
+      "path": "docs/security/m2-validation.md",
+      "disposition": "H",
+      "source_blob": "b77f59b6190ae309933bf27fee72be3850167ef1",
+      "master_blob": null
+    },
+    {
+      "path": "docs/status.md",
+      "disposition": "H",
+      "source_blob": "2cbef99edf69a0c2451d705aaaaacc8d1efe1381",
+      "master_blob": "b66260211724723813d35484798bfe168a46d6c0"
+    },
+    {
+      "path": "docs/temporal_compatibility.md",
+      "disposition": "already on pinned master",
+      "source_blob": "ab1d2319816d22fe0d0196b3aadade484fe05a59",
+      "master_blob": "ab1d2319816d22fe0d0196b3aadade484fe05a59"
+    },
+    {
+      "path": "evaluation/m29_feature_mutation_contract.md",
+      "disposition": "already on pinned master",
+      "source_blob": "7b372745a7ce30bed2797c9637b501885b35c78c",
+      "master_blob": "7b372745a7ce30bed2797c9637b501885b35c78c"
+    },
+    {
+      "path": "evaluation/m29_live_provider_suite_mutation.json",
+      "disposition": "already on pinned master",
+      "source_blob": "d30f1c98c00e0633ec5bc3e673ae3c25eb08e9d4",
+      "master_blob": "d30f1c98c00e0633ec5bc3e673ae3c25eb08e9d4"
+    },
+    {
+      "path": "evaluation/m29_mutation_dispatcher.py",
+      "disposition": "already on pinned master",
+      "source_blob": "cc3350f0afaa2123200977014b821393240f5f6d",
+      "master_blob": "cc3350f0afaa2123200977014b821393240f5f6d"
+    },
+    {
+      "path": "evaluation/m29_mutation_isolation.py",
+      "disposition": "already on pinned master",
+      "source_blob": "9b3822d3598a9099fabe83011c819ecb46740df3",
+      "master_blob": "9b3822d3598a9099fabe83011c819ecb46740df3"
+    },
+    {
+      "path": "evaluation/m29_mutation_publication.py",
+      "disposition": "already on pinned master",
+      "source_blob": "d34c331f76961803b43a861630878a190572a5ff",
+      "master_blob": "d34c331f76961803b43a861630878a190572a5ff"
+    },
+    {
+      "path": "evaluation/m29_mutation_reconciliation.py",
+      "disposition": "already on pinned master",
+      "source_blob": "2953f2842d86faf23912b87775c74619e7bcab69",
+      "master_blob": "2953f2842d86faf23912b87775c74619e7bcab69"
+    },
+    {
+      "path": "evaluation/m29_mutation_reviewer_client.py",
+      "disposition": "already on pinned master",
+      "source_blob": "b883cd536104ada9c715217d74faca97e26b963f",
+      "master_blob": "b883cd536104ada9c715217d74faca97e26b963f"
+    },
+    {
+      "path": "evaluation/m29_mutation_runner_preflight.py",
+      "disposition": "already on pinned master",
+      "source_blob": "3ff1f3b94173b36e83632290ad9afa5b3f86332f",
+      "master_blob": "3ff1f3b94173b36e83632290ad9afa5b3f86332f"
+    },
+    {
+      "path": "evaluation/m29_mutation_smokes.py",
+      "disposition": "already on pinned master",
+      "source_blob": "155d8d804a97b5be49a54c3b7588d10d6afc80be",
+      "master_blob": "155d8d804a97b5be49a54c3b7588d10d6afc80be"
+    },
+    {
+      "path": "evaluation/m29_mutation_suite.py",
+      "disposition": "already on pinned master",
+      "source_blob": "5c6d5bc9dce0c7faf09f2cd0ea4ea13e284986e7",
+      "master_blob": "5c6d5bc9dce0c7faf09f2cd0ea4ea13e284986e7"
+    },
+    {
+      "path": "evaluation/m29_mutation_verifier.py",
+      "disposition": "already on pinned master",
+      "source_blob": "85995e2cdc5f54567ea0721441c9f64388519121",
+      "master_blob": "85995e2cdc5f54567ea0721441c9f64388519121"
+    },
+    {
+      "path": "evaluation/m29_provider_reliability_mutation_manifest.json",
+      "disposition": "already on pinned master",
+      "source_blob": "d92d91c6cc414c89ef5ccb5c74e44e69894d6123",
+      "master_blob": "d92d91c6cc414c89ef5ccb5c74e44e69894d6123"
+    },
+    {
+      "path": "evaluation/m29_provider_reliability_mutation_paired_analysis.json",
+      "disposition": "already on pinned master",
+      "source_blob": "ee66c9e361ac7a0c5ece7d8de048107422234522",
+      "master_blob": "ee66c9e361ac7a0c5ece7d8de048107422234522"
+    },
+    {
+      "path": "evaluation/m29_provider_reliability_mutation_paired_analysis.md",
+      "disposition": "already on pinned master",
+      "source_blob": "c4d6c12f7da72c8305be0ff634e001429ef8e7cd",
+      "master_blob": "c4d6c12f7da72c8305be0ff634e001429ef8e7cd"
+    },
+    {
+      "path": "evaluation/m29_provider_reliability_operational_report.json",
+      "disposition": "already on pinned master",
+      "source_blob": "a3dde4871941b48f97753065c886378044f16707",
+      "master_blob": "a3dde4871941b48f97753065c886378044f16707"
+    },
+    {
+      "path": "evaluation/m29_provider_reliability_operational_report.md",
+      "disposition": "already on pinned master",
+      "source_blob": "c02f76000e0f51538a1fb79ae794849e6b993dc5",
+      "master_blob": "c02f76000e0f51538a1fb79ae794849e6b993dc5"
+    },
+    {
+      "path": "evaluation/m29_provider_reliability_report.json",
+      "disposition": "already on pinned master",
+      "source_blob": "b859ab159c9526c24531e868d62d412c9f9b53e3",
+      "master_blob": "b859ab159c9526c24531e868d62d412c9f9b53e3"
+    },
+    {
+      "path": "evaluation/m29_provider_reliability_report.md",
+      "disposition": "already on pinned master",
+      "source_blob": "bb8a152a3eb5dfd0c5bc249b2f46eb638fb4bee6",
+      "master_blob": "bb8a152a3eb5dfd0c5bc249b2f46eb638fb4bee6"
+    },
+    {
+      "path": "evaluation/m29_provider_reliability_robustness_report.json",
+      "disposition": "already on pinned master",
+      "source_blob": "e81b2da29f6bd878279f7a1b3116b006faa9d1e3",
+      "master_blob": "e81b2da29f6bd878279f7a1b3116b006faa9d1e3"
+    },
+    {
+      "path": "evaluation/m29_provider_reliability_robustness_report.md",
+      "disposition": "already on pinned master",
+      "source_blob": "7321bc310b5cafd753341a5a3ae46a03b107fb44",
+      "master_blob": "7321bc310b5cafd753341a5a3ae46a03b107fb44"
+    },
+    {
+      "path": "evaluation/m29_provider_reliability_threshold_analysis.md",
+      "disposition": "already on pinned master",
+      "source_blob": "7193170572c5a7239f8a2c6b5bf3f84c5d5e1327",
+      "master_blob": "7193170572c5a7239f8a2c6b5bf3f84c5d5e1327"
+    },
+    {
+      "path": "orchestrator/execution.py",
+      "disposition": "already on pinned master",
+      "source_blob": "b40fa3eda4ebb9f642ca64ec258ae704731c25cb",
+      "master_blob": "b40fa3eda4ebb9f642ca64ec258ae704731c25cb"
+    },
+    {
+      "path": "orchestrator/execution_interaction_service.py",
+      "disposition": "already on pinned master",
+      "source_blob": "1ed35a1d2227bc3f19106a8016a90ae0ba0b2019",
+      "master_blob": "1ed35a1d2227bc3f19106a8016a90ae0ba0b2019"
+    },
+    {
+      "path": "orchestrator/execution_outcome_service.py",
+      "disposition": "already on pinned master",
+      "source_blob": "4b34f79f9ee5ccd2d1814dd31ab0a59bf4b3cd8b",
+      "master_blob": "4b34f79f9ee5ccd2d1814dd31ab0a59bf4b3cd8b"
+    },
+    {
+      "path": "orchestrator/execution_snapshot_service.py",
+      "disposition": "already on pinned master",
+      "source_blob": "0e40d6cb3651ea11f4e3acaeda098172ae9848cc",
+      "master_blob": "0e40d6cb3651ea11f4e3acaeda098172ae9848cc"
+    },
+    {
+      "path": "orchestrator/execution_submission_service.py",
+      "disposition": "already on pinned master",
+      "source_blob": "5ca787c06fb1d8e375afcc0068c4114b4e6d9bd9",
+      "master_blob": "5ca787c06fb1d8e375afcc0068c4114b4e6d9bd9"
+    },
+    {
+      "path": "orchestrator/execution_types.py",
+      "disposition": "already on pinned master",
+      "source_blob": "26c85085684fc89a8229323d9384e689e04fa62d",
+      "master_blob": "26c85085684fc89a8229323d9384e689e04fa62d"
+    },
+    {
+      "path": "orchestrator/github_delivery_sync.py",
+      "disposition": "already on pinned master",
+      "source_blob": "235e7af22f3abacbb4898e5e8e1ec8eae7ed9dce",
+      "master_blob": "235e7af22f3abacbb4898e5e8e1ec8eae7ed9dce"
+    },
+    {
+      "path": "orchestrator/github_events.py",
+      "disposition": "already on pinned master",
+      "source_blob": "778c3c942964597f78707164a985cb12bea67279",
+      "master_blob": "778c3c942964597f78707164a985cb12bea67279"
+    },
+    {
+      "path": "orchestrator/github_issue_intake.py",
+      "disposition": "already on pinned master",
+      "source_blob": "aaa91523a7a36cabc644e07d1366197dc64bebe3",
+      "master_blob": "aaa91523a7a36cabc644e07d1366197dc64bebe3"
+    },
+    {
+      "path": "orchestrator/nodes/delivery.py",
+      "disposition": "already on pinned master",
+      "source_blob": "b67d35e595fc5b902ef40078fd63a0f92ac454ff",
+      "master_blob": "b67d35e595fc5b902ef40078fd63a0f92ac454ff"
+    },
+    {
+      "path": "orchestrator/operational_health.py",
+      "disposition": "already on pinned master",
+      "source_blob": "f69e4a9045f736d187d713b90bc90a77e1626467",
+      "master_blob": "f69e4a9045f736d187d713b90bc90a77e1626467"
+    },
+    {
+      "path": "orchestrator/operational_health_types.py",
+      "disposition": "already on pinned master",
+      "source_blob": "69a4ffbd2ae5566e49e3616c3a69f1d3cc587165",
+      "master_blob": "69a4ffbd2ae5566e49e3616c3a69f1d3cc587165"
+    },
+    {
+      "path": "orchestrator/provider_diagnostics.py",
+      "disposition": "already on pinned master",
+      "source_blob": "ee4473bc9a38c8aadbee058174b0340cc4b8f773",
+      "master_blob": "ee4473bc9a38c8aadbee058174b0340cc4b8f773"
+    },
+    {
+      "path": "orchestrator/provider_diagnostics_credentials.py",
+      "disposition": "already on pinned master",
+      "source_blob": "08284bb1c30d072ae362c707e2e9b637fc72651c",
+      "master_blob": "08284bb1c30d072ae362c707e2e9b637fc72651c"
+    },
+    {
+      "path": "orchestrator/provider_diagnostics_types.py",
+      "disposition": "already on pinned master",
+      "source_blob": "9abfa0b98f36214243262a77252cbb183aac3532",
+      "master_blob": "9abfa0b98f36214243262a77252cbb183aac3532"
+    },
+    {
+      "path": "orchestrator/provider_observations.py",
+      "disposition": "already on pinned master",
+      "source_blob": "45941e3aeec76df8bd4491c552111c5d33dab063",
+      "master_blob": "45941e3aeec76df8bd4491c552111c5d33dab063"
+    },
+    {
+      "path": "orchestrator/read_only_evidence.py",
+      "disposition": "already on pinned master",
+      "source_blob": "c54b7b876a1c7ffcfd037c0f0836d7c5781a428d",
+      "master_blob": "c54b7b876a1c7ffcfd037c0f0836d7c5781a428d"
+    },
+    {
+      "path": "orchestrator/schedule_spec.py",
+      "disposition": "already on pinned master",
+      "source_blob": "d078641d0484cd5dc96fd48dd03ec3cc4e5e11b6",
+      "master_blob": "d078641d0484cd5dc96fd48dd03ec3cc4e5e11b6"
+    },
+    {
+      "path": "orchestrator/scheduled_evidence.py",
+      "disposition": "already on pinned master",
+      "source_blob": "a1ed92abcc6335e86ac49067f304199015188259",
+      "master_blob": "a1ed92abcc6335e86ac49067f304199015188259"
+    },
+    {
+      "path": "orchestrator/scheduled_health.py",
+      "disposition": "already on pinned master",
+      "source_blob": "303ee1752252754b9412cc8cf5460573c93ac512",
+      "master_blob": "303ee1752252754b9412cc8cf5460573c93ac512"
+    },
+    {
+      "path": "orchestrator/scheduled_submission.py",
+      "disposition": "already on pinned master",
+      "source_blob": "95a628434a3078d3d9dedd8a4b96f6c0d85881ff",
+      "master_blob": "95a628434a3078d3d9dedd8a4b96f6c0d85881ff"
+    },
+    {
+      "path": "orchestrator/temporal/activities.py",
+      "disposition": "already on pinned master",
+      "source_blob": "68bf57f1c0de7df7ed1d5ebc2c4115a65e778e03",
+      "master_blob": "68bf57f1c0de7df7ed1d5ebc2c4115a65e778e03"
+    },
+    {
+      "path": "orchestrator/temporal/policy.py",
+      "disposition": "already on pinned master",
+      "source_blob": "71329fd979d8d275f9906643e0dd7482a207825a",
+      "master_blob": "71329fd979d8d275f9906643e0dd7482a207825a"
+    },
+    {
+      "path": "orchestrator/temporal/scheduled_review.py",
+      "disposition": "already on pinned master",
+      "source_blob": "63ec2773a123275505c62b2b5ccc188c82fc6000",
+      "master_blob": "63ec2773a123275505c62b2b5ccc188c82fc6000"
+    },
+    {
+      "path": "orchestrator/temporal/worker.py",
+      "disposition": "already on pinned master",
+      "source_blob": "6b3d2d45b83fcd701f758528808c759683ba7fdb",
+      "master_blob": "6b3d2d45b83fcd701f758528808c759683ba7fdb"
+    },
+    {
+      "path": "orchestrator/temporal/workflows.py",
+      "disposition": "already on pinned master",
+      "source_blob": "e1a0d2f135ca65783e682224502199ec27e6c507",
+      "master_blob": "e1a0d2f135ca65783e682224502199ec27e6c507"
+    },
+    {
+      "path": "orchestrator/verification.py",
+      "disposition": "already on pinned master",
+      "source_blob": "dd4ffb42ae9f72d6ee312d135914c17b8e623430",
+      "master_blob": "dd4ffb42ae9f72d6ee312d135914c17b8e623430"
+    },
+    {
+      "path": "poetry.lock",
+      "disposition": "already on pinned master",
+      "source_blob": "56d9ba5447116fd07f875aced36e3e243c83d580",
+      "master_blob": "56d9ba5447116fd07f875aced36e3e243c83d580"
+    },
+    {
+      "path": "privacy/redaction.py",
+      "disposition": "already on pinned master",
+      "source_blob": "33a2f4aee9113d189864736034fe02a542314c49",
+      "master_blob": "33a2f4aee9113d189864736034fe02a542314c49"
+    },
+    {
+      "path": "pyproject.toml",
+      "disposition": "already on pinned master",
+      "source_blob": "627dbe106dd916ce749adae67e7f71e66eb66346",
+      "master_blob": "627dbe106dd916ce749adae67e7f71e66eb66346"
+    },
+    {
+      "path": "repositories/__init__.py",
+      "disposition": "already on pinned master",
+      "source_blob": "35510429b508248f60ef94edfdad3a9b01a55988",
+      "master_blob": "35510429b508248f60ef94edfdad3a9b01a55988"
+    },
+    {
+      "path": "repositories/operational_evidence.py",
+      "disposition": "already on pinned master",
+      "source_blob": "7ffbc7576332b45c48d6bdbb9218f75bce8b9728",
+      "master_blob": "7ffbc7576332b45c48d6bdbb9218f75bce8b9728"
+    },
+    {
+      "path": "repositories/readiness_alert_delivery_claims.py",
+      "disposition": "already on pinned master",
+      "source_blob": "19b7e6ec431f4af1acc329b2260bef060f8c55b9",
+      "master_blob": "19b7e6ec431f4af1acc329b2260bef060f8c55b9"
+    },
+    {
+      "path": "repositories/readiness_alert_locks.py",
+      "disposition": "already on pinned master",
+      "source_blob": "e8ed403cf33579a0a3660684929fb530c88f1fa1",
+      "master_blob": "e8ed403cf33579a0a3660684929fb530c88f1fa1"
+    },
+    {
+      "path": "repositories/sqlalchemy_interaction.py",
+      "disposition": "already on pinned master",
+      "source_blob": "e698a03cb23a6cdf205fb3f9c3985e75dc58b8f1",
+      "master_blob": "e698a03cb23a6cdf205fb3f9c3985e75dc58b8f1"
+    },
+    {
+      "path": "repositories/sqlalchemy_operational_health.py",
+      "disposition": "already on pinned master",
+      "source_blob": "a7306c8baaee83c35089e2ccc89baeaf2c3eef6b",
+      "master_blob": "a7306c8baaee83c35089e2ccc89baeaf2c3eef6b"
+    },
+    {
+      "path": "repositories/sqlalchemy_readiness_alerts.py",
+      "disposition": "already on pinned master",
+      "source_blob": "1a8eda067aa8636ef770f395f6022e23816cfe28",
+      "master_blob": "1a8eda067aa8636ef770f395f6022e23816cfe28"
+    },
+    {
+      "path": "repositories/sqlalchemy_task.py",
+      "disposition": "already on pinned master",
+      "source_blob": "99f7194ed8016c1964e0804d80a78c5e61e85c8e",
+      "master_blob": "99f7194ed8016c1964e0804d80a78c5e61e85c8e"
+    },
+    {
+      "path": "repositories/sqlalchemy_webhook_alerts.py",
+      "disposition": "already on pinned master",
+      "source_blob": "d35989fab3e4ce5467d00b0a6da13e63af0d71ca",
+      "master_blob": "d35989fab3e4ce5467d00b0a6da13e63af0d71ca"
+    },
+    {
+      "path": "repositories/sqlalchemy_worker.py",
+      "disposition": "already on pinned master",
+      "source_blob": "07cd2c3d81551d9ff3b7d9a196a40f5354fd6ef3",
+      "master_blob": "07cd2c3d81551d9ff3b7d9a196a40f5354fd6ef3"
+    },
+    {
+      "path": "sandbox/audit.py",
+      "disposition": "already on pinned master",
+      "source_blob": "a3e62f66df8d491a745a0807948f0058c668ca88",
+      "master_blob": "a3e62f66df8d491a745a0807948f0058c668ca88"
+    },
+    {
+      "path": "sandbox/container.py",
+      "disposition": "B",
+      "source_blob": "33f5862dfbc8ac98b41efa35de4de9ccb8b9c996",
+      "master_blob": "1f1c9a7711dd395b0d2c654eababf27edcfba247"
+    },
+    {
+      "path": "sandbox/legacy_egress.py",
+      "disposition": "B",
+      "source_blob": "c2d2d32fdef2075e9a37710f3b79ed17d3cec386",
+      "master_blob": null
+    },
+    {
+      "path": "sandbox/legacy_security.py",
+      "disposition": "B",
+      "source_blob": "45430fb61b301a60efb83c6a593557a0b59db023",
+      "master_blob": null
+    },
+    {
+      "path": "sandbox/native_agent_executor.py",
+      "disposition": "B",
+      "source_blob": "2201bde018a2a9974d81add9ba61ca1c4babeb42",
+      "master_blob": "da8f195c7e670e9c2bbe178743f205fadde117f5"
+    },
+    {
+      "path": "sandbox/provider_bootstrap.py",
+      "disposition": "B",
+      "source_blob": "4b09ba53ca12d350517447e7a6a38368f78a0efd",
+      "master_blob": "de316294811e3745809ac1f73d1eb81135ffa27a"
+    },
+    {
+      "path": "sandbox/provider_stager.py",
+      "disposition": "B",
+      "source_blob": "1033bc2dd4ba881c8baa4092def479b92790345d",
+      "master_blob": "b980c28bb22368eb4f9c46c0983d68d26810ada5"
+    },
+    {
+      "path": "sandbox/runner.py",
+      "disposition": "B",
+      "source_blob": "5ee336c2008f7006513688f856f8bbb25841da9f",
+      "master_blob": "7470fbbf95b8a668fb2f5679dd5125a5b5e1a742"
+    },
+    {
+      "path": "sandbox/session.py",
+      "disposition": "already on pinned master",
+      "source_blob": "d177a0d9ef087e364e927ca027c8ae121a585678",
+      "master_blob": "d177a0d9ef087e364e927ca027c8ae121a585678"
+    },
+    {
+      "path": "scripts/e2e/run_m29_mutation_wave.py",
+      "disposition": "already on pinned master",
+      "source_blob": "3636ae61031b4ff6dfa777159885c992605b78b8",
+      "master_blob": "3636ae61031b4ff6dfa777159885c992605b78b8"
+    },
+    {
+      "path": "scripts/init_webhook.sh",
+      "disposition": "C",
+      "source_blob": "8704ca2eba6b3dfa2b4a060ccd1b2f18fcce9883",
+      "master_blob": "1f9d42cc9aadc07e8fd4db8d0273fd1d444f52c7"
+    },
+    {
+      "path": "scripts/m2_preservation.ps1",
+      "disposition": "H",
+      "source_blob": "055f5710724f4b838b4a75aa3b074542ad8bdd7b",
+      "master_blob": null
+    },
+    {
+      "path": "scripts/temporal-compatibility/dynamicconfig.yaml",
+      "disposition": "already on pinned master",
+      "source_blob": "1cf95977562d355690e85ca0cb0d6a63bd609d77",
+      "master_blob": "1cf95977562d355690e85ca0cb0d6a63bd609d77"
+    },
+    {
+      "path": "scripts/temporal-compatibility/init.sql",
+      "disposition": "already on pinned master",
+      "source_blob": "c9a585df6dba954b2a3b901fb53cf14c638479c4",
+      "master_blob": "c9a585df6dba954b2a3b901fb53cf14c638479c4"
+    },
+    {
+      "path": "scripts/up.sh",
+      "disposition": "C",
+      "source_blob": "9ca467cb63c1cb6859847f35fafe4a04c1e3becb",
+      "master_blob": "06d3d591486b9b85ab4f6c7bf3f4c77cc3aa991d"
+    },
+    {
+      "path": "tests/integration/fixtures/temporal_histories/approval-approved.json",
+      "disposition": "already on pinned master",
+      "source_blob": "7a7c66d1b06de50116281f8c6649853815c7f384",
+      "master_blob": "7a7c66d1b06de50116281f8c6649853815c7f384"
+    },
+    {
+      "path": "tests/integration/fixtures/temporal_histories/approval-rejected.json",
+      "disposition": "already on pinned master",
+      "source_blob": "be329e224c51cfe3af0400619c49d895a42a0c7d",
+      "master_blob": "be329e224c51cfe3af0400619c49d895a42a0c7d"
+    },
+    {
+      "path": "tests/integration/fixtures/temporal_histories/approval-update.json",
+      "disposition": "already on pinned master",
+      "source_blob": "28d1d7e08aaa572f1ebf3f0bf928308c265881e7",
+      "master_blob": "28d1d7e08aaa572f1ebf3f0bf928308c265881e7"
+    },
+    {
+      "path": "tests/integration/fixtures/temporal_histories/cancellation.json",
+      "disposition": "already on pinned master",
+      "source_blob": "ca2d8184d2cc952454c85ee08110dee5c7754d2f",
+      "master_blob": "ca2d8184d2cc952454c85ee08110dee5c7754d2f"
+    },
+    {
+      "path": "tests/integration/fixtures/temporal_histories/decomposed-patch-false.json",
+      "disposition": "already on pinned master",
+      "source_blob": "8557f552e9f42037ecb7e6d4dbcd4ed2b52def57",
+      "master_blob": "8557f552e9f42037ecb7e6d4dbcd4ed2b52def57"
+    },
+    {
+      "path": "tests/integration/fixtures/temporal_histories/repair.json",
+      "disposition": "already on pinned master",
+      "source_blob": "becb909031aff5af4435f0c579c4b7a955fa7cfb",
+      "master_blob": "becb909031aff5af4435f0c579c4b7a955fa7cfb"
+    },
+    {
+      "path": "tests/integration/provider_diagnostics_support.py",
+      "disposition": "already on pinned master",
+      "source_blob": "4f76be8d8f844ebbaf6c6db802be8f7932dbd878",
+      "master_blob": "4f76be8d8f844ebbaf6c6db802be8f7932dbd878"
+    },
+    {
+      "path": "tests/integration/task_endpoints_support.py",
+      "disposition": "already on pinned master",
+      "source_blob": "4ec6b509a473d532facfa86462aac65182a56e51",
+      "master_blob": "4ec6b509a473d532facfa86462aac65182a56e51"
+    },
+    {
+      "path": "tests/integration/test_antigravity_provider_auth.py",
+      "disposition": "B",
+      "source_blob": "4657f2f43c3f382fa4f27fe2cbd73115a313dc48",
+      "master_blob": "2712cbbf2d89e53b2a494456b1e82cef8f056858"
+    },
+    {
+      "path": "tests/integration/test_ci_workflows.py",
+      "disposition": "already on pinned master",
+      "source_blob": "6e7fc56a653ff16757997b521b9163bece77c775",
+      "master_blob": "6e7fc56a653ff16757997b521b9163bece77c775"
+    },
+    {
+      "path": "tests/integration/test_context_envelope_persistence.py",
+      "disposition": "already on pinned master",
+      "source_blob": "36be6701ca9f0a0ee5596eb951b8a7e8d6aee036",
+      "master_blob": "36be6701ca9f0a0ee5596eb951b8a7e8d6aee036"
+    },
+    {
+      "path": "tests/integration/test_db_migrations.py",
+      "disposition": "already on pinned master",
+      "source_blob": "ce1e144a6ca075a31acf0e959f9d338971d312e4",
+      "master_blob": "ce1e144a6ca075a31acf0e959f9d338971d312e4"
+    },
+    {
+      "path": "tests/integration/test_evidence_correlation.py",
+      "disposition": "already on pinned master",
+      "source_blob": "b8f4767c4598c0e9cd816c2768a45ed8d1d1cac9",
+      "master_blob": "b8f4767c4598c0e9cd816c2768a45ed8d1d1cac9"
+    },
+    {
+      "path": "tests/integration/test_github_webhook_integration.py",
+      "disposition": "already on pinned master",
+      "source_blob": "be7c657f8e69d7da70001360a3afdc3b3c173eb0",
+      "master_blob": "be7c657f8e69d7da70001360a3afdc3b3c173eb0"
+    },
+    {
+      "path": "tests/integration/test_interaction_wait_alerts.py",
+      "disposition": "already on pinned master",
+      "source_blob": "e376ac7bfaeb8d10092ad9752b21afd323074171",
+      "master_blob": "e376ac7bfaeb8d10092ad9752b21afd323074171"
+    },
+    {
+      "path": "tests/integration/test_local_infra_config.py",
+      "disposition": "C",
+      "source_blob": "d04f1728dea3a7ea326a3a52ed0e1931c67c1eda",
+      "master_blob": "06b57b268fe03af1a51e6e2812f3bc656fa72614"
+    },
+    {
+      "path": "tests/integration/test_m29_mutation_live_e2e.py",
+      "disposition": "A",
+      "source_blob": "74aada497aba6f00612b20fe6bd54a0f61e81911",
+      "master_blob": "da33e4bc0707346166e3a235e69a30da7291fbfd"
+    },
+    {
+      "path": "tests/integration/test_m2_docker_security.py",
+      "disposition": "C",
+      "source_blob": "3a2f6f470a9c1ebcb6d4be3da3f998eccba705b8",
+      "master_blob": null
+    },
+    {
+      "path": "tests/integration/test_m2_postgres_rollback.py",
+      "disposition": "C",
+      "source_blob": "2545e3fcb75f9e13681246578377fd7904ccd1f1",
+      "master_blob": null
+    },
+    {
+      "path": "tests/integration/test_m2_shell_boundary.py",
+      "disposition": "B",
+      "source_blob": "3cc28a2fcc7106306fb87fe468dc7603e006d667",
+      "master_blob": null
+    },
+    {
+      "path": "tests/integration/test_provider_capability_alerts.py",
+      "disposition": "already on pinned master",
+      "source_blob": "699607bf37bcda8c290e709c0df76f2df33f7c9a",
+      "master_blob": "699607bf37bcda8c290e709c0df76f2df33f7c9a"
+    },
+    {
+      "path": "tests/integration/test_readiness_alert_acknowledgments.py",
+      "disposition": "already on pinned master",
+      "source_blob": "495efa78ac175300deab1b8a646f42c05e590989",
+      "master_blob": "495efa78ac175300deab1b8a646f42c05e590989"
+    },
+    {
+      "path": "tests/integration/test_readiness_alert_migration.py",
+      "disposition": "already on pinned master",
+      "source_blob": "6624975041276d3c4114b880fe16c8cc21fcf445",
+      "master_blob": "6624975041276d3c4114b880fe16c8cc21fcf445"
+    },
+    {
+      "path": "tests/integration/test_readiness_alerts.py",
+      "disposition": "already on pinned master",
+      "source_blob": "98d441e0589098dae41be9680bb07644a354ba73",
+      "master_blob": "98d441e0589098dae41be9680bb07644a354ba73"
+    },
+    {
+      "path": "tests/integration/test_sandbox_docker_runner.py",
+      "disposition": "already on pinned master",
+      "source_blob": "932ecbd13151783f739ceb1dd7b69d4c1c18ee46",
+      "master_blob": "932ecbd13151783f739ceb1dd7b69d4c1c18ee46"
+    },
+    {
+      "path": "tests/integration/test_schedule_api_errors.py",
+      "disposition": "already on pinned master",
+      "source_blob": "0d78cd0654aed66e192c77dea98e628d774242d0",
+      "master_blob": "0d78cd0654aed66e192c77dea98e628d774242d0"
+    },
+    {
+      "path": "tests/integration/test_scheduled_evidence.py",
+      "disposition": "already on pinned master",
+      "source_blob": "fac1ceed52b2b0f323deee05d265a8e727728d55",
+      "master_blob": "fac1ceed52b2b0f323deee05d265a8e727728d55"
+    },
+    {
+      "path": "tests/integration/test_scheduled_submission.py",
+      "disposition": "already on pinned master",
+      "source_blob": "17b3b480bf65a8c8668bf23a30865c75bacf4098",
+      "master_blob": "17b3b480bf65a8c8668bf23a30865c75bacf4098"
+    },
+    {
+      "path": "tests/integration/test_stale_outbox_alerts.py",
+      "disposition": "already on pinned master",
+      "source_blob": "ae3f038431cceec6056c212b9234c606f1e3945d",
+      "master_blob": "ae3f038431cceec6056c212b9234c606f1e3945d"
+    },
+    {
+      "path": "tests/integration/test_task_endpoints_submission.py",
+      "disposition": "already on pinned master",
+      "source_blob": "dc5d3613ead788efda37d66a1b1232331db2af6d",
+      "master_blob": "dc5d3613ead788efda37d66a1b1232331db2af6d"
+    },
+    {
+      "path": "tests/integration/test_telegram_endpoints.py",
+      "disposition": "C",
+      "source_blob": "a2b92103be5605561c613577c1d9d9096dd7b095",
+      "master_blob": "46e558fe62e223f4a3d13388fb476777f87f997e"
+    },
+    {
+      "path": "tests/integration/test_temporal_compatibility.py",
+      "disposition": "already on pinned master",
+      "source_blob": "8a504fd11c497196afd2d80c57a56fab7227dff7",
+      "master_blob": "8a504fd11c497196afd2d80c57a56fab7227dff7"
+    },
+    {
+      "path": "tests/integration/test_temporal_fanout_replay.py",
+      "disposition": "already on pinned master",
+      "source_blob": "ac040cd173798ab1a4f6d6b4d7854f63feda677c",
+      "master_blob": "ac040cd173798ab1a4f6d6b4d7854f63feda677c"
+    },
+    {
+      "path": "tests/integration/test_temporal_runtime.py",
+      "disposition": "already on pinned master",
+      "source_blob": "faa976eaadf736b826ea422e118684e2b3b2470d",
+      "master_blob": "faa976eaadf736b826ea422e118684e2b3b2470d"
+    },
+    {
+      "path": "tests/integration/test_temporal_schedules_compatibility.py",
+      "disposition": "already on pinned master",
+      "source_blob": "a565b88880d9212ee6e879036de53f187f703f04",
+      "master_blob": "a565b88880d9212ee6e879036de53f187f703f04"
+    },
+    {
+      "path": "tests/integration/test_terminal_reconciliation_alerts.py",
+      "disposition": "already on pinned master",
+      "source_blob": "ee09c148f15d62b9ede0a256a10bc23ceb48f949",
+      "master_blob": "ee09c148f15d62b9ede0a256a10bc23ceb48f949"
+    },
+    {
+      "path": "tests/integration/test_vertical_slice_e2e.py",
+      "disposition": "already on pinned master",
+      "source_blob": "1e6b93ae123d1dd5d19a1b7137871c91c31bf68c",
+      "master_blob": "1e6b93ae123d1dd5d19a1b7137871c91c31bf68c"
+    },
+    {
+      "path": "tests/integration/test_webhook_alerts.py",
+      "disposition": "already on pinned master",
+      "source_blob": "26e50d85a218a01eb1b594c08b2f4ee99aea0f4e",
+      "master_blob": "26e50d85a218a01eb1b594c08b2f4ee99aea0f4e"
+    },
+    {
+      "path": "tests/temporal_history_fixtures.py",
+      "disposition": "already on pinned master",
+      "source_blob": "086a48a1495112d73674b0b85326134b6ad1af8e",
+      "master_blob": "086a48a1495112d73674b0b85326134b6ad1af8e"
+    },
+    {
+      "path": "tests/unit/test_antigravity_provider_auth.py",
+      "disposition": "B",
+      "source_blob": "dd4da8d505c07b561d1b18cda1773b5812e86996",
+      "master_blob": "2785980fa49a8e27cb9b93730fdb3bf814da2df5"
+    },
+    {
+      "path": "tests/unit/test_api_dependencies.py",
+      "disposition": "C",
+      "source_blob": "a96d1aab6ef86aaad917baf8d9eb15bb54ae7803",
+      "master_blob": "9206e65a85c1fdb8a9687581eab52562ffd4c78e"
+    },
+    {
+      "path": "tests/unit/test_api_github_webhook.py",
+      "disposition": "already on pinned master",
+      "source_blob": "14d92af10d328eb79ebe76fd798d8e9670c02ab0",
+      "master_blob": "14d92af10d328eb79ebe76fd798d8e9670c02ab0"
+    },
+    {
+      "path": "tests/unit/test_api_telegram_webhook_auth.py",
+      "disposition": "C",
+      "source_blob": "7c1e0fd5236f2b1937e693b266fc87345ab6317e",
+      "master_blob": "01d9e9a754fe1a7a623a85b416e5ed28f65772f3"
+    },
+    {
+      "path": "tests/unit/test_db_models.py",
+      "disposition": "already on pinned master",
+      "source_blob": "7855ec176f96d3c1cbd3529f820de239f5a44893",
+      "master_blob": "7855ec176f96d3c1cbd3529f820de239f5a44893"
+    },
+    {
+      "path": "tests/unit/test_docker_sandbox_container.py",
+      "disposition": "B",
+      "source_blob": "b61470efdab0a291f5e479866b5c044a7b522897",
+      "master_blob": "41e35ab641718a8133f437259a6208c1866fb00b"
+    },
+    {
+      "path": "tests/unit/test_docker_sandbox_runner.py",
+      "disposition": "B",
+      "source_blob": "d39fca5d98bc02907961bb41b3cc0a7de6116cf8",
+      "master_blob": "a90a351ad7ad7edb897bacef0625b6edb1bee458"
+    },
+    {
+      "path": "tests/unit/test_execution_snapshot_service.py",
+      "disposition": "already on pinned master",
+      "source_blob": "ee6169453160ca7e05a2b4478e05f24c76bcf2f7",
+      "master_blob": "ee6169453160ca7e05a2b4478e05f24c76bcf2f7"
+    },
+    {
+      "path": "tests/unit/test_github_events.py",
+      "disposition": "already on pinned master",
+      "source_blob": "0b299687fb3bc63c9be8ca0e59fe7ae73f72113f",
+      "master_blob": "0b299687fb3bc63c9be8ca0e59fe7ae73f72113f"
+    },
+    {
+      "path": "tests/unit/test_github_issue_replay.py",
+      "disposition": "already on pinned master",
+      "source_blob": "8d3159190ec1de55c56d921fd8d29e81a2c7a16d",
+      "master_blob": "8d3159190ec1de55c56d921fd8d29e81a2c7a16d"
+    },
+    {
+      "path": "tests/unit/test_m29_mutation_isolation.py",
+      "disposition": "already on pinned master",
+      "source_blob": "43b5197a6f5517ecf904fe0ef956d0cb2c34f718",
+      "master_blob": "43b5197a6f5517ecf904fe0ef956d0cb2c34f718"
+    },
+    {
+      "path": "tests/unit/test_m29_mutation_live_adapters.py",
+      "disposition": "already on pinned master",
+      "source_blob": "e716fdc0a90fbea0cb0ffb7cbf760253685ba1f8",
+      "master_blob": "e716fdc0a90fbea0cb0ffb7cbf760253685ba1f8"
+    },
+    {
+      "path": "tests/unit/test_m29_mutation_reconciliation.py",
+      "disposition": "already on pinned master",
+      "source_blob": "5c4346383a62a4acea5cad71ce23b45ae5e3acc2",
+      "master_blob": "5c4346383a62a4acea5cad71ce23b45ae5e3acc2"
+    },
+    {
+      "path": "tests/unit/test_m29_mutation_runner.py",
+      "disposition": "already on pinned master",
+      "source_blob": "30cca7d496e5356d16d8a2b5e699bbbefc06a703",
+      "master_blob": "30cca7d496e5356d16d8a2b5e699bbbefc06a703"
+    },
+    {
+      "path": "tests/unit/test_m29_wave5_mutation_published_artifacts.py",
+      "disposition": "already on pinned master",
+      "source_blob": "4b37ddebf52ded3a1feb72795b75ac0eb99b8d55",
+      "master_blob": "4b37ddebf52ded3a1feb72795b75ac0eb99b8d55"
+    },
+    {
+      "path": "tests/unit/test_m2_control_command_redaction.py",
+      "disposition": "B",
+      "source_blob": "f853b13e824e38fefd38293f111a2731184fa206",
+      "master_blob": null
+    },
+    {
+      "path": "tests/unit/test_m2_deployment_contracts.py",
+      "disposition": "C",
+      "source_blob": "2f6487d8d9da74e2096edbc785512398c8ef83fc",
+      "master_blob": null
+    },
+    {
+      "path": "tests/unit/test_m2_execution_security.py",
+      "disposition": "B",
+      "source_blob": "04f00669fdc6b6f55a50b03eac8d858733e40ba5",
+      "master_blob": null
+    },
+    {
+      "path": "tests/unit/test_native_agent_executor.py",
+      "disposition": "B",
+      "source_blob": "2501792778575ba5fe5614836bc45aec9ee41b85",
+      "master_blob": "2de8eb5823d0492a0b7f9426d276a0a5b5fa2ea6"
+    },
+    {
+      "path": "tests/unit/test_operational_health.py",
+      "disposition": "already on pinned master",
+      "source_blob": "d4e714a691f64d9f99fbab507bbfccc2233bdbb1",
+      "master_blob": "d4e714a691f64d9f99fbab507bbfccc2233bdbb1"
+    },
+    {
+      "path": "tests/unit/test_orchestrator_nodes_delivery.py",
+      "disposition": "already on pinned master",
+      "source_blob": "26626746ec8214771c19688e4ab7cfea461274d7",
+      "master_blob": "26626746ec8214771c19688e4ab7cfea461274d7"
+    },
+    {
+      "path": "tests/unit/test_provider_bootstrap.py",
+      "disposition": "B",
+      "source_blob": "fb57a7387c7675e4abd92eb020a94edb9c465d28",
+      "master_blob": "956ad1a6f6adaba213f210c992ffd07813fdb0dc"
+    },
+    {
+      "path": "tests/unit/test_provider_diagnostics.py",
+      "disposition": "B",
+      "source_blob": "db3c233a1f664f2788bf40725ffbf67a41ccbb8a",
+      "master_blob": "18ade7c38624afa1ee6dc66d678b58d73b9e6eb5"
+    },
+    {
+      "path": "tests/unit/test_provider_observations.py",
+      "disposition": "already on pinned master",
+      "source_blob": "43dfc9d484541354f176e29698c16efa2578f2d3",
+      "master_blob": "43dfc9d484541354f176e29698c16efa2578f2d3"
+    },
+    {
+      "path": "tests/unit/test_read_only_workspace_evidence.py",
+      "disposition": "already on pinned master",
+      "source_blob": "b9d571d94985ebf0f25d354d87c8de9b50d189dd",
+      "master_blob": "b9d571d94985ebf0f25d354d87c8de9b50d189dd"
+    },
+    {
+      "path": "tests/unit/test_redaction.py",
+      "disposition": "already on pinned master",
+      "source_blob": "ec110abf577c1de158b1916829bfb379472ac8cf",
+      "master_blob": "ec110abf577c1de158b1916829bfb379472ac8cf"
+    },
+    {
+      "path": "tests/unit/test_schedule_management.py",
+      "disposition": "already on pinned master",
+      "source_blob": "221e39d4d464848b380f4a22153d2a1485125df7",
+      "master_blob": "221e39d4d464848b380f4a22153d2a1485125df7"
+    },
+    {
+      "path": "tests/unit/test_schedule_spec.py",
+      "disposition": "already on pinned master",
+      "source_blob": "efb9e639fdaaa044b7eeeb14974f56464ad7187b",
+      "master_blob": "efb9e639fdaaa044b7eeeb14974f56464ad7187b"
+    },
+    {
+      "path": "tests/unit/test_scheduled_evidence.py",
+      "disposition": "already on pinned master",
+      "source_blob": "9c7ae2de6f2610f13997934edcde178a3c0dc4ab",
+      "master_blob": "9c7ae2de6f2610f13997934edcde178a3c0dc4ab"
+    },
+    {
+      "path": "tests/unit/test_scheduled_health.py",
+      "disposition": "already on pinned master",
+      "source_blob": "546a780a94fb506b60d61b7f72d5e659b42af6a2",
+      "master_blob": "546a780a94fb506b60d61b7f72d5e659b42af6a2"
+    },
+    {
+      "path": "tests/unit/test_scheduled_review.py",
+      "disposition": "already on pinned master",
+      "source_blob": "0e76b6d17be8dac7df6203c012f65326a103d906",
+      "master_blob": "0e76b6d17be8dac7df6203c012f65326a103d906"
+    },
+    {
+      "path": "tests/unit/test_scheduled_submission.py",
+      "disposition": "already on pinned master",
+      "source_blob": "3c8590ee088725d333546bff3088e80c0b4ec0fc",
+      "master_blob": "3c8590ee088725d333546bff3088e80c0b4ec0fc"
+    },
+    {
+      "path": "tests/unit/test_shell_worker.py",
+      "disposition": "B",
+      "source_blob": "7d18b084cf7b7e5d8c57448cfe247d2e1d7b7923",
+      "master_blob": "88bf7fa39c20025c13beb33fb54da2cad529261d"
+    },
+    {
+      "path": "tests/unit/test_stale_outbox_eligibility.py",
+      "disposition": "already on pinned master",
+      "source_blob": "60b7c251dabc29c66e38aba6452d8b65a53e2572",
+      "master_blob": "60b7c251dabc29c66e38aba6452d8b65a53e2572"
+    },
+    {
+      "path": "tests/unit/test_task_execution_service_delivery.py",
+      "disposition": "already on pinned master",
+      "source_blob": "db07718b844e5437d8ac8b38cd2878364fe3cdd0",
+      "master_blob": "db07718b844e5437d8ac8b38cd2878364fe3cdd0"
+    },
+    {
+      "path": "tests/unit/test_telegram_security.py",
+      "disposition": "C",
+      "source_blob": "eb88756d6eaa921b06c120b0f35897338503bdc3",
+      "master_blob": null
+    },
+    {
+      "path": "tests/unit/test_temporal_workflow_policy.py",
+      "disposition": "already on pinned master",
+      "source_blob": "16ddd1bf68571aacb9bb6c4c91b505bb733aa58c",
+      "master_blob": "16ddd1bf68571aacb9bb6c4c91b505bb733aa58c"
+    },
+    {
+      "path": "tests/unit/test_temporal_workflow_primitives.py",
+      "disposition": "already on pinned master",
+      "source_blob": "d23f6fdfd77f10eaa6124f01494da014d0783abd",
+      "master_blob": "d23f6fdfd77f10eaa6124f01494da014d0783abd"
+    },
+    {
+      "path": "tests/unit/test_verification_helpers.py",
+      "disposition": "already on pinned master",
+      "source_blob": "f8d9a77e980fac98b27df34de7de3ed958d9d111",
+      "master_blob": "f8d9a77e980fac98b27df34de7de3ed958d9d111"
+    },
+    {
+      "path": "tests/unit/test_webhook_alerts.py",
+      "disposition": "already on pinned master",
+      "source_blob": "f16124dda34f7ef12efcf5f9d8a1b055153a9aec",
+      "master_blob": "f16124dda34f7ef12efcf5f9d8a1b055153a9aec"
+    },
+    {
+      "path": "tests/unit/test_worker_runtime_entrypoints.py",
+      "disposition": "already on pinned master",
+      "source_blob": "2a12e77ba3047b58b3e914454adc7f701cdf653b",
+      "master_blob": "2a12e77ba3047b58b3e914454adc7f701cdf653b"
+    },
+    {
+      "path": "workers/shell_worker.py",
+      "disposition": "B",
+      "source_blob": "3f4c4bcc95a2d0c1368727df39f75cf8ae5fe8ab",
+      "master_blob": "a82799458ee5d1535742b2b5531da0a5c7157420"
+    }
+  ],
+  "remaining_inventory": [
+    {
+      "path": ".dockerignore",
+      "owner": "B",
+      "hunks": [
+        {
+          "range": "@@ -17 +17,11 @@ tests/",
+          "sha256": "9c683d4b869912077216c5c68a0d0297a9e00a3228c081c2674c1836fc2c46c5",
+          "owner": "B"
+        }
+      ]
+    },
+    {
+      "path": ".env.example",
+      "owner": "C",
+      "hunks": [
+        {
+          "range": "@@ -122 +122,8 @@ CODE_AGENT_RUN_WORKER=0",
+          "sha256": "00b04de16f02448fe27b587757c6f529e89877b0412c6182c414ac7e2ef6ab16",
+          "owner": "C"
+        }
+      ]
+    },
+    {
+      "path": ".gitattributes",
+      "owner": "A+C (report attributes / shell attributes)",
+      "hunks": [
+        {
+          "range": "@@ -0,0 +1,7 @@",
+          "sha256": "c12f7066d1f7ea7ae8ae155e6e4ea39ce67084d98f8c40ea2b0a1f4ce9415d76",
+          "owner": "A+C (new-file hunk split by report vs script path)"
+        }
+      ]
+    },
+    {
+      "path": "apps/api/auth.py",
+      "owner": "C",
+      "hunks": [
+        {
+          "range": "@@ -13,0 +14,6 @@ import jwt",
+          "sha256": "f40e7bbf51e3f183901589aeb2ca2b4f9273567b56b72003c1b6c28b1a93e5af",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -62,0 +69,11 @@ class ApiAuthConfig:",
+          "sha256": "829a2ae3c70d5b701db514f2a9c267eba4b9a97ed568b660889480141076d2fa",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -109,0 +127 @@ def build_api_auth_config_from_env(environ: Mapping[str, str] | None = None) ->",
+          "sha256": "155ac17a6b336cf7b6171eca8d892f2275bb5afc2696b9117665e01df9beb279",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -113 +131,5 @@ def build_api_auth_config_from_env(environ: Mapping[str, str] | None = None) ->",
+          "sha256": "c06a847a13c56d41ebb138b352deb4e0b2cab08cd84ac2f74eb74a6e48597f73",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -117,0 +140,9 @@ def build_api_auth_config_from_env(environ: Mapping[str, str] | None = None) ->",
+          "sha256": "d86526fa80828a55a955a87ce2536ec8f6ef999f3084b82b93c84db4a50eb6b4",
+          "owner": "C"
+        }
+      ]
+    },
+    {
+      "path": "apps/api/dependencies.py",
+      "owner": "C",
+      "hunks": [
+        {
+          "range": "@@ -25,0 +26 @@ from apps.api.config import SystemConfig",
+          "sha256": "ed4678dc5857739b4138e3f9843ebf90fba03cf62672134ad15e6150a582ae59",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -201 +202 @@ def require_telegram_webhook_auth(request: Request) -> None:",
+          "sha256": "acf50d09bc99cdb6ed9bc1f0cd6bcec44479940d82133cb4336dbe613fdbf186",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -203,10 +204,12 @@ def require_telegram_webhook_auth(request: Request) -> None:",
+          "sha256": "1e04a5693147f853a9bbc6ce0f42cfb4368dcc94b2c37224a878afe9e0385f4e",
+          "owner": "C"
+        }
+      ]
+    },
+    {
+      "path": "apps/api/main.py",
+      "owner": "C",
+      "hunks": [
+        {
+          "range": "@@ -44,0 +45 @@ from apps.api.task_service_factory import build_task_service_from_env  # noqa: E",
+          "sha256": "14236e1ae7c244ced79257ce7294e580a9653eed4d08abee6912c6bd3c2a72c7",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -301,0 +303 @@ def create_app(",
+          "sha256": "ffc079d6e8d6c80527881ea220c687e8ef142022a48eaddc97c0bfa1f33a0e4c",
+          "owner": "C"
+        }
+      ]
+    },
+    {
+      "path": "apps/api/routes/telegram.py",
+      "owner": "C",
+      "hunks": [
+        {
+          "range": "@@ -8 +8 @@ from fastapi import APIRouter, Depends, HTTPException, status",
+          "sha256": "dc9125731ed0f574b460e3ccd20a167ba5a400dbf9be3283bda0cfb0ae00d4d2",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -9,0 +10 @@ from pydantic import BaseModel, ConfigDict, Field",
+          "sha256": "da4a3f7287036da9fb15acdc83974e15c3c90cc1b80c4624a2191a98cadaad1f",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -11 +12,6 @@ from apps.api.config import SystemConfig",
+          "sha256": "06d0a665e62a58ec77e5bae163ee7732a4d38e9de33b5c4ebdd6d35057bd6843",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -37 +43,2 @@ class TelegramUser(BaseModel):",
+          "sha256": "9095f4e80bc4f6a282b65e6d04dd7c09c4205f6886abcac07d881fef822137c4",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -48 +55,2 @@ class TelegramChat(BaseModel):",
+          "sha256": "c82c247519fb780747e5111b7a113ff0a042d9073b276f9b79570e2435caa307",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -60,0 +69,6 @@ class TelegramMessage(BaseModel):",
+          "sha256": "568ac42b993bce3db691af3e29de9a0e22782b4d57d62c227e5c8fe0e60aea3b",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -66 +80 @@ class TelegramUpdate(BaseModel):",
+          "sha256": "dd47c57198ea742de5f7f5d60f62965588495ff6be0649d9e01a8334ff0de4bd",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -73 +87 @@ class TelegramUpdate(BaseModel):",
+          "sha256": "83dad532431aea3d5e9800a257e75ce72c70144157d2b04785fd06e761c1b54e",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -155,0 +170 @@ def receive_telegram_update(",
+          "sha256": "5fd313e11271c8c7cc890cb9007f57eab9deb5061b67b7079997c91778e527f3",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -164 +179 @@ def receive_telegram_update(",
+          "sha256": "fcc5d01bde4d392e1a08ce62af58ab927eb8897f0daf805c6ec6d3c0bce778ff",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -169,0 +185,16 @@ def receive_telegram_update(",
+          "sha256": "716a288ee597a754921ef0bdcea9b8f13623e226f8e730771254427cc2024ab1",
+          "owner": "C"
+        }
+      ]
+    },
+    {
+      "path": "apps/api/telegram_body.py",
+      "owner": "C",
+      "hunks": [
+        {
+          "range": "@@ -0,0 +1,53 @@",
+          "sha256": "06915d14628248bb24c7076ef8818dd926eef4304f0e7b6d13695daba6df2050",
+          "owner": "C"
+        }
+      ]
+    },
+    {
+      "path": "apps/api/telegram_security.py",
+      "owner": "C",
+      "hunks": [
+        {
+          "range": "@@ -0,0 +1,48 @@",
+          "sha256": "3c862d5c723d94bb2f2c73d46c7485e8cd4da2fef1b0d3d5e31299d53efbe1fe",
+          "owner": "C"
+        }
+      ]
+    },
+    {
+      "path": "deploy/telegram/nginx.conf",
+      "owner": "C",
+      "hunks": [
+        {
+          "range": "@@ -0,0 +1,38 @@",
+          "sha256": "ab9ee1fd486c90b0d54e3e9f79650ea26530c70ced1e56c8a0b147e065b2ab98",
+          "owner": "C"
+        }
+      ]
+    },
+    {
+      "path": "docker-compose.yml",
+      "owner": "B+C (credential mounts / remaining ingress and logging hunks)",
+      "hunks": [
+        {
+          "range": "@@ -0,0 +1,5 @@",
+          "sha256": "98ffb802b93d45877d496f28f4309e33477832b778d1dd6d45b2c9e99afadefe",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -2,0 +8 @@ services:",
+          "sha256": "4ea40d545e180bcff8ead71b3975a12c63adf41b252315b4ae213ebcf45e4401",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -9 +15 @@ services:",
+          "sha256": "b5b20a7f7af173041180d3ce4e8a37c79514e6f925a8a2f6da97e8694106a2e2",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -18,0 +25 @@ services:",
+          "sha256": "fe01d8f4e9e6063330fa31c27fc429cce9fa28eb4ccdebf480a8df5849949976",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -27 +34 @@ services:",
+          "sha256": "2c5ea2230f668f54242003cc342fea65dac33169a40b4d6ba3955668f8e4d368",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -37,0 +45 @@ services:",
+          "sha256": "6b44939c21d2f3c3eb128114e788378622de180efe8f043276a4c491088a58ed",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -40 +48 @@ services:",
+          "sha256": "1bcaeb26e6496f235eecb52bccc68a20fb786214ce524bd5daa56307906a8331",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -45,0 +54 @@ services:",
+          "sha256": "49fa8660eae7243b9e1e1f283387d4f2528ffc88e568099e3d2d19b679a6a5bb",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -64,0 +74,2 @@ services:",
+          "sha256": "8dbc4de080ad7931a9ca89529d76eab2cc67a9acc4d7b2ea392c00008596a20a",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -81,0 +93,4 @@ services:",
+          "sha256": "bfb75fe87a907226006a5da229fa1ac13eea7a060b17cfa857f383ddd41adccf",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -109 +124 @@ services:",
+          "sha256": "9811583f59ba2ebdc485a36d50d2d56d7058ce1a953b020b857955daad41ed4d",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -121,0 +137 @@ services:",
+          "sha256": "1d25073909700dabea317081b3d109afde040fade74b3f99198e94a633b9ae8b",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -184,2 +200,12 @@ services:",
+          "sha256": "1fb40eff8455599bf31ffe8d480c2d9f9e66eeacafd190ac2d533db64d75f384",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -187,0 +214 @@ services:",
+          "sha256": "75786e8cb464d44bab4d25d7edb03b6d6ef8d4d134bc12bcc924d1830f89dc7c",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -190,2 +217,2 @@ services:",
+          "sha256": "36857a324e7f226fb0aabf46a7c96c29a9fcec914117a10084193a66646b1e53",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -194,0 +222 @@ services:",
+          "sha256": "74d173ddf141f769b0a7d088a20bb9336470e1bc9aa2c0f531eda4cd08342147",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -200 +228 @@ services:",
+          "sha256": "f7caaad1dcc0524cb85e7c2b86104aef7f83d32fc2df73272e58b91cd3f02f67",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -208,0 +237,26 @@ services:",
+          "sha256": "0304b9fff884deff5540e6451607ee1712d3f8891bc1043eed8e73b4445cb9a2",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -209,0 +264 @@ services:",
+          "sha256": "ff92bd6792e7a53fa081af8933ceb58b88af22cb6c81de0ae1c3401d6ce5bf6e",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -212 +267,2 @@ services:",
+          "sha256": "110bda84f5ef3be9b8ca4c463660e99b76311f904569a98ee9ca809dd5ef2c7e",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -222 +278 @@ services:",
+          "sha256": "68f78a6e5aadc215010d19498def7b6dc4b8134a3da4ffc06a19552b62c8878e",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -228 +284,2 @@ services:",
+          "sha256": "b637ac45ba1b786d373ed59c59a8864efab3a926f05f923464668efa4aef3b66",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -230 +287 @@ services:",
+          "sha256": "d7e75fd5445316e3d603dea757ebd75e13458c15c143bdc69ceb8531f9a6df77",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -234,0 +292 @@ services:",
+          "sha256": "c66c76f129774086d3e5a4b0db79270fa603bd087d7846ce55cc2f43a232cd12",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -246,0 +305,4 @@ services:",
+          "sha256": "cca013ed1fa52ffb4ba450a699614acde1f7257b9260fd291f6c253532d527a5",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -251,0 +314,5 @@ volumes:",
+          "sha256": "c573c12c59004d812da8dfd35530b8a2be5d9fa981c4aa339726ee631aa90f1e",
+          "owner": "B"
+        }
+      ]
+    },
+    {
+      "path": "docs/security/m2-audit.md",
+      "owner": "H",
+      "hunks": [
+        {
+          "range": "@@ -0,0 +1,73 @@",
+          "sha256": "e10b8ddee232c2a1dbe6a3c1da98c3bc2a91fd75bd3391cc97ffd03bea5429ab",
+          "owner": "H"
+        }
+      ]
+    },
+    {
+      "path": "docs/security/m2-closeout.md",
+      "owner": "H",
+      "hunks": [
+        {
+          "range": "@@ -0,0 +1,135 @@",
+          "sha256": "f786562a6b96d41c41a3ce21ddd6c88ace6fe5fd43885c646b3a0323f2d16a9c",
+          "owner": "H"
+        }
+      ]
+    },
+    {
+      "path": "docs/security/m2-implementation.md",
+      "owner": "H",
+      "hunks": [
+        {
+          "range": "@@ -0,0 +1,69 @@",
+          "sha256": "71d8afd48fe74d9602e81bc4d01b0fe8e45656930a16f8f99f832f4802a1ef5e",
+          "owner": "H"
+        }
+      ]
+    },
+    {
+      "path": "docs/security/m2-operations.md",
+      "owner": "H",
+      "hunks": [
+        {
+          "range": "@@ -0,0 +1,220 @@",
+          "sha256": "7e5c9ce127b471b560c52909993de65e36fbcc9a1829f946804613e03254647d",
+          "owner": "H"
+        }
+      ]
+    },
+    {
+      "path": "docs/security/m2-threat-model.md",
+      "owner": "H",
+      "hunks": [
+        {
+          "range": "@@ -0,0 +1,64 @@",
+          "sha256": "3fccd82ce43dc8a9c0bcbc5d1d0b6e70e4cca6fc7576c8772995764f4731d06b",
+          "owner": "H"
+        }
+      ]
+    },
+    {
+      "path": "docs/security/m2-validation.md",
+      "owner": "H",
+      "hunks": [
+        {
+          "range": "@@ -0,0 +1,223 @@",
+          "sha256": "fde4ef916b5554342da6da2c0987608a0f2df6cd9113b93468be94403a3859f8",
+          "owner": "H"
+        }
+      ]
+    },
+    {
+      "path": "docs/status.md",
+      "owner": "H",
+      "hunks": [
+        {
+          "range": "@@ -96 +96 @@ schedules do not require a new scheduler or schedule access in this bridge.",
+          "sha256": "6ddfb48770f06b6650710b58c031a40f51388e42bce73de9b9f86caf38ec98a7",
+          "owner": "H"
+        }
+      ]
+    },
+    {
+      "path": "sandbox/container.py",
+      "owner": "B",
+      "hunks": [
+        {
+          "range": "@@ -8 +7,0 @@ import os",
+          "sha256": "02e275d8dbe9af9d78145440dad85237a24af753e8a084a92c4eda7bdc81e2f9",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -16,0 +16,7 @@ from pydantic import Field",
+          "sha256": "01c874b8afc2bb69d5b289b3119d286c843bf07517d71e2219276d667e9e9c3c",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -18 +23,0 @@ from sandbox.policy import LocalRepoPolicyError, validate_local_repo_path",
+          "sha256": "f587a56a0fe85e706c5c85bf07e2d9ddc88c6aab005adb8ee4d38ab03f03058f",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -64,0 +70,2 @@ class DockerSandboxContainer(SandboxModel):",
+          "sha256": "8b6d60cddd72e8559ccd85e0e1319b480a01db62e1d9bee6b28d737261211312",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -186 +192,0 @@ def _append_local_repo_mount(",
+          "sha256": "2aeabfe5d6c0d16948d230b3d3529be51c34442fa4a80f9ccfdec3219974c098",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -188 +194 @@ def _append_local_repo_mount(",
+          "sha256": "e158c9eca22febc2b727a136a30cea7ead38b0313dcf08fc535fa645d3a17612",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -193,6 +199,2 @@ def _append_user_options(command: list[str]) -> None:",
+          "sha256": "ed11a0169ead911ac8ef9b61c0124d96db75993fa2dbb74fa33b6ba157a47937",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -207 +209,3 @@ def _append_environment_options(",
+          "sha256": "54f8bcb54f74fbfb692fb17e893c2602157ca5426eeadf3b264c93a573261f91",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -217,0 +222 @@ def _build_docker_container_run_command(",
+          "sha256": "78fb5a234188393a3aa4b0ddde55c8f2494a7fe2727e4f64bf7bb8580a621f88",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -229,0 +235 @@ def _build_docker_container_run_command(",
+          "sha256": "1a06991a8c54001d3b8c209aea5c96327ebbf32a20a8c3064004540e5e7b2cf2",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -234,2 +240,3 @@ def _build_docker_container_run_command(",
+          "sha256": "12d564f61ef3aa7d06340f60a0439c6f43e50757bd772b4be6ce0d6b126ff75e",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -277 +283,0 @@ def _run_docker_command(",
+          "sha256": "7fae19fdc23240e6edb9cfdc3a751a56dc3ad76c23e225b91e083db7052035e5",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -279,4 +285,3 @@ def _run_docker_command(",
+          "sha256": "6215dae6cd3171eef61a36d2c2d89d5ab9987cdef8d6c647e9840fa62f6a1c76",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -284,2 +289,2 @@ def _run_docker_command(",
+          "sha256": "6cac93736ea79265c96d505f0c8383964b85bfc91f3e1b127a4ec55c795c9fd1",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -308,0 +314,23 @@ class DockerSandboxContainerManager:",
+          "sha256": "3e3f4fced59a39558afc475f4ee79434b6d63e6c8d0cc056b513b822df423a43",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -313,0 +342,6 @@ class DockerSandboxContainerManager:",
+          "sha256": "bcc8684b513a84766316c62805e6ca346bdb4122ee4fa797cb8ade31c6aae77f",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -351,0 +386,2 @@ class DockerSandboxContainerManager:",
+          "sha256": "01d71ebf3e923adecf545d8ddce6686ceb73f59caea68df1ba2235e4b0fcb83b",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -387,4 +423,12 @@ class DockerSandboxContainerManager:",
+          "sha256": "afd117b811f5af52ca01d7754207fd6ccd07c1b020e5dda252e07dcae3b1efce",
+          "owner": "B"
+        }
+      ]
+    },
+    {
+      "path": "sandbox/legacy_egress.py",
+      "owner": "B",
+      "hunks": [
+        {
+          "range": "@@ -0,0 +1,71 @@",
+          "sha256": "aad7b10f8ee94bb965034fb6170daa35f913e97e96f25a895d98e825cfbfbd60",
+          "owner": "B"
+        }
+      ]
+    },
+    {
+      "path": "sandbox/legacy_security.py",
+      "owner": "B",
+      "hunks": [
+        {
+          "range": "@@ -0,0 +1,80 @@",
+          "sha256": "2fdc32c5e4f46e51df6cd39f020da3b8f560eaa74c682fe828320383ad88284c",
+          "owner": "B"
+        }
+      ]
+    },
+    {
+      "path": "sandbox/native_agent_executor.py",
+      "owner": "B",
+      "hunks": [
+        {
+          "range": "@@ -23,0 +24 @@ from sandbox.capability import FileSystemAccessPolicy, NetworkEgressPolicy",
+          "sha256": "60f690daa0c03649404332a5b8bec589dba868eaec43fab924b3c918738d022f",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -188,0 +190,24 @@ def _sandbox_file_secret_mount(sandbox_secrets_dir: Path) -> str:",
+          "sha256": "4bfc4f7c1692a5c44593045d0d5b331ebf79c30d7a9efdbb2aa3f10df3051b2d",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -269,0 +295 @@ class DockerNativeAgentExecutor:",
+          "sha256": "73924a6660895d551cb90ee78c1a6c2fdc64a95faff9386dc6609a053e2f7cfe",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -320,7 +346,6 @@ class DockerNativeAgentExecutor:",
+          "sha256": "55eda9db035677c5e904c46d56fe1ff2e6a97ac1a16541a9062a2a7bcca9fa31",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -328,2 +352,0 @@ class DockerNativeAgentExecutor:",
+          "sha256": "f85740c459d74e658b22daf7cc253edeada0e32e43a6d3d433990444f18389a2",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -378,0 +402,2 @@ class DockerNativeAgentExecutor:",
+          "sha256": "ce0bb30e045a78ef6a46bd4ca3ee0bd3c3578d931623bb6a006ae133aae5f624",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -380 +405,5 @@ class DockerNativeAgentExecutor:",
+          "sha256": "6d894eaa218741a41f54bff0cb82474bbb3f466c16d6273767f4f98b1a7369c3",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -395,0 +425,2 @@ class DockerNativeAgentExecutor:",
+          "sha256": "a13fdede5019e3870febc86b612a5d46f936f84720f452b6c06dcfcaf4be7f9c",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -423 +453,0 @@ class DockerNativeAgentExecutor:",
+          "sha256": "c7a5c01fbe07870f93c8243f5ba79f289f2273e20b828628e4e427ace2b42435",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -432,12 +462,10 @@ class DockerNativeAgentExecutor:",
+          "sha256": "c301fd9652995a23fdae8344b37d438e1504bcd632c003b54cc226f9b947b526",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -544,0 +573,5 @@ class DockerNativeAgentExecutor:",
+          "sha256": "314d5e2c3c8cdbe67dd0ac7af8d8dc8da16c8356574823c7fe9500151a63d552",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -609,0 +643 @@ class DockerNativeAgentExecutor:",
+          "sha256": "7ab728ffbefa5d6c6d4efd61a288f11d5536b264cab38d4015dec7cb1bb42411",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -611 +645 @@ class DockerNativeAgentExecutor:",
+          "sha256": "a220023009e16a688c5c62867f01b5cf3b52228bfecb4b337d20e3135864b634",
+          "owner": "B"
+        }
+      ]
+    },
+    {
+      "path": "sandbox/provider_bootstrap.py",
+      "owner": "B",
+      "hunks": [
+        {
+          "range": "@@ -60,0 +61,3 @@ def resolve_codex_provider_dir(",
+          "sha256": "c85f6464859e9ce8396190191e702c12dfe4f94dadc54876afd32b9549cdc226",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -80,0 +84,3 @@ def resolve_antigravity_provider_dir(",
+          "sha256": "e8051884b28a4952b728dfd4f0edfb609d42504c43e047e4b35a5b94f5f99229",
+          "owner": "B"
+        }
+      ]
+    },
+    {
+      "path": "sandbox/provider_stager.py",
+      "owner": "B",
+      "hunks": [
+        {
+          "range": "@@ -6 +6 @@ import os",
+          "sha256": "2e790bfc048957a0f18f84d977e1b0472f05c920bc31f3a103f37b14606db54b",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -10,0 +11,23 @@ from sandbox.secrets import ResolvedSecret, SecretScope",
+          "sha256": "66caa4b36b7754086b7d0af593f82015abc17d797cf2fd0ddcee990194dc1936",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -45 +68 @@ class ProviderCredentialStager:",
+          "sha256": "f028cd5c57b7609890be81e13f7fdbdb0b448432971b9bb5d928ea8c85d14f85",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -52 +75,7 @@ class ProviderCredentialStager:",
+          "sha256": "7957a571d45265e7a7a8119b52c2f2331812bcff2439bbd6714e4a7ec171c2ab",
+          "owner": "B"
+        }
+      ]
+    },
+    {
+      "path": "sandbox/runner.py",
+      "owner": "B",
+      "hunks": [
+        {
+          "range": "@@ -30,0 +31,2 @@ from sandbox.container import (",
+          "sha256": "ae768b9ea5d00bebffdd9ec18379c3248a45873f832eb350a9322f8da5ddacc1",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -40,0 +43 @@ from sandbox.redact import (",
+          "sha256": "1e410f7d3ebea407b05a20794cacbd61c9c2039f481081feff2e66e6e3b9eae9",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -161,0 +165 @@ def _build_docker_run_command(",
+          "sha256": "f16afc6d77798acf158b6126b2f03f34a2c29a55efb2fbcb7f19730ae5a59146",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -180,0 +185 @@ def _build_docker_run_command(",
+          "sha256": "eaafe264cbae904f0fc7f7c87dec0c96efcbcd4c1a3164d26d6a2e63b16dabe9",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -191,2 +196,3 @@ def _build_docker_run_command(",
+          "sha256": "80a8fadc6afb550b31e17998d54f28189ab3b289aeb78a4e5234dcdba28a58cf",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -198 +204,3 @@ def _build_docker_run_command(",
+          "sha256": "6b1930d9a802d648ef3fe89a28d6826c76c4c87359e53945283ac28b5f246733",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -389,0 +398,22 @@ class DockerSandboxRunner:",
+          "sha256": "d361a64128bf16d1ed907b832bebd58682ab03c6a0161913b754ded541dbd665",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -394,0 +425,4 @@ class DockerSandboxRunner:",
+          "sha256": "8760bf3b7ec597c58ea78192a68890116391c0b284383517f4e3f48a39aefb38",
+          "owner": "B"
+        }
+      ]
+    },
+    {
+      "path": "scripts/init_webhook.sh",
+      "owner": "C",
+      "hunks": [
+        {
+          "range": "@@ -4 +4,22 @@",
+          "sha256": "16ae9a233e6772e7778d846a8676a76ada9c422af620ad1d61daa4833df3f24b",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -7 +28,5 @@ set -e",
+          "sha256": "b0b6cdef63f09419a02001b7b443ad42e2e14d26eee490cbdd72b51fc6df6dd3",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -13 +38,2 @@ for i in $(seq 1 30); do",
+          "sha256": "2587f9c61bbd3b0ae6e1db0da32fd2c21e10b17ffac36e6dac7f4f0e62fd03d3",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -27 +53 @@ fi",
+          "sha256": "247837eceef0aae6cc11eec3024f720965141dc267c563e739bdf4359d474905",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -35,16 +61,12 @@ echo \"Registering Telegram webhook...\"",
+          "sha256": "62343f45b30794d278ff91b28af3fe2ed9c588195378018dd07f3d8077bca154",
+          "owner": "C"
+        }
+      ]
+    },
+    {
+      "path": "scripts/m2_preservation.ps1",
+      "owner": "H",
+      "hunks": [
+        {
+          "range": "@@ -0,0 +1,58 @@",
+          "sha256": "e16acbf2946971d9e9c17e83da0181c83869e86e45f481a02c21910faf58c145",
+          "owner": "H"
+        }
+      ]
+    },
+    {
+      "path": "scripts/up.sh",
+      "owner": "C",
+      "hunks": [
+        {
+          "range": "@@ -36,2 +36,2 @@ set +a",
+          "sha256": "e926d81fd0be7cab8be236f94b68ee4eeedd5ad0e56e5569550957d3bc83c812",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -49,23 +48,0 @@ ALLOW_READ_ONLY_SANDBOX=\"${CODE_AGENT_ALLOW_READ_ONLY_SANDBOX:-0}\"",
+          "sha256": "52eccf66d9811ce21a403ad080e992dac6083d4a12984216be7e6130a483da91",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -74,3 +51 @@ if [ ! -f \"$CODE_AGENT_CODEX_AUTH_DIR/auth.json\" ]; then",
+          "sha256": "fd71db407d0c194886de399b26ff87a05947aa89eb49720982f5ec4c125e5842",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -81,2 +56,2 @@ if [ ! -f \"$CODE_AGENT_ANTIGRAVITY_AUTH_DIR/antigravity-cli/antigravity-oauth-to",
+          "sha256": "22329c366bba9795fed9f8cbec35866912f31ae0faf023014d88b92509a4d431",
+          "owner": "C"
+        }
+      ]
+    },
+    {
+      "path": "tests/integration/test_antigravity_provider_auth.py",
+      "owner": "B",
+      "hunks": [
+        {
+          "range": "@@ -39 +39 @@ def _auth_context(tmp_path):",
+          "sha256": "37b95bd8161d20757978367de31455f5819f41bb774622d068d8d5c353aee66b",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -63 +63 @@ def test_agy_auth_copy_can_refresh_without_changing_source(tmp_path: Path):",
+          "sha256": "0810a9e89f395de6a7ca14936a274e0ab98f412723a3c17a3239cd75d993523b",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -78 +78,5 @@ def test_agy_auth_readable_and_refreshable_by_container_user(tmp_path: Path):",
+          "sha256": "b7225ea73fc24a0865876aa7cfcf6dfed50c9dd5a02765ec91d772a098d57686",
+          "owner": "B"
+        }
+      ]
+    },
+    {
+      "path": "tests/integration/test_local_infra_config.py",
+      "owner": "C",
+      "hunks": [
+        {
+          "range": "@@ -42 +42 @@ def test_api_service_waits_for_healthy_postgres(compose_config: dict[str, Any])",
+          "sha256": "06c4e3649e0112a3e1fbe021a845f1881d8751341d2bc239a22d58318af65d41",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -110 +110 @@ def test_postgres_service_has_healthcheck_and_port_mapping(",
+          "sha256": "c3c1459788d5625ec8e9016cb804dfa5e8757236431711e215e8fe50d8f50184",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -175,2 +175,2 @@ def test_compose_includes_optional_phoenix_observability_service(",
+          "sha256": "c6b88bd4ef5b05b6c531703ff8c1f0cd98e4fb5f38e500734b30184c80cf8c51",
+          "owner": "C"
+        }
+      ]
+    },
+    {
+      "path": "tests/integration/test_m29_mutation_live_e2e.py",
+      "owner": "A",
+      "hunks": [
+        {
+          "range": "@@ -47,0 +48 @@ from evaluation.m29_mutation_watchdog import EvaluationRetentionWatchdog",
+          "sha256": "ccc0a42a5c7549b8c599d09daae80f1aee1492f80c917406fb93cf660d80f66d",
+          "owner": "A"
+        },
+        {
+          "range": "@@ -70 +71 @@ def _build_task_snapshot(",
+          "sha256": "a2f832c6ce7d2e2bbf5e09a72af5e810219c0e86a1a27c9442b07e7f99757d79",
+          "owner": "A"
+        },
+        {
+          "range": "@@ -99 +100,7 @@ def _build_task_snapshot(",
+          "sha256": "8647783ada93eeb76ec5d0ca4c869d3c932efed0246ab8b75a4be9fac955f9cd",
+          "owner": "A"
+        },
+        {
+          "range": "@@ -107,0 +115 @@ def _create_mock_stack_client(",
+          "sha256": "4882f06d215ba73aa72a6726a457828d1f0ec1a183c8cf7e99f9e7acaa45206c",
+          "owner": "A"
+        },
+        {
+          "range": "@@ -140 +148,3 @@ def _create_mock_stack_client(",
+          "sha256": "59faa13e7c46f34f11b7d90ebfcd774b7876cb02d6397256ecd051bf6f44c11e",
+          "owner": "A"
+        },
+        {
+          "range": "@@ -150 +160 @@ def _create_mock_stack_client(",
+          "sha256": "244e1669ebb5600b979a6ec379f0654215b6ec4a328489e090331ae68b95204d",
+          "owner": "A"
+        },
+        {
+          "range": "@@ -155,0 +166,10 @@ def _create_mock_stack_client(",
+          "sha256": "2541d9cf16afae987546fd907cb942a459b2689a39c71d705f7f3574f4bfa70b",
+          "owner": "A"
+        },
+        {
+          "range": "@@ -301 +321,2 @@ def test_live_adapters_e2e_stack_with_watchdog(tmp_path: Path) -> None:",
+          "sha256": "bccf9a55480fdebd546e02882e9784317de6b6e0a0a58389709731031fc63dc2",
+          "owner": "A"
+        },
+        {
+          "range": "@@ -320 +341 @@ def test_live_adapters_e2e_stack_with_watchdog(tmp_path: Path) -> None:",
+          "sha256": "72a214a9fa690c0c3dc30acd8c18b8c3b1fff7064b216a669d5f6b660029e78e",
+          "owner": "A"
+        }
+      ]
+    },
+    {
+      "path": "tests/integration/test_m2_docker_security.py",
+      "owner": "C",
+      "hunks": [
+        {
+          "range": "@@ -0,0 +1,470 @@",
+          "sha256": "088560817390a8705be66638f53315c4dfb77bf5aa5e6e63427c3ded57c7b2d4",
+          "owner": "C"
+        }
+      ]
+    },
+    {
+      "path": "tests/integration/test_m2_postgres_rollback.py",
+      "owner": "C",
+      "hunks": [
+        {
+          "range": "@@ -0,0 +1,137 @@",
+          "sha256": "c015f0fa1c92c7200b27d1b54d1710e78988fce9c154bad8173d8e37d84cb5a4",
+          "owner": "C"
+        }
+      ]
+    },
+    {
+      "path": "tests/integration/test_m2_shell_boundary.py",
+      "owner": "B",
+      "hunks": [
+        {
+          "range": "@@ -0,0 +1,76 @@",
+          "sha256": "5096de63ebad6f82fb3ef4ec06cafd5e32c94f08ed40103a7c174e799bb64d67",
+          "owner": "B"
+        }
+      ]
+    },
+    {
+      "path": "tests/integration/test_telegram_endpoints.py",
+      "owner": "C",
+      "hunks": [
+        {
+          "range": "@@ -5,0 +6 @@ from collections.abc import Iterator",
+          "sha256": "7a8a92bf0e3fbefcb3cdc7545287bd9a6d2273bb8b58aa463413b369ba01794c",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -9,0 +11 @@ from fastapi.testclient import TestClient",
+          "sha256": "3829289904e0c00a55b9da859f97e392b2c7a4510c09fa311ae34b0ab4599e85",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -15,0 +18 @@ from db.enums import TaskStatus",
+          "sha256": "616352e0c5a0c33611fc00cc3ae5c3e2756ca3880ff12d446169c3671a7e3bbf",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -82 +85,7 @@ def client(session_factory) -> Iterator[TestClient]:",
+          "sha256": "fdf144d92a72030ffe9a5b89d7c7f6e0331a284016b6551739b461b963d327de",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -86,0 +96 @@ def client(session_factory) -> Iterator[TestClient]:",
+          "sha256": "578cd0b3612f4e93b5c854e7dba3092f36dede4f927fa02ebb2de90645b7b09f",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -103 +113 @@ def _text_update(text: str, update_id: int = 1, user_id: int = 42, chat_id: int",
+          "sha256": "7742b225fef65c6d92b32a10334cad2d54cfe3b42b7c0064f8c9bf1f72d5a4ce",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -221 +231 @@ def test_telegram_display_name_from_first_last(client: TestClient) -> None:",
+          "sha256": "4359142c705901781e8a96331f45342a8c28260c13d34995860e15e46366f803",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -237 +247 @@ def test_telegram_update_with_username_only(client: TestClient) -> None:",
+          "sha256": "f7e410a578f200bb53f48ff989f453cc2fe614b9f12539de3350c08eab12ed80",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -248 +258 @@ def test_telegram_channel_post_no_sender(client: TestClient) -> None:",
+          "sha256": "92210561c2ce5043c2cc9c405b1ffb1e31ab6ad7b57cd7165910221ae8461708",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -259 +269 @@ def test_telegram_channel_post_no_sender(client: TestClient) -> None:",
+          "sha256": "4cce81a672d653fb24ecb779fc92ced8044d82199f1ad56e1815b8fa11f138b5",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -286 +296 @@ def test_telegram_message_without_text_returns_ok(client: TestClient) -> None:",
+          "sha256": "f1f9e85814c663ccec94ba86fec49a44035979b48debfa2f90576b92947e62a1",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -329 +339 @@ def test_telegram_unconfigured_service_returns_503(client: TestClient) -> None:",
+          "sha256": "d8f6df68ccd32a7e4e64cef08b23c617a3141d49278d8e1fe3e14f4b8e9b8a12",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -366 +376,4 @@ def test_telegram_webhook_rejects_missing_secret_header_when_configured(",
+          "sha256": "915c80605d40b5f48e4cdcba8953b9a3e317edfb9a5df7bb89cbeebfc004005f",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -374 +387 @@ def test_telegram_webhook_rejects_missing_secret_header_when_configured(",
+          "sha256": "ffe0490495ea8ad93f360fd730ffeffd3336022bf0527dbb859d40f85e4971a9",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -396 +409,4 @@ def test_telegram_webhook_accepts_matching_secret_header_when_configured(",
+          "sha256": "2e960fc7f68383ab559241ebd503ef5abe0ece673607eb2803fc2708a7fe5e96",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -412,0 +429,118 @@ def test_telegram_webhook_accepts_matching_secret_header_when_configured(",
+          "sha256": "bd94899e9a8fddcd8b2266612edf9201c758eabcbc20ef23ccfa380cc2221c6e",
+          "owner": "C"
+        }
+      ]
+    },
+    {
+      "path": "tests/unit/test_antigravity_provider_auth.py",
+      "owner": "B",
+      "hunks": [
+        {
+          "range": "@@ -28 +28 @@ def test_explicit_agy_auth_directory_precedes_adapter_home(tmp_path, monkeypatch",
+          "sha256": "2c6e7f6947b5ccbb9c594eb20e5d45548bc67b2225ae0b1d63eb32d2ebb2a3fa",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -31,3 +31 @@ def test_unmounted_host_auth_path_falls_back_to_available_adapter_path(tmp_path,",
+          "sha256": "340c9d765d24d2e1ed2e709931d6d923e7cd92138639de45ce0d96c30a35881e",
+          "owner": "B"
+        }
+      ]
+    },
+    {
+      "path": "tests/unit/test_api_dependencies.py",
+      "owner": "C",
+      "hunks": [
+        {
+          "range": "@@ -8,0 +9 @@ from fastapi import HTTPException",
+          "sha256": "42dfe908d5f0b7d0493f61353c9ffd0dfb801e3be2729e2f165caa4e13a48757",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -124 +125,2 @@ def test_require_telegram_webhook_auth():",
+          "sha256": "1a060c6d58c76578a315ed8225970cf9064a9c60d9379caaac06f2725cfa7097",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -126,2 +128,7 @@ def test_require_telegram_webhook_auth():",
+          "sha256": "d4546a410432e132f5fc2cc9431925161e09ccd412967537ab587916ad3eb0fb",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -131 +138 @@ def test_require_telegram_webhook_auth():",
+          "sha256": "3f5346aa88dcc2170a30358977389d59d5cd20fa5e43e55b13ba0b9a7ac3ee95",
+          "owner": "C"
+        }
+      ]
+    },
+    {
+      "path": "tests/unit/test_api_telegram_webhook_auth.py",
+      "owner": "C",
+      "hunks": [
+        {
+          "range": "@@ -35,0 +36,3 @@ def test_telegram_webhook_route():",
+          "sha256": "1a44c1b8bc95483eaa8535c5b8eb85a40de19ff45743f2360270eb99bbcf0bde",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -42 +45 @@ def test_telegram_webhook_route():",
+          "sha256": "f0050d40f1a2ea55442ce7ded0b89f462d5b46b3a7f52814ff1c201591c14f63",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -47 +50,4 @@ def test_telegram_webhook_route():",
+          "sha256": "281eb71c37f8bc6b2d912b59a162e32cdce607696849ae11975a3c5335730f4d",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -49 +55 @@ def test_telegram_webhook_route():",
+          "sha256": "b98279c7c99e661d1c0197327bb5cdc0b16b14164b5a5a99fbbaaa5f80e3eb22",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -56 +62,6 @@ def test_telegram_webhook_route():",
+          "sha256": "a02624e976dae19623cfb15731ed66a16d07f181e3be550c6d3beef502a5ece3",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -58 +69 @@ def test_telegram_webhook_route():",
+          "sha256": "a6781e994f2f0ff986b3d5a20e1dacad99461e3515294005426493c028938987",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -66 +77 @@ def test_telegram_webhook_route():",
+          "sha256": "cb47fa81508dbece61de0fb34b19ab85286449960f3a60238ccb0b4fb7c33466",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -77 +88 @@ def test_telegram_webhook_route():",
+          "sha256": "4ab5cea88e871dfaed43bb1204424bcca736414d587e06c60e79925d8f45ae64",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -87 +98 @@ def test_telegram_webhook_route():",
+          "sha256": "dbae40b88fa3541c61e14beaf50ae53da07a7407e7c92a60357b85c07a387f81",
+          "owner": "C"
+        },
+        {
+          "range": "@@ -93 +104 @@ def test_telegram_webhook_route():",
+          "sha256": "60c5570a39c6b41c7e0fa19495a02a8914097b4685c1dab6151b3d17d3a92d12",
+          "owner": "C"
+        }
+      ]
+    },
+    {
+      "path": "tests/unit/test_docker_sandbox_container.py",
+      "owner": "B",
+      "hunks": [
+        {
+          "range": "@@ -60,0 +61,11 @@ def test_build_docker_container_run_command_detaches_and_mounts_workspace(tmp_pa",
+          "sha256": "5711d22103c1a4dd575c7a2acbda77dd155510a42109b0c35f0740b990cbf780",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -177 +188 @@ def test_build_docker_container_run_command_skips_user_mapping_on_windows(",
+          "sha256": "4f224f4e34909177c5f7c370eb1be62185fe94449c99bee997f8eba92d649250",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -255 +266 @@ def test_run_docker_command_raises_on_os_error() -> None:",
+          "sha256": "09f1459e5c7ab8d5a31add176e1777a7614c0a208a811e44c1252372cdf89a99",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -394 +405 @@ def test_build_docker_container_run_command_uses_patched_workspace_root(",
+          "sha256": "6d8b185caa29a70769d071d3e1035d0531112971e2ece58391f1c06621019be9",
+          "owner": "B"
+        }
+      ]
+    },
+    {
+      "path": "tests/unit/test_docker_sandbox_runner.py",
+      "owner": "B",
+      "hunks": [
+        {
+          "range": "@@ -145,0 +146,11 @@ def test_build_docker_run_command_mounts_workspace_and_disables_network(tmp_path",
+          "sha256": "7755af6236dfe2fc1b7f603aaf9df386201586d0bc942eb0f163cb9af993fec7",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -210 +221 @@ def test_build_docker_run_command_skips_user_mapping_on_windows(",
+          "sha256": "00e7b0292d854dfbf7a8b79abf75d54538f24679b830d8fc869c8d89c521bca3",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -220,0 +232,11 @@ def test_build_docker_run_command_skips_user_mapping_on_windows(",
+          "sha256": "55b0ebea099143a3c4760f9c2cffe77ceb42ea276301687628865848d5cd99df",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -224,0 +247,2 @@ def test_build_docker_run_command_skips_user_mapping_on_windows(",
+          "sha256": "3d1e91a546fa0660d485f1462e44d0f90710b33e036b18fcf4c465c55ddde65e",
+          "owner": "B"
+        }
+      ]
+    },
+    {
+      "path": "tests/unit/test_m2_control_command_redaction.py",
+      "owner": "B",
+      "hunks": [
+        {
+          "range": "@@ -0,0 +1,22 @@",
+          "sha256": "9a0a53843e67672da8087fd013d0a42108cf81f4206a73824773c796b0230495",
+          "owner": "B"
+        }
+      ]
+    },
+    {
+      "path": "tests/unit/test_m2_deployment_contracts.py",
+      "owner": "C",
+      "hunks": [
+        {
+          "range": "@@ -0,0 +1,167 @@",
+          "sha256": "cffc412ae74569461c5b267b03510ce089ada5d8473530c31f0c190d34d1295e",
+          "owner": "C"
+        }
+      ]
+    },
+    {
+      "path": "tests/unit/test_m2_execution_security.py",
+      "owner": "B",
+      "hunks": [
+        {
+          "range": "@@ -0,0 +1,341 @@",
+          "sha256": "b77435c9c42641cd5520a5d6a8e9a9354ffb0ebd38a48fccf9de92fcbcacba1c",
+          "owner": "B"
+        }
+      ]
+    },
+    {
+      "path": "tests/unit/test_native_agent_executor.py",
+      "owner": "B",
+      "hunks": [
+        {
+          "range": "@@ -180 +180,4 @@ def test_proxy_public_egress_rejects_private_and_dns_rebinding_addresses() -> No",
+          "sha256": "1ed6cc53d921de09e15f69d3d99d5c139eab18c01f2657fa611759136b0f8da4",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -188 +191 @@ def test_executor_auth_staging_failure_writes_startup_manifest(tmp_path: Path, m",
+          "sha256": "c237a232465bf120d45c6d64eae4d9543bcbe44bc4db9caa605b83451beb3143",
+          "owner": "B"
+        }
+      ]
+    },
+    {
+      "path": "tests/unit/test_provider_bootstrap.py",
+      "owner": "B",
+      "hunks": [
+        {
+          "range": "@@ -51,5 +51,4 @@ def test_codex_auth_resolution_uses_fallback_directory_consistently(tmp_path, mo",
+          "sha256": "1b1fec1e31848935b12733dd27736fe02b4d849f3583ab759fc91c12fdad3b1f",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -113 +112 @@ def test_antigravity_auth_resolution_uses_fallback_directory_consistently(",
+          "sha256": "0d12264463489e84823e89995004df31a6acd99a6cca4047c1412b5b267d0995",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -115 +114 @@ def test_antigravity_auth_resolution_uses_fallback_directory_consistently(",
+          "sha256": "e6ffdf1fab9d727477f2edd787eceb83e16891b1fa0bed5e35b69f4920747fad",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -117 +116 @@ def test_antigravity_auth_resolution_uses_fallback_directory_consistently(",
+          "sha256": "12f20d85f67de5f873e85585c35cc0d9a7481df6ff678fe33a1889b8a852115a",
+          "owner": "B"
+        }
+      ]
+    },
+    {
+      "path": "tests/unit/test_provider_diagnostics.py",
+      "owner": "B",
+      "hunks": [
+        {
+          "range": "@@ -1208 +1208,3 @@ def test_codex_oauth_empty_auth_json(tmp_path: Path, monkeypatch: pytest.MonkeyP",
+          "sha256": "8f2f2ff70cf88c991460b50acb2192f46a4a873ad4fdcf90baf95004288b5c83",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -1221 +1223,2 @@ def test_codex_oauth_preflight_uses_fallback_directory(tmp_path: Path, monkeypat",
+          "sha256": "c95e2bcac79e37be52476c23608b2297ff0baf9eef2c6ca15a49e799cbc92379",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -1255 +1258,3 @@ def test_antigravity_token_missing_no_oauth_creds(",
+          "sha256": "37c5663e3465e0e19c9ada0547ef9b1793945ee20f89ac328187674b970651fb",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -1270 +1275,2 @@ def test_antigravity_preflight_uses_fallback_directory(tmp_path: Path, monkeypat",
+          "sha256": "2a97f56fc4f583c08bf893d682c166ae2052521240a4833c72e6d572b8da0e1b",
+          "owner": "B"
+        }
+      ]
+    },
+    {
+      "path": "tests/unit/test_shell_worker.py",
+      "owner": "B",
+      "hunks": [
+        {
+          "range": "@@ -42,0 +43,3 @@ def workspace_handle():",
+          "sha256": "7884779ecaddb5e9efe84a918f6d50ad7f2ac19c49b013829f0e6d22fa2ef033",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -44 +47,6 @@ async def test_shell_worker_run_success(",
+          "sha256": "45351250aba19b3e39fcdfb07aeb7c6da7a7243e3aad5fe41609f1a4f1ae7f05",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -52,0 +61,3 @@ async def test_shell_worker_run_success(",
+          "sha256": "a73db06f91a79da2e5dd1be0d7ac4fb4f35a4928518218d408e5e0ffbb1af22b",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -75,0 +87,5 @@ async def test_shell_worker_run_success(",
+          "sha256": "816bad0374b9ad3b519cfabb482449a9b2b433d9d5b3a6fad47ec9cde0362880",
+          "owner": "B"
+        }
+      ]
+    },
+    {
+      "path": "tests/unit/test_telegram_security.py",
+      "owner": "C",
+      "hunks": [
+        {
+          "range": "@@ -0,0 +1,191 @@",
+          "sha256": "d5b436d01caa95fbbefac0179172e1cb5a195d48031875426e0bb0acb558f6bc",
+          "owner": "C"
+        }
+      ]
+    },
+    {
+      "path": "workers/shell_worker.py",
+      "owner": "B",
+      "hunks": [
+        {
+          "range": "@@ -214,0 +215,13 @@ def _run_shell_script(",
+          "sha256": "0de6544c93afac5b08b849301d4ae046eb10698bda69933afa254ec2f9c6f81c",
+          "owner": "B"
+        },
+        {
+          "range": "@@ -282,6 +295 @@ class ShellWorker(Worker):",
+          "sha256": "458232285796bb8e9347d82d66acb5c7ddf9ca3c56ef8bf6b0aff3efe399890a",
+          "owner": "B"
+        }
+      ]
+    }
+  ]
+}
