@@ -228,6 +228,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Fixed
 
+- Fix: preserve deterministic M29 evaluation evidence ([#479](https://github.com/natanayalo/code-agent/pull/479))
+
 - Fix: clean up namespaced sandbox containers ([#465](https://github.com/natanayalo/code-agent/pull/465))
 
 - Fix(eval): run extractor stage smokes in isolated disposable db ([#429](https://github.com/natanayalo/code-agent/pull/429))
