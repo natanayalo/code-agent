@@ -340,7 +340,7 @@ def handle_delivery_sync(
     with session_scope(task_service.session_factory) as session:
         delivery_repo = InboundDeliveryRepository(session)
         existing = delivery_repo.get_by_channel_delivery(channel="github", delivery_id=delivery_id)
-        if existing is not None:
+        if existing is not None and existing.task_id is not None:
             return (
                 True,
                 "duplicate",
@@ -359,13 +359,10 @@ def handle_delivery_sync(
             branch_name=branch_name,
         )
 
-        if task is None:
-            try:
-                with session.begin_nested():
-                    delivery_repo.create(channel="github", delivery_id=delivery_id, task_id=None)
-            except IntegrityError:
-                pass
-            return True, "ignored", False, None, None, "No matching code-agent task found."
+        if task is None or worker_run is None:
+            _record_delivery_claim(session, delivery_repo, delivery_id, task_id=None)
+            logger.info("GitHub delivery awaiting persisted worker metadata")
+            return True, "pending", False, None, None, "Redeliver after worker metadata persists."
 
         check_entry = _apply_worker_run_delivery_update(
             worker_run,
@@ -389,11 +386,7 @@ def handle_delivery_sync(
             pr_payload=payload.get("pull_request") or {},
         )
 
-        try:
-            with session.begin_nested():
-                delivery_repo.create(channel="github", delivery_id=delivery_id, task_id=task.id)
-        except IntegrityError:
-            pass
+        _record_delivery_claim(session, delivery_repo, delivery_id, task_id=task.id)
 
         return (
             True,
@@ -403,3 +396,21 @@ def handle_delivery_sync(
             worker_run.id if worker_run else None,
             f"Synchronized {event} event onto task {task.id}.",
         )
+
+
+def _record_delivery_claim(
+    session: Session,
+    repository: InboundDeliveryRepository,
+    delivery_id: str,
+    *,
+    task_id: str | None,
+) -> None:
+    """Retain pending claims and attach reconciled tasks without duplicate inserts."""
+    try:
+        with session.begin_nested():
+            repository.create(channel="github", delivery_id=delivery_id, task_id=task_id)
+    except IntegrityError:
+        if task_id is not None:
+            repository.attach_task_if_unassigned(
+                channel="github", delivery_id=delivery_id, task_id=task_id
+            )
