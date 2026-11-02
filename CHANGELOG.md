@@ -228,6 +228,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Fixed
 
+- Fix: prevent delayed GitHub checks from regressing PR state (PR #430 split E) ([#483](https://github.com/natanayalo/code-agent/pull/483))
+
 - Fix: bound signed GitHub ingress and pass deployment configuration ([#482](https://github.com/natanayalo/code-agent/pull/482))
 
 - Fix: restrict Telegram ingress to approved private operators (PR #430 split C) ([#481](https://github.com/natanayalo/code-agent/pull/481))
