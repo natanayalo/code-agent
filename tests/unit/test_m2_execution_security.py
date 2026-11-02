@@ -221,6 +221,8 @@ def test_proxy_failure_never_leaves_owned_network_untracked(
     cleanup = MagicMock(return_value="removed")
 
     def command(args):
+        if args[0] == "exec":
+            return subprocess.CompletedProcess([], 0, "", "")
         current = "run" if args[0] == "run" else ("create" if args[1] == "create" else "attach")
         if current == phase:
             if exception:
