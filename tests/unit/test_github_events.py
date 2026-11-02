@@ -333,7 +333,8 @@ def test_upsert_check_run_prunes_stale_sha():
     )
     assert meta["ci_status"] == "failed"
 
-    # New commit pushed: sha-v2 check run arrives
+    # A pull_request event establishes the new authoritative head.
+    sync_pr_metadata(meta, {"number": 10, "head": {"sha": "sha-v2"}})
     upsert_check_run(
         meta,
         {

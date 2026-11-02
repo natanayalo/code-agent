@@ -65,6 +65,10 @@ def sync_pr_metadata(meta: dict[str, Any], pr: dict[str, Any]) -> None:
                 for c in (meta.get("check_runs") or [])
                 if not c.get("head_sha") or c.get("head_sha") == head_sha
             ]
+        if meta.get("head_sha") != head_sha:
+            meta["ci_status"] = "pending"
+            meta["ci_failed_jobs"] = []
+            meta["ci_last_checked_at"] = None
         meta["head_sha"] = head_sha
     if branch_name := (pr.get("head") or {}).get("ref"):
         meta["branch_name"] = branch_name
@@ -97,7 +101,10 @@ def build_check_entry(payload: dict[str, Any], event: str, head_sha: str | None)
 
 def upsert_check_run(meta: dict[str, Any], check_entry: dict[str, Any]) -> None:
     """Upsert a check run into delivery_metadata and update aggregate CI status."""
-    head_sha = check_entry.get("head_sha") or meta.get("head_sha")
+    head_sha = check_entry.get("head_sha")
+    if meta.get("head_sha") and head_sha != meta["head_sha"]:
+        logger.info("Ignoring GitHub check for a noncurrent or unknown head")
+        return
     if head_sha and meta.get("head_sha") != head_sha:
         meta["head_sha"] = head_sha
 
