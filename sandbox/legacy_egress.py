@@ -36,7 +36,13 @@ class LegacyEgress:
     ) -> LegacyEgress:
         # Legacy DTOs cannot express credential audiences. Never combine arbitrary
         # sandbox credentials with public egress; use native grants for that flow.
-        if set(environment) - _SAFE_NETWORK_ENV:
+        unscoped = {
+            key
+            for key, value in environment.items()
+            if key not in _SAFE_NETWORK_ENV
+            and (key != "POETRY_VIRTUALENVS_IN_PROJECT" or value != "true")
+        }
+        if unscoped:
             raise ValueError(
                 "Networked legacy execution cannot receive unscoped environment values"
             )
