@@ -390,6 +390,34 @@ class DockerNativeAgentExecutor:
             timeout=timeout,
         )
 
+    def _wait_for_proxy(self, proxy_name: str) -> None:
+        """Do not release a task until its private proxy listener is ready."""
+        script = (
+            "import socket,time\n"
+            "deadline=time.monotonic()+10\n"
+            "while True:\n"
+            " try:\n"
+            "  socket.create_connection(('127.0.0.1',8080),timeout=0.5).close();break\n"
+            " except OSError:\n"
+            "  if time.monotonic()>=deadline:raise\n"
+            "  time.sleep(0.05)\n"
+        )
+        result = self._docker(["exec", proxy_name, "python", "-c", script])
+        if result.returncode != 0:
+            raise NativeAgentExecutorError("Egress proxy listener did not become ready")
+
+    def _create_proxy_network(self, network_name: str) -> None:
+        """Allocate the private network and clean up partial daemon failures."""
+        try:
+            created = self._docker(["network", "create", "--internal", network_name])
+        except BaseException:
+            self._cleanup_network(network_name=network_name, proxy_name=None)
+            raise
+        if created.returncode != 0:
+            raise NativeAgentExecutorError(
+                created.stderr.strip() or "failed to create executor network"
+            )
+
     def _start_proxy(
         self,
         *,
@@ -402,15 +430,7 @@ class DockerNativeAgentExecutor:
         uid, gid = legacy_identity()
         prepare_proxy_audit_root(artifact_root, uid, gid)
         proxy_name = f"native-egress-{uuid4().hex[:20]}"
-        try:
-            created = self._docker(["network", "create", "--internal", network_name])
-        except BaseException:
-            self._cleanup_network(network_name=network_name, proxy_name=None)
-            raise
-        if created.returncode != 0:
-            raise NativeAgentExecutorError(
-                created.stderr.strip() or "failed to create executor network"
-            )
+        self._create_proxy_network(network_name)
 
         docker_args = [
             "run",
@@ -463,6 +483,7 @@ class DockerNativeAgentExecutor:
             proxy = self._docker(docker_args)
             if proxy.returncode != 0:
                 raise NativeAgentExecutorError("Failed to start egress proxy")
+            self._wait_for_proxy(proxy_name)
             connected = self._docker(["network", "connect", "bridge", proxy_name])
             if connected.returncode != 0:
                 raise NativeAgentExecutorError("Failed to attach egress proxy")
