@@ -503,8 +503,9 @@ def test_delivery_sync_helpers():
         find_matching_delivery_run,
     )
 
-    # _apply_worker_run_delivery_update when worker_run is None returns None
-    assert _apply_worker_run_delivery_update(None, "pull_request", {}, None) is None
+    # _apply_worker_run_delivery_update when worker_run is None
+    assert _apply_worker_run_delivery_update(None, "pull_request", {}, None) == (None, True)
+    assert _apply_worker_run_delivery_update(None, "check_run", {}, None) == (None, False)
 
     # find_matching_delivery_run with invalid repo_url returns (None, None)
     mock_session = MagicMock()

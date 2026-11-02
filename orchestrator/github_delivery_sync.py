@@ -59,13 +59,10 @@ def sync_pr_metadata(meta: dict[str, Any], pr: dict[str, Any]) -> None:
     meta["pr_state"] = "merged" if pr.get("merged") else pr.get("state")
     meta["pr_draft"] = pr.get("draft", False)
     if head_sha := (pr.get("head") or {}).get("sha"):
-        if meta.get("head_sha") and meta["head_sha"] != head_sha:
-            meta["check_runs"] = [
-                c
-                for c in (meta.get("check_runs") or [])
-                if not c.get("head_sha") or c.get("head_sha") == head_sha
-            ]
         if meta.get("head_sha") != head_sha:
+            meta["check_runs"] = [
+                c for c in (meta.get("check_runs") or []) if c.get("head_sha") == head_sha
+            ]
             meta["ci_status"] = "pending"
             meta["ci_failed_jobs"] = []
             meta["ci_last_checked_at"] = None
@@ -99,20 +96,19 @@ def build_check_entry(payload: dict[str, Any], event: str, head_sha: str | None)
     }
 
 
-def upsert_check_run(meta: dict[str, Any], check_entry: dict[str, Any]) -> None:
-    """Upsert a check run into delivery_metadata and update aggregate CI status."""
+def upsert_check_run(meta: dict[str, Any], check_entry: dict[str, Any]) -> bool:
+    """Upsert a check run into delivery_metadata and update aggregate CI status.
+
+    Returns True if the check was applied, False if ignored.
+    """
     head_sha = check_entry.get("head_sha")
-    if meta.get("head_sha") and head_sha != meta["head_sha"]:
+    if not head_sha or (meta.get("head_sha") and head_sha != meta["head_sha"]):
         logger.info("Ignoring GitHub check for a noncurrent or unknown head")
-        return
-    if head_sha and meta.get("head_sha") != head_sha:
+        return False
+    if meta.get("head_sha") != head_sha:
         meta["head_sha"] = head_sha
 
-    raw_check_runs = list(meta.get("check_runs") or [])
-    if head_sha:
-        raw_check_runs = [
-            c for c in raw_check_runs if not c.get("head_sha") or c.get("head_sha") == head_sha
-        ]
+    raw_check_runs = [c for c in (meta.get("check_runs") or []) if c.get("head_sha") == head_sha]
 
     check_runs = raw_check_runs
     updated = False
@@ -148,6 +144,7 @@ def upsert_check_run(meta: dict[str, Any], check_entry: dict[str, Any]) -> None:
     meta["ci_status"] = ci_status
     meta["ci_failed_jobs"] = failed_jobs
     meta["ci_last_checked_at"] = datetime.now(UTC).isoformat()
+    return True
 
 
 def find_matching_delivery_run(
@@ -297,10 +294,10 @@ def _apply_worker_run_delivery_update(
     payload: dict[str, Any],
     head_sha: str | None,
     task: Task | None = None,
-) -> dict[str, Any] | None:
-    """Update worker_run delivery metadata and return check_entry if applicable."""
+) -> tuple[dict[str, Any] | None, bool]:
+    """Update worker_run delivery metadata and return check_entry and applied status."""
     if worker_run is None:
-        return None
+        return None, event == "pull_request"
     meta = dict(worker_run.delivery_metadata or {})
     target_task = task or getattr(worker_run, "task", None)
     if target_task and isinstance(target_task.constraints, dict):
@@ -313,14 +310,26 @@ def _apply_worker_run_delivery_update(
             if issue_url and not meta.get("source_issue_url"):
                 meta["source_issue_url"] = issue_url
     check_entry: dict[str, Any] | None = None
+    applied = True
     if event == "pull_request":
         sync_pr_metadata(meta, payload.get("pull_request") or {})
     else:
         check_entry = build_check_entry(payload, event, head_sha)
-        upsert_check_run(meta, check_entry)
-    worker_run.delivery_metadata = meta
-    flag_modified(worker_run, "delivery_metadata")
-    return check_entry
+        applied = upsert_check_run(meta, check_entry)
+    if applied:
+        worker_run.delivery_metadata = meta
+        flag_modified(worker_run, "delivery_metadata")
+    return check_entry, applied
+
+
+def _safe_record_inbound_delivery(
+    repo: InboundDeliveryRepository, session: Session, delivery_id: str, task_id: str | None
+) -> None:
+    try:
+        with session.begin_nested():
+            repo.create(channel="github", delivery_id=delivery_id, task_id=task_id)
+    except IntegrityError:
+        pass
 
 
 def handle_delivery_sync(
@@ -360,20 +369,21 @@ def handle_delivery_sync(
         )
 
         if task is None:
-            try:
-                with session.begin_nested():
-                    delivery_repo.create(channel="github", delivery_id=delivery_id, task_id=None)
-            except IntegrityError:
-                pass
+            _safe_record_inbound_delivery(delivery_repo, session, delivery_id, None)
             return True, "ignored", False, None, None, "No matching code-agent task found."
 
-        check_entry = _apply_worker_run_delivery_update(
-            worker_run,
-            event,
-            payload,
-            head_sha,
-            task=task,
+        check_entry, applied = _apply_worker_run_delivery_update(
+            worker_run, event, payload, head_sha, task=task
         )
+        if not applied:
+            return (
+                True,
+                "ignored",
+                False,
+                task.id,
+                worker_run.id if worker_run else None,
+                f"Ignored {event} for a noncurrent or unknown head.",
+            )
 
         record_delivery_timeline_event(
             session=session,
@@ -389,12 +399,7 @@ def handle_delivery_sync(
             pr_payload=payload.get("pull_request") or {},
         )
 
-        try:
-            with session.begin_nested():
-                delivery_repo.create(channel="github", delivery_id=delivery_id, task_id=task.id)
-        except IntegrityError:
-            pass
-
+        _safe_record_inbound_delivery(delivery_repo, session, delivery_id, task.id)
         return (
             True,
             "synced",
