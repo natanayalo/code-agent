@@ -228,6 +228,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Fixed
 
+- Fix: harden task credentials and legacy execution boundaries (PR #430 split B) ([#480](https://github.com/natanayalo/code-agent/pull/480))
+
 - Fix: preserve deterministic M29 evaluation evidence ([#479](https://github.com/natanayalo/code-agent/pull/479))
 
 - Fix: clean up namespaced sandbox containers ([#465](https://github.com/natanayalo/code-agent/pull/465))
