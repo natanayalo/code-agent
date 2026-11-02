@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
@@ -112,10 +113,13 @@ async def test_init_environment_integration_poetry(tmp_path: Path, monkeypatch):
     source_repo = tmp_path / "source-repo"
     _create_poetry_repo(source_repo)
 
+    # A test must never collide with or remove another checkout's container.
+    task_id = "test-init-" + uuid4().hex[:12]
+
     # 3. Create workspace
     workspace = manager.create_workspace(
         WorkspaceRequest(
-            task_id="test-init-task",
+            task_id=task_id,
             repo_url=f"file://{source_repo.resolve()}",
         )
     )
@@ -124,7 +128,7 @@ async def test_init_environment_integration_poetry(tmp_path: Path, monkeypatch):
     node = build_init_environment_node(manager, shell_worker)
     state = OrchestratorState(
         task={
-            "task_id": "test-init-task",
+            "task_id": task_id,
             "repo_url": f"file://{source_repo.resolve()}",
             "task_text": "Setup the environment",
             "constraints": {"allow_non_reproducible_install": True},

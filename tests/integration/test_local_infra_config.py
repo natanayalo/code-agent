@@ -39,7 +39,7 @@ def test_api_service_waits_for_healthy_postgres(compose_config: dict[str, Any]) 
     api_service = compose_config["services"]["api"]
 
     assert api_service["depends_on"]["postgres"]["condition"] == "service_healthy"
-    assert "8000:8000" in api_service["ports"]
+    assert "127.0.0.1:8000:8000" in api_service["ports"]
 
 
 def test_compose_requires_explicit_database_credentials(
@@ -107,7 +107,7 @@ def test_postgres_service_has_healthcheck_and_port_mapping(
         "-d ${POSTGRES_DB?Please set POSTGRES_DB in .env}"
     )
 
-    assert "5432:5432" in postgres_service["ports"]
+    assert "127.0.0.1:5432:5432" in postgres_service["ports"]
     assert postgres_service["healthcheck"]["test"] == [
         "CMD-SHELL",
         expected_healthcheck,
@@ -172,8 +172,8 @@ def test_compose_includes_optional_phoenix_observability_service(
 
     assert phoenix_service["image"] == "arizephoenix/phoenix:latest"
     assert "observability" in phoenix_service["profiles"]
-    assert "6006:6006" in phoenix_service["ports"]
-    assert "4317:4317" in phoenix_service["ports"]
+    assert "127.0.0.1:6006:6006" in phoenix_service["ports"]
+    assert "127.0.0.1:4317:4317" in phoenix_service["ports"]
 
 
 def test_api_and_worker_expose_tracing_env_overrides(compose_config: dict[str, Any]) -> None:
