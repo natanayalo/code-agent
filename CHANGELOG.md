@@ -228,6 +228,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Fixed
 
+- Fix: restrict Telegram ingress to approved private operators (PR #430 split C) ([#481](https://github.com/natanayalo/code-agent/pull/481))
+
 - Fix: harden task credentials and legacy execution boundaries (PR #430 split B) ([#480](https://github.com/natanayalo/code-agent/pull/480))
 
 - Fix: preserve deterministic M29 evaluation evidence ([#479](https://github.com/natanayalo/code-agent/pull/479))
