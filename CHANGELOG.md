@@ -228,6 +228,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Fixed
 
+- Fix: bound signed GitHub ingress and pass deployment configuration ([#482](https://github.com/natanayalo/code-agent/pull/482))
+
 - Fix: restrict Telegram ingress to approved private operators (PR #430 split C) ([#481](https://github.com/natanayalo/code-agent/pull/481))
 
 - Fix: harden task credentials and legacy execution boundaries (PR #430 split B) ([#480](https://github.com/natanayalo/code-agent/pull/480))
