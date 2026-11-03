@@ -9,12 +9,48 @@ from typing import Any
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
+from sqlalchemy.orm import Session
+
+from db.models import Task
 from orchestrator.github_repo import github_repo_spec_from_url
+from sandbox.ephemeral_store_postgres import PostgresEphemeralSecretStore
+from sandbox.secrets import SecretExposurePolicy, SecretScope
 
 logger = logging.getLogger(__name__)
 
 
-def _fetch_current_pull_request(repo_url: str, pr_number: int) -> dict[str, Any] | None:
+def _task_github_token(session: Session, task: Task) -> str | None:
+    """Use only the matched task's delivery credentials and configured API token."""
+    secrets = task.secrets or {}
+    token = secrets.get("GH_TOKEN") or secrets.get("GITHUB_TOKEN")
+    if token:
+        return token
+    store = PostgresEphemeralSecretStore(session)
+    for ref in task.secret_refs or []:
+        name = ref.get("name")
+        if not isinstance(name, str) or not name.startswith("ephem_"):
+            continue
+        try:
+            record = store.get_record(name, task_id=task.id)
+        except (RuntimeError, ValueError) as exc:
+            logger.info(
+                "Unable to resolve task delivery credential",
+                extra={"error_type": type(exc).__name__},
+            )
+            continue
+        if (
+            record
+            and record.required_scope == SecretScope.GIT_PUSH
+            and record.exposure_policy == SecretExposurePolicy.BROKER_ONLY
+            and record.value
+        ):
+            return record.value
+    return os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+
+
+def _fetch_current_pull_request(
+    repo_url: str, pr_number: int, token: str | None
+) -> dict[str, Any] | None:
     """Read the current PR snapshot when a pending webhook cannot order itself."""
     repo_spec = github_repo_spec_from_url(repo_url)
     if not repo_spec or repo_spec.count("/") != 1:
@@ -29,7 +65,6 @@ def _fetch_current_pull_request(repo_url: str, pr_number: int) -> dict[str, Any]
             "X-GitHub-Api-Version": "2022-11-28",
         },
     )
-    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
     if token:
         request.add_header("Authorization", f"Bearer {token}")
     try:
@@ -50,6 +85,8 @@ def _prepare_pending_pr_payload(
     pr_number: int | None,
     head_sha: str | None,
     meta: dict[str, Any],
+    session: Session,
+    task: Task,
 ) -> tuple[dict[str, Any] | None, bool, str | None]:
     """Verify pending head changes when stored timestamps cannot order them."""
     pr = payload.get("pull_request") or {}
@@ -60,7 +97,11 @@ def _prepare_pending_pr_payload(
     if not mismatch or not unordered:
         return payload, False, None
 
-    snapshot = _fetch_current_pull_request(repo_url, pr_number) if pr_number else None
+    snapshot = (
+        _fetch_current_pull_request(repo_url, pr_number, _task_github_token(session, task))
+        if pr_number
+        else None
+    )
     if snapshot is None:
         logger.info("Pending PR delivery remains retryable until state can be verified")
         return None, False, "pending"

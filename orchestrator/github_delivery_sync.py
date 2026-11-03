@@ -459,7 +459,13 @@ def _sync_matched_delivery(
     is_authoritative = False
     if is_pending and event == "pull_request":
         sync_payload, is_authoritative, verification_status = _prepare_pending_pr_payload(
-            payload, repo_url, pr_number, head_sha, worker_run.delivery_metadata or {}
+            payload,
+            repo_url,
+            pr_number,
+            head_sha,
+            worker_run.delivery_metadata or {},
+            session,
+            task,
         )
         if verification_status:
             detail = (
