@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -22,6 +23,18 @@ from orchestrator.github_repo import github_repo_spec_from_url
 from repositories import InboundDeliveryRepository, TaskTimelineRepository, session_scope
 
 logger = logging.getLogger(__name__)
+
+
+def _lock_delivery_updates(session: Session, repo_url: str) -> None:
+    """Serialize delivery transactions before reading claims or run metadata."""
+    dialect = session.get_bind().dialect.name
+    if dialect == "postgresql":
+        repo = (github_repo_spec_from_url(repo_url) or repo_url).lower()
+        digest = hashlib.sha256(f"github-delivery:{repo}".encode()).digest()
+        lock_id = int.from_bytes(digest[:8], byteorder="big", signed=True)
+        session.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id})
+    elif dialect == "sqlite":
+        session.execute(text("BEGIN IMMEDIATE"))
 
 
 def extract_delivery_identifiers(
@@ -509,6 +522,7 @@ def handle_delivery_sync(
         (ok, status, duplicate, task_id, run_id, detail)
     """
     with session_scope(task_service.session_factory) as session:
+        _lock_delivery_updates(session, repo_url)
         delivery_repo = InboundDeliveryRepository(session)
         existing = delivery_repo.get_by_channel_delivery(channel="github", delivery_id=delivery_id)
         if existing is not None and existing.task_id is not None:
