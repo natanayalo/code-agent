@@ -22,8 +22,13 @@ def test_compose_passes_github_configuration():
         "CODE_AGENT_GITHUB_WEBHOOK_SECRET",
         "CODE_AGENT_GITHUB_OWNER_LOGIN",
         "CODE_AGENT_GITHUB_ISSUE_LABEL",
+        "GH_TOKEN",
+        "CODE_AGENT_ENCRYPTION_KEY",
     ):
         assert environment[key].startswith("${" + key + ":-")
+    assert compose["services"]["worker"]["environment"]["CODE_AGENT_ENCRYPTION_KEY"] == (
+        "${CODE_AGENT_ENCRYPTION_KEY:-}"
+    )
 
 
 def test_signed_issue_intake_and_oversized_http_rejection(webhook_client):
