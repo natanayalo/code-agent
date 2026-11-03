@@ -25,16 +25,19 @@ from repositories import InboundDeliveryRepository, TaskTimelineRepository, sess
 logger = logging.getLogger(__name__)
 
 
-def _lock_delivery_updates(session: Session, repo_url: str) -> None:
-    """Serialize delivery transactions before reading claims or run metadata."""
+def _lock_delivery_updates(session: Session, repo_url: str) -> bool:
+    """Acquire a delivery transaction lock without waiting on PostgreSQL."""
     dialect = session.get_bind().dialect.name
     if dialect == "postgresql":
         repo = (github_repo_spec_from_url(repo_url) or repo_url).lower()
         digest = hashlib.sha256(f"github-delivery:{repo}".encode()).digest()
         lock_id = int.from_bytes(digest[:8], byteorder="big", signed=True)
-        session.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id})
+        return bool(
+            session.scalar(text("SELECT pg_try_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id})
+        )
     elif dialect == "sqlite":
         session.execute(text("BEGIN IMMEDIATE"))
+    return True
 
 
 def extract_delivery_identifiers(
@@ -522,7 +525,9 @@ def handle_delivery_sync(
         (ok, status, duplicate, task_id, run_id, detail)
     """
     with session_scope(task_service.session_factory) as session:
-        _lock_delivery_updates(session, repo_url)
+        if not _lock_delivery_updates(session, repo_url):
+            logger.info("GitHub delivery deferred while repository reconciliation is in progress")
+            return _sync_result("pending", None, None, "Repository busy; redeliver this event.")
         delivery_repo = InboundDeliveryRepository(session)
         existing = delivery_repo.get_by_channel_delivery(channel="github", delivery_id=delivery_id)
         if existing is not None and existing.task_id is not None:

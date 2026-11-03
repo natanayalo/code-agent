@@ -4,4 +4,4 @@ Depends on CI ordering. Unmatched delivery IDs persist with a null task_id, a pe
 
 Pending responses remain HTTP 200 with status=pending; operators must redeliver from GitHub after metadata persists. This PR does not introduce an automatic event poller or retain payloads, so a delivery that is never redelivered remains pending. That limit is explicit rather than permanently consuming it as a completed duplicate. No migration; revert to roll back. This forms part of the PR #430 split.
 
-Delivery transactions for the same repository are serialized with PostgreSQL transaction advisory locks; SQLite serializes writers. A slow GitHub verification can delay other deliveries sharing that lock, while unrelated API requests remain responsive.
+Delivery transactions for the same repository are serialized with PostgreSQL transaction advisory locks; SQLite serializes writers. If a PostgreSQL delivery cannot acquire its lock immediately, it returns `pending` without recording a claim. Operators must redeliver it after the current reconciliation finishes. This keeps lock waiters from occupying database pool connections during slow GitHub verification.
