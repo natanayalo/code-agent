@@ -1,5 +1,6 @@
 """GitHub verification must not block unrelated webhook requests."""
 
+import json
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 from unittest.mock import patch
@@ -53,3 +54,24 @@ def test_pending_verification_does_not_block_ping(webhook_client, session_factor
             finally:
                 release.set()
             assert pending.result(timeout=3)["status"] == "synced"
+
+
+def test_persistent_lock_contention_returns_failure(webhook_client, monkeypatch):
+    client, secret, _ = webhook_client
+    monkeypatch.setattr("apps.api.routes.github.DELIVERY_LOCK_RETRY_ATTEMPTS", 2)
+    monkeypatch.setattr("apps.api.routes.github.DELIVERY_LOCK_RETRY_DELAY_SECONDS", 0)
+    monkeypatch.setattr(
+        "orchestrator.github_delivery_sync._lock_delivery_updates", lambda *_: False
+    )
+    body = json.dumps({"repository": {"full_name": "octocat/code-agent"}}).encode()
+    response = client.post(
+        "/github/webhook",
+        content=body,
+        headers={
+            "X-Hub-Signature-256": support._sign(body, secret),
+            "X-GitHub-Event": "check_run",
+            "X-GitHub-Delivery": "busy-check",
+        },
+    )
+    assert response.status_code == 503
+    assert "redeliver" in response.json()["detail"]

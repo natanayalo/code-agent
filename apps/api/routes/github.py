@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+from collections.abc import Callable
 from functools import partial
 from typing import Any
 
@@ -28,9 +30,26 @@ from apps.observability import (
 )
 from orchestrator.execution import TaskExecutionService, TemporalUnavailableError
 from orchestrator.execution_types import TaskSubmissionValidationError
-from orchestrator.github_events import process_github_webhook_event
+from orchestrator.github_events import GitHubWebhookResult, process_github_webhook_event
 
 router = APIRouter(prefix="/github", tags=["github"])
+DELIVERY_LOCK_RETRY_ATTEMPTS = 81
+DELIVERY_LOCK_RETRY_DELAY_SECONDS = 0.1
+
+
+async def _process_delivery_with_retry(
+    process_event: Callable[[], GitHubWebhookResult],
+) -> GitHubWebhookResult:
+    for attempt in range(DELIVERY_LOCK_RETRY_ATTEMPTS):
+        result = await run_in_threadpool(process_event)
+        if result.status != "busy":
+            return result
+        if attempt < DELIVERY_LOCK_RETRY_ATTEMPTS - 1:
+            await asyncio.sleep(DELIVERY_LOCK_RETRY_DELAY_SECONDS)
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Repository reconciliation is busy; redeliver this event.",
+    )
 
 
 class GitHubWebhookResponse(BaseModel):
@@ -108,7 +127,7 @@ async def receive_github_webhook(
                 task_service=task_service,
             )
             if x_github_event in {"pull_request", "check_run", "check_suite"}:
-                result = await run_in_threadpool(process_event)
+                result = await _process_delivery_with_retry(process_event)
             else:
                 result = process_event()
         except TaskSubmissionValidationError as exc:

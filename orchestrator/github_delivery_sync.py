@@ -527,7 +527,7 @@ def handle_delivery_sync(
     with session_scope(task_service.session_factory) as session:
         if not _lock_delivery_updates(session, repo_url):
             logger.info("GitHub delivery deferred while repository reconciliation is in progress")
-            return _sync_result("pending", None, None, "Repository busy; redeliver this event.")
+            return _sync_result("busy", None, None, "Repository reconciliation is in progress.")
         delivery_repo = InboundDeliveryRepository(session)
         existing = delivery_repo.get_by_channel_delivery(channel="github", delivery_id=delivery_id)
         if existing is not None and existing.task_id is not None:
