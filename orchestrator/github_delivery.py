@@ -68,6 +68,10 @@ def capture_delivery_metadata(
                     **metadata,
                     "pr_url": pull_request.get("html_url"),
                     "pr_number": pull_request.get("number"),
+                    "pr_state": (
+                        "merged" if pull_request.get("merged") else pull_request.get("state")
+                    ),
+                    "pr_draft": pull_request.get("draft", False),
                     "head_sha": head.get("sha"),
                     "pr_updated_at": pull_request.get("updated_at"),
                 }
@@ -216,6 +220,8 @@ def _create_draft_pr(
         "branch_name": branch_name,
         "pr_url": pull_request.get("html_url"),
         "pr_number": pull_request.get("number"),
+        "pr_state": "merged" if pull_request.get("merged") else pull_request.get("state"),
+        "pr_draft": pull_request.get("draft", False),
         "head_sha": head.get("sha"),
         "pr_updated_at": pull_request.get("updated_at"),
     }

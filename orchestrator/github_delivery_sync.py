@@ -14,6 +14,10 @@ from sqlalchemy.orm.attributes import flag_modified
 from db.enums import TimelineEventType
 from db.models import Task, WorkerRun
 from orchestrator.execution import TaskExecutionService
+from orchestrator.github_delivery_reconciliation import (
+    _known_superseded_pr_event,
+    _prepare_pending_pr_payload,
+)
 from orchestrator.github_repo import github_repo_spec_from_url
 from repositories import InboundDeliveryRepository, TaskTimelineRepository, session_scope
 
@@ -56,6 +60,7 @@ def sync_pr_metadata(
     pr: dict[str, Any],
     *,
     is_pending: bool = False,
+    is_authoritative: bool = False,
 ) -> bool:
     """Update delivery_metadata dictionary from a pull_request payload.
 
@@ -65,7 +70,12 @@ def sync_pr_metadata(
     incoming_updated_at = pr.get("updated_at")
     current_updated_at = meta.get("pr_updated_at")
 
-    if incoming_updated_at and current_updated_at and incoming_updated_at < current_updated_at:
+    if (
+        not is_authoritative
+        and incoming_updated_at
+        and current_updated_at
+        and incoming_updated_at < current_updated_at
+    ):
         logger.info("Ignoring pull_request event older than current pr_updated_at")
         return False
 
@@ -76,7 +86,9 @@ def sync_pr_metadata(
         has_newer_ordering = bool(
             incoming_updated_at and current_updated_at and incoming_updated_at > current_updated_at
         )
-        if (is_pending or head_sha in head_history) and not has_newer_ordering:
+        if (is_pending or head_sha in head_history) and not (
+            has_newer_ordering or is_authoritative
+        ):
             logger.info("Ignoring pull_request event for an older or superseded head")
             return False
 
@@ -331,6 +343,7 @@ def _apply_worker_run_delivery_update(
     task: Task | None = None,
     *,
     is_pending: bool = False,
+    is_authoritative: bool = False,
 ) -> tuple[dict[str, Any] | None, bool]:
     """Update worker_run delivery metadata and return check_entry and applied status."""
     if worker_run is None:
@@ -349,7 +362,12 @@ def _apply_worker_run_delivery_update(
     check_entry: dict[str, Any] | None = None
     applied = True
     if event == "pull_request":
-        applied = sync_pr_metadata(meta, payload.get("pull_request") or {}, is_pending=is_pending)
+        applied = sync_pr_metadata(
+            meta,
+            payload.get("pull_request") or {},
+            is_pending=is_pending,
+            is_authoritative=is_authoritative,
+        )
     else:
         check_entry = build_check_entry(payload, event, head_sha)
         applied = upsert_check_run(meta, check_entry)
@@ -383,17 +401,97 @@ def _sync_result(
     return True, status, False, task_id, run.id if run else None, msg
 
 
-def _known_superseded_pr_event(
-    payload: dict[str, Any], event: str, head_sha: str | None, meta: dict[str, Any]
-) -> bool:
-    """Return whether an ignored pending PR event is known to be stale."""
-    if event != "pull_request" or not head_sha or head_sha == meta.get("head_sha"):
-        return False
-    if head_sha in (meta.get("head_history") or []):
-        return True
-    incoming = (payload.get("pull_request") or {}).get("updated_at")
-    current = meta.get("pr_updated_at")
-    return bool(incoming and current and incoming < current)
+def _ignored_delivery_result(
+    session: Session,
+    delivery_repo: InboundDeliveryRepository,
+    delivery_id: str,
+    task: Task,
+    worker_run: WorkerRun,
+    event: str,
+    payload: dict[str, Any],
+    head_sha: str | None,
+    is_pending: bool,
+) -> tuple[bool, str, bool, str | None, str | None, str | None]:
+    """Keep uncertain pending checks retryable and settle known stale PR events."""
+    meta = worker_run.delivery_metadata or {}
+    if is_pending and _known_superseded_pr_event(payload, event, head_sha, meta):
+        _record_delivery_claim(session, delivery_repo, delivery_id, task_id=task.id)
+    return _sync_result(
+        "ignored", task.id, worker_run, f"Ignored older or noncurrent {event} event."
+    )
+
+
+def _sync_matched_delivery(
+    *,
+    session: Session,
+    delivery_repo: InboundDeliveryRepository,
+    existing: Any,
+    payload: dict[str, Any],
+    event: str,
+    action: str | None,
+    delivery_id: str,
+    repo_url: str,
+    pr_number: int | None,
+    head_sha: str | None,
+    branch_name: str | None,
+    worker_run: WorkerRun,
+    task: Task,
+) -> tuple[bool, str, bool, str | None, str | None, str | None]:
+    """Reconcile a matched delivery, retaining claims until its state is safe to apply."""
+    is_pending = existing is not None and existing.task_id is None
+    sync_payload: dict[str, Any] | None = payload
+    is_authoritative = False
+    if is_pending and event == "pull_request":
+        sync_payload, is_authoritative, verification_status = _prepare_pending_pr_payload(
+            payload, repo_url, pr_number, head_sha, worker_run.delivery_metadata or {}
+        )
+        if verification_status:
+            detail = (
+                "Current GitHub PR state is unavailable; redeliver after verification."
+                if verification_status == "pending"
+                else "Pending PR event is not the current PR head."
+            )
+            return _sync_result(verification_status, task.id, worker_run, detail)
+    assert sync_payload is not None
+    check_entry, applied = _apply_worker_run_delivery_update(
+        worker_run,
+        event,
+        sync_payload,
+        head_sha,
+        task=task,
+        is_pending=is_pending,
+        is_authoritative=is_authoritative,
+    )
+    if not applied:
+        return _ignored_delivery_result(
+            session,
+            delivery_repo,
+            delivery_id,
+            task,
+            worker_run,
+            event,
+            payload,
+            head_sha,
+            is_pending,
+        )
+
+    record_delivery_timeline_event(
+        session=session,
+        task=task,
+        event=event,
+        action=action,
+        delivery_id=delivery_id,
+        pr_number=pr_number,
+        head_sha=head_sha,
+        branch_name=branch_name,
+        worker_run=worker_run,
+        check_entry=check_entry,
+        pr_payload=sync_payload.get("pull_request") or {},
+    )
+    _record_delivery_claim(session, delivery_repo, delivery_id, task_id=task.id)
+    return _sync_result(
+        "synced", task.id, worker_run, f"Synchronized {event} event onto task {task.id}."
+    )
 
 
 def handle_delivery_sync(
@@ -437,33 +535,18 @@ def handle_delivery_sync(
             logger.info("GitHub delivery awaiting persisted worker metadata")
             return _sync_result("pending", None, None, "Redeliver after worker metadata persists.")
 
-        is_pending = existing is not None and existing.task_id is None
-        check_entry, applied = _apply_worker_run_delivery_update(
-            worker_run, event, payload, head_sha, task=task, is_pending=is_pending
-        )
-        if not applied:
-            meta = worker_run.delivery_metadata or {}
-            if is_pending and _known_superseded_pr_event(payload, event, head_sha, meta):
-                _record_delivery_claim(session, delivery_repo, delivery_id, task_id=task.id)
-            return _sync_result(
-                "ignored", task.id, worker_run, f"Ignored older or noncurrent {event} event."
-            )
-
-        record_delivery_timeline_event(
+        return _sync_matched_delivery(
             session=session,
-            task=task,
+            delivery_repo=delivery_repo,
+            existing=existing,
+            payload=payload,
             event=event,
             action=action,
             delivery_id=delivery_id,
+            repo_url=repo_url,
             pr_number=pr_number,
             head_sha=head_sha,
             branch_name=branch_name,
             worker_run=worker_run,
-            check_entry=check_entry,
-            pr_payload=payload.get("pull_request") or {},
-        )
-
-        _record_delivery_claim(session, delivery_repo, delivery_id, task_id=task.id)
-        return _sync_result(
-            "synced", task.id, worker_run, f"Synchronized {event} event onto task {task.id}."
+            task=task,
         )

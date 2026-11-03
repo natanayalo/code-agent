@@ -329,3 +329,102 @@ def test_pending_check_for_future_head_stays_retryable(webhook_client, session_f
         run = session.get(WorkerRun, run_id)
         assert run.delivery_metadata["head_sha"] == "sha-B"
         assert run.delivery_metadata["ci_status"] == "passed"
+
+
+@pytest.mark.parametrize("stored_updated_at", [None, "2026-11-02T11:00:00Z"])
+def test_pending_pr_with_missing_or_tied_ordering_uses_current_github_head(
+    webhook_client, session_factory, stored_updated_at
+):
+    client, secret, _ = webhook_client
+    _, data = support._post_issue_labeled(client, secret, f"unordered-issue-{stored_updated_at}")
+    task_id = data["task_id"]
+    pr_b = {
+        "action": "synchronize",
+        "pull_request": {
+            "number": 105,
+            "state": "open",
+            "draft": True,
+            "head": {"sha": "sha-B", "ref": "github/issue-42"},
+            "updated_at": "2026-11-02T11:00:00Z",
+        },
+    }
+    delivery_id = f"unordered-pr-{stored_updated_at}"
+    assert _post_event(client, secret, "pull_request", pr_b, delivery_id)["status"] == "pending"
+    run_id = support._create_delivered_worker_run(session_factory, task_id)
+    with session_scope(session_factory) as session:
+        run = session.get(WorkerRun, run_id)
+        run.delivery_metadata = {
+            **run.delivery_metadata,
+            "pr_number": 105,
+            "head_sha": "sha-A",
+            "head_history": ["sha-A"],
+            "pr_updated_at": stored_updated_at,
+        }
+
+    current_response = MagicMock()
+    current_response.__enter__.return_value = current_response
+    current_response.__exit__.return_value = None
+    current_response.read.return_value = json.dumps(pr_b["pull_request"]).encode()
+    with patch(
+        "orchestrator.github_delivery_reconciliation.urlopen", return_value=current_response
+    ):
+        result = _post_event(client, secret, "pull_request", pr_b, delivery_id)
+
+    assert result["status"] == "synced"
+    with session_scope(session_factory) as session:
+        run = session.get(WorkerRun, run_id)
+        assert run.delivery_metadata["head_sha"] == "sha-B"
+
+
+def test_newer_captured_draft_snapshot_survives_older_pending_event(
+    webhook_client, session_factory
+):
+    client, secret, _ = webhook_client
+    _, data = support._post_issue_labeled(client, secret, "captured-draft-issue")
+    task_id = data["task_id"]
+    old_pr = {
+        "action": "opened",
+        "pull_request": {
+            "number": 105,
+            "state": "open",
+            "draft": False,
+            "head": {"sha": "sha-A", "ref": "github/issue-42"},
+            "updated_at": "2026-11-02T10:00:00Z",
+        },
+    }
+    assert (
+        _post_event(client, secret, "pull_request", old_pr, "old-pending-open")["status"]
+        == "pending"
+    )
+    run_id = support._create_delivered_worker_run(session_factory, task_id)
+    response = MagicMock()
+    response.__enter__.return_value = response
+    response.__exit__.return_value = None
+    response.read.return_value = json.dumps(
+        [
+            {
+                "html_url": "https://github.com/octocat/code-agent/pull/105",
+                "number": 105,
+                "state": "open",
+                "draft": True,
+                "updated_at": "2026-11-02T11:00:00Z",
+                "head": {"sha": "sha-B"},
+            }
+        ]
+    ).encode()
+    with patch("orchestrator.github_delivery.urlopen", return_value=response):
+        captured_metadata = capture_delivery_metadata(
+            repo_url="https://github.com/octocat/code-agent.git",
+            delivery_mode="draft_pr",
+            branch_name="github/issue-42",
+            token="task-token",
+        )
+    with session_scope(session_factory) as session:
+        session.get(WorkerRun, run_id).delivery_metadata = captured_metadata
+
+    result = _post_event(client, secret, "pull_request", old_pr, "old-pending-open")
+    assert result["status"] == "ignored"
+    with session_scope(session_factory) as session:
+        run = session.get(WorkerRun, run_id)
+        assert run.delivery_metadata["pr_state"] == "open"
+        assert run.delivery_metadata["pr_draft"] is True

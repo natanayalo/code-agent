@@ -16,6 +16,8 @@ def test_publish_draft_pr_pushes_without_token_in_command_and_creates_pr(tmp_pat
         {
             "html_url": "https://github.com/example/project/pull/7",
             "number": 7,
+            "state": "open",
+            "draft": True,
             "updated_at": "2026-11-03T06:00:00Z",
             "head": {"sha": "abc123"},
         }
@@ -41,6 +43,8 @@ def test_publish_draft_pr_pushes_without_token_in_command_and_creates_pr(tmp_pat
         "branch_name": "qa/evidence",
         "pr_url": "https://github.com/example/project/pull/7",
         "pr_number": 7,
+        "pr_state": "open",
+        "pr_draft": True,
         "head_sha": "abc123",
         "pr_updated_at": "2026-11-03T06:00:00Z",
     }
