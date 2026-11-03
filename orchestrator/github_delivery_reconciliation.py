@@ -6,6 +6,7 @@ import json
 import logging
 import os
 from typing import Any
+from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
@@ -56,27 +57,48 @@ def _fetch_current_pull_request(
     if not repo_spec or repo_spec.count("/") != 1:
         return None
     owner, repository = repo_spec.split("/", 1)
-    request = Request(
-        "https://api.github.com/repos/"
-        f"{quote(owner, safe='')}/{quote(repository, safe='')}/pulls/{pr_number}",
-        headers={
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "code-agent-delivery-reconciliation",
-            "X-GitHub-Api-Version": "2022-11-28",
-        },
-    )
-    if token:
-        request.add_header("Authorization", f"Bearer {token}")
-    try:
-        with urlopen(request, timeout=15) as response:  # noqa: S310 - fixed GitHub API host
-            snapshot = json.load(response)
-    except (json.JSONDecodeError, OSError, TimeoutError, ValueError) as exc:
-        logger.info(
-            "Unable to verify current GitHub PR state during pending delivery reconciliation",
-            extra={"pr_number": pr_number, "error_type": type(exc).__name__},
+    candidates: list[str | None] = list(
+        dict.fromkeys(
+            candidate
+            for candidate in (token, os.environ.get("GH_TOKEN"), os.environ.get("GITHUB_TOKEN"))
+            if candidate
         )
-        return None
-    return snapshot if isinstance(snapshot, dict) else None
+    )
+    if not candidates:
+        candidates.append(None)
+    for candidate in candidates:
+        request = Request(
+            "https://api.github.com/repos/"
+            f"{quote(owner, safe='')}/{quote(repository, safe='')}/pulls/{pr_number}",
+            headers={
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "code-agent-delivery-reconciliation",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        )
+        if candidate:
+            request.add_header("Authorization", f"Bearer {candidate}")
+        try:
+            with urlopen(request, timeout=15) as response:  # noqa: S310 - fixed GitHub API host
+                snapshot = json.load(response)
+        except HTTPError as exc:
+            status = exc.code
+            exc.close()
+            if status in {401, 403, 404}:
+                logger.info(
+                    "GitHub PR verification credential was rejected", extra={"status": status}
+                )
+                continue
+            logger.info("GitHub PR verification failed", extra={"status": status})
+            return None
+        except (json.JSONDecodeError, OSError, TimeoutError, ValueError) as exc:
+            logger.info(
+                "Unable to verify current GitHub PR state during pending delivery reconciliation",
+                extra={"pr_number": pr_number, "error_type": type(exc).__name__},
+            )
+            return None
+        return snapshot if isinstance(snapshot, dict) else None
+    return None
 
 
 def _prepare_pending_pr_payload(

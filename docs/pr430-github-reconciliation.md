@@ -6,4 +6,6 @@ Pending responses remain HTTP 200 with status=pending; operators must redeliver 
 
 For unordered pending private PR events, verification uses the matched task's GitHub credential, an API environment token, or an unexpired task-scoped broker-only Git push secret. Compose passes `GH_TOKEN` to the API and shares the optional encryption key with the API and worker. A missing, expired, or unusable credential leaves the event pending; configure a valid credential before redelivery. No token is stored in delivery metadata or returned in webhook responses.
 
+If GitHub rejects the selected credential with HTTP 401, 403, or 404, verification also tries any distinct configured API environment tokens. Other GitHub or network failures leave the event pending without trying additional credentials.
+
 Delivery transactions for the same repository are serialized with PostgreSQL transaction advisory locks; SQLite serializes writers. On PostgreSQL, a busy delivery retries asynchronously 80 times at 100 ms intervals without retaining a database connection between attempts. If contention persists, the webhook returns HTTP 503 and the operator must redeliver the failed delivery; GitHub does not automatically redeliver failed webhooks.

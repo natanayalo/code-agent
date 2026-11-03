@@ -39,3 +39,17 @@ def test_legacy_task_credential_takes_precedence_over_environment(monkeypatch):
     monkeypatch.setenv("GH_TOKEN", "environment-token")
     task = MagicMock(secrets={"GITHUB_TOKEN": "task-token"})
     assert _task_github_token(MagicMock(), task) == "task-token"
+
+
+def test_duplicate_credentials_are_not_retried(monkeypatch, caplog):
+    from urllib.error import HTTPError
+
+    from orchestrator.github_delivery_reconciliation import _fetch_current_pull_request
+
+    monkeypatch.setenv("GH_TOKEN", "same-token")
+    monkeypatch.setenv("GITHUB_TOKEN", "same-token")
+    failure = HTTPError("https://api.github.com/", 401, "bad token", {}, None)
+    with patch("orchestrator.github_delivery_reconciliation.urlopen", side_effect=failure) as fetch:
+        assert _fetch_current_pull_request("https://github.com/owner/repo", 1, "same-token") is None
+    assert fetch.call_count == 1
+    assert "same-token" not in caplog.text
