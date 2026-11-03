@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+from functools import partial
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from apps.api.config import SystemConfig
@@ -97,13 +99,18 @@ async def receive_github_webhook(
             input_data={"event": x_github_event, "delivery_id": x_github_delivery}
         )
         try:
-            result = process_github_webhook_event(
+            process_event = partial(
+                process_github_webhook_event,
                 payload=payload,
                 event=x_github_event,
                 delivery_id=x_github_delivery,
                 config=config,
                 task_service=task_service,
             )
+            if x_github_event in {"pull_request", "check_run", "check_suite"}:
+                result = await run_in_threadpool(process_event)
+            else:
+                result = process_event()
         except TaskSubmissionValidationError as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
