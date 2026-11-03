@@ -177,6 +177,7 @@ def test_pending_pr_redelivery_cannot_regress_newer_pr_and_ci_state(
             "status": "completed",
             "conclusion": "success",
             "head_sha": "sha-B",
+            "check_suite": {"head_branch": "github/issue-42"},
             "pull_requests": [{"number": 105}],
         },
     }
@@ -201,3 +202,115 @@ def test_pending_pr_redelivery_cannot_regress_newer_pr_and_ci_state(
 
     dup = _post_event(client, secret, "pull_request", pr_a, "delivery-pr-A")
     assert dup["status"] == "duplicate" and dup["duplicate"] is True
+
+
+def test_newer_pending_pr_head_is_applied_and_force_push_can_restore_prior_head(
+    webhook_client, session_factory
+):
+    client, secret, _ = webhook_client
+    _, data = support._post_issue_labeled(client, secret, "force-push-issue")
+    task_id = data["task_id"]
+    pending_b = {
+        "action": "synchronize",
+        "pull_request": {
+            "number": 105,
+            "state": "open",
+            "head": {"sha": "sha-B", "ref": "github/issue-42"},
+            "updated_at": "2026-11-02T11:00:00Z",
+        },
+    }
+    assert _post_event(client, secret, "pull_request", pending_b, "pending-pr-B")["status"] == (
+        "pending"
+    )
+    run_id = support._create_delivered_worker_run(session_factory, task_id)
+    with session_scope(session_factory) as session:
+        run = session.get(WorkerRun, run_id)
+        run.delivery_metadata = {
+            **run.delivery_metadata,
+            **{
+                "head_sha": "sha-A",
+                "head_history": ["sha-A"],
+                "pr_updated_at": "2026-11-02T10:00:00Z",
+            },
+        }
+
+    assert _post_event(client, secret, "pull_request", pending_b, "pending-pr-B")["status"] == (
+        "synced"
+    )
+    pr_a_again = {
+        "action": "synchronize",
+        "pull_request": {
+            "number": 105,
+            "state": "open",
+            "head": {"sha": "sha-A", "ref": "github/issue-42"},
+            "updated_at": "2026-11-02T12:00:00Z",
+        },
+    }
+    assert (
+        _post_event(client, secret, "pull_request", pr_a_again, "force-push-pr-A")["status"]
+        == "synced"
+    )
+
+    with session_scope(session_factory) as session:
+        run = session.get(WorkerRun, run_id)
+        assert run.delivery_metadata["head_sha"] == "sha-A"
+        assert run.delivery_metadata["pr_updated_at"] == "2026-11-02T12:00:00Z"
+
+
+def test_pending_check_for_future_head_stays_retryable(webhook_client, session_factory):
+    client, secret, _ = webhook_client
+    _, data = support._post_issue_labeled(client, secret, "future-check-issue")
+    task_id = data["task_id"]
+    check_b = {
+        "action": "completed",
+        "check_run": {
+            "id": 902,
+            "name": "unit",
+            "status": "completed",
+            "conclusion": "success",
+            "head_sha": "sha-B",
+            "check_suite": {"head_branch": "github/issue-42"},
+            "pull_requests": [{"number": 105}],
+        },
+    }
+    assert _post_event(client, secret, "check_run", check_b, "pending-check-B")["status"] == (
+        "pending"
+    )
+    run_id = support._create_delivered_worker_run(session_factory, task_id)
+    with session_scope(session_factory) as session:
+        run = session.get(WorkerRun, run_id)
+        run.delivery_metadata = {
+            **run.delivery_metadata,
+            "pr_number": 105,
+            "head_sha": "sha-A",
+            "head_history": ["sha-A"],
+        }
+
+    assert _post_event(client, secret, "check_run", check_b, "pending-check-B")["status"] == (
+        "ignored"
+    )
+    with session_scope(session_factory) as session:
+        pending = InboundDeliveryRepository(session).get_by_channel_delivery(
+            channel="github", delivery_id="pending-check-B"
+        )
+        assert pending is not None and pending.task_id is None
+
+    pr_b = {
+        "action": "synchronize",
+        "pull_request": {
+            "number": 105,
+            "state": "open",
+            "head": {"sha": "sha-B", "ref": "github/issue-42"},
+            "updated_at": "2026-11-02T11:00:00Z",
+        },
+    }
+    assert _post_event(client, secret, "pull_request", pr_b, "pr-B-after-check")["status"] == (
+        "synced"
+    )
+    assert _post_event(client, secret, "check_run", check_b, "pending-check-B")["status"] == (
+        "synced"
+    )
+    with session_scope(session_factory) as session:
+        run = session.get(WorkerRun, run_id)
+        assert run.delivery_metadata["head_sha"] == "sha-B"
+        assert run.delivery_metadata["ci_status"] == "passed"

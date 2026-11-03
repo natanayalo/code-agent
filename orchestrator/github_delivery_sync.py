@@ -73,7 +73,10 @@ def sync_pr_metadata(
     head_history = list(meta.get("head_history") or [])
 
     if current_head and head_sha and head_sha != current_head:
-        if is_pending or head_sha in head_history:
+        has_newer_ordering = bool(
+            incoming_updated_at and current_updated_at and incoming_updated_at > current_updated_at
+        )
+        if (is_pending or head_sha in head_history) and not has_newer_ordering:
             logger.info("Ignoring pull_request event for an older or superseded head")
             return False
 
@@ -380,6 +383,19 @@ def _sync_result(
     return True, status, False, task_id, run.id if run else None, msg
 
 
+def _known_superseded_pr_event(
+    payload: dict[str, Any], event: str, head_sha: str | None, meta: dict[str, Any]
+) -> bool:
+    """Return whether an ignored pending PR event is known to be stale."""
+    if event != "pull_request" or not head_sha or head_sha == meta.get("head_sha"):
+        return False
+    if head_sha in (meta.get("head_history") or []):
+        return True
+    incoming = (payload.get("pull_request") or {}).get("updated_at")
+    current = meta.get("pr_updated_at")
+    return bool(incoming and current and incoming < current)
+
+
 def handle_delivery_sync(
     *,
     payload: dict[str, Any],
@@ -426,7 +442,8 @@ def handle_delivery_sync(
             worker_run, event, payload, head_sha, task=task, is_pending=is_pending
         )
         if not applied:
-            if is_pending:
+            meta = worker_run.delivery_metadata or {}
+            if is_pending and _known_superseded_pr_event(payload, event, head_sha, meta):
                 _record_delivery_claim(session, delivery_repo, delivery_id, task_id=task.id)
             return _sync_result(
                 "ignored", task.id, worker_run, f"Ignored older or noncurrent {event} event."
