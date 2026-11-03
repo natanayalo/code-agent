@@ -16,6 +16,7 @@ def test_publish_draft_pr_pushes_without_token_in_command_and_creates_pr(tmp_pat
         {
             "html_url": "https://github.com/example/project/pull/7",
             "number": 7,
+            "updated_at": "2026-11-03T06:00:00Z",
             "head": {"sha": "abc123"},
         }
     ).encode()
@@ -41,6 +42,7 @@ def test_publish_draft_pr_pushes_without_token_in_command_and_creates_pr(tmp_pat
         "pr_url": "https://github.com/example/project/pull/7",
         "pr_number": 7,
         "head_sha": "abc123",
+        "pr_updated_at": "2026-11-03T06:00:00Z",
     }
     command = run_mock.call_args.args[0]
     assert command[-2:] == [

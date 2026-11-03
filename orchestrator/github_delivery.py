@@ -69,6 +69,7 @@ def capture_delivery_metadata(
                     "pr_url": pull_request.get("html_url"),
                     "pr_number": pull_request.get("number"),
                     "head_sha": head.get("sha"),
+                    "pr_updated_at": pull_request.get("updated_at"),
                 }
         except (json.JSONDecodeError, OSError, TimeoutError, ValueError) as exc:
             logger.debug("Failed to capture PR metadata via GitHub API: %s", exc)
@@ -216,6 +217,7 @@ def _create_draft_pr(
         "pr_url": pull_request.get("html_url"),
         "pr_number": pull_request.get("number"),
         "head_sha": head.get("sha"),
+        "pr_updated_at": pull_request.get("updated_at"),
     }
 
 

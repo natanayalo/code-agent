@@ -2,11 +2,13 @@
 
 import json
 from datetime import UTC, datetime
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from db.enums import WorkerRunStatus, WorkerType
 from db.models import Task, WorkerRun
+from orchestrator.github_delivery import capture_delivery_metadata
 from repositories import InboundDeliveryRepository, WorkerRunRepository, session_scope
 from tests.integration import test_github_webhook_integration as support
 
@@ -223,16 +225,29 @@ def test_newer_pending_pr_head_is_applied_and_force_push_can_restore_prior_head(
         "pending"
     )
     run_id = support._create_delivered_worker_run(session_factory, task_id)
+    response = MagicMock()
+    response.__enter__.return_value = response
+    response.__exit__.return_value = None
+    response.read.return_value = json.dumps(
+        [
+            {
+                "html_url": "https://github.com/octocat/code-agent/pull/105",
+                "number": 105,
+                "updated_at": "2026-11-02T10:00:00Z",
+                "head": {"sha": "sha-A"},
+            }
+        ]
+    ).encode()
+    with patch("orchestrator.github_delivery.urlopen", return_value=response):
+        captured_metadata = capture_delivery_metadata(
+            repo_url="https://github.com/octocat/code-agent.git",
+            delivery_mode="draft_pr",
+            branch_name="github/issue-42",
+            token="task-token",
+        )
     with session_scope(session_factory) as session:
         run = session.get(WorkerRun, run_id)
-        run.delivery_metadata = {
-            **run.delivery_metadata,
-            **{
-                "head_sha": "sha-A",
-                "head_history": ["sha-A"],
-                "pr_updated_at": "2026-11-02T10:00:00Z",
-            },
-        }
+        run.delivery_metadata = captured_metadata
 
     assert _post_event(client, secret, "pull_request", pending_b, "pending-pr-B")["status"] == (
         "synced"
