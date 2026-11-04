@@ -228,6 +228,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Fixed
 
+- Fix: reconcile GitHub redeliveries after worker metadata persists (PR #430 split F) ([#484](https://github.com/natanayalo/code-agent/pull/484))
+
 - Fix: prevent delayed GitHub checks from regressing PR state (PR #430 split E) ([#483](https://github.com/natanayalo/code-agent/pull/483))
 
 - Fix: bound signed GitHub ingress and pass deployment configuration ([#482](https://github.com/natanayalo/code-agent/pull/482))
