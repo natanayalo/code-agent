@@ -228,6 +228,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Fixed
 
+- Fix: terminate exhausted readiness leases before recovery (PR #430 split G) ([#485](https://github.com/natanayalo/code-agent/pull/485))
+
 - Fix: reconcile GitHub redeliveries after worker metadata persists (PR #430 split F) ([#484](https://github.com/natanayalo/code-agent/pull/484))
 
 - Fix: prevent delayed GitHub checks from regressing PR state (PR #430 split E) ([#483](https://github.com/natanayalo/code-agent/pull/483))
