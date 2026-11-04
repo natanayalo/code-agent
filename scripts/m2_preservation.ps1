@@ -6,7 +6,9 @@ param(
 $ErrorActionPreference = 'Stop'
 function Get-M2Baseline {
     $items = @()
-    foreach ($containerId in (docker ps -aq)) {
+    $containerIds = docker ps -aq
+    if ($LASTEXITCODE -ne 0) { throw 'Docker container enumeration failed' }
+    foreach ($containerId in $containerIds) {
         $item = (docker inspect $containerId | ConvertFrom-Json)[0]
         if ($LASTEXITCODE -ne 0) { throw 'Container metadata inspection failed' }
         if ($item.Config.Labels.'code-agent.m2.owner' -eq 'security-validation') { continue }

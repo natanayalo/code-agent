@@ -216,7 +216,7 @@
     "dashboard/"
   ],
   "assessment": "All original outstanding paths retained. Production changes are limited to listed confirmed corrections. Runtime equivalence is qualified by explicit new ingress/head-selection/retry/startup contracts and pending live gates.",
-  "assessment_snapshot_note": "Tree hashes identify the tested combined runtime snapshot. Final tracking-only updates add this reconciliation artifact and update plan/ownership; all are explicitly inventoried below.",
+  "assessment_snapshot_note": "The recorded combined commit and tree are not currently retrievable from the repository. These historical results cannot be independently reproduced until the exact snapshot is recovered or an equivalent reconstruction is verified. Later preservation-script review changes are outside this inventory and test run.",
   "historical_changed_files": [
     ".agents/README.md",
     ".agents/rules/development.md",
