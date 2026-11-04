@@ -162,6 +162,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Dependencies
 
+- Chore(deps): bump cryptography from 48.0.1 to 50.0.0 ([#355](https://github.com/natanayalo/code-agent/pull/355))
+
 - Chore(deps-dev): bump brace-expansion in /dashboard ([#475](https://github.com/natanayalo/code-agent/pull/475))
 
 - Chore(deps-dev): bump fast-uri from 3.1.7 to 3.1.9 in /dashboard ([#473](https://github.com/natanayalo/code-agent/pull/473))
