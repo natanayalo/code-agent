@@ -93,7 +93,7 @@ schedules do not require a new scheduler or schedule access in this bridge.
 
 | Order | Slice | Status | Completion condition |
 | --- | --- | --- | --- |
-| 0 | M32-0: M2 readiness reconciliation | Ready to scope when selected | Reconcile #430 with current master, review hardening/regression evidence, and record remaining live gates. |
+| 0 | M32-0: M2 readiness reconciliation | In progress | Reconcile [PR #430](https://github.com/natanayalo/code-agent/pull/430) with current master, review hardening/regression evidence, and record remaining live gates. |
 | 1 | M32-1: Scoped client tokens | Planned | Operator-only token lifecycle; expiring, revocable, repository-scoped bearer access. |
 | 2 | M32-2: Safe task observation | Planned | Versioned sanitized task views with server-side repository filtering. |
 | 3 | M32-3: Attributed task commands | Planned | Atomic, idempotent scout/coding submissions and own-client cancellation. |
