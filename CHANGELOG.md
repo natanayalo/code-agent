@@ -197,6 +197,8 @@ completed-task ledger; keep completed work here instead.
 
 ### Documentation
 
+- Docs: reconcile PR 430 ownership and preserved evidence (PR #430 split H) ([#486](https://github.com/natanayalo/code-agent/pull/486))
+
 - Docs: plan m32 code agent bridge execution slices ([#471](https://github.com/natanayalo/code-agent/pull/471))
 
 - Docs: mark M31-3 complete ([#464](https://github.com/natanayalo/code-agent/pull/464))
