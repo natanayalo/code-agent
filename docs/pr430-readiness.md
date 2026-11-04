@@ -1,0 +1,3 @@
+# PR #430 split: readiness
+
+Expired Telegram processing leases at or above the existing eight-attempt budget become terminal failed deliveries before later transitions are selected. Exhausted pending rows also become terminal; unexpired processing leases remain active. Acknowledged expired degradations retain suppression precedence. The API Compose service receives CODE_AGENT_READINESS_ALERT_WEBHOOK_URL and CODE_AGENT_READINESS_ALERT_WEBHOOK_TOKEN, both empty by default. No notification destination is activated by this change. No schema changes or historical delivery deletions are required; rollback is a code revert. This forms part of the PR #430 split.
