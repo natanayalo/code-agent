@@ -209,7 +209,11 @@ def test_acknowledgment_suppresses_retries_when_in_flight_deliveries_fail(sessio
     assert webhook_row.last_failure_code == "webhook_request_failed"
 
 
-def test_acknowledgment_suppresses_crashed_delivery_after_lease_expiry(session_factory) -> None:
+@pytest.mark.parametrize("attempts", [1, 8, 9])
+def test_acknowledgment_suppresses_crashed_delivery_after_lease_expiry(
+    session_factory, attempts: int
+) -> None:
+    """Acknowledgment takes precedence even when an expired lease has spent its budget."""
     with session_scope(session_factory) as session:
         repository = ReadinessAlertRepository(session, webhook_destination_id="destination")
         repository.record_snapshot(["temporal_unavailable"])
@@ -218,6 +222,8 @@ def test_acknowledgment_suppresses_crashed_delivery_after_lease_expiry(session_f
         assert webhook is not None
         telegram_id = telegram.id
         webhook_id = webhook.id
+        telegram.attempts = attempts
+        webhook.attempts = attempts
 
     with session_scope(session_factory) as session:
         repository = ReadinessAlertRepository(session, webhook_destination_id="destination")
@@ -235,8 +241,17 @@ def test_acknowledgment_suppresses_crashed_delivery_after_lease_expiry(session_f
         assert next_webhook is not None
         assert [item.transition for item in next_telegram] == ["recovered"]
         assert next_webhook.transition == "recovered"
-        assert session.get(ReadinessAlertDelivery, telegram_id).status == "suppressed"
-        assert session.get(WebhookAlertDelivery, webhook_id).status == "suppressed"
+
+    with session_scope(session_factory) as session:
+        telegram_row = session.get(ReadinessAlertDelivery, telegram_id)
+        webhook_row = session.get(WebhookAlertDelivery, webhook_id)
+        assert telegram_row is not None and webhook_row is not None
+        for delivery in (telegram_row, webhook_row):
+            assert delivery.status == "suppressed"
+            assert delivery.attempts == attempts
+            assert delivery.lease_expires_at is None
+            assert delivery.last_failure_code is None
+        assert webhook_row.lease_owner is None
 
 
 def test_postgres_acknowledgment_serializes_concurrent_delivery_failures(

@@ -228,6 +228,20 @@ completed-task ledger; keep completed work here instead.
 
 ### Fixed
 
+- Fix: terminate exhausted readiness leases before recovery (PR #430 split G) ([#485](https://github.com/natanayalo/code-agent/pull/485))
+
+- Fix: reconcile GitHub redeliveries after worker metadata persists (PR #430 split F) ([#484](https://github.com/natanayalo/code-agent/pull/484))
+
+- Fix: prevent delayed GitHub checks from regressing PR state (PR #430 split E) ([#483](https://github.com/natanayalo/code-agent/pull/483))
+
+- Fix: bound signed GitHub ingress and pass deployment configuration ([#482](https://github.com/natanayalo/code-agent/pull/482))
+
+- Fix: restrict Telegram ingress to approved private operators (PR #430 split C) ([#481](https://github.com/natanayalo/code-agent/pull/481))
+
+- Fix: harden task credentials and legacy execution boundaries (PR #430 split B) ([#480](https://github.com/natanayalo/code-agent/pull/480))
+
+- Fix: preserve deterministic M29 evaluation evidence ([#479](https://github.com/natanayalo/code-agent/pull/479))
+
 - Fix: clean up namespaced sandbox containers ([#465](https://github.com/natanayalo/code-agent/pull/465))
 
 - Fix(eval): run extractor stage smokes in isolated disposable db ([#429](https://github.com/natanayalo/code-agent/pull/429))

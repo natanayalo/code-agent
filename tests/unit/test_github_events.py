@@ -333,7 +333,8 @@ def test_upsert_check_run_prunes_stale_sha():
     )
     assert meta["ci_status"] == "failed"
 
-    # New commit pushed: sha-v2 check run arrives
+    # A pull_request event establishes the new authoritative head.
+    sync_pr_metadata(meta, {"number": 10, "head": {"sha": "sha-v2"}})
     upsert_check_run(
         meta,
         {
@@ -502,8 +503,9 @@ def test_delivery_sync_helpers():
         find_matching_delivery_run,
     )
 
-    # _apply_worker_run_delivery_update when worker_run is None returns None
-    assert _apply_worker_run_delivery_update(None, "pull_request", {}, None) is None
+    # _apply_worker_run_delivery_update when worker_run is None
+    assert _apply_worker_run_delivery_update(None, "pull_request", {}, None) == (None, True)
+    assert _apply_worker_run_delivery_update(None, "check_run", {}, None) == (None, False)
 
     # find_matching_delivery_run with invalid repo_url returns (None, None)
     mock_session = MagicMock()

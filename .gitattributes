@@ -1,0 +1,7 @@
+# These scripts are bind-mounted into Linux containers from Windows checkouts.
+scripts/init_webhook.sh text eol=lf
+scripts/up.sh text eol=lf
+# These report bytes are bound by the published mutation manifest's SHA-256.
+evaluation/m29_provider_reliability_report.json text eol=lf
+evaluation/m29_provider_reliability_operational_report.json text eol=lf
+evaluation/m29_provider_reliability_robustness_report.json text eol=lf

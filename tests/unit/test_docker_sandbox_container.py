@@ -58,6 +58,17 @@ def test_build_docker_container_run_command_detaches_and_mounts_workspace(tmp_pa
         "1g",
         "--cpus",
         "1.0",
+        "--read-only",
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges=true",
+        "--pids-limit",
+        "256",
+        "--ipc",
+        "private",
+        "--tmpfs",
+        "/tmp:rw,noexec,nosuid,size=64m",
         "--workdir",
         str(request.workspace.workspace_path.resolve()),
         "--mount",
@@ -174,7 +185,7 @@ def test_build_docker_container_run_command_skips_user_mapping_on_windows(
 
     command = _build_docker_container_run_command(request, image="python:3.12-slim")
 
-    assert "--user" not in command
+    assert command[command.index("--user") + 1] == "65532:65532"
 
 
 @pytest.mark.parametrize("scratch_namespace", [None, "node-activity:v1:plan:first:1"])
@@ -252,7 +263,7 @@ def test_run_docker_command_raises_on_os_error() -> None:
     with patch("subprocess.run", side_effect=OSError("docker missing")):
         with pytest.raises(
             DockerSandboxContainerError,
-            match=r"Failed to start Docker container command .* docker missing",
+            match=r"Failed to start Docker container command \(OSError, errno=None\)",
         ):
             _run_docker_command(["docker", "run", "-d"], timeout=30)
 
@@ -391,6 +402,6 @@ def test_build_docker_container_run_command_uses_patched_workspace_root(
     command = _build_docker_container_run_command(request, image="python:3.12-slim")
 
     local_remote_mount = (
-        f"type=bind,source={local_remote.resolve()},target={local_remote.resolve()}"
+        f"type=bind,source={local_remote.resolve()},target={local_remote.resolve()},readonly"
     )
     assert local_remote_mount in command

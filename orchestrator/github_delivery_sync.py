@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -14,10 +15,29 @@ from sqlalchemy.orm.attributes import flag_modified
 from db.enums import TimelineEventType
 from db.models import Task, WorkerRun
 from orchestrator.execution import TaskExecutionService
+from orchestrator.github_delivery_reconciliation import (
+    _known_superseded_pr_event,
+    _prepare_pending_pr_payload,
+)
 from orchestrator.github_repo import github_repo_spec_from_url
 from repositories import InboundDeliveryRepository, TaskTimelineRepository, session_scope
 
 logger = logging.getLogger(__name__)
+
+
+def _lock_delivery_updates(session: Session, repo_url: str) -> bool:
+    """Acquire a delivery transaction lock without waiting on PostgreSQL."""
+    dialect = session.get_bind().dialect.name
+    if dialect == "postgresql":
+        repo = (github_repo_spec_from_url(repo_url) or repo_url).lower()
+        digest = hashlib.sha256(f"github-delivery:{repo}".encode()).digest()
+        lock_id = int.from_bytes(digest[:8], byteorder="big", signed=True)
+        return bool(
+            session.scalar(text("SELECT pg_try_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id})
+        )
+    elif dialect == "sqlite":
+        session.execute(text("BEGIN IMMEDIATE"))
+    return True
 
 
 def extract_delivery_identifiers(
@@ -51,25 +71,69 @@ def extract_delivery_identifiers(
     return None, None, None
 
 
-def sync_pr_metadata(meta: dict[str, Any], pr: dict[str, Any]) -> None:
-    """Update delivery_metadata dictionary from a pull_request payload."""
+def sync_pr_metadata(
+    meta: dict[str, Any],
+    pr: dict[str, Any],
+    *,
+    is_pending: bool = False,
+    is_authoritative: bool = False,
+) -> bool:
+    """Update delivery_metadata dictionary from a pull_request payload.
+
+    Returns True if the PR metadata was applied, False if ignored as older/superseded.
+    """
+    head_sha = (pr.get("head") or {}).get("sha")
+    incoming_updated_at = pr.get("updated_at")
+    current_updated_at = meta.get("pr_updated_at")
+
+    if (
+        not is_authoritative
+        and incoming_updated_at
+        and current_updated_at
+        and incoming_updated_at < current_updated_at
+    ):
+        logger.info("Ignoring pull_request event older than current pr_updated_at")
+        return False
+
+    current_head = meta.get("head_sha")
+    head_history = list(meta.get("head_history") or [])
+
+    if current_head and head_sha and head_sha != current_head:
+        has_newer_ordering = bool(
+            incoming_updated_at and current_updated_at and incoming_updated_at > current_updated_at
+        )
+        if (is_pending or head_sha in head_history) and not (
+            has_newer_ordering or is_authoritative
+        ):
+            logger.info("Ignoring pull_request event for an older or superseded head")
+            return False
+
     meta["pr_number"] = pr.get("number")
     meta["pr_url"] = pr.get("html_url")
     meta["pr_node_id"] = pr.get("node_id")
     meta["pr_state"] = "merged" if pr.get("merged") else pr.get("state")
     meta["pr_draft"] = pr.get("draft", False)
-    if head_sha := (pr.get("head") or {}).get("sha"):
-        if meta.get("head_sha") and meta["head_sha"] != head_sha:
+    if incoming_updated_at:
+        meta["pr_updated_at"] = incoming_updated_at
+
+    if head_sha:
+        if current_head != head_sha:
             meta["check_runs"] = [
-                c
-                for c in (meta.get("check_runs") or [])
-                if not c.get("head_sha") or c.get("head_sha") == head_sha
+                c for c in (meta.get("check_runs") or []) if c.get("head_sha") == head_sha
             ]
+            meta["ci_status"] = "pending"
+            meta["ci_failed_jobs"] = []
+            meta["ci_last_checked_at"] = None
         meta["head_sha"] = head_sha
+        if head_sha not in head_history:
+            head_history.append(head_sha)
+        meta["head_history"] = head_history
+
     if branch_name := (pr.get("head") or {}).get("ref"):
         meta["branch_name"] = branch_name
     if base_branch := (pr.get("base") or {}).get("ref"):
         meta["base_branch"] = base_branch
+    return True
 
 
 def build_check_entry(payload: dict[str, Any], event: str, head_sha: str | None) -> dict[str, Any]:
@@ -95,17 +159,19 @@ def build_check_entry(payload: dict[str, Any], event: str, head_sha: str | None)
     }
 
 
-def upsert_check_run(meta: dict[str, Any], check_entry: dict[str, Any]) -> None:
-    """Upsert a check run into delivery_metadata and update aggregate CI status."""
-    head_sha = check_entry.get("head_sha") or meta.get("head_sha")
-    if head_sha and meta.get("head_sha") != head_sha:
+def upsert_check_run(meta: dict[str, Any], check_entry: dict[str, Any]) -> bool:
+    """Upsert a check run into delivery_metadata and update aggregate CI status.
+
+    Returns True if the check was applied, False if ignored.
+    """
+    head_sha = check_entry.get("head_sha")
+    if not head_sha or (meta.get("head_sha") and head_sha != meta["head_sha"]):
+        logger.info("Ignoring GitHub check for a noncurrent or unknown head")
+        return False
+    if meta.get("head_sha") != head_sha:
         meta["head_sha"] = head_sha
 
-    raw_check_runs = list(meta.get("check_runs") or [])
-    if head_sha:
-        raw_check_runs = [
-            c for c in raw_check_runs if not c.get("head_sha") or c.get("head_sha") == head_sha
-        ]
+    raw_check_runs = [c for c in (meta.get("check_runs") or []) if c.get("head_sha") == head_sha]
 
     check_runs = raw_check_runs
     updated = False
@@ -141,6 +207,7 @@ def upsert_check_run(meta: dict[str, Any], check_entry: dict[str, Any]) -> None:
     meta["ci_status"] = ci_status
     meta["ci_failed_jobs"] = failed_jobs
     meta["ci_last_checked_at"] = datetime.now(UTC).isoformat()
+    return True
 
 
 def find_matching_delivery_run(
@@ -290,10 +357,13 @@ def _apply_worker_run_delivery_update(
     payload: dict[str, Any],
     head_sha: str | None,
     task: Task | None = None,
-) -> dict[str, Any] | None:
-    """Update worker_run delivery metadata and return check_entry if applicable."""
+    *,
+    is_pending: bool = False,
+    is_authoritative: bool = False,
+) -> tuple[dict[str, Any] | None, bool]:
+    """Update worker_run delivery metadata and return check_entry and applied status."""
     if worker_run is None:
-        return None
+        return None, event == "pull_request"
     meta = dict(worker_run.delivery_metadata or {})
     target_task = task or getattr(worker_run, "task", None)
     if target_task and isinstance(target_task.constraints, dict):
@@ -306,14 +376,144 @@ def _apply_worker_run_delivery_update(
             if issue_url and not meta.get("source_issue_url"):
                 meta["source_issue_url"] = issue_url
     check_entry: dict[str, Any] | None = None
+    applied = True
     if event == "pull_request":
-        sync_pr_metadata(meta, payload.get("pull_request") or {})
+        applied = sync_pr_metadata(
+            meta,
+            payload.get("pull_request") or {},
+            is_pending=is_pending,
+            is_authoritative=is_authoritative,
+        )
     else:
         check_entry = build_check_entry(payload, event, head_sha)
-        upsert_check_run(meta, check_entry)
-    worker_run.delivery_metadata = meta
-    flag_modified(worker_run, "delivery_metadata")
-    return check_entry
+        applied = upsert_check_run(meta, check_entry)
+    if applied:
+        worker_run.delivery_metadata = meta
+        flag_modified(worker_run, "delivery_metadata")
+    return check_entry, applied
+
+
+def _record_delivery_claim(
+    session: Session,
+    repository: InboundDeliveryRepository,
+    delivery_id: str,
+    *,
+    task_id: str | None,
+) -> None:
+    """Retain pending claims and attach reconciled tasks without duplicate inserts."""
+    try:
+        with session.begin_nested():
+            repository.create(channel="github", delivery_id=delivery_id, task_id=task_id)
+    except IntegrityError:
+        if task_id is not None:
+            repository.attach_task_if_unassigned(
+                channel="github", delivery_id=delivery_id, task_id=task_id
+            )
+
+
+def _sync_result(
+    status: str, task_id: str | None, run: WorkerRun | None, msg: str
+) -> tuple[bool, str, bool, str | None, str | None, str | None]:
+    return True, status, False, task_id, run.id if run else None, msg
+
+
+def _ignored_delivery_result(
+    session: Session,
+    delivery_repo: InboundDeliveryRepository,
+    delivery_id: str,
+    task: Task,
+    worker_run: WorkerRun,
+    event: str,
+    payload: dict[str, Any],
+    head_sha: str | None,
+    is_pending: bool,
+) -> tuple[bool, str, bool, str | None, str | None, str | None]:
+    """Keep uncertain pending checks retryable and settle known stale PR events."""
+    meta = worker_run.delivery_metadata or {}
+    if is_pending and _known_superseded_pr_event(payload, event, head_sha, meta):
+        _record_delivery_claim(session, delivery_repo, delivery_id, task_id=task.id)
+    return _sync_result(
+        "ignored", task.id, worker_run, f"Ignored older or noncurrent {event} event."
+    )
+
+
+def _sync_matched_delivery(
+    *,
+    session: Session,
+    delivery_repo: InboundDeliveryRepository,
+    existing: Any,
+    payload: dict[str, Any],
+    event: str,
+    action: str | None,
+    delivery_id: str,
+    repo_url: str,
+    pr_number: int | None,
+    head_sha: str | None,
+    branch_name: str | None,
+    worker_run: WorkerRun,
+    task: Task,
+) -> tuple[bool, str, bool, str | None, str | None, str | None]:
+    """Reconcile a matched delivery, retaining claims until its state is safe to apply."""
+    is_pending = existing is not None and existing.task_id is None
+    sync_payload: dict[str, Any] | None = payload
+    is_authoritative = False
+    if is_pending and event == "pull_request":
+        sync_payload, is_authoritative, verification_status = _prepare_pending_pr_payload(
+            payload,
+            repo_url,
+            pr_number,
+            head_sha,
+            worker_run.delivery_metadata or {},
+            session,
+            task,
+        )
+        if verification_status:
+            detail = (
+                "Current GitHub PR state is unavailable; redeliver after verification."
+                if verification_status == "pending"
+                else "Pending PR event is not the current PR head."
+            )
+            return _sync_result(verification_status, task.id, worker_run, detail)
+    assert sync_payload is not None
+    check_entry, applied = _apply_worker_run_delivery_update(
+        worker_run,
+        event,
+        sync_payload,
+        head_sha,
+        task=task,
+        is_pending=is_pending,
+        is_authoritative=is_authoritative,
+    )
+    if not applied:
+        return _ignored_delivery_result(
+            session,
+            delivery_repo,
+            delivery_id,
+            task,
+            worker_run,
+            event,
+            payload,
+            head_sha,
+            is_pending,
+        )
+
+    record_delivery_timeline_event(
+        session=session,
+        task=task,
+        event=event,
+        action=action,
+        delivery_id=delivery_id,
+        pr_number=pr_number,
+        head_sha=head_sha,
+        branch_name=branch_name,
+        worker_run=worker_run,
+        check_entry=check_entry,
+        pr_payload=sync_payload.get("pull_request") or {},
+    )
+    _record_delivery_claim(session, delivery_repo, delivery_id, task_id=task.id)
+    return _sync_result(
+        "synced", task.id, worker_run, f"Synchronized {event} event onto task {task.id}."
+    )
 
 
 def handle_delivery_sync(
@@ -331,9 +531,12 @@ def handle_delivery_sync(
         (ok, status, duplicate, task_id, run_id, detail)
     """
     with session_scope(task_service.session_factory) as session:
+        if not _lock_delivery_updates(session, repo_url):
+            logger.info("GitHub delivery deferred while repository reconciliation is in progress")
+            return _sync_result("busy", None, None, "Repository reconciliation is in progress.")
         delivery_repo = InboundDeliveryRepository(session)
         existing = delivery_repo.get_by_channel_delivery(channel="github", delivery_id=delivery_id)
-        if existing is not None:
+        if existing is not None and existing.task_id is not None:
             return (
                 True,
                 "duplicate",
@@ -352,47 +555,23 @@ def handle_delivery_sync(
             branch_name=branch_name,
         )
 
-        if task is None:
-            try:
-                with session.begin_nested():
-                    delivery_repo.create(channel="github", delivery_id=delivery_id, task_id=None)
-            except IntegrityError:
-                pass
-            return True, "ignored", False, None, None, "No matching code-agent task found."
+        if task is None or worker_run is None or not worker_run.delivery_metadata:
+            _record_delivery_claim(session, delivery_repo, delivery_id, task_id=None)
+            logger.info("GitHub delivery awaiting persisted worker metadata")
+            return _sync_result("pending", None, None, "Redeliver after worker metadata persists.")
 
-        check_entry = _apply_worker_run_delivery_update(
-            worker_run,
-            event,
-            payload,
-            head_sha,
-            task=task,
-        )
-
-        record_delivery_timeline_event(
+        return _sync_matched_delivery(
             session=session,
-            task=task,
+            delivery_repo=delivery_repo,
+            existing=existing,
+            payload=payload,
             event=event,
             action=action,
             delivery_id=delivery_id,
+            repo_url=repo_url,
             pr_number=pr_number,
             head_sha=head_sha,
             branch_name=branch_name,
             worker_run=worker_run,
-            check_entry=check_entry,
-            pr_payload=payload.get("pull_request") or {},
-        )
-
-        try:
-            with session.begin_nested():
-                delivery_repo.create(channel="github", delivery_id=delivery_id, task_id=task.id)
-        except IntegrityError:
-            pass
-
-        return (
-            True,
-            "synced",
-            False,
-            task.id,
-            worker_run.id if worker_run else None,
-            f"Synchronized {event} event onto task {task.id}.",
+            task=task,
         )

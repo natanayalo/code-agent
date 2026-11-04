@@ -5,10 +5,16 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
+from apps.api.auth import ApiAuthConfig
 from apps.api.config import SystemConfig
-from apps.api.dependencies import get_system_config, get_task_service, require_telegram_webhook_auth
+from apps.api.dependencies import (
+    get_api_auth_config,
+    get_system_config,
+    get_task_service,
+    require_telegram_webhook_auth,
+)
 from orchestrator.execution import (
     DeliveryKey,
     SubmissionSession,
@@ -34,7 +40,8 @@ class TelegramUser(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    id: int
+    id: StrictInt
+    is_bot: bool = False
     username: str | None = None
     first_name: str | None = None
     last_name: str | None = None
@@ -45,7 +52,8 @@ class TelegramChat(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    id: int
+    id: StrictInt
+    type: str | None = None
 
 
 class TelegramMessage(BaseModel):
@@ -58,19 +66,25 @@ class TelegramMessage(BaseModel):
     from_: TelegramUser | None = Field(default=None, alias="from")
     text: str | None = None
     caption: str | None = None
+    forward_origin: dict | None = None
+    forward_date: int | None = None
+    forward_from: dict | None = None
+    forward_from_chat: dict | None = None
+    sender_chat: dict | None = None
+    is_automatic_forward: bool = False
 
 
 class TelegramUpdate(BaseModel):
     """Partial Telegram Update object.
 
-    Only ``message`` and ``channel_post`` are handled in this slice.  Edited
+    Only direct private ``message`` updates can submit tasks. Channel posts, edited
     messages, callback queries, etc. are silently acknowledged (200 OK) without
     creating a task.
     """
 
     model_config = ConfigDict(extra="ignore")
 
-    update_id: int
+    update_id: StrictInt
     message: TelegramMessage | None = None
     channel_post: TelegramMessage | None = None
 
@@ -153,6 +167,7 @@ def receive_telegram_update(
     _auth: None = Depends(require_telegram_webhook_auth),
     task_service: TaskExecutionService = Depends(get_task_service),
     config: SystemConfig = Depends(get_system_config),
+    auth_config: ApiAuthConfig = Depends(get_api_auth_config),
 ) -> TelegramWebhookResponse:
     """Accept a Telegram Update and enqueue the message text as a task.
 
@@ -161,11 +176,27 @@ def receive_telegram_update(
     therefore return 200 even for non-message updates (edited messages, polls,
     etc.) or messages with no text content.
     """
-    msg = update.message or update.channel_post
+    msg = update.message
 
     if msg is None:
         logger.debug("telegram update_id=%d has no message, ignoring", update.update_id)
         return TelegramWebhookResponse(ok=True, detail="no_message")
+
+    if (
+        msg.from_ is None
+        or msg.from_.is_bot
+        or msg.from_.id not in auth_config.telegram_allowed_user_ids
+        or msg.chat.id not in auth_config.telegram_allowed_chat_ids
+        or msg.chat.type != "private"
+        or msg.sender_chat is not None
+        or msg.forward_origin is not None
+        or msg.forward_date is not None
+        or msg.forward_from is not None
+        or msg.forward_from_chat is not None
+        or msg.is_automatic_forward
+    ):
+        logger.info("telegram update_id=%d rejected by operator policy", update.update_id)
+        return TelegramWebhookResponse(ok=True, detail="not_authorized")
 
     text = (msg.text or msg.caption or "").strip()
     if not text:
